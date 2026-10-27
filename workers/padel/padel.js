@@ -41,7 +41,7 @@
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
 //           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
 
-export const VERSION = '2026-10-27.5';
+export const VERSION = '2026-10-27.6';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -54,7 +54,7 @@ export const PULSE_FRESH_MS = 20 * 60 * 1000;    // Pulse counts for 20 minutes 
 export const PULSE_EVERY_MS = 15 * 60 * 1000;    // Pulse is called at most once per 15 minutes
 export const REFRESH_GUARD_MS = 90 * 1000;       // no second Pulse read within 90 seconds
 export const READ_AT_SKEW_MS = 10 * 60 * 1000;   // a Mac read older (or newer) than this is refused
-export const ALERT_RECLAIM_MS = 2 * 60 * 1000;   // an alert row with no relay reply after this may be retried
+export const CLAIM_BUDGET_MS = 5000;             // a check claims no new slot once it has run this long
 export const SAVE_REPLY_RETRIES = 3;             // after a relay 200, the reply write is retried up to 3 times
 export const SAVE_REPLY_PAUSES_MS = [500, 1000, 2000];   // ...with these pauses between the tries
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -450,18 +450,16 @@ export function makeRepo(db) {
     async clearBooked(slot) {
       await db.prepare('DELETE FROM booked WHERE slot = ?').bind(slot).run();
     },
-    // The slots whose DM is done or under way. A row with no relay reply that is over 2 minutes old
-    // (the Worker stopped between the claim and the reply) is left out, so it is offered to
-    // claimAlert again.
-    async alertSlots(fromDate, reclaimBeforeIso) {
-      const r = await db.prepare('SELECT slot FROM alerts WHERE slot >= ?1 AND NOT (relay_reply IS NULL AND sent_at < ?2)').bind(fromDate, reclaimBeforeIso).all();
+    // The slots whose DM is done, under way, or given up: every row. A claimed row is final.
+    async alertSlots(fromDate) {
+      const r = await db.prepare('SELECT slot FROM alerts WHERE slot >= ?').bind(fromDate).all();
       return (r.results || []).map((x) => x.slot);
     },
-    // Only the request whose write changed a row sends the DM. A row whose DM never got a relay reply
-    // (the Worker was stopped mid-call) can be claimed again once it is over 2 minutes old.
-    async claimAlert(slot, names, venues, nowIso, reclaimBeforeIso) {
-      const r = await db.prepare('INSERT INTO alerts (slot, sent_at, names, venues) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(slot) DO UPDATE SET sent_at = excluded.sent_at, names = excluded.names, venues = excluded.venues WHERE alerts.relay_reply IS NULL AND alerts.sent_at < ?5')
-        .bind(slot, nowIso, names, venues, reclaimBeforeIso).run();
+    // Only the request whose insert changed a row sends the DM. The row carries a "claimed" reply
+    // from the start, so a Worker stopped mid-send leaves a final row, never one to send again.
+    async claimAlert(slot, names, venues, nowIso) {
+      const r = await db.prepare('INSERT OR IGNORE INTO alerts (slot, sent_at, names, venues, relay_reply) VALUES (?1, ?2, ?3, ?4, ?5)')
+        .bind(slot, nowIso, names, venues, JSON.stringify({ claimed: true, at: nowIso })).run();
       return (r.meta?.changes || 0) === 1;
     },
     async saveRelayReply(slot, reply) {
@@ -626,18 +624,22 @@ async function saveMatchi(repo, prev, clean) {
 }
 
 // ── Alerts ──
-// At most one DM per slot, ever. The row is claimed BEFORE the relay call. A definite refusal (a
-// non-200) releases it so the next check sends it. A 200 or no answer in 20 s makes it final with a
-// reply (the relay's, or a placeholder). Only a row with no reply at all over 2 minutes old (the
-// Worker was stopped mid-send) is claimed again.
-export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
+// At most one DM per slot, ever. A claim is FINAL: the row goes in with a "claimed" reply before the
+// relay call, and the relay's own reply (or a timeout or error marker) overwrites it. Only a definite
+// refusal (a non-200) deletes the row, so a later check sends it. A Worker stopped between the claim
+// and the reply leaves the slot claimed: a miss, accepted over a second DM.
+// One check claims no new slot once it has run 5 s, so a check with several slots due is never cut
+// off (the background limit is 30 s) between a claim and its relay call; the rest wait for the next
+// check.
+export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep, clock = Date.now) {
   const nowIso = new Date(nowMs).toISOString();
-  const reclaimBefore = new Date(nowMs - ALERT_RECLAIM_MS).toISOString();
-  const due = decideAlerts(state, await repo.alertSlots(state.today, reclaimBefore));
+  const started = clock();
+  const due = decideAlerts(state, await repo.alertSlots(state.today));
   const cfg = venueConfig(env);
   const sent = [];
   for (const r of due) {
-    const claimed = await repo.claimAlert(r.slot, r.names.join(', '), r.venues.map((v) => v.code).join(','), nowIso, reclaimBefore);
+    if (clock() - started > CLAIM_BUDGET_MS) break;
+    const claimed = await repo.claimAlert(r.slot, r.names.join(', '), r.venues.map((v) => v.code).join(','), nowIso);
     if (!claimed) continue;
     if (!env.RELAY || !env.RELAY_KEY) {
       // Nothing was sent: free the slot so a configured Worker can send it.
@@ -653,35 +655,30 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
         body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.kevinbrittain.workers.dev/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
       })), RELAY_TIMEOUT_MS);
     } catch (e) {
-      // No answer in 20 s (or a dropped call): the DM may or may not have gone. The row is made
-      // FINAL with a placeholder reply, so it is never claimed again: at most one DM per slot, ever.
-      // A slow relay that did deliver is that one DM; one that did not is a miss, accepted over a
-      // DM repeated on every re-claim.
+      // No answer in 20 s, or a dropped call: the DM may or may not have gone. The row stays final,
+      // with a marker saying which.
       const timedOut = e && e.name === 'TimeoutError';
       console.error('padel: alert DM unanswered, not retried', r.slot, String(e));
-      await writeReply(repo, r.slot, JSON.stringify(timedOut ? { timeout: true, at: nowIso } : { noAnswer: true, at: nowIso }), sleep);
+      await writeReply(repo, r.slot, JSON.stringify(timedOut ? { timeout: true, at: nowIso } : { error: String(e && e.message || e).slice(0, 200), at: nowIso }), sleep);
       continue;
     }
     if (res.status !== 200) {
-      // A definite "not sent": release the row so the next check sends it.
+      // A definite "not sent": delete the row so a later check sends it.
       let said = '';
-      try { said = await withTimeout(res.text(), RELAY_TIMEOUT_MS); } catch (e) { said = '(reply unreadable)'; }
+      try { said = await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS); } catch (e) { said = '(reply unreadable)'; }
       console.error('padel: alert DM failed, will retry', r.slot, `relay HTTP ${res.status}: ${said.slice(0, 300)}`);
       try { await repo.releaseAlert(r.slot); } catch (e) { console.error('padel: alert row not released', r.slot, String(e)); }
       continue;
     }
     sent.push(r.slot);
-    // A 200: the DM is out. A placeholder reply goes in BEFORE the body is read, so a body that
-    // stalls never leaves the row looking unanswered (which the re-claim would send again). The
-    // row is never released from here on.
-    await writeReply(repo, r.slot, RELAY_PENDING, sleep);
-    // Then the relay's own words, best effort.
-    try {
-      const body = await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS);
-      await repo.saveRelayReply(r.slot, body || '(empty reply)');
-    } catch (e) {
-      console.error('padel: DM sent, its reply body was not stored', r.slot, String(e));
+    // A 200: the DM is out. The relay's own words replace the claim marker (a body that stalls
+    // past 5 s is stored as "pending"). The row stays final even if this write fails.
+    let reply;
+    try { reply = (await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS)) || '(empty reply)'; } catch (e) {
+      console.error('padel: DM sent, its reply body was not read', r.slot, String(e));
+      reply = RELAY_PENDING;
     }
+    await writeReply(repo, r.slot, reply, sleep);
   }
   return sent;
 }
@@ -916,7 +913,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       if (!(await repo.getPerson(id))) return fail('No such person', 404);
       await repo.applyVotes(id, add.slots, remove.slots, nowIso);
       const state = await loadState(env, repo, nowMs);
-      // The save answers at once; the DM (up to 8 s on the relay) goes in the background.
+      // The save answers at once; the DM (up to 20 s on the relay) goes in the background.
       ctx.waitUntil(alertSafely(state, env, repo, nowMs, sleep));
       return json(state);
     }

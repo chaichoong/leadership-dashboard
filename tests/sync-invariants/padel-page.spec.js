@@ -13,6 +13,9 @@
 //   4. A 429 holds the retry for its own 10 s, never the shorter 5 s back-off.
 //   5. A save that fails AFTER a hide flush never puts its older change back over the newer one.
 //   6. When the person is removed from the list, their unsaved changes are dropped, never sent.
+//   7. Untick an hour whose tick is still on its way (a flush the page was shown again before):
+//      the server ends with the hour absent, as the page shows.
+//   8. During a back-off, "Save now", the page shown again and switching person all wait.
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -30,6 +33,8 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const store = { votes: new Map(), bodies: [], times: [], inflight: 0, maxInflight: 0 };
   store.removePerson = () => { store.gone = true; };
+  // The hours a person has ticked on the server (votes are keyed by person and hour).
+  store.ticks = (pid = 1) => [...store.votes.values()].filter((v) => v.person_id === pid).map((v) => v.slot).sort();
   const state = () => {
     const now = Date.now();
     const at = new Date(now).toISOString();
@@ -49,13 +54,14 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
       const body = req.postDataJSON();
       store.bodies.push(body);
       store.times.push(Date.now());
+      if (store.gone && body.person_id === 1) return reply(route, 404, { error: 'No such person' });
       const status = voteStatuses.shift();
       store.inflight++;
       store.maxInflight = Math.max(store.maxInflight, store.inflight);
       if (voteDelayMs) await sleep(voteDelayMs);
       if (status && status !== 200) { store.inflight--; return reply(route, status, { error: status === 429 ? 'slow down' : 'boom' }); }
-      for (const slot of body.add || []) store.votes.set(slot, { person_id: body.person_id, slot });
-      for (const slot of body.remove || []) store.votes.delete(slot);
+      for (const slot of body.add || []) store.votes.set(`${body.person_id}|${slot}`, { person_id: body.person_id, slot });
+      for (const slot of body.remove || []) store.votes.delete(`${body.person_id}|${slot}`);
       person.savedAt = new Date().toISOString();
       store.inflight--;
       return reply(route, 200, state());
@@ -81,7 +87,7 @@ test.describe('padel page: ticks reach the server', () => {
     const day = await openAsTestAnn(page);
     await tap(page, `${day}|19`);
     await tap(page, `${day}|20`);
-    await expect.poll(() => [...store.votes.keys()].sort()).toEqual([`${day}|19`, `${day}|20`]);
+    await expect.poll(() => store.ticks()).toEqual([`${day}|19`, `${day}|20`]);
     await page.reload();
     await page.locator(`[data-day="${day}"]`).click();
     expect(await pressed(page, `${day}|19`)).toBe('true');
@@ -94,7 +100,7 @@ test.describe('padel page: ticks reach the server', () => {
     await tap(page, `${day}|19`);
     await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);   // the 19:00 save is out
     await tap(page, `${day}|20`);
-    await expect.poll(() => [...store.votes.keys()].sort(), { timeout: 10000 }).toEqual([`${day}|19`, `${day}|20`]);
+    await expect.poll(() => store.ticks(), { timeout: 10000 }).toEqual([`${day}|19`, `${day}|20`]);
     expect(store.maxInflight).toBe(1);
     expect(store.bodies.map((b) => [b.add, b.remove])).toEqual([[[`${day}|19`], []], [[`${day}|20`], []]]);
     expect(await pressed(page, `${day}|19`)).toBe('true');
@@ -125,7 +131,7 @@ test.describe('padel page: ticks reach the server', () => {
     // both the in-flight 19:00 and the new 20:00, because the browser cancels the in-flight save on close.
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(before + 1);
     expect(store.bodies[before].add.sort()).toEqual([`${day}|19`, `${day}|20`]);
-    await expect.poll(() => [...store.votes.keys()].sort(), { timeout: 5000 }).toEqual([`${day}|19`, `${day}|20`]);
+    await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([`${day}|19`, `${day}|20`]);
 
     // pagehide (the tab closing) sends them too.
     await page.evaluate(() => { delete document.visibilityState; });
@@ -141,7 +147,7 @@ test.describe('padel page: ticks reach the server', () => {
     const store = await mockPadel(page, { voteStatuses: [429] });
     const day = await openAsTestAnn(page);
     await tap(page, `${day}|19`);
-    await expect.poll(() => store.votes.has(`${day}|19`), { timeout: 20000 }).toBe(true);
+    await expect.poll(() => store.ticks().includes(`${day}|19`), { timeout: 20000 }).toBe(true);
     expect(store.bodies).toHaveLength(2);
     expect(store.times[1] - store.times[0]).toBeGreaterThanOrEqual(9500);
   });
@@ -161,7 +167,7 @@ test.describe('padel page: ticks reach the server', () => {
     expect(store.bodies[1]).toMatchObject({ add: [], remove: [`${day}|19`] });
     // Past the failure, the 5 s retry and the flush's own reply: the server must not hold 19:00.
     await sleep(8000);
-    expect(store.votes.has(`${day}|19`)).toBe(false);
+    expect(store.ticks().includes(`${day}|19`)).toBe(false);
     expect(store.bodies.slice(2).some((b) => (b.add || []).includes(`${day}|19`))).toBe(false);
   });
 
@@ -178,6 +184,57 @@ test.describe('padel page: ticks reach the server', () => {
     await tap(page, `${day}|20`);                                          // and their own tap goes alone
     await expect.poll(() => store.bodies.length, { timeout: 3000 }).toBe(1);
     expect(store.bodies[0]).toEqual({ person_id: 2, add: [`${day}|20`], remove: [] });
-    expect([...store.votes.keys()]).toEqual([`${day}|20`]);
+    expect(store.ticks(2)).toEqual([`${day}|20`]);
+    expect(store.ticks(1)).toEqual([]);
+  });
+
+  test('a removed person\'s failing save (404) shows the name list instead of "check your signal"', async ({ page }) => {
+    const store = await mockPadel(page);
+    const day = await openAsTestAnn(page);
+    store.removePerson();                                                   // removed before the save lands
+    await tap(page, `${day}|19`);
+    await expect(page.locator('#pick')).toBeVisible({ timeout: 4000 });
+    expect(await page.locator('#unsaved').isHidden()).toBe(true);
+    expect(store.bodies).toHaveLength(1);
+    expect(store.ticks(1)).toEqual([]);
+  });
+
+  test('S2: untick an hour while its flush is still landing: the server ends with it absent, as the page shows', async ({ page }) => {
+    // The first save (add A) is slow and then fails. The page is hidden (the flush carries add A),
+    // shown again before the flush's reply, and A is unticked.
+    const store = await mockPadel(page, { voteDelayMs: 1500, voteStatuses: [500] });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    await tap(page, A);
+    await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);   // the flush is out
+    await page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+    await tap(page, A);                                                        // untick, before the flush lands
+    expect(await pressed(page, A)).toBe('false');
+    await sleep(10000);                                                        // the failure, the 5 s retry, its reply
+    expect(store.ticks()).toEqual([]);
+    expect(await pressed(page, A)).toBe('false');
+  });
+
+  test('during a back-off, "Save now", the page shown again and switching person all wait', async ({ page }) => {
+    test.setTimeout(45000);
+    const store = await mockPadel(page, { voteStatuses: [429] });
+    const day = await openAsTestAnn(page);
+    await tap(page, `${day}|19`);
+    await expect.poll(() => store.bodies.length, { timeout: 3000 }).toBe(1);   // refused with 429: 10 s back-off
+    await sleep(300);
+    await page.evaluate(() => document.getElementById('save-now').click());    // "Save now"
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));   // the page shown again
+    await page.locator('#switch').click();                                      // switching person
+    await sleep(2000);
+    expect(store.bodies).toHaveLength(1);                                       // none of them went early
+    await expect(page.locator('#who')).toBeVisible();                           // the switch waited: still Test Ann
+    await expect(page.locator('#who-name')).toHaveText('Test Ann');
+    await expect.poll(() => store.ticks(), { timeout: 15000 }).toEqual([`${day}|19`]);
+    expect(store.times[1] - store.times[0]).toBeGreaterThanOrEqual(9500);
   });
 });

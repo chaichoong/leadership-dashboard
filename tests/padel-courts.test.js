@@ -23,7 +23,8 @@ const WORKER_OK = { ok: true, matchiFetchedAt: '2026-10-28T09:00:00.000Z', pulse
 
 // A fake Matchi and Worker. page(id, date) decides each page; post decides the Worker's answer.
 // clock: an array (each call takes the next value, the last one repeats) or a function of the call
-// number. postClock, when set, is what the clock reads once the POST has gone out.
+// number and of the pages fetched so far (so time can pass per fetch, whatever the script's own
+// clock reads). postClock, when set, is what the clock reads once the POST has gone out.
 function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { status: 200 }), clock = [START, START + 20 * 1000], postClock } = {}) {
   const pages = [];
   const posts = [];
@@ -44,7 +45,7 @@ function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { st
   const now = () => {
     if (postClock !== undefined && posts.length) return postClock;
     const n = calls++;
-    if (!times) return clock(n);
+    if (!times) return clock(n, pages.length);
     return times.length > 1 ? times.shift() : times[0];
   };
   const lines = [];
@@ -129,12 +130,21 @@ describe('a normal run', () => {
     expect(s.records[0]).toMatchObject({ posted: false, slept: true });
   });
 
-  it('item 1: 14 pages timing out with no gap (each read 10 s on) is a FAILED run, never "slept"', async () => {
-    const s = stubs({ page: () => { throw new DOMException('signal timed out', 'TimeoutError'); }, clock: (n) => START + n * 10 * 1000 });
+  it('item 1: 14 pages timing out with no gap (12 s per fetch, 336 s in all) is a FAILED run, never "slept"', async () => {
+    // Time moves 12 s per FETCH, so the run lasts past 5 minutes whatever the script's own clock
+    // reads: the script before the gap rule (ccfbd8f2^) called this "slept" and exited 0.
+    const s = stubs({ page: () => { throw new DOMException('signal timed out', 'TimeoutError'); }, clock: (n, fetched) => START + fetched * 12 * 1000 });
     expect(await s.go()).toBe(1);
     expect(s.pages).toHaveLength(28);                          // each page tried twice
     expect(s.posts).toHaveLength(1);
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(timed out\)/);
+  });
+
+  it('item 3 (6th pass): two 50 s gaps, neither over 60 s, still post', async () => {
+    const s = stubs({ page: livePage, clock: (n, fetched) => START + fetched * 1000 + (fetched >= 5 ? 50 * 1000 : 0) + (fetched >= 10 ? 50 * 1000 : 0) });
+    expect(await s.go()).toBe(0);
+    expect(s.posts).toHaveLength(1);
+    expect(s.lines[0]).toMatch(/^padel-courts: St Ives ok 6, closed 1; PDL ok 7; posted 200 in 114 s/);
   });
 });
 
@@ -155,6 +165,16 @@ describe('fails loudly', () => {
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(timed out\)/);
   });
 
+  it('item 4 (6th pass): the 10-minute readAt refusal after a read that took over 9 minutes is not a failure', async () => {
+    const refuse = () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 });
+    let s = stubs({ page: livePage, post: refuse, clock: (n, fetched) => START + fetched * 40 * 1000 });   // 14 x 40 s = 560 s
+    expect(await s.go()).toBe(0);
+    expect(s.lines[0]).toMatch(/^padel-courts: the read took 560 s, past the Worker's 10-minute limit; not counted/);
+    s = stubs({ page: livePage, post: refuse });                                                         // a 20 s read
+    expect(await s.go()).toBe(1);
+    expect(s.lines[0]).toMatch(/^FAILED: the Worker answered 400 \(readAt is not within 10 minutes of now\)/);
+  });
+
   it('item 4: a page lost to the network is fetched once more after 2 s before it counts', async () => {
     const tries = {};
     const s = stubs({ page: (id, date) => {
@@ -162,11 +182,12 @@ describe('fails loudly', () => {
       tries[k] = (tries[k] || 0) + 1;
       if (k === `3122 ${DATES[3]}` && tries[k] === 1) return new Response('busy', { status: 503 });
       if (k === `2619 ${DATES[0]}` && tries[k] === 1) throw new DOMException('signal timed out', 'TimeoutError');
+      if (k === `2619 ${DATES[1]}` && tries[k] === 1) throw new TypeError('fetch failed');   // no connection
       return livePage(id, date);
     } });
     expect(await s.go()).toBe(0);
-    expect(s.pages).toHaveLength(16);                          // 14 pages and 2 second tries
-    expect(s.sleeps.filter((ms) => ms === RETRY_MS)).toHaveLength(2);
+    expect(s.pages).toHaveLength(17);                          // 14 pages and 3 second tries
+    expect(s.sleeps.filter((ms) => ms === RETRY_MS)).toHaveLength(3);
     expect(s.lines[0]).toContain('St Ives ok 6, closed 1; PDL ok 7');
     // A page that arrived and could not be parsed gets no second try.
     const t = stubs({ page: (id, date) => (id === '3122' && date === DATES[2] ? new Response('<div class="schedule"><table><tr><td class="slot vacant"></td></tr></table></div>', { status: 200 }) : livePage(id, date)) });
@@ -235,12 +256,19 @@ describe('fails loudly', () => {
   it('item 4: a 409 (or a 400, or a lost connection) after the Mac slept past 5 minutes is "slept", not a failure', async () => {
     let s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), postClock: START + 20 * 1000 + 7 * 60 * 1000 });
     expect(await s.go()).toBe(0);
-    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept while posting \(a 420 s gap\), Worker answered 409; not counted/);
+    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept while posting \(a 390 s gap past the POST's own timeout\), Worker answered 409; not counted/);
     expect(s.records[0]).toMatchObject({ ok: true, posted: false, http: 409, slept: true });
     s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), postClock: START + 20 * 1000 + 7 * 60 * 1000 });
     expect(await s.go()).toBe(0);
     s = stubs({ page: livePage, post: () => { throw new TypeError('fetch failed'); }, postClock: START + 20 * 1000 + 6 * 60 * 1000 });
     expect(await s.go()).toBe(0);
+    // Item 4 (6th pass): the POST's own 30 s timeout is not a sleep. 80 s across the POST is 50 s
+    // past it: a failure. 100 s is 70 s past it: a sleep.
+    s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), postClock: START + 20 * 1000 + 80 * 1000 });
+    expect(await s.go()).toBe(1);
+    s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), postClock: START + 20 * 1000 + 100 * 1000 });
+    expect(await s.go()).toBe(0);
+    expect(s.lines[0]).toContain('a 70 s gap past');
     // The same 409 with no sleep (a 20 s POST) is a real failure.
     s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), postClock: START + 40 * 1000 });
     expect(await s.go()).toBe(1);

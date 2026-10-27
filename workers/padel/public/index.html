@@ -258,6 +258,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let pendingRemove = new Set();
   let inflight = null;                        // { person, add, remove } sent and not yet answered
   let lastFlush = null;                       // the changes sent with keepalive, not yet confirmed
+  let shownFlush = null;                      // a flush put back when the page was shown again, still landing
   let flushFailed = false;
   let saving = false;
   let savingPromise = null;
@@ -612,7 +613,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     pendingRemove = new Set();
     inflight = null;
     lastFlush = null;
+    shownFlush = null;
+    saving = false;
+    savingPromise = null;
   }
+  // Does a change already on its way to the server (the save in flight, or a keepalive flush that
+  // may still land) carry this hour? Then a tap must be sent as its own change, not cancelled.
+  const carried = (d, slot) => !!d && d.person === me && (d.add.has(slot) || d.remove.has(slot));
+  const lowerHas = (slot) => carried(inflight, slot) || carried(lastFlush, slot) || carried(shownFlush, slot);
 
   function setBusy(on) {
     busy = on;
@@ -621,7 +629,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function toggle(slot) {
     if (!me) return;
-    if (mine.has(slot)) { if (!pendingAdd.delete(slot)) pendingRemove.add(slot); } else if (!pendingRemove.delete(slot)) pendingAdd.add(slot);
+    // Tap then untap cancels the pending change, unless a change already on its way carries the
+    // hour: then the opposite change is sent, so the server ends where the page shows.
+    const [from, to] = mine.has(slot) ? [pendingAdd, pendingRemove] : [pendingRemove, pendingAdd];
+    if (from.has(slot) && !lowerHas(slot)) from.delete(slot);
+    else { from.delete(slot); to.add(slot); }
     recomputeMine();
     keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
     scheduleSave();
@@ -661,6 +673,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         putBack(sent);
         recomputeMine();
         if (e.status === 401) return false;
+        // "No such person": they were removed. Reading the state again shows the name list.
+        if (e.status === 404) { load(); return false; }
         saveTry++;
         if (saveTry === 1) toast("Couldn't save your ticks. Trying again.");
         // One timer only: a tap during the failing save had set its own 800 ms one. The back-off
@@ -705,7 +719,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     pendingAdd = new Set();
     pendingRemove = new Set();
     fetch('/api/vote', { method: 'POST', keepalive: true, cache: 'no-store', headers: { 'X-Group-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: me, add: [...add].filter(inWindow), remove: [...remove].filter(inWindow) }) })
-      .then((res) => { lastWriteDone = performance.now(); if (res.ok) { if (lastFlush === sent) lastFlush = null; } else { flushFailed = true; } })
+      .then((res) => { lastWriteDone = performance.now(); if (res.ok) { if (lastFlush === sent) lastFlush = null; if (shownFlush === sent) shownFlush = null; } else { flushFailed = true; } })
       .catch(() => { flushFailed = true; });        // resent as a normal save when the page is shown again
   }
 
@@ -815,7 +829,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (document.visibilityState === 'hidden') { flush(); return; }
     if (!S) return;
     // Shown again: changes sent with keepalive and not confirmed go again as a normal save.
-    if (lastFlush) { const d = lastFlush; lastFlush = null; if (d.person === me) putBack(d); }
+    if (lastFlush) { const d = lastFlush; lastFlush = null; if (d.person === me) { putBack(d); shownFlush = d; } }
     flushFailed = false;
     if (hasPending()) { saveTry = 0; save(); } else if (!saving) load();
   });

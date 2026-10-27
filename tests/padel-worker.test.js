@@ -295,11 +295,10 @@ function mapRepo() {
       async listBooked(from) { return [...booked.values()].filter((b) => b.slot >= from); },
       async setBooked(slot, person_id, venue, now) { booked.set(slot, { slot, person_id, venue, created_at: now }); },
       async clearBooked(slot) { booked.delete(slot); },
-      async alertSlots(from, reclaimBefore) { return [...alerts.values()].filter((a) => a.slot >= from && !(a.relay_reply === null && a.sent_at < reclaimBefore)).map((a) => a.slot); },
-      async claimAlert(slot, names, venues, now, reclaimBefore) {
-        const row = alerts.get(slot);
-        if (row && !(row.relay_reply === null && row.sent_at < reclaimBefore)) return false;
-        alerts.set(slot, { slot, sent_at: now, names, venues, relay_reply: null });
+      async alertSlots(from) { return [...alerts.keys()].filter((s) => s >= from); },
+      async claimAlert(slot, names, venues, now) {
+        if (alerts.has(slot)) return false;
+        alerts.set(slot, { slot, sent_at: now, names, venues, relay_reply: JSON.stringify({ claimed: true, at: now }) });
         return true;
       },
       async saveRelayReply(slot, reply) { if (alerts.has(slot)) alerts.get(slot).relay_reply = reply; },
@@ -510,37 +509,78 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.nearly).toEqual([]);
   });
 
-  it('F6: a claimed row with no relay reply can be claimed again after 2 minutes, never before', async () => {
-    const r = t.repo;
-    t.putAlert({ slot: '2026-10-28|08', sent_at: iso(NOW - 3 * MIN), relay_reply: null });
-    t.putAlert({ slot: '2026-10-28|09', sent_at: iso(NOW - 1 * MIN), relay_reply: null });
-    t.putAlert({ slot: '2026-10-28|10', sent_at: iso(NOW - 60 * MIN), relay_reply: '{"ok":true}' });
-    const before = iso(NOW - 2 * MIN);
-    expect(await r.claimAlert('2026-10-28|08', 'a', 'si', iso(NOW), before)).toBe(true);
-    expect(await r.claimAlert('2026-10-28|08', 'a', 'si', iso(NOW), before)).toBe(false);   // just claimed
-    expect(await r.claimAlert('2026-10-28|09', 'a', 'si', iso(NOW), before)).toBe(false);
-    expect(await r.claimAlert('2026-10-28|10', 'a', 'si', iso(NOW), before)).toBe(false);
-    expect(await r.claimAlert('2026-10-28|11', 'a', 'si', iso(NOW), before)).toBe(true);
+  it('item 1 (6th pass): a claim is final; the row carries a claimed marker from the start', async () => {
+    expect(await t.repo.claimAlert('2026-10-28|08', 'a', 'si', iso(NOW))).toBe(true);
+    expect(await t.repo.claimAlert('2026-10-28|08', 'a', 'si', iso(NOW + 3 * MIN))).toBe(false);
+    expect(t.rows.alerts().map((r) => [r.slot, JSON.parse(r.relay_reply)])).toEqual([['2026-10-28|08', { claimed: true, at: iso(NOW) }]]);
   });
 
-  it('F9: relay 200 then every reply write fails: one DM, the row kept, pauses of 0.5, 1 and 2 s, no second DM', async () => {
+  it('item 1 (6th pass): a Worker killed right after the claim leaves the slot claimed: no DM 10 s or 3 min later', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    // The "kill": the relay call throws and no reply can be written, so only the claim is left.
+    t.env.RELAY.fetch = vi.fn(async () => { throw new Error('the isolate went away'); });
+    t.repo.saveRelayReply = vi.fn(async () => { throw new Error('the isolate went away'); });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(t.rows.alerts()[0].relay_reply)).toEqual({ claimed: true, at: iso(NOW) });
+    t.env.RELAY.fetch = vi.fn(async () => new Response(RELAY_OK, { status: 200 }));
+    for (const later of [NOW + 10 * 1000, NOW + 3 * MIN]) {
+      t.setNow(later);
+      await t.call('/api/vote', { person_id: ids[0], add: ['2026-10-29|08'] });
+      await t.call('/api/state');
+    }
+    expect(t.env.RELAY.fetch).not.toHaveBeenCalled();
+  });
+
+  it('item 1 (6th pass): a relay that throws (not a timeout) writes its error marker, and the slot is final', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    t.env.RELAY.fetch = vi.fn(async () => { throw new TypeError('network connection lost'); });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
+    expect(JSON.parse(t.rows.alerts()[0].relay_reply)).toEqual({ error: 'network connection lost', at: iso(NOW) });
+    await t.call('/api/state');
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('item 1 (6th pass): with 3 slots due and a relay that hangs 20 s, a check claims only the first; the next check the rest', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    const slots = ['2026-10-28|19', '2026-10-29|08', '2026-10-29|09'];
+    await t.seedAvailability({ ...EVENING, si: { ...EVENING.si, '2026-10-29': { status: 'ok', starts: { '08:00': { courts: 1, min: 60 }, '09:00': { courts: 1, min: 60 } } } } });
+    t.env.RELAY = undefined;                                   // build the votes with no DM going
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: slots });
+    expect(t.rows.alerts()).toEqual([]);                       // relay not configured: the claims were let go
+    t.env.RELAY = { fetch: vi.fn(() => new Promise(() => {})) };
+    const state = (await t.call('/api/state', undefined, { drain: false })).json;
+    expect(state.ready.map((r) => r.slot)).toEqual(slots);
+    const p = checkAlerts(state, t.env, t.repo, NOW, async () => {});
+    await vi.advanceTimersByTimeAsync(20001);
+    expect(await p).toEqual([]);
+    expect(t.rows.alerts().map((r) => r.slot)).toEqual([slots[0]]);   // the 5 s budget was spent on the first
+    t.env.RELAY = { fetch: vi.fn(async () => new Response(RELAY_OK, { status: 200 })) };
+    expect(await checkAlerts(state, t.env, t.repo, NOW + 30 * 1000, async () => {})).toEqual(slots.slice(1));
+    vi.useRealTimers();
+    expect(t.rows.alerts().map((r) => r.slot).sort()).toEqual(slots);
+  });
+
+  it('F9: relay 200 then every reply write fails: one DM, the claimed row kept, pauses of 0.5, 1 and 2 s, no second DM', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     t.repo.saveRelayReply = vi.fn(async () => { throw new Error('D1 busy'); });
     const ids = await t.addPeople(NAMES);
     for (const id of ids.slice(0, 4)) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
-    expect(t.rows.alerts()).toHaveLength(1);                // the row stays: the DM went
-    // The placeholder: the write and 3 retries, then one best-effort write of the body.
-    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(5);
-    expect(t.repo.saveRelayReply.mock.calls.slice(0, 4).map((c) => c[1])).toEqual(Array(4).fill(RELAY_PENDING));
+    expect(t.rows.alerts()).toHaveLength(1);                // the claimed row stays: the DM went
+    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(4);  // the write and 3 retries
     expect(t.sleeps).toEqual([500, 1000, 2000]);
     expect(err).toHaveBeenCalledWith('padel: DM sent, reply not saved', SLOT, 'attempt 4', expect.stringContaining('D1 busy'));
     await t.call('/api/vote', { person_id: ids[4], add: [SLOT] });
     await t.call('/api/state');
-    expect(t.relayCalls).toHaveLength(1);                   // under 2 minutes old: never claimed again
+    expect(t.relayCalls).toHaveLength(1);
   });
 
-  it('item 1: relay 200, the placeholder write fails twice then succeeds: one DM and the relay reply stored', async () => {
+  it('item 1: relay 200, the reply write fails twice then succeeds: one DM and the relay reply stored', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const real = t.repo.saveRelayReply.bind(t.repo);
     let n = 0;
@@ -548,7 +588,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const ids = await t.addPeople(NAMES.slice(0, 4));
     for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
-    expect(t.repo.saveRelayReply.mock.calls.map((c) => c[1])).toEqual([RELAY_PENDING, RELAY_PENDING, RELAY_PENDING, RELAY_OK]);
+    expect(t.repo.saveRelayReply.mock.calls.map((c) => c[1])).toEqual([RELAY_OK, RELAY_OK, RELAY_OK]);
     expect(t.sleeps).toEqual([500, 1000]);
     expect(t.rows.alerts().map((r) => [r.slot, r.relay_reply])).toEqual([[SLOT, RELAY_OK]]);
   });
@@ -571,24 +611,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('item 1: a stuck row (no relay reply) over 2 minutes old is retried through the vote route: exactly one DM', async () => {
-    t.putAlert({ slot: SLOT, sent_at: iso(NOW - 3 * MIN), relay_reply: null });
-    const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
-    await t.call('/api/state');
-    expect(t.relayCalls).toHaveLength(1);
-    const rows = t.rows.alerts();
-    expect(rows.map((r) => [r.slot, r.sent_at, r.relay_reply])).toEqual([[SLOT, iso(NOW), RELAY_OK]]);
-  });
 
-  it('item 1: a stuck row only 1 minute old is left alone: no DM', async () => {
-    t.putAlert({ slot: SLOT, sent_at: iso(NOW - 1 * MIN), relay_reply: null });
-    const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
-    await t.call('/api/state');
-    expect(t.relayCalls).toHaveLength(0);
-    expect(t.rows.alerts().map((r) => [r.sent_at, r.relay_reply])).toEqual([[iso(NOW - 1 * MIN), null]]);
-  });
 
   it('a save stamps the person with savedAt, the time of their last save', async () => {
     const [id] = await t.addPeople(['Test Ann']);
@@ -639,7 +662,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     state.ready = [{ ...state.ready[0], slot: '2026-10-29|19' }];
     const p = checkAlerts(state, t.env, t.repo, NOW, async () => {});
     await vi.advanceTimersByTimeAsync(19000);
-    expect(t.rows.alerts().find((r) => r.slot === '2026-10-29|19').relay_reply).toBeNull();   // still waiting at 19 s
+    expect(JSON.parse(t.rows.alerts().find((r) => r.slot === '2026-10-29|19').relay_reply)).toEqual({ claimed: true, at: iso(NOW) });   // still waiting at 19 s
     await vi.advanceTimersByTimeAsync(1001);
     expect(await p).toEqual([]);
     vi.useRealTimers();

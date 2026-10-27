@@ -57,6 +57,7 @@ export const GAP_MS = 250;
 export const PAGE_TIMEOUT_MS = 10000;
 export const POST_TIMEOUT_MS = 30000;
 export const MAX_GAP_MS = 60 * 1000;  // one gap this long between two clock reads means the Mac slept
+export const LONG_READ_MS = 9 * 60 * 1000;   // a read this long meets the Worker's 10-minute readAt limit
 export const RETRY_MS = 2000;        // a page lost to a timeout, a 5xx or no connection is fetched once more after this
 const QUIET_FROM = 23 * 60;          // 23:00 London
 const QUIET_UNTIL = 6 * 60 + 30;     // 06:30 London
@@ -220,10 +221,18 @@ export async function run({
   const post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
   if (post.status !== 200) {
     // A Mac that slept while the POST was out gets a 400 or 409 for an old read: the sleep, not a
-    // fault. Judged by the gap across the POST alone (its own timeout is 30 s).
+    // fault. Judged by the gap across the POST, less the POST's own 30 s timeout.
     const afterMs = now();
-    if (afterMs - endMs > MAX_GAP_MS) {
-      log(`padel-courts: the Mac slept while posting (a ${Math.round((afterMs - endMs) / 1000)} s gap), Worker answered ${post.status || 'nothing'}; not counted; ${summaryOf(counts)}`);
+    const postGap = afterMs - endMs - POST_TIMEOUT_MS;
+    if (postGap > MAX_GAP_MS) {
+      log(`padel-courts: the Mac slept while posting (a ${Math.round(postGap / 1000)} s gap past the POST's own timeout), Worker answered ${post.status || 'nothing'}; not counted; ${summaryOf(counts)}`);
+      record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds, counts, slept: true });
+      return 0;
+    }
+    // The Worker refuses a read older than 10 minutes. A read that itself took over 9 minutes
+    // (only possible on a Mac that kept dozing in short naps) is that, not a fault.
+    if (post.status === 400 && /within 10 minutes/.test(String(post.body?.error || '')) && endMs - startMs > LONG_READ_MS) {
+      log(`padel-courts: the read took ${seconds} s, past the Worker's 10-minute limit; not counted; ${summaryOf(counts)}`);
       record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds, counts, slept: true });
       return 0;
     }
