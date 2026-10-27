@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { run, isQuiet, buildPayload, readProblems, selftest, ENDPOINT, GAP_MS } from '../scripts/padel-courts.mjs';
+import { run, isQuiet, buildPayload, readProblems, selftest, ENDPOINT, GAP_MS, RETRY_MS } from '../scripts/padel-courts.mjs';
 import { cleanCourts, londonDates } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -135,6 +135,26 @@ describe('fails loudly', () => {
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(timed out\)/);
   });
 
+  it('item 4: a page lost to the network is fetched once more after 2 s before it counts', async () => {
+    const tries = {};
+    const s = stubs({ page: (id, date) => {
+      const k = `${id} ${date}`;
+      tries[k] = (tries[k] || 0) + 1;
+      if (k === `3122 ${DATES[3]}` && tries[k] === 1) return new Response('busy', { status: 503 });
+      if (k === `2619 ${DATES[0]}` && tries[k] === 1) throw new DOMException('signal timed out', 'TimeoutError');
+      return livePage(id, date);
+    } });
+    expect(await s.go()).toBe(0);
+    expect(s.pages).toHaveLength(16);                          // 14 pages and 2 second tries
+    expect(s.sleeps.filter((ms) => ms === RETRY_MS)).toHaveLength(2);
+    expect(s.lines[0]).toContain('St Ives ok 6, closed 1; PDL ok 7');
+    // A page that arrived and could not be parsed gets no second try.
+    const t = stubs({ page: (id, date) => (id === '3122' && date === DATES[2] ? new Response('<div class="schedule"><table><tr><td class="slot vacant"></td></tr></table></div>', { status: 200 }) : livePage(id, date)) });
+    expect(await t.go()).toBe(1);
+    expect(t.pages).toHaveLength(14);
+    expect(t.lines[0]).toMatch(/^FAILED: PDL 2026-10-30 could not be read \(unknown court cell\)/);
+  });
+
   it('but a few days lost to the network (timeouts, a 5xx) are not a failure of the run', async () => {
     const down = new Set([DATES[2], DATES[4], DATES[5]]);
     const s = stubs({ page: (id, date) => {
@@ -189,11 +209,13 @@ describe('fails loudly', () => {
     expect(s.lines[0]).toMatch(/^FAILED: the Worker answered nothing \(could not reach the Worker\)/);
   });
 
-  it('item 4: a 409 or a lost connection after the Mac slept past 5 minutes is "slept", not a failure', async () => {
-    let s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), clock: [START, START + 20 * 1000, START + 7 * 60 * 1000] });
+  it('item 4: a 409 (or a 400, or a lost connection) after the Mac slept past 5 minutes is "slept", not a failure', async () => {
+    let s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), clock: [START, START + 20 * 1000, START + 7 * 60 * 1000] });
     expect(await s.go()).toBe(0);
-    expect(s.lines[0]).toMatch(/^padel-courts: slept before the POST landed \(420 s since the read started\), Worker answered 400; not counted/);
-    expect(s.records[0]).toMatchObject({ ok: true, posted: false, http: 400, slept: true });
+    expect(s.lines[0]).toMatch(/^padel-courts: slept before the POST landed \(420 s since the read started\), Worker answered 409; not counted/);
+    expect(s.records[0]).toMatchObject({ ok: true, posted: false, http: 409, slept: true });
+    s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), clock: [START, START + 20 * 1000, START + 7 * 60 * 1000] });
+    expect(await s.go()).toBe(0);
     s = stubs({ page: livePage, post: () => { throw new TypeError('fetch failed'); }, clock: [START, START + 20 * 1000, START + 6 * 60 * 1000] });
     expect(await s.go()).toBe(0);
     // The same 409 with no sleep is a real failure.

@@ -1,16 +1,17 @@
 -- Padel group page (workers/padel). D1 (SQLite), never KV: KV free-tier writes are 1,000 a day
 -- account-wide and starve the other Workers (workers/property-manager/wrangler.toml).
 --
--- Apply:  npx wrangler d1 execute padel --local  --file=workers/padel/schema.sql -c workers/padel/wrangler.toml
---         npx wrangler d1 execute padel --remote --file=workers/padel/schema.sql -c workers/padel/wrangler.toml
--- Safe to re-run: every statement is IF NOT EXISTS.
+-- This file builds a FRESH database only (a local `wrangler dev` copy, the tests' SQLite):
+--   npx wrangler d1 execute padel --local --file=workers/padel/schema.sql -c workers/padel/wrangler.toml
+-- It never changes a database that already exists (every statement is IF NOT EXISTS, so a table
+-- that is there is skipped, columns and all). A change to the LIVE database goes through a
+-- numbered file in migrations/, applied once with `wrangler d1 execute padel --remote --file`,
+-- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
 -- One row per player. venues = the venue codes this person can get to (si, pdl, pp). votes_at = when
--- this person's tick list was last saved (the page uses it to decide whether ticks it kept on the
--- phone are still unsaved). Added 27 Oct 2026; the live database got it once with:
---   npx wrangler d1 execute padel --remote -c workers/padel/wrangler.toml --command "ALTER TABLE people ADD COLUMN votes_at TEXT"
+-- this person last saved their ticks (migrations/0001-votes-at.sql, 27 Oct 2026).
 CREATE TABLE IF NOT EXISTS people (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -19,7 +20,7 @@ CREATE TABLE IF NOT EXISTS people (
   votes_at TEXT
 );
 
--- "I can play" ticks. A person's whole list is replaced in one batch on every save.
+-- "I can play" ticks. A save adds and removes single hours (POST /api/vote { add, remove }).
 CREATE TABLE IF NOT EXISTS votes (
   person_id INTEGER NOT NULL,
   slot TEXT NOT NULL,

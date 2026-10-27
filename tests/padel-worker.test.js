@@ -18,7 +18,7 @@ import worker from '../workers/padel/worker.js';
 import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
-  readPulse, checkAlerts, assembleAvailability, VERSION,
+  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +26,8 @@ const fixture = (f) => readFileSync(resolve(ROOT, 'tests/fixtures/padel', f), 'u
 const ST_IVES = fixture('matchi-2619-2026-10-28.html');
 const PDL = fixture('matchi-3122-2026-10-28.html');
 const CLOSED = fixture('matchi-2619-2026-11-05.html');
+const ST_IVES_TODAY = fixture('matchi-2619-2026-10-27.html');    // read live on 27 Oct 2026 at 13:10
+const PDL_TODAY = fixture('matchi-3122-2026-10-27.html');
 const PULSE = JSON.parse(fixture('pulse-search.json'));
 const countClass = (html, cls) => (html.match(new RegExp(`class="slot ${cls}"`, 'g')) || []).length;
 
@@ -96,11 +98,25 @@ describe('parseMatchi', () => {
     expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '19:00': { courts: 1, min: 60, names: ['Court 1'] } } });
   });
 
-  it('F3: a schedule table whose cells all carry an unknown class is an error, never closed or empty', () => {
+  it('F3 and item 3: a court cell of a kind the parser does not know is an error, never "no court free"', () => {
     const html = table('<td class="slot vacant" data-slot-can-start="true" data-slot-min-duration="60" title="Available<br>Court 1<br>19:00 - 20:00"></td><td class="slot taken"></td>');
-    expect(parseMatchi(html)).toEqual({ status: 'error', reason: 'no court cells recognised' });
-    // An empty schedule table is the same error (it used to read as "closed").
-    expect(parseMatchi(table('')).status).toBe('error');
+    expect(parseMatchi(html)).toEqual({ status: 'error', reason: 'unknown court cell' });
+    // An empty schedule table is an error too (it used to read as "closed").
+    expect(parseMatchi(table(''))).toEqual({ status: 'error', reason: 'no court cells recognised' });
+    // A renamed class on a live page: one "slot red" becomes "slot booked".
+    expect(parseMatchi(ST_IVES_TODAY.replace('class="slot red"', 'class="slot booked"'))).toEqual({ status: 'error', reason: 'unknown court cell' });
+  });
+
+  it('item 3: today\'s live pages (27 Oct, past hours not-available) parse, the not-available cells ignored', () => {
+    expect([countClass(ST_IVES_TODAY, 'free'), countClass(ST_IVES_TODAY, 'red'), countClass(ST_IVES_TODAY, 'can-not-start'), countClass(ST_IVES_TODAY, 'not-available')]).toEqual([13, 5, 3, 26]);
+    expect([countClass(PDL_TODAY, 'free'), countClass(PDL_TODAY, 'red'), countClass(PDL_TODAY, 'can-not-start'), countClass(PDL_TODAY, 'not-available')]).toEqual([7, 29, 6, 39]);
+    const si = parseMatchi(ST_IVES_TODAY);
+    expect(si.status).toBe('ok');
+    expect(Object.values(si.starts).reduce((n, x) => n + x.courts, 0)).toBe(13);
+    expect(Object.keys(si.starts).sort()[0]).toBe('13:30');            // nothing before the time the page was read
+    const pdl = parseMatchi(PDL_TODAY);
+    expect(pdl.status).toBe('ok');
+    expect(Object.values(pdl.starts).reduce((n, x) => n + x.courts, 0)).toBe(7);
   });
 
   it('F4: a free, bookable cell whose title cannot be read makes the day an error', () => {
@@ -270,9 +286,9 @@ function mapRepo() {
       },
       async setVenues(id, venues) { const p = people.get(id); if (!p) return false; p.venues = venues.join(','); return true; },
       async listVotes(from) { return [...votes.values()].filter((v) => v.slot >= from).map(({ person_id, slot }) => ({ person_id, slot })); },
-      async replaceVotes(pid, slots, now) {
-        for (const [k, v] of [...votes]) if (v.person_id === pid && !slots.includes(v.slot)) votes.delete(k);
-        for (const s of slots) if (!votes.has(`${pid}|${s}`)) votes.set(`${pid}|${s}`, { person_id: pid, slot: s, created_at: now });
+      async applyVotes(pid, add, remove, now) {
+        for (const s of add) if (!votes.has(`${pid}|${s}`)) votes.set(`${pid}|${s}`, { person_id: pid, slot: s, created_at: now });
+        for (const s of remove) votes.delete(`${pid}|${s}`);
         if (people.has(pid)) people.get(pid).votes_at = now;
       },
       async listBooked(from) { return [...booked.values()].filter((b) => b.slot >= from); },
@@ -358,6 +374,7 @@ function harness(make) {
   const waits = [];
   const calls = [];
   const limited = { n: 0, max: Infinity, keys: [] };
+  const sleeps = [];
   const env = {
     GROUP_KEY: KEY,
     ROBOT_KEY: ROBOT,
@@ -377,7 +394,7 @@ function harness(make) {
     if (ip) headers['CF-Connecting-IP'] = ip;
     const payload = raw !== undefined ? raw : (body ? JSON.stringify(body) : undefined);
     const req = new Request(`https://padel.kevinbrittain.workers.dev${path}`, { method: method || (payload !== undefined ? 'POST' : 'GET'), headers, body: payload });
-    const res = await handleRequest(req, env, ctx, h.repo, { now: () => now, fetch: fetchImpl });
+    const res = await handleRequest(req, env, ctx, h.repo, { now: () => now, fetch: fetchImpl, sleep: async (ms) => { sleeps.push(ms); } });
     if (doDrain) await drain();
     const text = await res.text();
     let json = null;
@@ -385,7 +402,7 @@ function harness(make) {
     return { status: res.status, json, text, headers: res.headers };
   };
   return {
-    ...h, env, ctx, waits, calls, relayCalls, call, drain, limited,
+    ...h, env, ctx, waits, calls, relayCalls, call, drain, limited, sleeps,
     setNow: (ms) => { now = ms; },
     setRelay: (fn) => { relayReply = fn; },
     setFetch: (f) => { fetchImpl = f; },
@@ -430,7 +447,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
 
   it('no DM at 3, one DM at 4, none again at 5; the DM gives each venue its own count and names', async () => {
     const ids = await t.addPeople(NAMES);
-    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     let s = (await t.call('/api/state')).json;
     expect(t.relayCalls).toHaveLength(0);
     expect(s.ready).toEqual([]);
@@ -440,7 +457,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     // (Ann, Bob, Cat, Dan) once Dan ticks. Never "5 in": people are not added up across venues.
     await t.call('/api/person', { id: ids[4], venues: ['pdl', 'pp'] });
     await t.call('/api/person', { id: ids[3], venues: ['si'] });
-    await t.call('/api/vote', { person_id: ids[4], slots: [SLOT] });
+    await t.call('/api/vote', { person_id: ids[4], add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
     const dm = t.relayCalls[0];
     expect(dm.url).toBe('https://apple-inbound/slack-relay');
@@ -454,7 +471,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].relay_reply).ok).toBe(true);
 
-    s = (await t.call('/api/vote', { person_id: ids[3], slots: [SLOT] })).json;
+    s = (await t.call('/api/vote', { person_id: ids[3], add: [SLOT] })).json;
     expect(t.relayCalls).toHaveLength(1);
     expect(s.ready[0].venues.map((v) => [v.code, v.count, v.names])).toEqual([
       ['si', 4, ['Test Ann', 'Test Bob', 'Test Cat', 'Test Dan']], ['pdl', 4, ['Test Ann', 'Test Bob', 'Test Cat', 'Test Eve']],
@@ -468,7 +485,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   it('F1: St Ives data 2 days old plus 4 ticks sends nothing, and the page says "couldn\'t check"', async () => {
     await t.seedAvailability(EVENING, NOW - 2 * 24 * 60 * MIN, NOW);
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     const s = (await t.call('/api/state')).json;
     expect(t.relayCalls).toHaveLength(0);
     expect(t.rows.alerts()).toHaveLength(0);
@@ -482,7 +499,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   it('freshness edges: Matchi counts for 45 minutes, Pulse for 20', async () => {
     const ids = await t.addPeople(NAMES.slice(0, 4));
     await t.seedAvailability(EVENING, NOW - 44 * MIN, NOW - 19 * MIN);
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-29|08'] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-29|08'] });
     let s = (await t.call('/api/state')).json;
     expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: true });
     await t.seedAvailability(EVENING, NOW - 46 * MIN, NOW - 21 * MIN);
@@ -505,36 +522,58 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(await r.claimAlert('2026-10-28|11', 'a', 'si', iso(NOW), before)).toBe(true);
   });
 
-  it('F9: relay 200 then every reply write fails: one DM, 4 tries, the row kept, no second DM on the next save', async () => {
+  it('F9: relay 200 then every reply write fails: one DM, the row kept, pauses of 0.5, 1 and 2 s, no second DM', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     t.repo.saveRelayReply = vi.fn(async () => { throw new Error('D1 busy'); });
     const ids = await t.addPeople(NAMES);
-    for (const id of ids.slice(0, 4)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids.slice(0, 4)) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
     expect(t.rows.alerts()).toHaveLength(1);                // the row stays: the DM went
-    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(4);  // the write, then 3 retries
+    // The placeholder: the write and 3 retries, then one best-effort write of the body.
+    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(5);
+    expect(t.repo.saveRelayReply.mock.calls.slice(0, 4).map((c) => c[1])).toEqual(Array(4).fill(RELAY_PENDING));
+    expect(t.sleeps).toEqual([500, 1000, 2000]);
     expect(err).toHaveBeenCalledWith('padel: DM sent, reply not saved', SLOT, 'attempt 4', expect.stringContaining('D1 busy'));
-    await t.call('/api/vote', { person_id: ids[4], slots: [SLOT] });
+    await t.call('/api/vote', { person_id: ids[4], add: [SLOT] });
     await t.call('/api/state');
     expect(t.relayCalls).toHaveLength(1);                   // under 2 minutes old: never claimed again
   });
 
-  it('item 1: relay 200, the reply write fails twice then succeeds: one DM and the reply stored', async () => {
+  it('item 1: relay 200, the placeholder write fails twice then succeeds: one DM and the relay reply stored', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const real = t.repo.saveRelayReply.bind(t.repo);
     let n = 0;
     t.repo.saveRelayReply = vi.fn(async (slot, reply) => { n++; if (n <= 2) throw new Error('D1 busy'); return real(slot, reply); });
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
-    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(3);
+    expect(t.repo.saveRelayReply.mock.calls.map((c) => c[1])).toEqual([RELAY_PENDING, RELAY_PENDING, RELAY_PENDING, RELAY_OK]);
+    expect(t.sleeps).toEqual([500, 1000]);
     expect(t.rows.alerts().map((r) => [r.slot, r.relay_reply])).toEqual([[SLOT, RELAY_OK]]);
+  });
+
+  it('item 2: a relay 200 whose body stalls leaves the placeholder, so no re-claim 3 minutes later', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    t.env.RELAY.fetch = vi.fn(async () => new Response(new ReadableStream({ start() {} }), { status: 200 }));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] }, { drain: false });
+    const p = t.drain();
+    await vi.advanceTimersByTimeAsync(8001);
+    await p;
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
+    expect(t.rows.alerts().map((r) => r.relay_reply)).toEqual([RELAY_PENDING]);
+    t.setNow(NOW + 3 * MIN);
+    vi.useRealTimers();
+    await t.call('/api/vote', { person_id: ids[0], add: ['2026-10-29|08'] });
+    await t.call('/api/state');
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('item 1: a stuck row (no relay reply) over 2 minutes old is retried through the vote route: exactly one DM', async () => {
     t.putAlert({ slot: SLOT, sent_at: iso(NOW - 3 * MIN), relay_reply: null });
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     await t.call('/api/state');
     expect(t.relayCalls).toHaveLength(1);
     const rows = t.rows.alerts();
@@ -544,17 +583,17 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   it('item 1: a stuck row only 1 minute old is left alone: no DM', async () => {
     t.putAlert({ slot: SLOT, sent_at: iso(NOW - 1 * MIN), relay_reply: null });
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     await t.call('/api/state');
     expect(t.relayCalls).toHaveLength(0);
     expect(t.rows.alerts().map((r) => [r.sent_at, r.relay_reply])).toEqual([[iso(NOW - 1 * MIN), null]]);
   });
 
-  it('item 7: a save stamps the person with savedAt, which the page compares with its kept copy', async () => {
+  it('a save stamps the person with savedAt, the time of their last save', async () => {
     const [id] = await t.addPeople(['Test Ann']);
     expect((await t.call('/api/state')).json.people[0].savedAt).toBeNull();
     t.setNow(NOW + MIN);
-    const s = (await t.call('/api/vote', { person_id: id, slots: [] })).json;     // an empty list still stamps it
+    const s = (await t.call('/api/vote', { person_id: id, add: [] })).json;     // an empty save still stamps it
     expect(s.people[0]).toMatchObject({ id, savedAt: iso(NOW + MIN) });
   });
 
@@ -562,23 +601,23 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     t.setRelay(() => new Response('{"ok":false,"sent":[{"ok":false,"error":"channel_not_found"}]}', { status: 502 }));
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
     expect(t.rows.alerts()).toHaveLength(0);
     expect(err).toHaveBeenCalledWith('padel: alert DM failed, will retry', SLOT, expect.stringContaining('relay HTTP 502'));
     t.setRelay(() => new Response(RELAY_OK, { status: 200 }));
-    await t.call('/api/vote', { person_id: ids[0], slots: [SLOT] });
+    await t.call('/api/vote', { person_id: ids[0], add: [SLOT] });
     expect(t.relayCalls).toHaveLength(2);
     expect(t.rows.alerts()).toHaveLength(1);
   });
 
-  it('F20: the vote answers before the DM; a relay that hangs is cut off at 8 s and the row released', async () => {
+  it('F20 and item 2: the vote answers before the DM; a relay that hangs is cut off at 8 s and the row KEPT for the re-claim', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     let release;
     t.env.RELAY.fetch = vi.fn(() => new Promise((r) => { release = r; }));
-    const res = await t.call('/api/vote', { person_id: ids[3], slots: [SLOT] }, { drain: false });
+    const res = await t.call('/api/vote', { person_id: ids[3], add: [SLOT] }, { drain: false });
     expect(res.status).toBe(200);
     expect(res.json.ready.map((r) => r.slot)).toEqual([SLOT]);   // the state computed before the check
     expect(t.waits).toHaveLength(1);                              // the DM runs in waitUntil
@@ -587,23 +626,43 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     await t.drain();
     expect(t.rows.alerts()[0].relay_reply).toBe(RELAY_OK);
 
-    // A relay that never answers.
+    // A relay that never answers: the row stays with no reply (the DM may have gone).
     vi.useFakeTimers();
     t.env.RELAY.fetch = vi.fn(() => new Promise(() => {}));
     const state = (await t.call('/api/state', undefined, { drain: false })).json;
     state.ready = [{ ...state.ready[0], slot: '2026-10-29|19' }];
-    const p = checkAlerts(state, t.env, t.repo, NOW);
+    const p = checkAlerts(state, t.env, t.repo, NOW, async () => {});
     await vi.advanceTimersByTimeAsync(8001);
     expect(await p).toEqual([]);
-    expect(t.rows.alerts().map((r) => r.slot)).toEqual([SLOT]);
-    expect(err).toHaveBeenCalledWith('padel: alert DM failed, will retry', '2026-10-29|19', expect.stringContaining('timed out'));
+    vi.useRealTimers();
+    expect(t.rows.alerts().map((r) => [r.slot, r.relay_reply === null])).toEqual([[SLOT, false], ['2026-10-29|19', true]]);
+    expect(err).toHaveBeenCalledWith('padel: alert DM unanswered, the re-claim will retry', '2026-10-29|19', expect.stringContaining('timed out'));
+    // A check 10 s later sends no second DM: the row is under 2 minutes old.
+    t.env.RELAY.fetch = vi.fn(async () => new Response(RELAY_OK, { status: 200 }));
+    expect(await checkAlerts(state, t.env, t.repo, NOW + 10 * 1000, async () => {})).toEqual([]);
+    expect(t.env.RELAY.fetch).not.toHaveBeenCalled();
+  });
+
+  it('item 7: /api/refresh runs the alert check in the background (waitUntil), and it sends the DM', async () => {
+    // Pulse last read 20 minutes ago: not fresh, so the votes alone send nothing.
+    await t.seedAvailability({ si: {}, pdl: {} }, NOW, NOW - 20 * MIN);
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|21'] }, { drain: false });
+    await t.drain();
+    expect(t.relayCalls).toHaveLength(0);
+    const r = await t.call('/api/refresh', {}, { drain: false });
+    expect(r.json.refreshed).toBe(true);
+    expect(t.waits).toHaveLength(1);                         // the check was handed to waitUntil
+    await Promise.all(t.waits.splice(0));
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Pulse: 4 in');
   });
 
   it('no DM when the only free venue is one the 4th person cannot do', async () => {
     await t.seedAvailability({ si: EVENING.si, pdl: { '2026-10-28': { status: 'closed' } }, pp: { '2026-10-28': { status: 'error', reason: 'HTTP 500' } } });
     const ids = await t.addPeople(NAMES.slice(0, 4));
     expect((await t.call('/api/person', { id: ids[3], venues: ['pdl', 'pp'] })).json.venues).toEqual(['pdl', 'pp']);
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     const s = (await t.call('/api/state')).json;
     expect(t.relayCalls).toHaveLength(0);
     expect(s.ready).toEqual([]);
@@ -613,23 +672,23 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   it('no DM for a booked slot', async () => {
     const ids = await t.addPeople(NAMES.slice(0, 4));
     expect((await t.call('/api/booked', { slot: SLOT, person_id: ids[0], venue: 'si', booked: true })).status).toBe(200);
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     const s = (await t.call('/api/state')).json;
     expect(t.relayCalls).toHaveLength(0);
     expect(s.ready).toEqual([]);
     expect(s.booked[SLOT]).toEqual({ person_id: ids[0], venue: 'si' });
     // Undo the booking: the slot is ready again and the next save sends its one DM.
     await t.call('/api/booked', { slot: SLOT, booked: false });
-    await t.call('/api/vote', { person_id: ids[0], slots: [SLOT] });
+    await t.call('/api/vote', { person_id: ids[0], add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
   });
 
   it('two saves at once send one DM, and both saves persist', async () => {
     const ids = await t.addPeople(NAMES);
-    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     const [a, b] = await Promise.all([
-      t.call('/api/vote', { person_id: ids[3], slots: [SLOT] }),
-      t.call('/api/vote', { person_id: ids[4], slots: [SLOT, '2026-10-29|08'] }),
+      t.call('/api/vote', { person_id: ids[3], add: [SLOT] }),
+      t.call('/api/vote', { person_id: ids[4], add: [SLOT, '2026-10-29|08'] }),
     ]);
     expect([a.status, b.status]).toEqual([200, 200]);
     expect(t.relayCalls).toHaveLength(1);
@@ -638,11 +697,35 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.votes['2026-10-29|08']).toEqual([ids[4]]);
   });
 
-  it('a save replaces the whole list: an untick removes the vote', async () => {
+  it('item 1: a save is a change: add, remove, both at once, and an empty save', async () => {
     const [id] = await t.addPeople(['Test Ann']);
-    await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|07', '2026-10-28|08'] });
-    const s = (await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|08'] })).json;
+    let s = (await t.call('/api/vote', { person_id: id, add: ['2026-10-28|07', '2026-10-28|08'] })).json;
+    expect(s.votes).toEqual({ '2026-10-28|07': [id], '2026-10-28|08': [id] });
+    s = (await t.call('/api/vote', { person_id: id, remove: ['2026-10-28|07'] })).json;
     expect(s.votes).toEqual({ '2026-10-28|08': [id] });
+    s = (await t.call('/api/vote', { person_id: id, add: ['2026-10-29|10'], remove: ['2026-10-28|08', '2026-10-30|11'] })).json;
+    expect(s.votes).toEqual({ '2026-10-29|10': [id] });                 // removing an hour never ticked is a no-op
+    s = (await t.call('/api/vote', { person_id: id, add: ['2026-10-29|10'] })).json;
+    expect(s.votes).toEqual({ '2026-10-29|10': [id] });                 // adding twice is a no-op
+    expect((await t.call('/api/vote', { person_id: id })).status).toBe(200);
+  });
+
+  it('item 1: two phones adding different hours merge instead of overwriting (review finding 10)', async () => {
+    const [id] = await t.addPeople(['Test Ann']);
+    await t.call('/api/vote', { person_id: id, add: ['2026-10-28|07'] });     // phone A
+    await t.call('/api/vote', { person_id: id, add: ['2026-10-29|20'] });     // phone B, which never saw 07
+    expect((await t.call('/api/state')).json.votes).toEqual({ '2026-10-28|07': [id], '2026-10-29|20': [id] });
+  });
+
+  it('item 1: past hours are dropped from add and remove; an hour in both lists, or the old slots list, is refused', async () => {
+    const [id] = await t.addPeople(['Test Ann']);
+    expect((await t.call('/api/vote', { person_id: id, add: ['2026-10-26|20', '2026-10-27|20'], remove: ['2026-10-26|21'] })).json.votes).toEqual({ '2026-10-27|20': [id] });
+    const both = await t.call('/api/vote', { person_id: id, add: ['2026-10-28|07'], remove: ['2026-10-28|07'] });
+    expect(both).toMatchObject({ status: 400, json: { error: 'An hour cannot be added and removed at once: 2026-10-28|07' } });
+    expect((await t.call('/api/vote', { person_id: id, remove: ['2026-11-03|10'] })).status).toBe(400);
+    expect((await t.call('/api/vote', { person_id: id, add: 'x' })).status).toBe(400);
+    expect((await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|07'] })).status).toBe(400);
+    expect(t.rows.votes().map((v) => v.slot)).toEqual(['2026-10-27|20']);
   });
 
   it('the key gate: 401 without it or with a wrong one; health needs none and says only ok and version', async () => {
@@ -691,9 +774,9 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   it('slot validation refuses a slot outside the window or the hours', async () => {
     const [id] = await t.addPeople(['Test Ann']);
     for (const slot of ['2026-11-03|10', '2026-10-28|06', '2026-10-28|22', 'garbage']) {
-      expect((await t.call('/api/vote', { person_id: id, slots: [slot] })).status, slot).toBe(400);
+      expect((await t.call('/api/vote', { person_id: id, add: [slot] })).status, slot).toBe(400);
     }
-    expect((await t.call('/api/vote', { person_id: 999, slots: [SLOT] })).status).toBe(404);
+    expect((await t.call('/api/vote', { person_id: 999, add: [SLOT] })).status).toBe(404);
     expect((await t.call('/api/booked', { slot: '2026-11-09|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: '2026-10-26|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'xx', booked: true })).status).toBe(400);
@@ -702,7 +785,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
 
   it('F11: a save from a page left open over midnight drops yesterday and keeps today', async () => {
     const [id] = await t.addPeople(['Test Ann']);
-    const r = await t.call('/api/vote', { person_id: id, slots: ['2026-10-26|20', '2026-10-27|20'] });
+    const r = await t.call('/api/vote', { person_id: id, add: ['2026-10-26|20', '2026-10-27|20'] });
     expect(r.status).toBe(200);
     expect(r.json.votes).toEqual({ '2026-10-27|20': [id] });
   });
@@ -738,7 +821,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   it('a stale Pulse read kicks ONE background read of Pulse only (never Matchi), then alerts', async () => {
     await t.seedAvailability({ si: EVENING.si, pdl: EVENING.pdl }, NOW, NOW - 20 * MIN);
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|21'] }, { drain: false });
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|21'] }, { drain: false });
     await t.drain();
     expect(t.relayCalls).toHaveLength(0);                 // nothing free at 21:00 yet, Pulse is not fresh
     const first = (await t.call('/api/state', undefined, { drain: false })).json;
@@ -786,7 +869,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
 
   it('old votes, bookings and alerts are pruned on a Pulse read', async () => {
     const [id] = await t.addPeople(['Test Ann']);
-    await t.call('/api/vote', { person_id: id, slots: ['2026-10-27|20'] });
+    await t.call('/api/vote', { person_id: id, add: ['2026-10-27|20'] });
     t.setNow(Date.parse('2026-10-28T09:00:00Z'));
     await t.call('/api/refresh', {});
     expect(t.rows.votes()).toEqual([]);
@@ -800,7 +883,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     it('stores the saved pages, reads Pulse once (it is due), alerts, and answers with both read times', async () => {
       await t.seedAvailability({}, NOW - 60 * MIN);
       const ids = await t.addPeople(NAMES.slice(0, 4));
-      for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|07'] }, { drain: false });
+      for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|07'] }, { drain: false });
       await t.drain();
       t.relayCalls.length = 0;
       t.calls.length = 0;
@@ -844,10 +927,11 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     });
 
     it('validates strictly: venues, statuses, start times, whole numbers', async () => {
-      const day = (d) => ({ readAt: iso(NOW), venues: { si: { '2026-10-28': d }, pdl: {} } });
-      const both = (v) => ({ readAt: iso(NOW), venues: { pdl: {}, ...v } });
+      const PDL_OK = { '2026-10-28': { status: 'closed' } };
+      const day = (d) => ({ readAt: iso(NOW), venues: { si: { '2026-10-28': d }, pdl: PDL_OK } });
+      const both = (v) => ({ readAt: iso(NOW), venues: { ...v, pdl: v.pdl || PDL_OK } });
       const bad = [
-        both({ si: {}, pp: { '2026-10-28': { status: 'closed' } } }),
+        both({ si: PDL_OK, pp: { '2026-10-28': { status: 'closed' } } }),
         both({ si: [] }),
         { readAt: iso(NOW), venues: [] },
         day({ status: 'open' }),
@@ -866,6 +950,11 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       const noPdl = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT });
       expect(noPdl).toMatchObject({ status: 400, json: { error: 'venues.pdl is needed' } });
       expect((await t.call('/api/courts', { readAt: iso(NOW), venues: { pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT })).json).toEqual({ error: 'venues.si is needed' });
+      // Item 5: each venue needs at least one date inside the 7 days; an empty or all-outside venue is refused.
+      for (const pdl of [{}, { '2026-11-09': { status: 'closed' } }]) {
+        const r = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-10-28': { status: 'closed' } }, pdl } }, { robot: ROBOT });
+        expect(r, JSON.stringify(pdl)).toMatchObject({ status: 400, json: { error: 'pdl: no dates inside the next 7 days' } });
+      }
       // Dates outside the window are ignored without refusing the rest; an error day keeps its reason.
       const ok = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'nonsense' }, '2026-10-28': { status: 'error', reason: 'HTTP 500' } }, pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT });
       expect(ok.status).toBe(200);
@@ -876,7 +965,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     });
 
     it('takes a body up to 64 KB, refuses one over it', async () => {
-      const filler = { readAt: iso(NOW), venues: { pdl: {}, si: { '2026-10-28': { status: 'closed' }, '2030-01-01': { status: 'error', reason: 'x'.repeat(30000) } } } };
+      const filler = { readAt: iso(NOW), venues: { pdl: { '2026-10-28': { status: 'closed' } }, si: { '2026-10-28': { status: 'closed' }, '2030-01-01': { status: 'error', reason: 'x'.repeat(30000) } } } };
       expect((await t.call('/api/courts', filler, { robot: ROBOT })).status).toBe(200);
       filler.venues.si['2030-01-01'].reason = 'x'.repeat(70000);
       expect((await t.call('/api/courts', filler, { robot: ROBOT })).status).toBe(413);
@@ -935,20 +1024,6 @@ describe('the page and its headers (workers/padel/public)', () => {
     // The live page is served with no charset in its content-type, so this meta line is what makes
     // the browser decode the script as UTF-8, the bytes the hash was taken from.
     expect(page).toMatch(/^<!doctype html>\s*<html[^>]*>\s*<head>\s*<meta charset="utf-8">/i);
-  });
-  it('item 7: the kept-ticks copy is replayed only while the server still shows the stamp it was made against', () => {
-    const src = page.match(/\/\/ <unsavedDecision>\n([\s\S]*?)\n\s*\/\/ <\/unsavedDecision>/);
-    expect(src, 'the marked function (control)').not.toBeNull();
-    const unsavedDecision = new Function(`${src[1]}\nreturn unsavedDecision;`)();
-    const copy = { p: 7, s: ['2026-10-28|19'], at: 1, base: '2026-10-27T09:00:00.000Z' };
-    expect(unsavedDecision(copy, 7, '2026-10-27T09:00:00.000Z')).toBe('replay');      // nothing saved since: send it
-    expect(unsavedDecision(copy, 7, '2026-10-27T09:05:00.000Z')).toBe('drop');        // the keepalive landed, or another browser saved
-    expect(unsavedDecision({ ...copy, base: null }, 7, null)).toBe('replay');          // first ticks ever, never saved
-    expect(unsavedDecision({ ...copy, base: null }, 7, '2026-10-27T09:05:00.000Z')).toBe('drop');
-    expect(unsavedDecision(copy, 8, '2026-10-27T09:00:00.000Z')).toBe('keep');        // someone else's copy on this phone
-    expect(unsavedDecision({ p: 7, s: ['x'] }, 7, null)).toBe('drop');                // no stamp: never overwrite
-    expect(unsavedDecision(null, 7, null)).toBe('drop');
-    expect(unsavedDecision({ p: 7, s: 'x', base: null }, 7, null)).toBe('drop');
   });
   it('S4: the page headers live in _headers, for every path', () => {
     expect(headers).toMatch(/^\/\*$/m);

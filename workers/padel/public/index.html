@@ -251,14 +251,19 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let S = null;                               // last state from the server
   let me = Number(store.get('padel.person')) || null;
   let day = null;                             // the selected date
-  let mine = new Set();                       // my ticks (optimistic)
-  let dirty = false;                          // ticks changed and not yet confirmed saved
+  let mine = new Set();                       // my ticks as shown: the server's plus my unconfirmed changes
+  // A save sends CHANGES, never the whole list: the hours ticked and unticked since the last
+  // completed save. A tap moves an hour between the two sets, so tap then untap cancels out.
+  let pendingAdd = new Set();
+  let pendingRemove = new Set();
+  let inflight = null;                        // { person, add, remove } sent and not yet answered
+  let lastFlush = null;                       // the changes sent with keepalive, not yet confirmed
+  let flushFailed = false;
   let saving = false;
   let savingPromise = null;
   let saveTimer = null;
   let saveTry = 0;                            // failed saves in a row
   let backoffUntil = 0;
-  let restored = false;
   let busy = false;
   let staleStart = 0;
   let staleIdx = 0;
@@ -386,8 +391,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function apply(s) {
     S = s;
     if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); }
-    if (!dirty && !saving) mine = new Set(Object.keys(S.votes).filter((k) => S.votes[k].includes(me)));
-    if (!restored && me) restoreUnsaved();
+    recomputeMine();
     // After 22:00 there is nothing left to tick today, so the page opens on tomorrow.
     if (!day || !S.days.includes(day)) day = londonHour() >= 22 && S.days.length > 1 ? S.days[1] : S.days[0];
     keepFocus(render);
@@ -552,6 +556,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function renderUnsaved() {
     const box = $('unsaved');
     if (!box) return;
+    const dirty = hasPending();
     if (!dirty && !saving) { box.hidden = true; return; }
     box.hidden = false;
     const givenUp = dirty && !saving && saveTry > SAVE_RETRY_MS.length;
@@ -575,37 +580,26 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
 
   // ── Saving ticks ──
-  // A tick is kept on this phone (localStorage) until the server confirms it, so a closed tab, a
-  // dropped signal or WhatsApp's in-app browser shutting the page never loses it.
-  function currentSlots() { return [...mine].filter((s) => S.days.includes(s.split('|')[0])).sort(); }
-  // The copy carries `base`: the person's savedAt (the server's stamp of their last save) as the
-  // page saw it when the copy was made. On the next visit the copy is sent again only while the
-  // server still shows that same stamp. A keepalive save that landed after the page closed, or ticks
-  // saved later from another browser, move the stamp, and the copy is dropped instead of
-  // overwriting them. No phone clock is involved.
-  // <unsavedDecision>
-  function unsavedDecision(copy, personId, serverSavedAt) {
-    if (!copy || typeof copy !== 'object' || !Array.isArray(copy.s)) return 'drop';
-    if (copy.p !== personId) return 'keep';                   // someone else's on this phone: leave it
-    if (!Object.prototype.hasOwnProperty.call(copy, 'base')) return 'drop';
-    return (copy.base || null) === (serverSavedAt || null) ? 'replay' : 'drop';
+  // Changes, in the order they were made: the server's list, then the save in flight, then what
+  // was sent with keepalive, then the taps since. Each is "add these hours, remove those".
+  const inWindow = (slot) => S.days.includes(slot.split('|')[0]);
+  const hasPending = () => pendingAdd.size > 0 || pendingRemove.size > 0;
+  function layer(set, d) {
+    if (!d) return;
+    for (const x of d.add) set.add(x);
+    for (const x of d.remove) set.delete(x);
   }
-  // </unsavedDecision>
-  function persistUnsaved() {
-    const p = person(me);
-    if (me) store.set('padel.unsaved', JSON.stringify({ p: me, s: [...mine], at: Date.now(), base: (p && p.savedAt) || null }));
+  function recomputeMine() {
+    mine = new Set(me ? Object.keys(S.votes).filter((k) => S.votes[k].includes(me)) : []);
+    if (inflight && inflight.person === me) layer(mine, inflight);
+    if (lastFlush && lastFlush.person === me) layer(mine, lastFlush);
+    layer(mine, { add: pendingAdd, remove: pendingRemove });
   }
-  function clearUnsaved() { store.del('padel.unsaved'); }
-  function restoreUnsaved() {
-    restored = true;
-    let u = null;
-    try { u = JSON.parse(store.get('padel.unsaved') || 'null'); } catch (e) { clearUnsaved(); toast("Some ticks from your last visit couldn't be read."); }
-    const decision = unsavedDecision(u, me, (person(me) || {}).savedAt);
-    if (decision === 'drop' && u) clearUnsaved();
-    if (decision !== 'replay') return;
-    mine = new Set(u.s.filter((s) => typeof s === 'string' && S.days.includes(s.split('|')[0])));
-    dirty = true;
-    scheduleSave(800);
+  // Put unconfirmed changes back under any newer taps (a newer tap on the same hour wins).
+  function putBack(d) {
+    if (!d) return;
+    for (const x of d.add) if (!pendingAdd.has(x) && !pendingRemove.has(x)) pendingAdd.add(x);
+    for (const x of d.remove) if (!pendingAdd.has(x) && !pendingRemove.has(x)) pendingRemove.add(x);
   }
 
   function setBusy(on) {
@@ -615,9 +609,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function toggle(slot) {
     if (!me) return;
-    if (mine.has(slot)) mine.delete(slot); else mine.add(slot);
-    dirty = true;
-    persistUnsaved();
+    if (mine.has(slot)) { if (!pendingAdd.delete(slot)) pendingRemove.add(slot); } else if (!pendingRemove.delete(slot)) pendingAdd.add(slot);
+    recomputeMine();
     keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
     scheduleSave();
   }
@@ -625,35 +618,42 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, Math.max(ms || 800, backoffUntil - Date.now()));
   }
+  // One save in flight at a time. A tap during a save waits; the follow-up save goes when the
+  // reply lands. Changes are idempotent, so a save repeated after a lost reply does no harm.
   function save() {
     clearTimeout(saveTimer);
-    if (saving) { scheduleSave(); return savingPromise; }
-    if (!dirty || !S || !me) return Promise.resolve(true);
+    if (!S || !me) return Promise.resolve(true);
+    if (saving) return savingPromise;
+    if (!hasPending()) return Promise.resolve(true);
+    inflight = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove) };
+    pendingAdd = new Set();
+    pendingRemove = new Set();
     saving = true;
-    dirty = false;
-    const slots = currentSlots();
     renderUnsaved();
     savingPromise = (async () => {
+      const sent = inflight;
       try {
-        const r = await api('/api/vote', { person_id: me, slots });
+        const r = await api('/api/vote', { person_id: sent.person, add: [...sent.add].filter(inWindow), remove: [...sent.remove].filter(inWindow) });
+        inflight = null;
         saving = false;
         saveTry = 0;
         backoffUntil = 0;
-        if (!dirty) clearUnsaved();
         applyNewest(r);
-        if (dirty) { persistUnsaved(); scheduleSave(); }   // newer ticks: their copy takes the new stamp
-        return !dirty;
+        if (hasPending()) scheduleSave(1);
+        return !hasPending();
       } catch (e) {
+        inflight = null;
         saving = false;
-        dirty = true;
+        putBack(sent);
+        recomputeMine();
         if (e.status === 401) return false;
         saveTry++;
         if (saveTry === 1) toast("Couldn't save your ticks. Trying again.");
         // One timer only: a tap during the failing save had set its own 800 ms one. The back-off
-        // holds every later tap too (scheduleSave waits for backoffUntil).
+        // holds every later tap too, and never cuts short a 429's own back-off.
         clearTimeout(saveTimer);
         if (saveTry <= SAVE_RETRY_MS.length) {
-          const wait = SAVE_RETRY_MS[saveTry - 1];
+          const wait = Math.max(SAVE_RETRY_MS[saveTry - 1], backoffUntil - Date.now());
           backoffUntil = Math.max(backoffUntil, Date.now() + wait);
           saveTimer = setTimeout(save, wait);
         }
@@ -666,28 +666,38 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
   async function saveAndWait() {
     if (saving) await savingPromise;
-    if (dirty) await save();
-    return !dirty;
+    if (hasPending()) await save();
+    if (saving) await savingPromise;
+    return !hasPending() && !inflight;
   }
-  // The page is being hidden or closed: send unsaved ticks with keepalive so the request outlives it.
-  let flushFailed = false;
+  // The page is being hidden or closed: every unconfirmed change (the save in flight too, which
+  // the browser cancels on close) goes with keepalive so the request outlives the page. Order does
+  // not matter for changes, so it goes even while a save is in flight.
   function flush() {
-    if (!dirty || !me || !S || saving) return;
+    if (!me || !S) return;
+    const add = new Set();
+    const remove = new Set();
+    for (const d of [inflight, lastFlush, { person: me, add: pendingAdd, remove: pendingRemove }]) {
+      if (!d || d.person !== me) continue;
+      for (const x of d.add) { remove.delete(x); add.add(x); }
+      for (const x of d.remove) { add.delete(x); remove.add(x); }
+    }
+    if (!add.size && !remove.size) return;
     clearTimeout(saveTimer);
-    const slots = currentSlots();
-    const sent = JSON.stringify(slots);
-    fetch('/api/vote', { method: 'POST', keepalive: true, cache: 'no-store', headers: { 'X-Group-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: me, slots }) })
-      .then((res) => { lastWriteDone = performance.now(); if (res.ok && JSON.stringify(currentSlots()) === sent) { dirty = false; clearUnsaved(); } else { flushFailed = true; } })
-      .catch(() => { flushFailed = true; });        // kept in localStorage; saved when the page is next shown
+    const sent = { person: me, add, remove };
+    lastFlush = sent;
+    pendingAdd = new Set();
+    pendingRemove = new Set();
+    fetch('/api/vote', { method: 'POST', keepalive: true, cache: 'no-store', headers: { 'X-Group-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: me, add: [...add].filter(inWindow), remove: [...remove].filter(inWindow) }) })
+      .then((res) => { lastWriteDone = performance.now(); if (res.ok) { if (lastFlush === sent) lastFlush = null; } else { flushFailed = true; } })
+      .catch(() => { flushFailed = true; });        // resent as a normal save when the page is shown again
   }
 
   async function pickPerson(id) {
     if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
     me = id;
     store.set('padel.person', String(id));
-    mine = new Set(Object.keys(S.votes).filter((k) => S.votes[k].includes(me)));
-    restored = false;
-    restoreUnsaved();
+    recomputeMine();
     render();
     window.scrollTo(0, 0);
   }
@@ -788,10 +798,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { flush(); return; }
     if (!S) return;
-    if (dirty || flushFailed) { flushFailed = false; saveTry = 0; save(); } else if (!saving) load();
+    // Shown again: changes sent with keepalive and not confirmed go again as a normal save.
+    if (lastFlush) { const d = lastFlush; lastFlush = null; if (d.person === me) putBack(d); }
+    flushFailed = false;
+    if (hasPending()) { saveTry = 0; save(); } else if (!saving) load();
   });
   window.addEventListener('pagehide', flush);
 
+  store.del('padel.unsaved');                 // the old whole-list copy (before 27 Oct 2026, 4th pass) is never used
   if (!key) showGate(); else load();
 })();
 </script>

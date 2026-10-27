@@ -14,7 +14,7 @@
 //   GET  /api/state                         -> the whole page state (kicks a lazy Pulse read)
 //   POST /api/person  { name }              -> { id, name, venues }   creates the name if absent
 //   POST /api/person  { id, venues:[...] }  -> { id, name, venues }   venue preferences
-//   POST /api/vote    { person_id, slots }  -> state                  replaces that person's ticks
+//   POST /api/vote    { person_id, add, remove } -> state            applies that person's tick changes
 //   POST /api/booked  { slot, person_id, venue, booked } -> state
 //   POST /api/refresh                       -> state + { refreshed }  "Check now" (Pulse only)
 // The page itself is a static asset in ./public, served without this Worker (wrangler.toml
@@ -41,7 +41,7 @@
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
 //           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
 
-export const VERSION = '2026-10-27.3';
+export const VERSION = '2026-10-27.4';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -56,6 +56,8 @@ export const REFRESH_GUARD_MS = 90 * 1000;       // no second Pulse read within 
 export const READ_AT_SKEW_MS = 10 * 60 * 1000;   // a Mac read older (or newer) than this is refused
 export const ALERT_RECLAIM_MS = 2 * 60 * 1000;   // an alert row with no relay reply after this may be retried
 export const SAVE_REPLY_RETRIES = 3;             // after a relay 200, the reply write is retried up to 3 times
+export const SAVE_REPLY_PAUSES_MS = [500, 1000, 2000];   // ...with these pauses between the tries
+const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const FETCH_TIMEOUT_MS = 8000;
 export const RELAY_TIMEOUT_MS = 8000;
 export const ALERT_AT = 4;
@@ -174,7 +176,10 @@ export function parseMatchi(html) {
     i = end;
     const at = tagAttrs(html.slice(open + 3, end));
     const cls = String(at.class || '').split(/\s+/);
-    if (!cls.includes('slot') || !CELL_KINDS.some((k) => cls.includes(k))) continue;
+    if (!cls.includes('slot')) continue;
+    // A court cell of a kind this parser does not know (a renamed class) is an error for the day,
+    // never "no court free" (checked 27 Oct 2026: only these four kinds exist on either venue).
+    if (!CELL_KINDS.some((k) => cls.includes(k))) return { status: 'error', reason: 'unknown court cell' };
     cells++;
     if (!cls.includes('free') || at['data-slot-can-start'] !== 'true') continue;
     const m = TITLE_RE.exec(at.title || '');
@@ -422,14 +427,13 @@ export function makeRepo(db) {
       const r = await db.prepare('SELECT person_id, slot FROM votes WHERE slot >= ? ORDER BY slot').bind(fromDate).all();
       return r.results || [];
     },
-    // One batch, whatever the number of slots: drop the ticks not in the list, add the new ones (a
-    // kept tick keeps its first created_at), and stamp the person's votes_at with this save. The page
-    // compares that stamp with the one it saw when it kept unsaved ticks on the phone.
-    async replaceVotes(personId, slots, nowIso) {
-      const list = JSON.stringify(slots);
+    // A save is a change, never the whole list: the hours ticked since the last save are added, the
+    // hours unticked are removed, in one batch, and votes_at says when this person last saved. Two
+    // phones adding different hours therefore merge, and a late or repeated save does no harm.
+    async applyVotes(personId, add, remove, nowIso) {
       await db.batch([
-        db.prepare('DELETE FROM votes WHERE person_id = ?1 AND slot NOT IN (SELECT value FROM json_each(?2))').bind(personId, list),
-        db.prepare('INSERT OR IGNORE INTO votes (person_id, slot, created_at) SELECT ?1, value, ?3 FROM json_each(?2)').bind(personId, list, nowIso),
+        db.prepare('INSERT OR IGNORE INTO votes (person_id, slot, created_at) SELECT ?1, value, ?3 FROM json_each(?2)').bind(personId, JSON.stringify(add), nowIso),
+        db.prepare('DELETE FROM votes WHERE person_id = ?1 AND slot IN (SELECT value FROM json_each(?2))').bind(personId, JSON.stringify(remove)),
         db.prepare('UPDATE people SET votes_at = ?2 WHERE id = ?1').bind(personId, nowIso),
       ]);
     },
@@ -595,7 +599,6 @@ export function cleanCourts(body, nowMs) {
   for (const code of MATCHI_VENUES) if (!isObj(body.venues[code])) return { error: `venues.${code} is needed` };
   const window = new Set(londonDates(nowMs));
   const venues = {};
-  let kept = 0;
   for (const [code, days] of Object.entries(body.venues)) {
     if (!MATCHI_VENUES.includes(code)) return { error: `unknown venue: ${code.slice(0, 10)}` };
     if (!isObj(days)) return { error: `${code} must be an object of dates` };
@@ -605,10 +608,9 @@ export function cleanCourts(body, nowMs) {
       const c = cleanDay(day);
       if (c.error) return { error: `${code} ${date}: ${c.error}` };
       venues[code][date] = c.day;
-      kept++;
     }
+    if (!Object.keys(venues[code]).length) return { error: `${code}: no dates inside the next 7 days` };
   }
-  if (!kept) return { error: 'no dates inside the next 7 days' };
   return { readAt: new Date(readAtMs).toISOString(), venues };
 }
 async function saveMatchi(repo, prev, clean) {
@@ -625,7 +627,7 @@ async function saveMatchi(repo, prev, clean) {
 // The DM must never go twice for one slot. The row is claimed BEFORE the relay call; it is released
 // only when the relay call itself failed (no answer, a timeout or a non-200). After a 200 the DM is
 // out, so the row stays even when saving the relay's reply fails.
-export async function checkAlerts(state, env, repo, nowMs) {
+export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
   const nowIso = new Date(nowMs).toISOString();
   const reclaimBefore = new Date(nowMs - ALERT_RECLAIM_MS).toISOString();
   const due = decideAlerts(state, await repo.alertSlots(state.today, reclaimBefore));
@@ -634,40 +636,59 @@ export async function checkAlerts(state, env, repo, nowMs) {
   for (const r of due) {
     const claimed = await repo.claimAlert(r.slot, r.names.join(', '), r.venues.map((v) => v.code).join(','), nowIso, reclaimBefore);
     if (!claimed) continue;
+    if (!env.RELAY || !env.RELAY_KEY) {
+      // Nothing was sent: free the slot so a configured Worker can send it.
+      console.error('padel: alert DM not sent, relay not configured', r.slot);
+      try { await repo.releaseAlert(r.slot); } catch (e) { console.error('padel: alert row not released', r.slot, String(e)); }
+      continue;
+    }
     let res;
     try {
-      if (!env.RELAY || !env.RELAY_KEY) throw new Error('relay not configured');
       res = await withTimeout(env.RELAY.fetch(new Request(RELAY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Relay-Key': env.RELAY_KEY },
         body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.kevinbrittain.workers.dev/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
       })), RELAY_TIMEOUT_MS);
     } catch (e) {
-      res = null;
-      console.error('padel: alert DM failed, will retry', r.slot, String(e));
+      // No answer (a timeout or a dropped call): the DM may or may not have gone. The row is KEPT
+      // with no reply, so the 2-minute re-claim tries again. A slow relay that did deliver can then
+      // send a second DM; that is accepted over a DM that never comes.
+      console.error('padel: alert DM unanswered, the re-claim will retry', r.slot, String(e));
+      continue;
     }
-    let reply = '';
-    if (res) { try { reply = await res.text(); } catch (e) { reply = '(reply unreadable)'; } }
-    if (!res || res.status !== 200) {
-      if (res) console.error('padel: alert DM failed, will retry', r.slot, `relay HTTP ${res.status}: ${reply.slice(0, 300)}`);
+    if (res.status !== 200) {
+      // A definite "not sent": release the row so the next check sends it.
+      let said = '';
+      try { said = await withTimeout(res.text(), RELAY_TIMEOUT_MS); } catch (e) { said = '(reply unreadable)'; }
+      console.error('padel: alert DM failed, will retry', r.slot, `relay HTTP ${res.status}: ${said.slice(0, 300)}`);
       try { await repo.releaseAlert(r.slot); } catch (e) { console.error('padel: alert row not released', r.slot, String(e)); }
       continue;
     }
     sent.push(r.slot);
-    // The DM is out: the row is never released from here on. The reply write is tried up to 3 more
-    // times, because a row left with no reply could be claimed again after 2 minutes.
+    // A 200: the DM is out. A placeholder reply goes in BEFORE the body is read, so a body that
+    // stalls never leaves the row looking unanswered (which the re-claim would send again). It is
+    // tried up to 3 more times with pauses; the row is never released from here on.
     let saved = false;
     for (let attempt = 0; attempt <= SAVE_REPLY_RETRIES && !saved; attempt++) {
+      if (attempt) await sleep(SAVE_REPLY_PAUSES_MS[attempt - 1]);
       try {
-        await repo.saveRelayReply(r.slot, reply || '(empty reply)');
+        await repo.saveRelayReply(r.slot, RELAY_PENDING);
         saved = true;
       } catch (e) {
         console.error('padel: DM sent, reply not saved', r.slot, `attempt ${attempt + 1}`, String(e));
       }
     }
+    // Then the relay's own words, best effort.
+    try {
+      const body = await withTimeout(res.text(), RELAY_TIMEOUT_MS);
+      await repo.saveRelayReply(r.slot, body || '(empty reply)');
+    } catch (e) {
+      console.error('padel: DM sent, its reply body was not stored', r.slot, String(e));
+    }
   }
   return sent;
 }
+export const RELAY_PENDING = '{"ok":true,"pending":true}';
 
 // ── HTTP ──
 const BASE_HEADERS = { 'X-Robots-Tag': 'noindex, nofollow', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
@@ -738,19 +759,19 @@ async function loadState(env, repo, nowMs) {
 
 // Read Pulse (when due), then run the alert check on the fresh state. Never throws: it runs inside
 // waitUntil, where a throw would vanish.
-async function refreshAndAlert(env, repo, nowMs, fetchImpl, clock) {
+async function refreshAndAlert(env, repo, nowMs, fetchImpl, clock, sleep) {
   try {
     const read = await refreshPulse(env, repo, nowMs, fetchImpl);
     const now = clock();
-    await checkAlerts(await loadState(env, repo, now), env, repo, now);
+    await checkAlerts(await loadState(env, repo, now), env, repo, now, sleep);
     return read;
   } catch (e) {
     console.error('padel: refresh failed', String(e && e.stack || e));
     return false;
   }
 }
-async function alertSafely(state, env, repo, nowMs) {
-  try { return await checkAlerts(state, env, repo, nowMs); } catch (e) { console.error('padel: alert check failed', String(e && e.stack || e)); return []; }
+async function alertSafely(state, env, repo, nowMs, sleep) {
+  try { return await checkAlerts(state, env, repo, nowMs, sleep); } catch (e) { console.error('padel: alert check failed', String(e && e.stack || e)); return []; }
 }
 
 // Bytes, not characters: a body of emoji is four bytes a character.
@@ -779,7 +800,7 @@ function venueStatus(a, dates) {
   return out;
 }
 
-async function handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock) {
+async function handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep) {
   if (!keyOk(request.headers.get('X-Robot-Key'), env.ROBOT_KEY)) return fail('Robot key needed', 401);
   if (request.method === 'GET') {
     const { availability } = await loadAvailability(repo);
@@ -800,7 +821,7 @@ async function handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock) {
   const state = await loadState(env, repo, now);
   // In waitUntil, so the Mac going away cannot stop a DM between its claim and its reply. The reply
   // says only that the check is under way; the Mac does not depend on what it sends.
-  ctx.waitUntil(alertSafely(state, env, repo, now));
+  ctx.waitUntil(alertSafely(state, env, repo, now, sleep));
   const { availability } = await loadAvailability(repo);
   return json({ ok: true, matchiFetchedAt: availability.matchiFetchedAt, pulseFetchedAt: availability.pulseFetchedAt, alerted: 'checking', ready: state.ready.length });
 }
@@ -810,6 +831,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
   const path = url.pathname;
   const fetchImpl = deps.fetch || globalThis.fetch;
   const clock = deps.now || Date.now;
+  const sleep = deps.sleep || realSleep;
   const nowMs = clock();
   try {
     // The page is served as a static asset before this Worker runs; anything else is not ours.
@@ -819,14 +841,14 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       if (!success) return fail('slow down', 429);
     }
     if (path === '/api/health' && request.method === 'GET') return json({ ok: true, version: VERSION });
-    if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock);
+    if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
     if (!keyOk(request.headers.get('X-Group-Key'), env.GROUP_KEY)) return fail(GATE_MSG, 401);
 
     if (path === '/api/ping' && request.method === 'GET') return json({ ok: true });
     if (path === '/api/state' && request.method === 'GET') {
       const state = await loadState(env, repo, nowMs);
       if (state.availability.stale && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {
-        ctx.waitUntil(refreshAndAlert(env, repo, nowMs, fetchImpl, clock));
+        ctx.waitUntil(refreshAndAlert(env, repo, nowMs, fetchImpl, clock, sleep));
       }
       return json(state);
     }
@@ -842,7 +864,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       const now = clock();
       const state = await loadState(env, repo, now);
       // The alert check runs in waitUntil: a caller going away cannot stop it between claim and reply.
-      ctx.waitUntil(alertSafely(state, env, repo, now));
+      ctx.waitUntil(alertSafely(state, env, repo, now, sleep));
       return json({ ...state, refreshed });
     }
 
@@ -874,13 +896,18 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     if (path === '/api/vote') {
       const id = intId(body.person_id);
       if (!id) return fail('person_id is needed', 400);
-      const clean = cleanSlots(body.slots, dates);
-      if (clean.error) return fail(clean.error, 400);
+      if (body.slots !== undefined) return fail('A save sends add and remove, not slots. Reload the page.', 400);
+      const add = cleanSlots(body.add ?? [], dates);
+      if (add.error) return fail(add.error, 400);
+      const remove = cleanSlots(body.remove ?? [], dates);
+      if (remove.error) return fail(remove.error, 400);
+      const both = add.slots.filter((x) => remove.slots.includes(x));
+      if (both.length) return fail(`An hour cannot be added and removed at once: ${both[0]}`, 400);
       if (!(await repo.getPerson(id))) return fail('No such person', 404);
-      await repo.replaceVotes(id, clean.slots, nowIso);
+      await repo.applyVotes(id, add.slots, remove.slots, nowIso);
       const state = await loadState(env, repo, nowMs);
       // The save answers at once; the DM (up to 8 s on the relay) goes in the background.
-      ctx.waitUntil(alertSafely(state, env, repo, nowMs));
+      ctx.waitUntil(alertSafely(state, env, repo, nowMs, sleep));
       return json(state);
     }
 

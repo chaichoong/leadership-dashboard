@@ -12,7 +12,8 @@
 //
 // WHAT IT DOES
 // ------------
-// run       fetches the 14 pages one after another (250 ms apart, 10 s timeout each, the same
+// run       fetches the 14 pages one after another (250 ms apart, 10 s timeout each, one more try
+//           after 2 s for a page lost to the network, the same
 //           headers the Worker used), parses them with the Worker's own parseMatchi (imported
 //           from ../workers/padel/padel.js, so both sides read a page one way), POSTs them with
 //           X-Robot-Key from ~/.config/od/padel_robot_key, prints one summary line and appends one
@@ -54,6 +55,7 @@ export const GAP_MS = 250;
 export const PAGE_TIMEOUT_MS = 10000;
 export const POST_TIMEOUT_MS = 30000;
 export const MAX_READ_MS = 5 * 60 * 1000;
+export const RETRY_MS = 2000;        // a page lost to the network is fetched once more after this
 const QUIET_FROM = 23 * 60;          // 23:00 London
 const QUIET_UNTIL = 6 * 60 + 30;     // 06:30 London
 
@@ -101,7 +103,15 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
     for (const date of dates) {
       if (!first) await sleep(GAP_MS);
       first = false;
-      raw[v.code][date] = await readDay(fetchImpl, v.id, date);
+      let day = await readDay(fetchImpl, v.id, date);
+      // A page that never arrived (an HTTP error, a timeout, no connection) gets one more try
+      // before it counts. A page that arrived and could not be parsed does not: it would fail the
+      // same way again.
+      if (day.status === 'error' && isNetworkReason(day.reason)) {
+        await sleep(RETRY_MS);
+        day = await readDay(fetchImpl, v.id, date);
+      }
+      raw[v.code][date] = day;
     }
   }
   return { dates, raw };
