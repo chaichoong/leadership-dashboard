@@ -120,6 +120,26 @@ describe('the scheduled-task drift guard', () => {
     expect(out).toContain('never-reviewed-routine');
   });
 
+  it('the hook checks the tree being committed, not the checkout its link points into', () => {
+    // 27 Oct 2026: .git/hooks/pre-commit resolves into the MAIN checkout. Another session held it on a
+    // branch from before a merged routine change, so its guard compared the live routines with an old
+    // mirror and refused every commit in every worktree. Here an "old checkout" holds the same three
+    // scripts and a mirror one routine behind the live copy; committing from this tree must pass.
+    const old = join(scratch, 'old-checkout');
+    mkdirSync(join(old, 'scripts'), { recursive: true });
+    for (const f of ['pre-commit', 'scheduled-task-drift-guard.py', 'sync-scheduled-tasks.py']) {
+      cpSync(resolve(__dirname, '../scripts', f), join(old, 'scripts', f));
+    }
+    cpSync(TRACKED, join(old, '.claude', 'scheduled-tasks'), { recursive: true });
+    writeFileSync(join(old, '.claude', 'scheduled-tasks', 'queue-fixer', 'SKILL.md'), 'an older reviewed copy\n');
+    // CONTROL: that old checkout's own guard does refuse, so a pass below means the hook looked elsewhere.
+    const own = run(join(old, 'scripts', 'scheduled-task-drift-guard.py'), inSync);
+    expect(own.code).toBe(1);
+    expect(own.out).toContain('queue-fixer');
+    const { out } = run(join(old, 'scripts', 'pre-commit'), inSync);
+    expect(out).not.toMatch(/BLOCKED: a scheduled routine/);
+  });
+
   it('the real pre-commit hook does not refuse when in sync', () => {
     const { out } = run(HOOK, inSync);
     expect(out).not.toMatch(/BLOCKED: a scheduled routine/);

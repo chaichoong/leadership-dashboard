@@ -13,6 +13,19 @@ import sys
 # did nothing on every commit while looking perfectly installed.
 # Found 2026-08-06 by installing it and watching pageVer refuse to move.
 script_dir = os.path.dirname(os.path.realpath(__file__))
+# The guards come from the tree being COMMITTED, not from wherever this hook file lives (27 Oct 2026).
+# Every worktree shares .git/hooks, whose link resolves into the main checkout, so while another
+# session held that checkout on a branch from before a merged routine change, its drift guard
+# compared the live routines with an old mirror and refused every commit in every worktree.
+try:
+    _top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True,
+                          text=True, cwd=os.getcwd()).stdout.strip()
+except OSError as e:
+    _top = ''
+    print(f"⚠️  pre-commit hook: could not find the tree being committed ({e}); using {script_dir}.",
+          file=sys.stderr)
+if _top and os.path.isfile(os.path.join(_top, 'scripts', 'scheduled-task-drift-guard.py')):
+    script_dir = os.path.join(_top, 'scripts')
 shared_script = os.path.join(script_dir, 'pre-commit-action.py')
 guard_script = os.path.join(script_dir, 'private-name-guard.py')
 drift_script = os.path.join(script_dir, 'scheduled-task-drift-guard.py')
