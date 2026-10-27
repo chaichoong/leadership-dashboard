@@ -602,6 +602,119 @@ test.describe('Home: one scroll of the real pages', () => {
     expect(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'the green ring the fold buttons use').toBe('solid');
   });
 
+  // Review, 27 Oct 2026: the AI Team cards draw after the dashboard, just above the forecast. Safari keeps
+  // no scroll anchor (Chromium's would hide the bug, so it is switched off), so a section pushed down after
+  // its jump is aimed again, unless Kevin has moved on.
+  const noScrollAnchor = page => page.addInitScript(() => { if (window === window.top) document.addEventListener('DOMContentLoaded', () => {
+    const st = document.createElement('style'); st.textContent = '* { overflow-anchor: none !important; }'; document.head.appendChild(st);
+  }); });
+  const grow = (page, id) => page.evaluate((i) => {
+    const d = document.createElement('div'); d.style.height = '600px'; document.getElementById(i).appendChild(d);
+  }, id);
+  test('a page section pushed down after its jump is aimed again, unless Kevin has moved on', async ({ page }) => {
+    await noScrollAnchor(page);
+    await tallHome(page);
+    for (const key of ['forecast', 'cfv']) {
+      await page.locator(`[data-home-jump="${key}"]`).click();
+      await settled(page);
+      await grow(page, 'aiTeamCards');
+      await page.waitForTimeout(300);
+      await settled(page);
+      const at = await headingTop(page, key);
+      expect(at.top, `${key} heading under the row`).toBeGreaterThanOrEqual(at.barBottom - 1);
+      expect(at.top, `${key} heading left where it was pushed`).toBeLessThanOrEqual(at.barBottom + 40);
+    }
+    // Once he scrolls himself, content growing above never pulls him back.
+    await page.locator('[data-home-jump="forecast"]').click();
+    await settled(page);
+    await page.mouse.wheel(0, 400);
+    const y = await settled(page);
+    await grow(page, 'aiTeamCards');
+    await page.waitForTimeout(300);
+    expect(await settled(page)).toBe(y);
+  });
+
+  // A scroll bar drag sends no wheel, key or touch event, and the scroll listener ignores scrolls while an
+  // aimed scroll runs: so a re-aim never starts unless the section moved, and one he stopped never returns.
+  for (const when of ['just after the page grew below the section', 'while a re-aim is still scrolling']) {
+    test(`a scroll bar drag ${when} is never pulled back`, async ({ page }) => {
+      await noScrollAnchor(page);
+      await tallHome(page);
+      await page.locator('[data-home-jump="forecast"]').click();
+      await settled(page);
+      if (when.startsWith('just')) {
+        await page.waitForTimeout(800);   // a pause after the landing
+        await grow(page, 'tab-cfv');
+        await page.waitForTimeout(120);
+        for (let i = 0; i < 4; i++) { await page.evaluate(() => window.scrollTo(0, window.scrollY + 400)); await page.waitForTimeout(100); }
+        await page.waitForTimeout(1500);
+      } else {
+        await grow(page, 'aiTeamCards');
+        await page.waitForTimeout(50);
+        await page.evaluate(() => window.scrollTo(0, window.scrollY + 1500));
+        await page.waitForTimeout(1000);
+      }
+      const left = await page.evaluate(() => window.scrollY);
+      await grow(page, 'aiTeamCards');
+      await page.waitForTimeout(300);
+      expect(await settled(page), 'pulled back').toBe(left);
+    });
+  }
+
+  test('a drag during a re-aim is never pulled back, even when the page grows again before it settles', async ({ page }) => {
+    await noScrollAnchor(page);
+    await tallHome(page);
+    await page.locator('[data-home-jump="forecast"]').click();
+    await settled(page);
+    await grow(page, 'aiTeamCards');
+    await page.waitForTimeout(50);
+    const dragged = await page.evaluate(() => { window.scrollTo(0, window.scrollY + 1500); return window.scrollY; });
+    await page.waitForTimeout(100);
+    await grow(page, 'aiTeamCards');
+    await page.waitForTimeout(300);
+    expect(await settled(page), 'pulled back about 600px').toBeGreaterThan(dragged - 100);
+  });
+
+  // Review, 27 Oct 2026: content above shrinking after the landing pulls the page up to its new bottom. That
+  // is the browser, not Kevin, so the jump still lands once the approvals are in.
+  test('a page that shrinks under a landed jump does not count as Kevin moving on', async ({ page }) => {
+    await noScrollAnchor(page);
+    await page.addInitScript(() => { if (window === window.top) document.addEventListener('DOMContentLoaded', () => {
+      const d = document.createElement('div'); d.id = 'specFat'; d.style.height = '900px'; document.getElementById('tab-home').appendChild(d);
+    }); });
+    await tallHome(page, null, { slow: true });
+    await page.locator('[data-home-jump="wealth"]').click();
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => document.getElementById('specFat').remove());
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await settled(page);
+    await page.waitForTimeout(1500);
+    await settled(page);
+    const at = await headingTop(page, 'wealth');
+    expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
+    expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+  });
+
+  // A section near the bottom cannot reach its mark, so the page stops as far down as it goes. Content
+  // drawn below it while it scrolls is not Kevin moving on: the jump still lands, and is aimed again later.
+  test('a jump stopped by the bottom of the page still lands once the page grows below it', async ({ page }) => {
+    await noScrollAnchor(page);
+    await tallHome(page, { wealth: true });
+    await page.evaluate(() => { const c = document.getElementById('tab-cfv'); c.style.maxHeight = '200px'; c.style.overflow = 'hidden'; });
+    await page.waitForTimeout(300);
+    await page.locator('[data-home-jump="cfv"]').click();
+    await page.waitForFunction(() => Math.abs(scrollY - (document.documentElement.scrollHeight - innerHeight)) < 1, null, { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('tab-cfv').style.maxHeight = ''; });   // grows below, before it settles
+    await page.waitForTimeout(400);
+    await settled(page);
+    await grow(page, 'aiTeamCards');
+    await page.waitForTimeout(300);
+    await settled(page);
+    const at = await headingTop(page, 'cfv');
+    expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
+    expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+  });
+
   test('a jump to a folded section opens it first', async ({ page }) => {
     await tallHome(page, { signins: true, approvals: true, brief: true, dashboard: true, cfv: true, wealth: true });
     const f = homeFrame(page);
