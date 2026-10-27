@@ -27,6 +27,14 @@
 name = "padel"
 main = "worker.js"
 compatibility_date = "2025-10-01"
+
+# The page lives at https://padel.runpreneur.org.uk (Kevin, 27 Oct 2026; the runpreneur.org.uk zone
+# is on this account). Cloudflare creates the DNS record and certificate for a custom_domain route
+# on deploy, as for workers/property-manager. The workers.dev host stays on so the first link the
+# group was given keeps working.
+routes = [
+  { pattern = "padel.runpreneur.org.uk", custom_domain = true }
+]
 workers_dev = true
 
 # The page is a plain static asset: only /api/* runs the Worker, so loading the page costs no
@@ -56,7 +64,7 @@ PDL_MATCHI_ID = "3122"
 PP_LABEL = "Pulse Padel Huntingdon"
 PP_SHORT = "Pulse"
 PP_CLUB_ID = "VEqVgpQmiJLiEC1Lm4z3"
-PAGE_URL = "https://padel.kevinbrittain.workers.dev/"
+PAGE_URL = "https://padel.runpreneur.org.uk/"
 ALERT_TO = "kevin@runpreneur.org.uk"
 
 [[d1_databases]]

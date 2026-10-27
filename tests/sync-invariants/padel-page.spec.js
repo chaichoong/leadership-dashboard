@@ -33,6 +33,7 @@
 //  19. Every failed save that carried a change shows the toast, not only the first in a row.
 //  20. Two overlapping saves (a hide-send during a save in flight): the truth is read again once
 //      the last of them lands.
+//  21. The day strip shows 14 days; a St Ives day beyond its booking window reads "not open yet".
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -47,7 +48,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // voteDelayMs: a number, or a function of the request number (0, 1, ...).
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const store = { votes: new Map(), bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
@@ -57,8 +58,11 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
   const state = () => {
     const now = Date.now();
     const at = new Date(now).toISOString();
+    // siClosedFrom: St Ives open (no court free) before that date number, "not open yet" from it.
+    const si = {};
+    if (siClosedFrom !== null) londonDates(now).forEach((d, i) => { si[d] = i >= siClosedFrom ? { status: 'closed' } : { status: 'ok', starts: {} }; });
     const availability = assembleAvailability(
-      { readAt: at, goodAt: { si: at, pdl: at }, venues: { si: {}, pdl: {} } },
+      { readAt: at, goodAt: { si: at, pdl: at }, venues: { si, pdl: {} } },
       { fetchedAt: at, goodAt: at, days: {} },
     );
     return computeState({ people: store.gone ? [other] : [person, other], votes: [...store.votes.values()], booked: [], availability, dates: londonDates(now), nowMs: now });
@@ -453,5 +457,20 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     expect(store.ticks()).toEqual([A, B]);
     expect(await pressed(page, A)).toBe('true');
     expect(await pressed(page, B)).toBe('true');
+  });
+
+  test('the day strip shows 14 days, and a St Ives day beyond its booking window reads "not open yet"', async ({ page }) => {
+    await mockPadel(page, { siClosedFrom: 7 });
+    await openAsTestAnn(page);
+    const dates = londonDates(Date.now());
+    expect(await page.locator('[data-day]').count()).toBe(14);
+    expect(await page.locator('[data-day]').evaluateAll((b) => b.map((x) => x.dataset.day))).toEqual(dates);
+    await page.locator(`[data-day="${dates[9]}"]`).click();                   // day 10
+    await expect(page.locator('#day-note')).toContainText('St Ives: not open yet for this day.');
+    const siChip = page.locator(`[data-slot="${dates[9]}|19"]`).locator('xpath=..').locator('.chip').first();
+    await expect(siChip).toHaveClass(/striped/);
+    await expect(siChip.locator('.sr')).toHaveText('St Ives: not open yet.');
+    await page.locator(`[data-day="${dates[1]}"]`).click();                   // day 2: open, no court free
+    await expect(page.locator(`[data-slot="${dates[1]}|19"]`).locator('xpath=..').locator('.chip').first().locator('.sr')).toHaveText('St Ives: no court free.');
   });
 });
