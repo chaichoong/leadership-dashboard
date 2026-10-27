@@ -256,12 +256,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let mine = new Set();                       // my ticks as shown
   let pendingAdd = new Set();                 // unsent changes
   let pendingRemove = new Set();
-  let inflight = null;                        // the one save on its way: { person, add, remove, token }
-  let flushes = [];                           // hide-flushes not yet confirmed: [{ person, add, remove, timer }]
-  const flushing = () => flushes.length > 0;
-  let saving = false;
-  let savingPromise = null;
-  let savingToken = null;                     // only the save holding this may clear saving and the back-off
+  // Saves on their way: [{ person, add, remove, owner, promise }]. Every save is sent with keepalive,
+  // so it survives the page being hidden or closed and is never sent twice.
+  let inFlight = [];
+  const saving = () => inFlight.length > 0;
   let saveTimer = null;
   let saveTry = 0;                            // failed saves in a row
   let backoffUntil = 0;
@@ -274,14 +272,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let lastWriteSeq = 0;                       // the newest write whose reply was shown
   let lastWriteDone = 0;                      // when the last write finished (performance.now())
   let refetchTimer = null;
-  const FLUSH_WAIT_MS = 10000;                // no save goes while a hide-flush is unconfirmed, up to this
 
   class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
   async function api(path, body) {
     const n = ++reqSeq;
     const write = !!body;
     const startedAt = performance.now();
-    const opts = { method: write ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store' };
+    // A write is sent with keepalive (its body is tiny), so it completes even if the page closes.
+    const opts = { method: write ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store', keepalive: write };
     if (write) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     let res;
     try { res = await fetch(path, opts); } catch (e) { if (write) lastWriteDone = performance.now(); throw new ApiError('No connection. Check your signal and try again.', 0); }
@@ -294,7 +292,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     return { data, n, write, startedAt };
   }
   // Apply a state reply only when no newer reply has been shown already. A write's own reply is the
-  // state after that write, so it is shown. A read is not shown while a save or a flush is on its
+  // state after that write, so it is shown. A read is not shown while a save is on its
   // way (that write's own reply will show the truth), and a read that STARTED before the last write
   // finished may have been answered before the write landed: it is ignored and asked for again.
   function applyNewest(r) {
@@ -306,7 +304,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       return true;
     }
     if (r.n < handledSeq) return false;
-    if (saving || flushing()) return false;
+    if (saving()) return false;
     if (r.startedAt < lastWriteDone) {
       if (!refetchTimer) refetchTimer = setTimeout(() => { refetchTimer = null; load(); }, 0);
       return false;
@@ -560,10 +558,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const box = $('unsaved');
     if (!box) return;
     const dirty = hasPending();
-    if (!dirty && !saving && !flushing()) { box.hidden = true; return; }
+    if (!dirty && !saving()) { box.hidden = true; return; }
     box.hidden = false;
-    const givenUp = dirty && !saving && saveTry > SAVE_RETRY_MS.length;
-    $('unsaved-text').textContent = saving ? 'Saving your ticks...' : givenUp ? 'Your ticks are not saved. Check your signal.' : dirty && saveTry ? 'Not saved yet. Trying again shortly.' : 'Saving your ticks...';
+    const givenUp = dirty && !saving() && saveTry > SAVE_RETRY_MS.length;
+    $('unsaved-text').textContent = saving() ? 'Saving your ticks...' : givenUp ? 'Your ticks are not saved. Check your signal.' : dirty && saveTry ? 'Not saved yet. Trying again shortly.' : 'Saving your ticks...';
     $('save-now').hidden = !givenUp;
   }
 
@@ -592,21 +590,15 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     for (const x of pendingAdd) mine.add(x);
     for (const x of pendingRemove) mine.delete(x);
   }
-  // Is a request on its way (the save in flight, or a hide-flush) carrying this hour?
-  const carried = (d, slot) => !!d && d.person === me && (d.add.has(slot) || d.remove.has(slot));
-  const onTheWay = (slot) => carried(inflight, slot) || flushes.some((f) => carried(f, slot));
+  // Is a save on its way carrying this hour?
+  const onTheWay = (slot) => inFlight.some((d) => d.person === me && (d.add.has(slot) || d.remove.has(slot)));
   // The person is gone (removed from the list): their changes go with them, and any answer still
   // on its way for them no longer owns anything.
   function dropChanges() {
     clearTimeout(saveTimer);
-    for (const f of flushes) clearTimeout(f.timer);
     pendingAdd = new Set();
     pendingRemove = new Set();
-    inflight = null;
-    flushes = [];
-    saving = false;
-    savingPromise = null;
-    savingToken = null;
+    inFlight = [];
   }
 
   function setBusy(on) {
@@ -637,39 +629,33 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, Math.max(ms || 800, backoffUntil - Date.now()));
   }
-  // One save at a time, none while a hide-flush is unconfirmed, none inside a back-off.
-  function save() {
+  // One save at a time, none inside a back-off. The one exception is `now` (the page being hidden
+  // or closed): the unsent changes go at once, even alongside a save in flight.
+  function save(now = false) {
     clearTimeout(saveTimer);
-    if (!S || !me) return Promise.resolve(true);
-    if (saving) return savingPromise;
-    if (flushing()) return Promise.resolve(false);         // flushDone carries on when the flushes answer
-    if (!hasPending()) return Promise.resolve(true);
-    if (backoffUntil > Date.now() + 5) { scheduleSave(); return Promise.resolve(false); }
-    const token = {};
-    const sent = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), token };
-    inflight = sent;
+    if (!S || !me || !hasPending()) return Promise.resolve(true);
+    if (!now) {
+      if (saving()) return inFlight[inFlight.length - 1].promise;
+      if (backoffUntil > Date.now() + 5) { scheduleSave(); return Promise.resolve(false); }
+    }
+    // The owner is the save that started with nothing else in flight: only it may clear the back-off.
+    const sent = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), owner: !saving() };
     pendingAdd = new Set();
     pendingRemove = new Set();
-    saving = true;
-    savingToken = token;
+    inFlight.push(sent);
     renderUnsaved();
-    savingPromise = (async () => {
+    sent.promise = (async () => {
       try {
         const r = await api('/api/vote', { person_id: sent.person, add: [...sent.add].filter(inWindow), remove: [...sent.remove].filter(inWindow) });
-        if (savingToken !== token) return false;           // a late answer for a dropped save
-        inflight = null;
-        saving = false;
-        savingToken = null;
-        saveTry = 0;
-        backoffUntil = 0;
+        if (!inFlight.includes(sent)) return false;        // a late answer for a dropped save
+        inFlight = inFlight.filter((x) => x !== sent);
+        if (sent.owner) { saveTry = 0; backoffUntil = 0; }
         if (!applyNewest(r)) load();                       // a newer reply was shown first: read the truth
-        if (hasPending()) scheduleSave(1);
+        if (hasPending() && !saving()) scheduleSave(1);
         return !hasPending();
       } catch (e) {
-        if (savingToken !== token) return false;
-        inflight = null;
-        saving = false;
-        savingToken = null;
+        if (!inFlight.includes(sent)) return false;
+        inFlight = inFlight.filter((x) => x !== sent);
         if (e.status === 401) return false;
         // "No such person": they were removed. Reading the state again shows the name list.
         if (e.status === 404) { await load(); return false; }
@@ -684,69 +670,22 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         }
         showTruth();
         await load();
-        if (hasPending() && saveTry <= SAVE_RETRY_MS.length) scheduleSave(1);
+        if (hasPending() && !saving() && saveTry <= SAVE_RETRY_MS.length) scheduleSave(1);
         return false;
       } finally {
         if (S && !$('board').hidden) keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
       }
     })();
-    return savingPromise;
+    return sent.promise;
   }
   async function saveAndWait() {
-    if (saving) await savingPromise;
-    if (flushing()) return false;
+    await Promise.all(inFlight.map((d) => d.promise));
     if (hasPending()) await save();
-    if (saving) await savingPromise;
-    return !hasPending() && !saving && !flushing();
+    await Promise.all(inFlight.map((d) => d.promise));
+    return !hasPending() && !saving();
   }
-  // The page is being hidden or closed: every unconfirmed change (the save in flight too, which
-  // the browser cancels on close) goes with keepalive so the request outlives the page. No save
-  // goes until the flushes answer (or 10 s pass); then the truth is shown and saving carries on.
-  // A hide while a flush is still unconfirmed sends the taps made since as a flush of their own.
-  function flush() {
-    if (!me || !S) return;
-    const add = new Set();
-    const remove = new Set();
-    for (const d of [inflight, { person: me, add: pendingAdd, remove: pendingRemove }]) {
-      if (!d || d.person !== me) continue;
-      for (const x of d.add) { remove.delete(x); add.add(x); }
-      for (const x of d.remove) { add.delete(x); remove.add(x); }
-    }
-    if (!add.size && !remove.size) return;
-    clearTimeout(saveTimer);
-    pendingAdd = new Set();
-    pendingRemove = new Set();
-    const n = ++reqSeq;
-    const startedAt = performance.now();
-    const f = { person: me, add, remove };
-    flushes.push(f);
-    f.timer = setTimeout(() => flushDone(f, 'late'), FLUSH_WAIT_MS);
-    fetch('/api/vote', { method: 'POST', keepalive: true, cache: 'no-store', headers: { 'X-Group-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: me, add: [...add].filter(inWindow), remove: [...remove].filter(inWindow) }) })
-      .then((res) => (res.ok ? res.json().catch(() => null) : null))
-      .then((data) => flushDone(f, data, n, startedAt), () => flushDone(f, null));
-  }
-  // result: the reply state, null for a failed flush (no signal, a non-200), or 'late' at the 10 s cap.
-  function flushDone(f, result, n, startedAt) {
-    if (!flushes.includes(f)) {                        // an answer after the 10 s cap: read the truth
-      if (result !== 'late') load();
-      return;
-    }
-    clearTimeout(f.timer);
-    flushes = flushes.filter((x) => x !== f);
-    lastWriteDone = performance.now();
-    if (result && result.days) {
-      applyNewest({ data: result, n, write: true, startedAt });
-    } else {
-      // Not confirmed: show the last known truth first (its hours are not shown as saved), then
-      // read the truth again. A failed flush says so, as a failed save does.
-      showTruth();
-      if (result === null) toast("Couldn't save. The page shows what is saved; tap again to change it.");
-      if (S && !$('board').hidden) keepFocus(() => { renderDays(); renderGrid(); });
-      load();
-    }
-    if (!flushing() && hasPending()) scheduleSave(1);
-    if (S && !$('board').hidden) renderUnsaved();
-  }
+  // Hidden or closing: send the unsent changes now (keepalive, no debounce wait).
+  function sendNow() { if (hasPending()) save(true); }
 
   async function pickPerson(id) {
     if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
@@ -851,11 +790,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   });
   $('add-form').addEventListener('submit', addName);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') { flush(); return; }
-    if (!S || flushing()) return;               // a flush on its way: flushDone shows the truth
-    if (hasPending()) { saveTry = 0; save(); } else if (!saving) load();
+    if (document.visibilityState === 'hidden') { sendNow(); return; }
+    if (!S) return;
+    if (hasPending()) { saveTry = 0; save(); } else if (!saving()) load();
   });
-  window.addEventListener('pagehide', flush);
+  window.addEventListener('pagehide', sendNow);
 
   store.del('padel.unsaved');                 // the old whole-list copy (before 27 Oct 2026, 4th pass) is never used
   if (!key) showGate(); else load();

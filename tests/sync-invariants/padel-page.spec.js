@@ -3,30 +3,33 @@
 // THE INVARIANT: after every reply, what the page shows = the server's truth in that reply + the
 // changes not yet sent. A save sends CHANGES ("add these hours, remove those"), never the whole
 // list. A failed save is never put back: the page reads the truth again, and the person sees
-// what is really saved. No save goes while a hide-flush is unconfirmed, and only the save that
-// owns the in-flight promise can unlock the next one.
+// what is really saved. Only the save that started alone may clear the back-off, and a late
+// answer for a dropped save changes nothing.
+//
+// Every save goes with keepalive, so a save on its way survives the page being hidden or closed
+// and is never sent twice. Hiding or closing the page sends the unsent changes at once.
 //
 // The cases:
 //   1. Two ticks survive a reload (they reached the server).
 //   2. A tap while a save is in flight is not lost: one save at a time.
 //   3. Tap then untap before the save cancels out: nothing is sent.
-//   4. Hiding the page sends the unsent changes at once, even while a save is in flight.
+//   4. Hiding the page sends the unsent changes at once, alongside a save in flight.
 //   5. A save refused with 429 shows the truth (not ticked); a new tap waits out the 429's 10 s.
-//   6. A save that fails after a hide flush never brings back the hour the flush removed.
+//   6. A save that fails after a hide-send never brings back the hour the hide-send removed.
 //   7. A removed person's unsaved changes are dropped, never sent as the next person's.
 //   8. A removed person's save answering 404 shows the name list.
-//   9. S2: untick an hour while its flush is still landing: server and page agree.
+//   9. Untick an hour while its save is out, and that save fails: server and page agree.
 //  10. During a back-off, "Save now", the page shown again and switching person all wait.
-//  11. Review finding 1: a save applied on the server but answered 500, then untapped inside the
-//      back-off: server and page agree after the retry.
-//  12. Review finding 2: S2 with the flush taking 9 s: server and page agree once it lands.
-//  13. Review finding 6: a removed person's slow 404 arriving after the next person started
-//      saving does not unlock the next person's saves.
-//  14. A hide-flush that fails (no signal) does not leave its hours shown as saved: the truth is
-//      shown, the toast says so, and a retap saves once the signal is back.
-//  15. A tap made while a hide-flush is unconfirmed is sent by the next hide as its own flush.
+//  11. A save applied on the server but answered 500, untapped inside the back-off: they agree.
+//  12. Tick, untick before the save answers, close the tab: the server ends unticked, two bodies.
+//  13. A removed person's slow 404 arriving after the next person started saving does not unlock
+//      the next person's saves.
+//  14. With the network down: tick, hide inside the debounce, show: unticked plus the toast; a
+//      retap saves when the network is back.
+//  15. Tap A, hide (A sent), show, tap B, hide and close: the server ends with A and B.
 //  16. A save whose reply is older than a Check-now reply still ends with the truth shown.
-//  17. A flush answering after the 10 s cap still ends with the truth shown.
+//  17. A hide-send that fails with the page still open shows the truth and the toast.
+//  18. A hide-send reply older than a newer write's reply still ends with the truth shown.
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -109,6 +112,7 @@ const hide = (page) => page.evaluate(() => {
   Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
   document.dispatchEvent(new Event('visibilitychange'));
 });
+const close = (page) => page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
 const show = (page) => page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
 // Server and page agree on an hour: ticked on both, or on neither.
 async function agree(page, store, slot) {
@@ -150,7 +154,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     expect(store.bodies).toEqual([]);
   });
 
-  test('hiding the page with unsent changes sends them at once, even while a save is in flight', async ({ page }) => {
+  test('hiding the page sends the unsent changes at once, alongside a save in flight', async ({ page }) => {
     const store = await mockPadel(page, { voteDelayMs: 1500 });
     const day = await openAsTestAnn(page);
     await tap(page, `${day}|19`);
@@ -158,17 +162,17 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await tap(page, `${day}|20`);
     const before = store.bodies.length;
     await hide(page);
-    // Sent straight away, carrying the in-flight 19:00 too (the browser cancels it on close).
+    // 20:00 goes straight away; 19:00 is not sent again (its own save survives with keepalive).
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(before + 1);
-    expect(store.bodies[before].add.sort()).toEqual([`${day}|19`, `${day}|20`]);
+    expect(store.bodies[before]).toMatchObject({ add: [`${day}|20`], remove: [] });
     await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([`${day}|19`, `${day}|20`]);
+    expect(store.bodies).toHaveLength(2);
 
-    // pagehide (the tab closing) sends them too.
+    // pagehide (the tab closing) sends too.
     await page.evaluate(() => { delete document.visibilityState; });
-    await sleep(300);
     await tap(page, `${day}|21`);
     const n = store.bodies.length;
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    await close(page);
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(n + 1);
     expect(store.bodies[n].add).toEqual([`${day}|21`]);
   });
@@ -186,13 +190,13 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     expect(store.times[1] - store.times[0]).toBeGreaterThanOrEqual(9500);
   });
 
-  test('a save that fails after a hide flush never brings back the hour the flush removed', async ({ page }) => {
+  test('a save that fails after a hide-send never brings back the hour the hide-send removed', async ({ page }) => {
     const store = await mockPadel(page, { voteDelayMs: 1500, voteStatuses: [500] });
     const day = await openAsTestAnn(page);
     await tap(page, `${day}|19`);
     await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);   // the add is out
     await tap(page, `${day}|19`);                                          // untick while it is out
-    await hide(page);
+    await hide(page);                                                      // the remove goes now
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
     expect(store.bodies[1]).toMatchObject({ add: [], remove: [`${day}|19`] });
     await sleep(8000);
@@ -229,18 +233,17 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     expect(store.ticks(1)).toEqual([]);
   });
 
-  test('S2: untick an hour while its flush is still landing: the server ends with it absent, as the page shows', async ({ page }) => {
+  test('untick an hour while its save is out, and that save fails: server and page agree', async ({ page }) => {
     const store = await mockPadel(page, { voteDelayMs: 1500, voteStatuses: [500] });
     const day = await openAsTestAnn(page);
     const A = `${day}|19`;
     await tap(page, A);
     await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);
-    await hide(page);
-    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);   // the flush is out
+    await hide(page);                                                          // nothing unsent: nothing sent
     await show(page);
-    await tap(page, A);                                                        // untick, before the flush lands
+    await tap(page, A);                                                        // untick: an explicit remove, unsent
     expect(await pressed(page, A)).toBe('false');
-    await sleep(10000);
+    await sleep(10000);                                                        // the failure, the 5 s retry, its reply
     expect(store.ticks()).toEqual([]);
     await agree(page, store, A);
   });
@@ -283,28 +286,19 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await agree(page, store, A);
   });
 
-  test('finding 2: S2 with the flush taking 9 s: server and page agree once it lands', async ({ page }) => {
-    test.setTimeout(45000);
-    // Request 0 (the save) is slow and fails; request 1 (the flush) takes 9 s.
-    const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 1500 : i === 1 ? 9000 : 0), voteStatuses: [500] });
+  test('tick, untick before the save answers, close the tab: the server ends unticked, two bodies at most', async ({ page }) => {
+    const store = await mockPadel(page, { voteDelayMs: 1500 });
     const day = await openAsTestAnn(page);
     const A = `${day}|19`;
     await tap(page, A);
-    await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);
+    await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);       // the add is out (keepalive)
+    await tap(page, A);                                                        // untick before it answers
     await hide(page);
-    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
-    await show(page);
-    await tap(page, A);
-    expect(await pressed(page, A)).toBe('false');
-    await sleep(3000);
-    expect(store.bodies).toHaveLength(2);                                      // no save while the flush is unconfirmed
-    await expect.poll(() => store.bodies.length, { timeout: 15000 }).toBe(3); // the remove, after the flush answered
-    expect(store.bodies[2]).toMatchObject({ add: [], remove: [A] });
-    expect(store.times[2] - store.times[1]).toBeGreaterThanOrEqual(9000);       // never before the flush landed
-    await expect.poll(() => store.inflight, { timeout: 15000 }).toBe(0);       // every request has landed
+    await close(page);
+    await expect.poll(() => store.inflight, { timeout: 5000 }).toBe(0);
     await sleep(500);
     expect(store.ticks()).toEqual([]);
-    await agree(page, store, A);
+    expect(store.bodies).toEqual([{ person_id: 1, add: [A], remove: [] }, { person_id: 1, add: [], remove: [A] }]);
   });
 
   test('finding 6: a removed person\'s slow 404 arriving after the next person started saving does not unlock their saves', async ({ page }) => {
@@ -329,7 +323,8 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     expect(store.ticks(1)).toEqual([]);
   });
 
-  test('a hide-flush with no signal does not leave its hour shown as saved; a retap saves when the signal is back', async ({ page }) => {
+  test('with the network down: tick, hide inside the debounce, show: unticked plus the toast; a retap saves when it is back', async ({ page }) => {
+    test.setTimeout(45000);
     const store = await mockPadel(page);
     const day = await openAsTestAnn(page);
     const A = `${day}|19`;
@@ -347,26 +342,26 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     expect(store.ticks()).toEqual([]);
     store.offline = false;
     await tap(page, A);
-    await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([A]);
+    await expect.poll(() => store.ticks(), { timeout: 10000 }).toEqual([A]);  // after the 5 s back-off
     expect(await pressed(page, A)).toBe('true');
   });
 
-  test('a tap made while a hide-flush is unconfirmed is sent by the next hide', async ({ page }) => {
-    // Request 0 is the flush of A, answering in 5 s; request 1 the flush of B.
+  test('tap A, hide (A sent), show, tap B, hide and close: the server ends with A and B', async ({ page }) => {
     const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 5000 : 0) });
     const day = await openAsTestAnn(page);
     const A = `${day}|19`;
     const B = `${day}|20`;
     await tap(page, A);
-    await hide(page);                                                          // flush A goes, slow
+    await hide(page);                                                          // A goes now, slow
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(1);
     await show(page);
-    await tap(page, B);                                                        // no save goes while A's flush is out
-    await hide(page);                                                          // the next hide sends B
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));   // and the tab closes
+    await tap(page, B);
+    await hide(page);                                                          // B goes now, alongside A
+    await close(page);
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
     expect(store.bodies[1]).toMatchObject({ add: [B], remove: [] });
     await expect.poll(() => store.ticks(), { timeout: 8000 }).toEqual([A, B]);
+    expect(store.bodies).toHaveLength(2);
   });
 
   test('a save whose reply is older than a Check-now reply still ends with the truth shown', async ({ page }) => {
@@ -380,18 +375,34 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('true'); // the truth, read again
   });
 
-  test('a flush answering after the 10 s cap still ends with the truth shown', async ({ page }) => {
-    test.setTimeout(45000);
-    const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 12000 : 0) });
+  test('a hide-send that fails with the page still open shows the truth and the toast', async ({ page }) => {
+    const store = await mockPadel(page, { voteStatuses: [500] });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    await page.evaluate(() => {
+      window.__toasts = [];
+      const t = document.getElementById('toast');
+      new MutationObserver(() => { if (!t.hidden) window.__toasts.push(t.textContent); }).observe(t, { attributes: true, childList: true, subtree: true, characterData: true });
+    });
+    await tap(page, A);
+    await hide(page);                                                          // sent now, refused with 500
+    await show(page);
+    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('false');
+    expect(await page.evaluate(() => window.__toasts)).toContain("Couldn't save. The page shows what is saved; tap again to change it.");
+    expect(store.ticks()).toEqual([]);
+    await agree(page, store, A);
+  });
+
+  test('a hide-send reply older than a newer write reply still ends with the truth shown', async ({ page }) => {
+    const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 3000 : 0) });
     const day = await openAsTestAnn(page);
     const A = `${day}|19`;
     await tap(page, A);
-    await hide(page);
+    await hide(page);                                                          // A goes now, slow
     await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(1);
     await show(page);
-    await sleep(10500);                                                        // past the cap: the flush is not confirmed
-    expect(await pressed(page, A)).toBe('false');                              // so its hour is not shown as saved
-    await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([A]);    // then it lands
-    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('true'); // and the late answer reads the truth
+    await page.locator('#check-now').click();                                  // a newer write reply, taken before A landed
+    await expect.poll(() => store.ticks(), { timeout: 6000 }).toEqual([A]);
+    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('true'); // the older reply lost: the truth was read
   });
 });
