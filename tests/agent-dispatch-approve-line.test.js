@@ -261,6 +261,7 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     "Don't send it yet, can we go through it together first?",
     "Hold off without sending anything, let's go through the records in a chat first.",
     'I want to go through this with you before it goes.',
+    "Don't send anything; let's go through it in a session first.",
   ])('a real ask beside a "no" about something else still counts: %s', (note) => {
     const r = run({ output: `${BODY}\n\n${REVIEW_LINE}\n\n${CLOSE_CLEAN}`, stored: { feedbackHistory: `[2026-10-20 10:00] ${note}` } });
     expect(r.refused, r.error).toBe(false);

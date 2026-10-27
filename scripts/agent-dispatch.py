@@ -3079,7 +3079,7 @@ KEVIN_ASKED_FOR_REVIEW_RE = re.compile(
 # A "no" only counts when it is about the review itself: "no need for a session" says no, while
 # "Don't send it yet, can we go through it together first?" is still an ask (review, 27 Oct 2026).
 _REVIEW_NOT_ASKED_RE = re.compile(
-    r"\b(?:no\s+need|don't|do\s+not|doesn't|not|never|without|no)\b[^.?!,]{0,25}?"
+    r"\b(?:no\s+need|don't|do\s+not|doesn't|not|never|without|no)\b[^.?!,;]{0,25}?"
     r"\b(?:a\s+|the\s+|any\s+)?(?:session|chat|prompt|review|go(?:ing)?\s+through|walk(?:ing)?\s+through)\b", re.I)
 
 
