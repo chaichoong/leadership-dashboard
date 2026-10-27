@@ -22,6 +22,11 @@
 //  12. Review finding 2: S2 with the flush taking 9 s: server and page agree once it lands.
 //  13. Review finding 6: a removed person's slow 404 arriving after the next person started
 //      saving does not unlock the next person's saves.
+//  14. A hide-flush that fails (no signal) does not leave its hours shown as saved: the truth is
+//      shown, the toast says so, and a retap saves once the signal is back.
+//  15. A tap made while a hide-flush is unconfirmed is sent by the next hide as its own flush.
+//  16. A save whose reply is older than a Check-now reply still ends with the truth shown.
+//  17. A flush answering after the 10 s cap still ends with the truth shown.
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -56,8 +61,10 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
   await page.route('**/api/**', async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
+    if (store.offline) return route.abort('internetdisconnected');      // no signal at all
     if (req.headers()['x-group-key'] !== KEY) return reply(route, 401, { error: 'This link needs the group code. Ask Kevin.' });
     if (path === '/api/state') return reply(route, 200, state());
+    if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false });
     if (path === '/api/vote') {
       const body = req.postDataJSON();
       const i = store.bodies.length;
@@ -320,5 +327,71 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await expect.poll(() => store.ticks(2), { timeout: 15000 }).toEqual([`${day}|20`, `${day}|21`]);
     expect(store.maxInflightBy[2]).toBe(1);
     expect(store.ticks(1)).toEqual([]);
+  });
+
+  test('a hide-flush with no signal does not leave its hour shown as saved; a retap saves when the signal is back', async ({ page }) => {
+    const store = await mockPadel(page);
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    await page.evaluate(() => {
+      window.__toasts = [];
+      const t = document.getElementById('toast');
+      new MutationObserver(() => { if (!t.hidden) window.__toasts.push(t.textContent); }).observe(t, { attributes: true, childList: true, subtree: true, characterData: true });
+    });
+    store.offline = true;
+    await tap(page, A);
+    await hide(page);                                                          // inside the 800 ms timer
+    await show(page);
+    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('false');   // the last known truth
+    expect(await page.evaluate(() => window.__toasts)).toContain("Couldn't save. The page shows what is saved; tap again to change it.");
+    expect(store.ticks()).toEqual([]);
+    store.offline = false;
+    await tap(page, A);
+    await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([A]);
+    expect(await pressed(page, A)).toBe('true');
+  });
+
+  test('a tap made while a hide-flush is unconfirmed is sent by the next hide', async ({ page }) => {
+    // Request 0 is the flush of A, answering in 5 s; request 1 the flush of B.
+    const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 5000 : 0) });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    const B = `${day}|20`;
+    await tap(page, A);
+    await hide(page);                                                          // flush A goes, slow
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(1);
+    await show(page);
+    await tap(page, B);                                                        // no save goes while A's flush is out
+    await hide(page);                                                          // the next hide sends B
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));   // and the tab closes
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
+    expect(store.bodies[1]).toMatchObject({ add: [B], remove: [] });
+    await expect.poll(() => store.ticks(), { timeout: 8000 }).toEqual([A, B]);
+  });
+
+  test('a save whose reply is older than a Check-now reply still ends with the truth shown', async ({ page }) => {
+    const store = await mockPadel(page, { voteDelayMs: 2000 });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    await tap(page, A);
+    await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);       // the save is out, slow
+    await page.locator('#check-now').click();                                  // a newer reply, taken before the save landed
+    await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([A]);
+    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('true'); // the truth, read again
+  });
+
+  test('a flush answering after the 10 s cap still ends with the truth shown', async ({ page }) => {
+    test.setTimeout(45000);
+    const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 12000 : 0) });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    await tap(page, A);
+    await hide(page);
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(1);
+    await show(page);
+    await sleep(10500);                                                        // past the cap: the flush is not confirmed
+    expect(await pressed(page, A)).toBe('false');                              // so its hour is not shown as saved
+    await expect.poll(() => store.ticks(), { timeout: 5000 }).toEqual([A]);    // then it lands
+    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('true'); // and the late answer reads the truth
   });
 });

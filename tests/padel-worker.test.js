@@ -550,7 +550,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     await t.seedAvailability({ ...EVENING, si: { ...EVENING.si, '2026-10-29': { status: 'ok', starts: { '08:00': { courts: 1, min: 60 }, '09:00': { courts: 1, min: 60 } } } } });
     t.env.RELAY = undefined;                                   // build the votes with no DM going
     for (const id of ids) await t.call('/api/vote', { person_id: id, add: slots });
-    expect(t.rows.alerts()).toEqual([]);                       // relay not configured: the claims were let go
+    expect(t.rows.alerts()).toEqual([]);                       // relay not configured: nothing is claimed
     t.env.RELAY = { fetch: vi.fn(() => new Promise(() => {})) };
     const state = (await t.call('/api/state', undefined, { drain: false })).json;
     expect(state.ready.map((r) => r.slot)).toEqual(slots);

@@ -22,12 +22,10 @@ const ROBOT = 'robot-key-for-tests';
 const WORKER_OK = { ok: true, matchiFetchedAt: '2026-10-28T09:00:00.000Z', pulseFetchedAt: '2026-10-28T08:50:00.000Z', alerted: 'checking', ready: 0 };
 
 // A fake Matchi and Worker. page(id, date) decides each page; post decides the Worker's answer.
-// Two clocks, as on the Mac. wall: an array (each call takes the next value, the last one repeats)
-// or a function of the call number and of the pages fetched so far (so time passes per fetch,
-// whatever the script reads). postClock, when set, is the wall clock once the POST has gone out.
-// The monotonic clock follows the wall clock, less the time spent asleep: asleep(fetched, posted)
-// says how much sleep had happened by then (none by default).
-function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { status: 200 }), clock = [START, START + 20 * 1000], postClock, asleep = () => 0 } = {}) {
+// clock: an array (each call takes the next value, the last one repeats) or a function of the call
+// number and of the pages fetched so far (so time passes per fetch, whatever the script reads).
+// postClock, when set, is what the clock reads once the POST has gone out.
+function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { status: 200 }), clock = [START, START + 20 * 1000], postClock } = {}) {
   const pages = [];
   const posts = [];
   const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -44,21 +42,18 @@ function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { st
   });
   const times = Array.isArray(clock) ? [...clock] : null;
   let calls = 0;
-  let lastWall = null;
   const now = () => {
-    if (postClock !== undefined && posts.length) return (lastWall = postClock);
+    if (postClock !== undefined && posts.length) return postClock;
     const n = calls++;
-    lastWall = times ? (times.length > 1 ? times.shift() : times[0]) : clock(n, pages.length);
-    return lastWall;
+    return times ? (times.length > 1 ? times.shift() : times[0]) : clock(n, pages.length);
   };
-  const mono = () => lastWall - asleep(pages.length, posts.length > 0);
   const lines = [];
   const records = [];
   const sleeps = [];
   return {
     pages, posts, lines, records, sleeps, fetchImpl,
     go: (extra = {}) => run({
-      fetchImpl, robotKey: ROBOT, now, mono,
+      fetchImpl, robotKey: ROBOT, now,
       sleep: async (ms) => { sleeps.push(ms); }, log: (l) => lines.push(l), record: (e) => records.push(e), ...extra,
     }),
   };
@@ -125,15 +120,8 @@ describe('a normal run', () => {
     expect(s.records).toEqual([{ ts: '2026-10-28T09:00:20.000Z', ok: true, posted: true, http: 200, seconds: 20, counts: { si: { ok: 6, closed: 1, error: 0 }, pdl: { ok: 7, closed: 0, error: 0 } }, problems: 0 }]);
   });
 
-  it('C: 90 s of drift (the Mac slept mid-read) is a sleep: thrown away, not posted, exit 0', async () => {
-    const s = stubs({ page: livePage, clock: (n, fetched) => START + fetched * 1000 + (fetched >= 6 ? 90 * 1000 : 0), asleep: (fetched) => (fetched >= 6 ? 90 * 1000 : 0) });
-    expect(await s.go()).toBe(0);
-    expect(s.posts).toHaveLength(0);
-    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept during the run \(90 s of drift\), not posted/);
-    expect(s.records[0]).toMatchObject({ posted: false, slept: true });
-  });
 
-  it('C: 14 pages timing out with no drift (12 s per fetch, 336 s in all) is a FAILED run, never "slept"', async () => {
+  it('14 pages timing out (12 s per fetch, 336 s in all) is a FAILED run', async () => {
     const s = stubs({ page: () => { throw new DOMException('signal timed out', 'TimeoutError'); }, clock: (n, fetched) => START + fetched * 12 * 1000 });
     expect(await s.go()).toBe(1);
     expect(s.pages).toHaveLength(28);                          // each page tried twice
@@ -141,13 +129,6 @@ describe('a normal run', () => {
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(timed out\)/);
   });
 
-  it('C: two 50 s sleeps are 100 s of drift: slept, not posted, exit 0 (the data may be old)', async () => {
-    const naps = (fetched) => (fetched >= 5 ? 50 * 1000 : 0) + (fetched >= 10 ? 50 * 1000 : 0);
-    const s = stubs({ page: livePage, clock: (n, fetched) => START + fetched * 1000 + naps(fetched), asleep: naps });
-    expect(await s.go()).toBe(0);
-    expect(s.posts).toHaveLength(0);
-    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept during the run \(100 s of drift\), not posted/);
-  });
 });
 
 describe('fails loudly', () => {
@@ -246,20 +227,15 @@ describe('fails loudly', () => {
     expect(s.lines[0]).toMatch(/^FAILED: the Worker answered nothing \(could not reach the Worker\)/);
   });
 
-  it('C: 75 s of drift during a fast-failing POST is "slept", exit 0; the same refusal with no drift is FAILED', async () => {
-    const refuse409 = () => new Response('{"error":"A newer read is already stored"}', { status: 409 });
-    let s = stubs({ page: livePage, post: refuse409, postClock: START + 20 * 1000 + 75 * 1000, asleep: (f, posted) => (posted ? 75 * 1000 : 0) });
-    expect(await s.go()).toBe(0);
-    expect(s.posts).toHaveLength(1);
-    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept during the run \(75 s of drift\), Worker answered 409, not counted/);
-    expect(s.records[0]).toMatchObject({ ok: true, posted: false, http: 409, slept: true });
-    // A lost connection after a sleep is the same.
-    s = stubs({ page: livePage, post: () => { throw new TypeError('fetch failed'); }, postClock: START + 20 * 1000 + 6 * 60 * 1000, asleep: (f, posted) => (posted ? 6 * 60 * 1000 : 0) });
-    expect(await s.go()).toBe(0);
-    // The same refusal after a long POST with NO drift (the Mac was awake) is a failure.
-    s = stubs({ page: livePage, post: refuse409, postClock: START + 20 * 1000 + 100 * 1000 });
+  it('a read the Worker refuses as over 10 minutes old fails ONCE, loudly: "did the Mac sleep?"', async () => {
+    const s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), postClock: START + 11 * 60 * 1000 });
     expect(await s.go()).toBe(1);
-    expect(s.lines[0]).toMatch(/^FAILED: the Worker answered 409 \(A newer read is already stored\)/);
+    expect(s.lines[0]).toMatch(/^FAILED: the read took too long for the Worker \(did the Mac sleep\?\)\. St Ives ok 6, closed 1; PDL ok 7$/);
+    expect(s.records[0]).toMatchObject({ ok: false, posted: false, http: 400 });
+    // Any other refusal keeps its own words.
+    const t = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }) });
+    expect(await t.go()).toBe(1);
+    expect(t.lines[0]).toMatch(/^FAILED: the Worker answered 409 \(A newer read is already stored\)/);
   });
 
   it('when there is no robot key file, before reading anything', async () => {

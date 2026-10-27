@@ -33,12 +33,12 @@
 //   - the POST did not answer 200.
 // A venue that misses a few days to a network error (a timeout, a 5xx) is not a failure on its
 // own: those days read "couldn't check" on the page and the next run is 15 minutes later.
-// SLEPT, not failed: ONE measure, the drift between the wall clock and the monotonic clock
-// (process.hrtime, which does not advance while macOS sleeps), read at the start, just before the
-// POST and right after it. Over 60 s of drift means the Mac slept during the run: the data may be
-// old, so it is not posted (or, if the sleep came during the POST, its answer is not counted), and
-// the run exits 0; the next run is 15 minutes away. With no drift, a slow run (14 pages timing out
-// one after another) is judged like any other run: FAILED.
+// A MAC THAT SLEPT MID-RUN is not measured here: process.hrtime on macOS counts sleep too
+// (mach_continuous_time), so no clock can tell. The Worker refuses a read older than 10 minutes,
+// so such a run fails ONCE with "FAILED: the read took too long for the Worker (did the Mac
+// sleep?)" and the next run, 15 minutes later, is clean. The Mac mini does not sleep (kern.sleeptime
+// 0 since it booted on 4 Oct 2026). A slow run with no sleep (14 pages timing out one after
+// another) is judged like any other run: FAILED.
 //
 // Usage:
 //   node scripts/padel-courts.mjs run
@@ -57,8 +57,6 @@ export const VENUES = [{ code: 'si', id: '2619', name: 'St Ives' }, { code: 'pdl
 export const GAP_MS = 250;
 export const PAGE_TIMEOUT_MS = 10000;
 export const POST_TIMEOUT_MS = 30000;
-export const MAX_DRIFT_MS = 60 * 1000;   // wall clock ahead of the monotonic clock by this much: the Mac slept
-const monoMs = () => Number(process.hrtime.bigint() / 1000000n);
 export const RETRY_MS = 2000;        // a page lost to a timeout, a 5xx or no connection is fetched once more after this
 const QUIET_FROM = 23 * 60;          // 23:00 London
 const QUIET_UNTIL = 6 * 60 + 30;     // 06:30 London
@@ -190,12 +188,10 @@ const summaryOf = (counts) => VENUES.map((v) => {
 
 // One run. Everything outside is passed in, so the tests drive this exact code.
 export async function run({
-  fetchImpl = globalThis.fetch, now = Date.now, mono = monoMs, sleep, robotKey = readKey(), log = (line) => process.stdout.write(`${line}\n`),
+  fetchImpl = globalThis.fetch, now = Date.now, sleep, robotKey = readKey(), log = (line) => process.stdout.write(`${line}\n`),
   record = (entry) => { mkdirSync(LOG_DIR, { recursive: true }); appendFileSync(join(LOG_DIR, 'runs.jsonl'), `${JSON.stringify(entry)}\n`); },
 } = {}) {
   const startMs = now();
-  const mono0 = mono();
-  const drift = () => (now() - startMs) - (mono() - mono0);
   if (isQuiet(startMs)) { log('quiet hours'); return 0; }
   if (!robotKey) { log(`FAILED: no robot key at ${KEY_FILE}`); return 1; }
   const { dates, raw } = await readAll({ fetchImpl, sleep, nowMs: startMs });
@@ -203,19 +199,12 @@ export async function run({
   const endMs = now();
   if (isQuiet(endMs)) { log('quiet hours'); return 0; }
   const seconds = Math.round((endMs - startMs) / 1000);
-  const slept = (d, posted, http) => {
-    log(`padel-courts: the Mac slept during the run (${Math.round(d / 1000)} s of drift), ${posted ? `Worker answered ${http || 'nothing'}, not counted` : 'not posted'}; ${summaryOf(counts)}`);
-    record({ ts: new Date(now()).toISOString(), ok: true, posted: posted && http === 200, http, seconds, counts, slept: true });
-    return 0;
-  };
-  const before = drift();
-  if (before > MAX_DRIFT_MS) return slept(before, false);
   // readAt is when the read STARTED: the oldest page in it.
   const post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
-  const after = drift();
-  if (after > MAX_DRIFT_MS) return slept(after, true, post.status);
   const problems = readProblems(raw, dates);
-  if (post.status !== 200) problems.push(`the Worker answered ${post.status || 'nothing'} (${String(post.body?.error || 'no reason').slice(0, 120)})`);
+  const tooOld = post.status === 400 && /within 10 minutes/.test(String(post.body?.error || ''));
+  if (tooOld) problems.unshift('the read took too long for the Worker (did the Mac sleep?)');
+  else if (post.status !== 200) problems.push(`the Worker answered ${post.status || 'nothing'} (${String(post.body?.error || 'no reason').slice(0, 120)})`);
   record({ ts: new Date(endMs).toISOString(), ok: !problems.length, posted: post.status === 200, http: post.status, seconds, counts, problems: problems.length });
   if (problems.length) { log(`FAILED: ${problems.join('; ')}. ${summaryOf(counts)}`); return 1; }
   log(`padel-courts: ${summaryOf(counts)}; posted 200 in ${seconds} s; Pulse read ${hhmm(post.body?.pulseFetchedAt)}`);
