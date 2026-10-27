@@ -27,6 +27,8 @@
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.197', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.45', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
+        // Wardrobe (Leadership, 27 Oct 2026): clothes, spring buys and the clear-out. Its "What to wear today" card sits at the top of My Dashboard.
+        { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.0', sopFile: 'sop-wardrobe.html',           sopVer: '1.0', standalone: 'index.html#wardrobe' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
@@ -106,6 +108,8 @@
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         runpreneurMoney: 'tblsH8x6fjWJC26Sa', // Runpreneur Money Record: one row per payment to a cause (10 Oct 2026)
         runpreneurPartners: 'tbl34aBkmSbY2XxTL', // Runpreneur Partners: the Dream 100, one row per partner (10 Oct 2026)
+        wardrobe:      'tblxcSDis9Tl1dFge', // Wardrobe: Kevin's clothes, one row per piece (What to wear card + Wardrobe page, 27 Oct 2026)
+        outfits:       'tblqGdFI6VUH1wUdq', // Outfits: base outfits linked to Wardrobe rows (27 Oct 2026)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
@@ -538,6 +542,17 @@
     // of slack — long enough not to cry wolf, short enough that Kevin finds out
     // within a week rather than after seventy days.
     const PAYMENT_RUN_STALE_DAYS = 8;
+
+    // Wardrobe + Outfits field IDs (read 27 Oct 2026 from the base schema). The rows are personal and
+    // live only in Airtable; nothing about the clothes themselves goes in this public repo.
+    const WR = { name: 'fldG9hxGddp8ijUwW', planId: 'fldFSQswPqxR2OvED', type: 'fldnUA7o3eR62r1FW', colour: 'fldbA3Yql3NAjdUAq',
+        swatch: 'fld44tZ76VsKRH0Db', usedFor: 'fldqINoZ665Tdmb0V', status: 'fld8Z9QI5pP97cymY', action: 'fldoYeCu7oAqgPZd8',
+        layerRole: 'fld7VonuseNOhkCcw', buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk',
+        lastWorn: 'fldc0Wa3pND9EbAI2', notes: 'fldZZULHcZYAFLEEl' };
+    const OF = { name: 'fldLpZormElc2HJ3s', planId: 'fldFgSJztt3TCKoEp', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o',
+        season: 'fldz3FqdChXD0ZRK5', why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z' };
+    // Weather for the What to wear card when the browser has no location permission: central Cambridge.
+    const WEATHER_FALLBACK = { lat: 52.205, lon: 0.119, place: 'Cambridge' };
 
     // ── Net Worth field IDs (Airtable: Specific Net Worth Statement by Month / tblvtDXCBJCHu9hnK) ──
     // One row per asset/liability item per month. Used by the Wealth tab.

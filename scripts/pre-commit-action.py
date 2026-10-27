@@ -35,6 +35,9 @@ FILE_TO_PAGE = {
     'publishing.html':      'publishing',
     'js/home.js':           'home',          # Home tab (29 Sep 2026)
     'css/home.css':         'home',
+    'js/wardrobe.js':       'wardrobe',      # Wardrobe page + What to wear card (27 Oct 2026)
+    'js/wardrobe-pick.js':  'wardrobe',
+    'css/wardrobe.css':     'wardrobe',
     'js/growth-plan-model.js': 'growth-plan',
     'os/tasks/index.html':  'tasks',
     # Agent accuracy scoring is shared by the Task OS (AI Agents tab) and the
