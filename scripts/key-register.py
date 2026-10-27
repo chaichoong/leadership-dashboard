@@ -626,13 +626,13 @@ def t_gdrive(v, row):
 def t_padel(v, row):
     """A GET of /api/ping with the code: 200 means the Worker holds this same code. Not /api/state,
     which would kick a venue read on every key check (review of PR #828)."""
-    s, _, b = _http("https://padel.kevinbrittain.workers.dev/api/ping", {"X-Group-Key": v})
+    s, _, b = _http("https://padel.runpreneur.org.uk/api/ping", {"X-Group-Key": v})
     return _ok(s, b)
 
 
 def t_padel_robot(v, row):
     """A GET of /api/courts with the Mac job's key: 200 means the Worker holds this same key."""
-    s, _, b = _http("https://padel.kevinbrittain.workers.dev/api/courts", {"X-Robot-Key": v})
+    s, _, b = _http("https://padel.runpreneur.org.uk/api/courts", {"X-Robot-Key": v})
     return _ok(s, b)
 
 

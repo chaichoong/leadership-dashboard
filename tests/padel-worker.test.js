@@ -144,7 +144,7 @@ describe('parsePulse (the saved live reply)', () => {
   it('Wed 28 Oct starts match the widget read on 27 Oct 2026', () => {
     const r = parsePulse(PULSE.json, NOW);
     expect(r.status).toBe('ok');
-    expect(Object.keys(r.byDate)).toEqual(londonDates(NOW));
+    expect(Object.keys(r.byDate)).toEqual(londonDates(NOW, 7));          // the saved reply covers 7 days
     expect(Object.keys(r.byDate['2026-10-28']).sort()).toEqual([
       '07:00', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '15:30', '16:30', '17:00', '21:30',
     ]);
@@ -219,7 +219,13 @@ describe('London time without Intl', () => {
   });
   it('the 7 days start today in London, even at 23:30 UTC in summer', () => {
     expect(londonDates(Date.parse('2026-07-31T23:30:00Z'))[0]).toBe('2026-08-01');
-    expect(londonDates(NOW)).toEqual(['2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']);
+    expect(londonDates(NOW, 7)).toEqual(['2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']);
+  });
+  it('the window is 14 days: today and the 13 days after, across the clock change', () => {
+    const d = londonDates(NOW);
+    expect(d).toHaveLength(14);
+    expect([d[0], d[6], d[7], d[13]]).toEqual(['2026-10-27', '2026-11-02', '2026-11-03', '2026-11-09']);
+    expect(londonDates(Date.parse('2026-03-25T12:00:00Z'))[13]).toBe('2026-04-07');   // over the spring change
   });
 });
 
@@ -240,10 +246,10 @@ describe('input checks', () => {
       expect(cleanName(bad).error, bad).toBeTruthy();
     }
   });
-  it('slots: only the next 7 days, hours 07 to 21', () => {
+  it('slots: only the next 14 days, hours 07 to 21', () => {
     const dates = londonDates(NOW);
-    expect(cleanSlots(['2026-10-28|07', '2026-11-02|21', '2026-10-28|07'], dates)).toEqual({ slots: ['2026-10-28|07', '2026-11-02|21'] });
-    for (const bad of ['2026-11-03|10', '2026-10-28|06', '2026-10-28|22', '2026-10-28 07', '2026-10-28|7']) {
+    expect(cleanSlots(['2026-10-28|07', '2026-11-09|21', '2026-10-28|07'], dates)).toEqual({ slots: ['2026-10-28|07', '2026-11-09|21'] });
+    for (const bad of ['2026-11-10|10', '2026-10-28|06', '2026-10-28|22', '2026-10-28 07', '2026-10-28|7']) {
       expect(cleanSlots([bad], dates).error, bad).toBeTruthy();
     }
     expect(cleanSlots('2026-10-28|07', dates).error).toBeTruthy();
@@ -436,7 +442,8 @@ function macBody(readAtMs = NOW) {
   const dates = londonDates(NOW);
   const si = {};
   const pdl = {};
-  dates.forEach((d, i) => { si[d] = i === 6 ? { status: 'closed' } : strip(parseMatchi(ST_IVES)); pdl[d] = strip(parseMatchi(PDL)); });
+  // St Ives opens 7 days ahead: from the 8th date its page says "not open yet" (closed). PDL opens all 14.
+  dates.forEach((d, i) => { si[d] = i >= 7 ? { status: 'closed' } : strip(parseMatchi(ST_IVES)); pdl[d] = strip(parseMatchi(PDL)); });
   return { readAt: iso(readAtMs), venues: { si, pdl } };
 }
 
@@ -808,7 +815,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect((await t.call('/api/vote', { person_id: id, add: ['2026-10-26|20', '2026-10-27|20'], remove: ['2026-10-26|21'] })).json.votes).toEqual({ '2026-10-27|20': [id] });
     const both = await t.call('/api/vote', { person_id: id, add: ['2026-10-28|07'], remove: ['2026-10-28|07'] });
     expect(both).toMatchObject({ status: 400, json: { error: 'An hour cannot be added and removed at once: 2026-10-28|07' } });
-    expect((await t.call('/api/vote', { person_id: id, remove: ['2026-11-03|10'] })).status).toBe(400);
+    expect((await t.call('/api/vote', { person_id: id, remove: ['2026-11-10|10'] })).status).toBe(400);
     expect((await t.call('/api/vote', { person_id: id, add: 'x' })).status).toBe(400);
     expect((await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|07'] })).status).toBe(400);
     expect(t.rows.votes().map((v) => v.slot)).toEqual(['2026-10-27|20']);
@@ -894,11 +901,11 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
 
   it('slot validation refuses a slot outside the window or the hours', async () => {
     const [id] = await t.addPeople(['Test Ann']);
-    for (const slot of ['2026-11-03|10', '2026-10-28|06', '2026-10-28|22', 'garbage']) {
+    for (const slot of ['2026-11-10|10', '2026-10-28|06', '2026-10-28|22', 'garbage']) {
       expect((await t.call('/api/vote', { person_id: id, add: [slot] })).status, slot).toBe(400);
     }
     expect((await t.call('/api/vote', { person_id: 999, add: [SLOT] })).status).toBe(404);
-    expect((await t.call('/api/booked', { slot: '2026-11-09|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: '2026-11-12|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: '2026-10-26|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'xx', booked: true })).status).toBe(400);
     expect(t.rows.votes()).toEqual([]);
@@ -955,7 +962,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.calls.filter((c) => c.host === 'www.matchi.se')).toHaveLength(0);
     const pulse = t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'));
     expect(pulse).toHaveLength(1);                        // oRPC first: one call
-    expect(JSON.parse(pulse[0].init.body)).toEqual({ json: { clubId: 'VEqVgpQmiJLiEC1Lm4z3', startDateTime: '2026-10-27T00:00:00.000Z', endDateTime: '2026-11-02T23:59:59.999Z' } });
+    expect(JSON.parse(pulse[0].init.body)).toEqual({ json: { clubId: 'VEqVgpQmiJLiEC1Lm4z3', startDateTime: '2026-10-27T00:00:00.000Z', endDateTime: '2026-11-09T23:59:59.999Z' } });   // the Pulse search covers all 14 days
     expect(pulse[0].init.headers.Origin).toBe('https://pulsepadel.co.uk');
 
     const s = (await t.call('/api/state')).json;
@@ -1008,7 +1015,9 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       await t.drain();
       t.relayCalls.length = 0;
       t.calls.length = 0;
-      const r = await t.call('/api/courts', macBody(NOW - 30 * 1000), { key: '', robot: ROBOT, drain: false });
+      const body = macBody(NOW - 30 * 1000);
+      expect([Object.keys(body.venues.si).length, Object.keys(body.venues.pdl).length]).toEqual([14, 14]);   // 14 dates per venue
+      const r = await t.call('/api/courts', body, { key: '', robot: ROBOT, drain: false });
       expect(r.status).toBe(200);
       // The alert check runs in waitUntil: the reply only says it is under way.
       expect(r.json).toEqual({ ok: true, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW), alerted: 'checking', ready: 1 });
@@ -1019,14 +1028,16 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect(t.relayCalls[0].body.text).toMatch(/^Padel: Wed 28 Oct 07:00\. St Ives: 4 in .* Pulse: 4 in .* Courts checked: St Ives 09:44, Pulse 09:45\./);
       const s = (await t.call('/api/state')).json;
       expect(s.availability.venues.si['2026-10-28'].hours['07']).toEqual({ free: true, min: 60, starts: ['07:00', '07:30'], mins: [60, 60] });
-      expect(s.availability.venues.si['2026-11-02']).toEqual({ status: 'closed', hours: {} });
+      // St Ives day 10 (5 Nov) is beyond its booking window: "not open yet", never counted.
+      expect(s.availability.venues.si['2026-11-05']).toEqual({ status: 'closed', hours: {} });
+      expect(s.availability.venues.pdl['2026-11-09'].status).toBe('ok');
       expect(s.availability.venues.pdl['2026-10-28'].hours['09'].free).toBe(true);
       expect(s.availability.checkedAt).toEqual({ si: iso(NOW - 30 * 1000), pdl: iso(NOW - 30 * 1000), pp: iso(NOW) });
 
       const g = await t.call('/api/courts', undefined, { key: '', robot: ROBOT });
       expect(g.json).toEqual({
         ok: true, version: VERSION, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW),
-        venueStatus: { si: { ok: 6, closed: 1 }, pdl: { ok: 7 }, pp: { ok: 7 } },
+        venueStatus: { si: { ok: 7, closed: 7 }, pdl: { ok: 14 }, pp: { ok: 14 } },
       });
     });
 
@@ -1063,7 +1074,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
         day({ status: 'ok', starts: { '19:00': { courts: 1, min: 1.5 } } }),
         day({ status: 'ok', starts: { '19:00': { courts: '1', min: 60 } } }),
         day('ok'),
-        both({ si: { '2026-11-03': { status: 'closed' }, '2026-10-26': { status: 'closed' } } }),   // nothing inside the window
+        both({ si: { '2026-11-10': { status: 'closed' }, '2026-10-26': { status: 'closed' } } }),   // nothing inside the window
       ];
       for (const b of bad) expect((await t.call('/api/courts', b, { robot: ROBOT })).status, JSON.stringify(b)).toBe(400);
       // Item 3: both venues every time. A body without pdl would have kept PDL's old days under the
@@ -1072,12 +1083,12 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect(noPdl).toMatchObject({ status: 400, json: { error: 'venues.pdl is needed' } });
       expect((await t.call('/api/courts', { readAt: iso(NOW), venues: { pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT })).json).toEqual({ error: 'venues.si is needed' });
       // Item 5: each venue needs at least one date inside the 7 days; an empty or all-outside venue is refused.
-      for (const pdl of [{}, { '2026-11-09': { status: 'closed' } }]) {
+      for (const pdl of [{}, { '2026-11-10': { status: 'closed' } }]) {
         const r = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-10-28': { status: 'closed' } }, pdl } }, { robot: ROBOT });
-        expect(r, JSON.stringify(pdl)).toMatchObject({ status: 400, json: { error: 'pdl: no dates inside the next 7 days' } });
+        expect(r, JSON.stringify(pdl)).toMatchObject({ status: 400, json: { error: 'pdl: no dates inside the next 14 days' } });
       }
       // Dates outside the window are ignored without refusing the rest; an error day keeps its reason.
-      const ok = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'nonsense' }, '2026-10-28': { status: 'error', reason: 'HTTP 500' } }, pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT });
+      const ok = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-11-10': { status: 'nonsense' }, '2026-10-28': { status: 'error', reason: 'HTTP 500' } }, pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT });
       expect(ok.status).toBe(200);
       const s = (await t.call('/api/state')).json;
       expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'HTTP 500', hours: {} });

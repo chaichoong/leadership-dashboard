@@ -1,6 +1,6 @@
 // Padel Worker logic (worker.js is the entry point): the padel group's "who can play when" page (Kevin approved the plan, 27 Oct 2026).
 //
-// WHAT IT DOES: an 11-person WhatsApp group ticks the hours they can play over the next 7 days on
+// WHAT IT DOES: an 11-person WhatsApp group ticks the hours they can play over the next 14 days on
 // one phone page. The Worker knows which courts are free at three venues and sends Kevin ONE Slack
 // DM the first time 4+ people line up on an hour where a court is free. Nobody has to count.
 //
@@ -47,13 +47,13 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-27.11';
+export const VERSION = '2026-10-27.12';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
 export const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);          // 7..21
 const HH = new Set(HOURS.map((h) => String(h).padStart(2, '0')));
-export const DAYS = 7;
+export const DAYS = 14;                          // the window: today and the 13 days after (Kevin, 27 Oct 2026)
 export const MAX_MIN = 90;                       // an hour counts as free only for a start of 90 min or less
 export const MATCHI_FRESH_MS = 45 * 60 * 1000;   // St Ives and PDL count for 45 minutes after the Mac's read
 export const PULSE_FRESH_MS = 20 * 60 * 1000;    // Pulse counts for 20 minutes after its read
@@ -526,7 +526,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, t]).finally(() => clearTimeout(timer));
 }
 
-// One search for the whole 7-day range. Three body formats, the one that worked last first:
+// One search for the whole 14-day range. Three body formats, the one that worked last first:
 //   orpc     { json: {...} } in, { json: {...}, meta } out. What the endpoint speaks: on 27 Oct 2026
 //            both other formats got HTTP 400 {"json":{"code":"BAD_REQUEST","message":"Input
 //            validation failed", ... "expected object, received undefined"}}, an oRPC reply.
@@ -618,12 +618,12 @@ export function cleanCourts(body, nowMs) {
     if (!isObj(days)) return { error: `${code} must be an object of dates` };
     venues[code] = {};
     for (const [date, day] of Object.entries(days)) {
-      if (!DATE_RE.test(date) || !window.has(date)) continue;          // outside the 7 days: ignored
+      if (!DATE_RE.test(date) || !window.has(date)) continue;          // outside the 14 days: ignored
       const c = cleanDay(day);
       if (c.error) return { error: `${code} ${date}: ${c.error}` };
       venues[code][date] = c.day;
     }
-    if (!Object.keys(venues[code]).length) return { error: `${code}: no dates inside the next 7 days` };
+    if (!Object.keys(venues[code]).length) return { error: `${code}: no dates inside the next ${DAYS} days` };
   }
   return { readAt: new Date(readAtMs).toISOString(), venues };
 }
@@ -664,7 +664,7 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep, bg
       res = await withTimeout(env.RELAY.fetch(new Request(RELAY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Relay-Key': env.RELAY_KEY },
-        body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.kevinbrittain.workers.dev/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
+        body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.runpreneur.org.uk/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
       })), RELAY_TIMEOUT_MS);
     } catch (e) {
       // No answer in 20 s, or a dropped call: the DM may or may not have gone.
@@ -744,7 +744,7 @@ export function cleanName(raw) {
   return { name };
 }
 // Past dates are dropped (a page left open over midnight still sends yesterday's ticks); anything
-// else outside the next 7 days or the hours 07 to 21 refuses the whole list.
+// else outside the next 14 days or the hours 07 to 21 refuses the whole list.
 export function cleanSlots(raw, dates) {
   if (!Array.isArray(raw)) return { error: 'slots must be a list' };
   if (raw.length > (dates.length + 1) * HOURS.length) return { error: 'too many slots' };
@@ -753,7 +753,7 @@ export function cleanSlots(raw, dates) {
   for (const s of raw) {
     const m = SLOT_RE.exec(String(s));
     if (m && m[1] < dates[0] && HH.has(m[2])) continue;
-    if (!m || !ok.has(m[1]) || !HH.has(m[2])) return { error: `Not an hour in the next 7 days: ${String(s).slice(0, 20)}` };
+    if (!m || !ok.has(m[1]) || !HH.has(m[2])) return { error: `Not an hour in the next ${DAYS} days: ${String(s).slice(0, 20)}` };
     out.add(m[0]);
   }
   return { slots: [...out].sort() };

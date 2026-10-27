@@ -6,13 +6,14 @@
 // -----------------
 // Matchi answers every /book/schedule request from Cloudflare's edge with HTTP 429 (12 of 12 probes
 // on 27 Oct 2026), and its CORS is closed, so neither the Worker nor the phones can read it. From
-// this Mac all 14 pages (2 venues x 7 days) return 200 in one burst with 250 ms gaps. So this job
-// reads them here and POSTs the parsed days to https://padel.kevinbrittain.workers.dev/api/courts.
+// this Mac the pages return 200 in one burst with 250 ms gaps. So this job reads 28 pages (2 venues
+// x 14 days)
+// here and POSTs the parsed days to https://padel.runpreneur.org.uk/api/courts.
 // Pulse Padel is still read by the Worker itself.
 //
 // WHAT IT DOES
 // ------------
-// run       fetches the 14 pages one after another (250 ms apart, 10 s timeout each, one more try
+// run       fetches the 28 pages one after another (250 ms apart, 10 s timeout each, one more try
 //           after 2 s for a page lost to a timeout, a 5xx or no connection, the same
 //           headers the Worker used), parses them with the Worker's own parseMatchi (imported
 //           from ../workers/padel/padel.js, so both sides read a page one way), POSTs them with
@@ -28,7 +29,8 @@
 //   - any day the parser could not read (an error that is not a network one: Matchi changed its
 //     page, or a login wall), on ANY day, even when every other page read fine;
 //   - a venue that errored on every day whose booking window must be open (St Ives today and
-//     tomorrow, PDL all 7 days), whatever the reason (a 404 on all 7 PDL days fails);
+//     tomorrow, PDL all 14 days), whatever the reason (a 404 on every PDL day fails); St Ives
+//     answers "allows bookings no more than 7 days" beyond its window, read as closed: fine;
 //   - a must-be-open day that came back closed (no court cells at all);
 //   - the POST did not answer 200.
 // A venue that misses a few days to a network error (a timeout, a 5xx) is not a failure on its
@@ -37,7 +39,7 @@
 // (mach_continuous_time), so no clock can tell. The Worker refuses a read older than 10 minutes,
 // so such a run fails ONCE with "FAILED: the read took too long for the Worker (did the Mac
 // sleep?)" and the next run, 15 minutes later, is clean. The Mac mini does not sleep (kern.sleeptime
-// 0 since it booted on 4 Oct 2026). A slow run with no sleep (14 pages timing out one after
+// 0 since it booted on 4 Oct 2026). A slow run with no sleep (28 pages timing out one after
 // another) is judged like any other run: FAILED.
 //
 // Usage:
@@ -50,7 +52,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseMatchi, matchiUrl, londonDates, londonParts, MATCHI_HEADERS } from '../workers/padel/padel.js';
 
-export const ENDPOINT = 'https://padel.kevinbrittain.workers.dev/api/courts';
+export const ENDPOINT = 'https://padel.runpreneur.org.uk/api/courts';
 export const KEY_FILE = join(homedir(), '.config/od/padel_robot_key');
 export const LOG_DIR = join(homedir(), 'knowledge-os/logs/padel-courts');
 export const VENUES = [{ code: 'si', id: '2619', name: 'St Ives' }, { code: 'pdl', id: '3122', name: 'PDL' }];
@@ -98,7 +100,7 @@ export function toPayloadDay(day) {
   return { status: 'ok', starts };
 }
 
-// Read the 14 pages one after another.
+// Read the 28 pages (2 venues x 14 days) one after another.
 export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs }) {
   const dates = londonDates(nowMs);
   const raw = {};
@@ -221,7 +223,7 @@ export function selftest(log = (line) => process.stdout.write(`${line}\n`)) {
   check('23:00 BST is quiet', isQuiet(Date.parse('2026-07-01T22:00:00Z')));
   check('06:30 GMT is not quiet', !isQuiet(Date.parse('2026-11-01T06:30:00Z')));
   check('23:00 GMT is quiet', isQuiet(Date.parse('2026-11-01T23:00:00Z')));
-  check('St Ives day 3 may be closed', !mustBeOpen('si', 2) && mustBeOpen('si', 1) && mustBeOpen('pdl', 6));
+  check('St Ives day 3 may be closed', !mustBeOpen('si', 2) && mustBeOpen('si', 1) && mustBeOpen('pdl', 13));
   const page = '<div class="schedule"><table><tr><td class="slot free" data-slot-can-start="true" data-slot-min-duration="60" title="Available<br>Court 1<br>19:00 - 20:00"></td></tr></table></div>';
   const day = parseMatchi(page);
   check('a free cell parses', day.status === 'ok' && day.starts['19:00'].courts === 1);

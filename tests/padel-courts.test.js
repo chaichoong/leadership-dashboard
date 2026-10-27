@@ -59,7 +59,8 @@ function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { st
   };
 }
 // The saved pages: St Ives closed from the 7th day on, as its window is 7 days.
-const livePage = (id, date) => new Response(id === '2619' ? (date === DATES[6] ? CLOSED : ST_IVES) : PDL, { status: 200 });
+// St Ives opens 7 days ahead, so from the 8th of the 14 dates its page says "not open yet" (closed).
+const livePage = (id, date) => new Response(id === '2619' ? (date >= DATES[7] ? CLOSED : ST_IVES) : PDL, { status: 200 });
 
 describe('quiet hours, decided in Europe/London', () => {
   it('BST: quiet before 06:30 and from 23:00', () => {
@@ -88,18 +89,19 @@ describe('quiet hours, decided in Europe/London', () => {
   it('re-reads the clock before the POST: a run that drifts into quiet hours does not post', async () => {
     const s = stubs({ page: livePage, clock: [Date.parse('2026-10-28T22:59:00Z'), Date.parse('2026-10-28T23:00:30Z')] });
     expect(await s.go()).toBe(0);
-    expect(s.pages).toHaveLength(14);
+    expect(s.pages).toHaveLength(28);
     expect(s.posts).toHaveLength(0);
     expect(s.lines).toEqual(['quiet hours']);
   });
 });
 
 describe('a normal run', () => {
-  it('reads 14 pages one after another, posts what the Worker accepts, prints one line, logs counts only', async () => {
+  it('reads 28 pages (14 days at each venue) one after another, posts what the Worker accepts, prints one line, logs counts only', async () => {
     const s = stubs({ page: livePage });
     expect(await s.go()).toBe(0);
     expect(s.pages.map((p) => `${p.id} ${p.date}`)).toEqual([...DATES.map((d) => `2619 ${d}`), ...DATES.map((d) => `3122 ${d}`)]);
-    expect(s.sleeps).toEqual(Array(13).fill(GAP_MS));
+    expect(DATES).toHaveLength(14);
+    expect(s.sleeps).toEqual(Array(27).fill(GAP_MS));
     expect(s.pages[0].headers['User-Agent']).toMatch(/^Mozilla\/5\.0/);
     expect(s.pages[0].headers.Accept).toBe('text/html');
     expect(s.pages[0].signal).toBeInstanceOf(AbortSignal);
@@ -111,20 +113,22 @@ describe('a normal run', () => {
     expect(body.readAt).toBe('2026-10-28T09:00:00.000Z');      // when the read started
     expect(Object.keys(body.venues)).toEqual(['si', 'pdl']);
     expect(body.venues.si[DATES[0]].starts['07:00']).toEqual({ courts: 2, min: 60 });
-    expect(body.venues.si[DATES[6]]).toEqual({ status: 'closed' });
+    expect(body.venues.si[DATES[6]].status).toBe('ok');
+    expect(body.venues.si[DATES[9]]).toEqual({ status: 'closed' });   // St Ives day 10: not open yet, and the run still exits 0
+    expect(Object.keys(body.venues.pdl)).toHaveLength(14);
     expect(JSON.stringify(body)).not.toMatch(/Court|names/);   // no court names, only counts
     // The Worker's own validator takes it as it is.
     expect(cleanCourts(body, START + 20 * 1000).error).toBeUndefined();
 
-    expect(s.lines).toEqual(['padel-courts: St Ives ok 6, closed 1; PDL ok 7; posted 200 in 20 s; Pulse read 08:50']);
-    expect(s.records).toEqual([{ ts: '2026-10-28T09:00:20.000Z', ok: true, posted: true, http: 200, seconds: 20, counts: { si: { ok: 6, closed: 1, error: 0 }, pdl: { ok: 7, closed: 0, error: 0 } }, problems: 0 }]);
+    expect(s.lines).toEqual(['padel-courts: St Ives ok 7, closed 7; PDL ok 14; posted 200 in 20 s; Pulse read 08:50']);
+    expect(s.records).toEqual([{ ts: '2026-10-28T09:00:20.000Z', ok: true, posted: true, http: 200, seconds: 20, counts: { si: { ok: 7, closed: 7, error: 0 }, pdl: { ok: 14, closed: 0, error: 0 } }, problems: 0 }]);
   });
 
 
-  it('14 pages timing out (12 s per fetch, 336 s in all) is a FAILED run', async () => {
+  it('28 pages timing out (12 s per fetch, each tried twice) is a FAILED run', async () => {
     const s = stubs({ page: () => { throw new DOMException('signal timed out', 'TimeoutError'); }, clock: (n, fetched) => START + fetched * 12 * 1000 });
     expect(await s.go()).toBe(1);
-    expect(s.pages).toHaveLength(28);                          // each page tried twice
+    expect(s.pages).toHaveLength(56);                          // each page tried twice
     expect(s.posts).toHaveLength(1);
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(timed out\)/);
   });
@@ -135,7 +139,7 @@ describe('fails loudly', () => {
   it('when every page of both venues errored (still posts, so the page says "couldn\'t check")', async () => {
     const s = stubs({ page: () => new Response('<title>429 Too Many Requests</title>', { status: 429 }) });
     expect(await s.go()).toBe(1);
-    expect(s.pages).toHaveLength(14);                          // a 429 is never retried
+    expect(s.pages).toHaveLength(28);                          // a 429 is never retried
     expect(s.posts).toHaveLength(1);
     expect(s.posts[0].body.venues.si[DATES[0]]).toEqual({ status: 'error', reason: 'HTTP 429' });
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(HTTP 429\)/);
@@ -160,13 +164,13 @@ describe('fails loudly', () => {
       return livePage(id, date);
     } });
     expect(await s.go()).toBe(0);
-    expect(s.pages).toHaveLength(17);                          // 14 pages and 3 second tries
+    expect(s.pages).toHaveLength(31);                          // 28 pages and 3 second tries
     expect(s.sleeps.filter((ms) => ms === RETRY_MS)).toHaveLength(3);
-    expect(s.lines[0]).toContain('St Ives ok 6, closed 1; PDL ok 7');
+    expect(s.lines[0]).toContain('St Ives ok 7, closed 7; PDL ok 14');
     // A page that arrived and could not be parsed gets no second try.
     const t = stubs({ page: (id, date) => (id === '3122' && date === DATES[2] ? new Response('<div class="schedule"><table><tr><td class="slot vacant"></td></tr></table></div>', { status: 200 }) : livePage(id, date)) });
     expect(await t.go()).toBe(1);
-    expect(t.pages).toHaveLength(14);
+    expect(t.pages).toHaveLength(28);
     expect(t.lines[0]).toMatch(/^FAILED: PDL 2026-10-30 could not be read \(unknown court cell\)/);
   });
 
@@ -177,15 +181,15 @@ describe('fails loudly', () => {
       return id === '3122' && down.has(date) ? new Response('x', { status: 503 }) : livePage(id, date);
     } });
     expect(await s.go()).toBe(0);
-    expect(s.lines[0]).toContain('PDL ok 4, error 3');
+    expect(s.lines[0]).toContain('PDL ok 11, error 3');
   });
 
-  it('item 2: a venue that errors on every day that should be open fails, whatever the reason (PDL 404 on all 7)', async () => {
+  it('item 2: a venue that errors on every day that should be open fails, whatever the reason (PDL 404 on all 14)', async () => {
     let s = stubs({ page: (id, date) => (id === '3122' ? new Response('gone', { status: 404 }) : livePage(id, date)) });
     expect(await s.go()).toBe(1);
     expect(s.lines[0]).toMatch(/^FAILED: PDL errored on every day that should be open \(HTTP 404\)/);
     // Item 1: a 404 is not retried (only a timeout, a 5xx or no connection is).
-    expect(s.pages).toHaveLength(14);
+    expect(s.pages).toHaveLength(28);
     expect(s.sleeps).not.toContain(RETRY_MS);
     // St Ives must be open today and tomorrow: both lost is a failure even with the rest fine.
     s = stubs({ page: (id, date) => (id === '2619' && date <= DATES[1] ? new Response('x', { status: 502 }) : livePage(id, date)) });
@@ -195,16 +199,16 @@ describe('fails loudly', () => {
 
   it('item 2: a Matchi markup change fails the run even when one page still reads (the 21:45 case)', async () => {
     // The reviewer's change: "Available<br>" became "Bookable<br>" in the saved pages. One St Ives
-    // page still reads ok; the other six cannot be read. That must never exit 0.
+    // page still reads ok; the other 13 cannot be read. That must never exit 0.
     const changed = ST_IVES.replace(/Available<br>/g, 'Bookable<br>');
     const s = stubs({ page: (id, date) => (id === '2619' && date !== DATES[0] ? new Response(changed, { status: 200 }) : livePage(id, date)) });
     expect(await s.go()).toBe(1);
     expect(s.lines[0]).toMatch(/^FAILED: St Ives 2026-10-29 could not be read \(a free court cell could not be read\)/);
-    expect(s.lines[0]).toContain('St Ives ok 1, error 6');
+    expect(s.lines[0]).toContain('St Ives ok 1, error 13');
     expect(s.posts).toHaveLength(1);                           // still posted: the page says "couldn't check"
   });
 
-  it('when a day whose window must be open has zero court cells (St Ives today and tomorrow, PDL all 7)', async () => {
+  it('when a day whose window must be open has zero court cells (St Ives today and tomorrow, PDL all 14)', async () => {
     const empty = '<div class="schedule"><table id="schedule-table"><tr></tr></table></div>';
     let s = stubs({ page: (id, date) => (id === '2619' && date === DATES[1] ? new Response(empty, { status: 200 }) : livePage(id, date)) });
     expect(await s.go()).toBe(1);
@@ -230,7 +234,7 @@ describe('fails loudly', () => {
   it('a read the Worker refuses as over 10 minutes old fails ONCE, loudly: "did the Mac sleep?"', async () => {
     const s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), postClock: START + 11 * 60 * 1000 });
     expect(await s.go()).toBe(1);
-    expect(s.lines[0]).toMatch(/^FAILED: the read took too long for the Worker \(did the Mac sleep\?\)\. St Ives ok 6, closed 1; PDL ok 7$/);
+    expect(s.lines[0]).toMatch(/^FAILED: the read took too long for the Worker \(did the Mac sleep\?\)\. St Ives ok 7, closed 7; PDL ok 14$/);
     expect(s.records[0]).toMatchObject({ ok: false, posted: false, http: 400 });
     // Any other refusal keeps its own words.
     const t = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }) });
