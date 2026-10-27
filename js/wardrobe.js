@@ -40,6 +40,14 @@
                         lastWorn: getField(r, WR.lastWorn) || null,
                     };
                 });
+                // List order = the order the outfits were added (Kevin's plan order), so "the first eligible
+                // outfit" is the one he approved at the gate. The API returns rows in its own order.
+                const planKey = (r) => { const m = String(getField(r, OF.planId) || '').match(/^([a-z]*)(\d*)/i); return [m[1], Number(m[2]) || 0]; };
+                of.sort((a, b) => {
+                    if (a.createdTime !== b.createdTime) return a.createdTime < b.createdTime ? -1 : 1;
+                    const [pa, na] = planKey(a), [pb, nb] = planKey(b);
+                    return pa === pb ? na - nb : pa.localeCompare(pb);
+                });
                 const outfits = of.map(r => ({
                     id: r.id, name: getField(r, OF.name) || '(unnamed)', option: getField(r, OF.option) || '',
                     itemIds: getField(r, OF.items) || [], season: getField(r, OF.season) || 'All',

@@ -73,6 +73,14 @@ test.describe('What to wear today', () => {
     expect(realErrors(errors)).toEqual([]);
   });
 
+  test('list order is the order the outfits were added, whatever order the API returns them in', async ({ page }) => {
+    const ordered = [...outfits(), outfit('recO5', 'Tee and boots', 'Out casual', ['recTee', 'recJeans', 'recBoots'])]
+      .map((o, i) => ({ id: o.id, createdTime: `2026-10-27T11:2${i}:00.000Z`, fields: { ...o.fields, [OF.lastWorn]: undefined } }));
+    // None worn yet. Added last, returned first: without the sort it would be picked.
+    await open(page, 'home', { fixtures: { outfits: [ordered[4], ordered[2], ordered[1], ordered[3], ordered[0]] } });
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('.wear-outfit')).toHaveText('Knit and denim', { timeout: 20000 });
+  });
+
   test('Wearing stamps today on the outfit and on every piece it lists, then holds it for the day', async ({ page }) => {
     await open(page, 'home');
     const patches = [];
