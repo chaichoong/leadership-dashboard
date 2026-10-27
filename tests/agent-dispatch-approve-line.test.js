@@ -202,6 +202,17 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     const smuggled = run({ output: `${BODY}\n\nKEVIN ONLY: payment: 1. Pay the £53 fee. 2. Then review the records in a chat with Claude.\n\n`
       + '**Carrying this out will involve:** the fee goes on the list, and you review the records with Claude in a chat.' });
     expect(smuggled.refused).toBe(true);
+    // Round 3: a covered step's clause runs on past "no", "in the card", and a payment is not an identity statement.
+    const witness = run({ output: `${BODY}\n\n${SIGN}\n\n**Carrying this out will involve:** the agreement opens, and you sign it, no witness needed, and then pay the £500 deposit.` });
+    expect(witness.refused).toBe(true);
+    const inCard = run({ output: `${BODY}\n\n${SIGN}\n\n**Carrying this out will involve:** the agreement opens, and you sign it in the card and pay the £500 deposit.` });
+    expect(inCard.refused).toBe(true);
+    const statement = run({ output: `${BODY}\n\nKEVIN ONLY: identity: 1. Give your own statement on the declarations page.\n\n`
+      + '**Carrying this out will involve:** the form opens, and you then pay the £400 shown on the statement.' });
+    expect(statement.refused).toBe(true);
+    const noun = run({ output: `${BODY}\n\nKEVIN ONLY: payment: 1. Pay the £53 fee.\n\n`
+      + '**Carrying this out will involve:** the invoice is checked, you pay the £53, and work starts on Monday.' });
+    expect(noun.refused, noun.error).toBe(false);
     const yourStep = run({ output: `${BODY}\n\nKEVIN ONLY: physical: 1. Swap the two cameras by hand.\n\n`
       + '**Carrying this out will involve:** the task stays open as your step, with no agent sending, paying or changing anything.' });
     expect(yourStep.refused, yourStep.error).toBe(false);
@@ -265,6 +276,9 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     ['says no', 'No need for a session or a chat on this one, just send it.'],
     ['asks the agent', 'Please review the figures again.'],
     ['uses the word in passing', 'Chase them for prompt payment.'],
+    ['does not want one', "I don't want to go through it together, just send it."],
+    ['does not need one', "We don't have to go through it together, it's fine."],
+    ['would rather not', "I'd rather not go through it with you, send it as it is."],
   ])('a note that %s is not an ask for a review', (_, note) => {
     const r = run({ output: `${BODY}\n\n${REVIEW_LINE}\n\n${CLOSE_CLEAN}`, stored: { feedbackHistory: `[2026-10-20 10:00] ${note}` } });
     expect(r.refused).toBe(true);

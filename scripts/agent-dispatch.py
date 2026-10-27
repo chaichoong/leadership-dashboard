@@ -2961,10 +2961,12 @@ _KEVIN_GETS_A_CARD_RE = re.compile(
 _KEVIN_DRAFT_RE = re.compile(r"for\s+you\s+to\s+(?:open\s+and\s+)?check\b(?P<rest>[^.;\n]{0,60})", re.I)
 # Where his clause ends: someone else takes over the sentence.
 _KEVIN_CLAUSE_END_RE = re.compile(
-    r"\b(?:the\s+robot|robots?|an?\s+agent|the\s+agent|agents?|no\s+one|nobody|nothing|no|we|they|roy|the\s+task|the\s+card)\b", re.I)
+    r"\b(?:the\s+robot|robots?|agents?|no\s+one|nobody|nothing|they|roy)\b", re.I)
 # Another of his verbs further on in the same clause: "check and approve, then sign and post it",
 # "you sign it and then pay the deposit".
-_KEVIN_MORE_RE = re.compile(r"(?:,|\band\b|\bthen\b)\s*(?:and\s+|then\s+)?(?P<verb>%s)\b" % _KEVIN_DOES, re.I)
+# A word used as a noun is not his verb: "and work starts on Monday".
+_KEVIN_MORE_RE = re.compile(r"(?:,|\band\b|\bthen\b)\s*(?:and\s+|then\s+)?(?P<verb>%s)\b"
+                            r"(?!\s+(?:starts?|begins?|is|are|was|were|will|goes|comes|happens))" % _KEVIN_DOES, re.I)
 
 
 # What a declared step covers in the closing line, on top of its kind's KEVIN_REASON_WORDS. Kept
@@ -2973,7 +2975,7 @@ _KEVIN_MORE_RE = re.compile(r"(?:,|\band\b|\bthen\b)\s*(?:and\s+|then\s+)?(?P<ve
 _COVER_EXTRA = {
     "purchase": r"declar\w*",                  # the declarations are his at a purchase's last step
     "credential": r"sign-in|log-in|key|token|site\s+list|robot'?s\s+list|settings?",
-    "identity": r"statement|declar\w*",        # a statement only he can give ("your own statement")
+    "identity": r"(?:your|his)\s+own\s+statement|declar\w*",   # a statement only he can give
     "physical": r"by\s+hand|in\s+person",
 }
 # A SIGN-IN NEEDED line covers the sign-in itself and nothing more: not a card, keys or a payment.
@@ -3077,7 +3079,7 @@ KEVIN_ASKED_FOR_REVIEW_RE = re.compile(
 # A "no" only counts when it is about the review itself: "no need for a session" says no, while
 # "Don't send it yet, can we go through it together first?" is still an ask (review, 27 Oct 2026).
 _REVIEW_NOT_ASKED_RE = re.compile(
-    r"\b(?:no\s+need|don't\s+need|do\s+not\s+need|not\s+needed|without|never|no)\b[^.?!,]{0,25}?"
+    r"\b(?:no\s+need|don't|do\s+not|doesn't|not|never|without|no)\b[^.?!,]{0,25}?"
     r"\b(?:a\s+|the\s+|any\s+)?(?:session|chat|prompt|review|go(?:ing)?\s+through|walk(?:ing)?\s+through)\b", re.I)
 
 
