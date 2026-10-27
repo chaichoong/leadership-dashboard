@@ -66,3 +66,48 @@ test.describe('the card opens with the plain summary', () => {
     await expect(page.locator('[data-apv-card="recApvA1"] [data-apv-plain-task]')).toHaveText('HMRC CFS-0000000: send tranche 1');
   });
 });
+
+// THEN YOUR STEP (Kevin, 27 Oct 2026): "If I approve should basically mean what happens if I press
+// the approve button. If there's anything that I need to do, it needs to be the other version of
+// the approval card where it tells me to do it." A step of his is the agent's KEVIN ONLY line, and
+// the card says on a line of its own that it comes back as its own card, never inside the approve line.
+test.describe('a step of Kevin\'s shows as Then your step, on its own line', () => {
+  function withStep() {
+    const fx = withPlain();
+    fx.approvals[1].fields[TF.agentOutput] = 'The quote form was filled from the records line by line. '.repeat(8)
+      + '\n\nKEVIN ONLY: purchase: buy the chosen policy in one session, paying monthly. 1. Open the window. 2. Buy it.'
+      + '\n\n**Carrying this out will involve:** the robot filling the quote form for 18 Example Road.';
+    fx.approvals[1].fields[TF.plainSummary] =
+      'TASK: The landlord insurance for 18 Example Road renews next week.\nIF YOU APPROVE: The robot fills the quote form for 18 Example Road.';
+    fx.approvals[2].fields[TF.agentOutput] = 'KEVIN ONLY: review: 1. Paste the prompt into a new chat. 2. Go through the records.';
+    return fx;
+  }
+
+  test('the declared step reads after the approve line, cut before its numbered steps', async ({ page }) => {
+    await mockAgentsPage(page, withStep());
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const then = page.locator('[data-apv-card="recApvA2"] [data-apv-then-step]');
+    await expect(then).toHaveAttribute('data-apv-then-step', 'purchase');
+    await expect(then).toHaveText('Buy the chosen policy in one session, paying monthly. This comes back to you as its own card once you approve: you do it there and add the proof.');
+    // It follows the approve line, inside the same plain block.
+    const order = await page.locator('[data-apv-card="recApvA2"] [data-apv-plain]').evaluate(el =>
+      [...el.querySelectorAll('[data-apv-plain-approve],[data-apv-then-step]')].map(n => n.hasAttribute('data-apv-then-step')));
+    expect(order).toEqual([false, true]);
+  });
+
+  test('a step written only as numbered steps reads as its kind', async ({ page }) => {
+    await mockAgentsPage(page, withStep());
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator('[data-apv-card="recApvB1"] [data-apv-then-step]'))
+      .toHaveText('You go through it in a chat with Claude. This comes back to you as its own card once you approve: you do it there and add the proof.');
+  });
+
+  test('a card with no declared step has no Then your step line', async ({ page }) => {
+    await mockAgentsPage(page, withStep());
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator('[data-apv-card="recApvA1"] [data-apv-then-step]')).toHaveCount(0);
+  });
+});

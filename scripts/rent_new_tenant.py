@@ -115,6 +115,11 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+# The card's If you approve line says what Approve sets going (agent-dispatch.py
+# approve_line_step_problem, Kevin 27 Oct 2026). His step on the form is the KEVIN ONLY line,
+# which the card shows as Then your step.
+FORM_PLAIN_APPROVE = "The robot fills the DWP form from the records and keeps it ready for you."
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 LONDON = ZoneInfo("Europe/London")
 
@@ -1411,7 +1416,7 @@ def raise_form(rc, item, day):
             call_in_process(ad.cmd_submit, argparse.Namespace(
                 task=tid, agent=rc.AGENT_TEAM_MEMBER, type="Admin", output_file=out_path,
                 plain_task=f"The DWP direct rent payment form for {item['tenant']}, filled from the records and waiting for you.",
-                plain_approve="Approving gives you the Your turn button: the robot fills the form, you choose the reason and send.",
+                plain_approve=FORM_PLAIN_APPROVE,
                 tier1=False, siblings=None, coverage=None, receipt=None, attach=None))
         finally:
             os.unlink(out_path)
