@@ -103,7 +103,8 @@ ACCESS_KEPT_DAYS = 30
 SIGNIN_SAME_HOURS = 2               # a second window within this of the first is the same sign-in
 KEVIN_STEPS_ALLOWED = ("payment", "purchase")   # paying is one of his four; every other KEVIN step is not
 KEVIN_STEP_WORDS = {"credential": "a sign-in or settings step", "identity": "an ID check",
-                    "signature": "a signature", "physical": "an in-person step"}
+                    "signature": "a signature", "physical": "an in-person step",
+                    "review": "a review session"}
 
 GROUPS = (
     ("flow", "Is work flowing?"),

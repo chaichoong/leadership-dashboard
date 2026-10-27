@@ -128,7 +128,7 @@ describe('agent-dispatch submit: the plain summary', () => {
 // text. Every pair, in both modes, must pass the same check an agent's does,
 // or the nightly run is refused at submit (review finding, 22 Sep 2026).
 describe('Content Engine cards carry plain lines that pass the gate', () => {
-  it('episode, performance read, post (full and thin) and newsletter, test and live', () => {
+  it('episode, performance read, post (full and thin), newsletter and the DWP form card, test and live', () => {
     const script = `
 import importlib.util, json, sys, os
 sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts/content-engine'))})
@@ -145,13 +145,30 @@ for mode in ('test', 'live'):
 out = []
 for name, a in pairs:
     assert a[0] == '--plain-task' and a[2] == '--plain-approve', name
-    out.append({'name': name, 'problem': m.plain_summary_problem(a[1], a[3])})
+    # The approve line says what Approve sets going, never a step of Kevin's (27 Oct 2026).
+    out.append({'name': name, 'problem': m.plain_summary_problem(a[1], a[3]) or m.approve_line_step_problem(a[3])})
 out.append({'name': 'performance passes plain lines', 'problem': '' if 'approval.plain_args(' in src else 'missing'})
+# The OD lane's cards carry no KEVIN ONLY line, so their closing lines may leave him no step either.
+tps = [{'n': 1, 'title': 'Topic one', 'angle': 'why', 'number': 'none needed'}]
+post = {'date': '2026-09-08', 'day': 'Tue', 'shape': 'The method', 'hook': 'Hook line', 'body': 'B',
+        'image': 'https://cdn/c.png', 'pdf': 'https://cdn/c.pdf', 'score': 8, 'voice_loaded': True}
+thin = {'date': '2026-09-09', 'day': 'Wed', 'shape': 'The build log', 'thin': True, 'source_line': 'Nothing sourced', 'voice_loaded': True}
+ed = {'date': '2026-09-11', 'n': 1, 'title': 'T', 'share': 'S', 'body': 'B', 'issues': []}
+for mode in ('test', 'live'):
+    for name, card in (('post card', od_lane.build_card(post, mode, tps)), ('thin card', od_lane.build_card(thin, mode, tps)),
+                       ('newsletter card', od_lane.build_newsletter_card(ed, mode, tps))):
+        out.append({'name': name + ' ' + mode, 'problem': m.kevin_step_in_line(m.carry_out_tail(card[2].strip()))})
+    # The Runpreneur episode card's closing line, in both modes (review, 27 Oct 2026: test mode said
+    # "until you switch the engine to live", which the closing-line check reads as his step).
+    out.append({'name': 'episode closing ' + mode, 'problem': m.kevin_step_in_line(m.carry_out_tail(approval.closing_line(mode)))})
+spec2 = importlib.util.spec_from_file_location('rnt', ${JSON.stringify(resolve(ROOT, 'scripts/rent_new_tenant.py'))})
+rnt = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rnt)
+out.append({'name': 'DWP form card', 'problem': m.approve_line_step_problem(rnt.FORM_PLAIN_APPROVE)})
 print('---JSON---'); print(json.dumps(out))
 `;
     const raw = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
     const res = JSON.parse(raw.split('---JSON---')[1]);
-    expect(res.length).toBe(9);
+    expect(res.length).toBe(18);
     for (const r of res) expect(r.problem, r.name).toBe('');
   });
 

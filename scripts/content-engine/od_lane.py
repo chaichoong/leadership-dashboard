@@ -395,7 +395,7 @@ def build_card(post, mode, topics=None):
     if mode == "live":
         parts.append("%s scheduling this post with its picture to %s through GoHighLevel for %s 08:00. Nothing else." % (CLOSING, where, date.strftime("%A")))
     else:
-        parts.append("%s TEST MODE: creating this post with its picture as a DRAFT in the GoHighLevel planner for %s, for you to open and check. Nothing reaches a public feed until you switch the engine to live." % (CLOSING, where))
+        parts.append("%s TEST MODE: creating this post with its picture as a DRAFT in the GoHighLevel planner for %s, for you to open and check. Nothing reaches a public feed until the engine is switched to live." % (CLOSING, where))
     desc = "Approve one Operations Director LinkedIn post (%s) for %s. Source: %s. Nothing is published until you approve." % (
         P.SHAPES[post["day"]]["name"], date.strftime("%A %-d %B"), (post.get("source_line") or "")[:120])
     return task_name(date, post["day"], post.get("hook") or P.SHAPES[post["day"]]["name"]), desc, "\n\n".join(parts)
@@ -409,9 +409,9 @@ def build_newsletter_card(ed, mode, topics=None):
     parts.append(("Rules check FLAGGED for you: " + "; ".join(issues)) if issues else "Rules check: nothing flagged.")
     if topics: parts.append("Your recording brief for next week's runs:\n" + "\n".join("%d. %s. %s Number to state: %s." % (t["n"], t["title"], t.get("angle", ""), t.get("number", "")) for t in topics))
     if mode == "live":
-        parts.append("%s the browser robot signing in as you (the linkedin profile you logged into once), pasting the title and body into LinkedIn's newsletter editor and pressing Publish on %s morning. LinkedIn has no API for this. If the robot cannot finish, you paste it yourself, about five minutes; the text sits on the record." % (CLOSING, date.strftime("%A")))
+        parts.append("%s the browser robot signing in as you (the linkedin profile you logged into once), pasting the title and body into LinkedIn's newsletter editor and pressing Publish on %s morning. LinkedIn has no API for this. If the robot cannot finish, nothing is published and the text stays on the record." % (CLOSING, date.strftime("%A")))
     else:
-        parts.append("%s TEST MODE: the browser robot fills LinkedIn's newsletter editor as a DRAFT and screenshots it for you; nothing is published until you switch the engine to live." % CLOSING)
+        parts.append("%s TEST MODE: the browser robot fills LinkedIn's newsletter editor as a DRAFT and screenshots it for you; nothing is published until the engine is switched to live." % CLOSING)
     name = "CONTENT (OD): %s, Newsletter: %s" % (date.strftime("%a %-d %b"), ed["title"][:70])
     desc = "Approve edition %d of the LinkedIn newsletter \"%s\" for %s. Nothing is published until you approve." % (ed.get("n", 1), P.NEWSLETTER_NAME, date.strftime("%A %-d %B"))
     return name, desc, "\n\n".join(parts)
@@ -929,7 +929,7 @@ def post_plain(post, mode):
 def newsletter_plain(ed, mode):
     task = "Edition %d of your LinkedIn newsletter is written and ready." % ed.get("n", 1)
     if mode == "live":
-        return approval.plain_args(task, "A robot publishes it on your LinkedIn on %s morning. If it cannot, you paste it in, about five minutes."
+        return approval.plain_args(task, "A robot publishes it on your LinkedIn on %s morning. If it cannot, nothing is published."
                                    % dt.date.fromisoformat(ed["date"]).strftime("%A"))
     return approval.plain_args(task, "Test mode: a robot fills it in as a draft and sends you a screenshot. Nothing is published.")
 
@@ -1198,7 +1198,7 @@ def selftest():
     assert "Runpreneur" not in out and "Runpreneur" not in fri, "an OD card never names the Runpreneur socials"
     ed = {"date": "2026-09-11", "n": 1, "title": "Hand your inbox to an agent", "share": "S", "body": "B", "issues": []}
     n2, d2, o2 = build_newsletter_card(ed, "test", tps); assert n2.startswith("CONTENT (OD): Fri 11 Sep, Newsletter:") and P.NEWSLETTER_NAME in o2 and "Topic one" in o2 and o2.rstrip().split("\n")[-1].startswith(CLOSING) and "DRAFT" in o2
-    _, _, o3 = build_newsletter_card(ed, "live"); assert "LinkedIn has no API" in o3 and "paste it yourself" in o3
+    _, _, o3 = build_newsletter_card(ed, "live"); assert "LinkedIn has no API" in o3 and "stays on the record" in o3
     assert attach_files("recX", ["/nonexistent/a.png"]) == [] and "eight-stage" in WEBSITE_METHOD and P.PRICING in WEBSITE_METHOD
     pl = newsletter_plan(ed, True); assert pl["profile"] == "linkedin" and pl["mode"] == "test" and pl["steps"][0]["url"].startswith("https://www.linkedin.com/article/new") and pl["submit"]["text"] == "Publish"
     pts = feedback_points("Terrible images again. We need to improve on those. I can't see the carousel file, so can you reattach that for me to see? Short.")

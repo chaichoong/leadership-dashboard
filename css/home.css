@@ -41,6 +41,7 @@ body.home-mode.home-folded-wealth .home-wealth-wait { display: none; }
     font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; }
 .home-fold-btn:hover { color: var(--text-primary); }
 .home-fold-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#homeForecastHeading:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }   /* the Cash flow forecast jump lands here from the keyboard */
 .home-chev { display: inline-block; width: 16px; font-size: var(--fs-lg); line-height: 1; transition: transform .15s; }
 .home-fold-btn[aria-expanded="false"] .home-chev { transform: rotate(-90deg); }
 body.home-mode.home-folded-dashboard #tab-overview { display: none; }

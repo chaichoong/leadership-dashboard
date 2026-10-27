@@ -116,6 +116,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-plain{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;background:var(--bg-subtle);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:10px;font-size:var(--fs-base);line-height:1.5}
 .apv-plain-label{font-weight:var(--fw-bold);color:var(--accent);white-space:nowrap}
 .apv-plain-text{color:var(--text-primary);font-weight:var(--fw-semibold)}
+.apv-plain-label.apv-plain-then{color:var(--accent-gold)}
 .apv-ask.apv-ask-detail{font-size:var(--fs-sm);font-weight:var(--fw-regular);color:var(--text-secondary)}
 .apv-ask-detail .apv-ask-stem{color:var(--text-secondary);font-weight:var(--fw-semibold)}
 @media (max-width:480px){.apv-plain{grid-template-columns:1fr;gap:0 0}.apv-plain-text{margin-bottom:6px}}
@@ -2715,10 +2716,32 @@ function apvPlain(t){
     return { task: (task||'').trim() || apvTidyName(t.name), approve: (approve||'').trim(), written: !!(task && approve) };
 }
 
+// THEN YOUR STEP (Kevin, 27 Oct 2026): "If I approve should basically mean what happens if I press
+// the approve button. If there's anything that I need to do, it needs to be the other version of
+// the approval card where it tells me to do it, and then I have to prove it's done." The If you
+// approve line says only what Approve sets going (agent-dispatch.py approve_line_step_problem). A
+// step of his is the agent's KEVIN ONLY line, and once he approves it comes back as a Your step
+// card he proves, so the card says that on a line of its own instead of leaving him to assume.
+const APV_KEVIN_ONLY_RE = /^\s*\**KEVIN ONLY:\**\s*([A-Za-z]+)\s*[:\-–]\s*(\S[^\n]*)$/m;
+const APV_STEP_KINDS = { payment:'You pay', purchase:'You buy', signature:'You sign', credential:'You sign in or change a setting',
+    identity:'You prove who you are', physical:'You go somewhere in person', review:'You go through it in a chat with Claude' };
+function apvThenStep(output){
+    const m = APV_KEVIN_ONLY_RE.exec(String(output||''));
+    const kind = m ? m[1].toLowerCase() : '';
+    if(!APV_STEP_KINDS[kind]) return null;
+    // The step as the agent wrote it, up to its numbered list, cut to one line.
+    let step = m[2].replace(/\*+/g,'').split(/\s(?=1[.)]\s)/)[0].replace(/[\s:;,.]+$/,'').trim();
+    if(/^1[.)]\s/.test(step) || step.length < 8) step = '';
+    if(step.length > 140) step = step.slice(0, 137).replace(/\s+\S*$/,'') + '…';
+    const what = step ? step.charAt(0).toUpperCase() + step.slice(1) : APV_STEP_KINDS[kind];
+    return { kind, text: `${what}. This comes back to you as its own card once you approve: you do it there and add the proof.` };
+}
+
 function apvCardHtml(t){
     const ys = apvYourStep(t);
     if(ys) return apvStepCardHtml(t, ys);
     const plain = apvPlain(t);
+    const then = apvThenStep(t.agentOutput);
     const askBits = apvAskLine(t);
     const isAction = askBits.isAction;
     const summary = askBits.summary;
@@ -2740,6 +2763,7 @@ function apvCardHtml(t){
         <div class="apv-plain" data-apv-plain="${plain.written?'written':'fallback'}">
             <span class="apv-plain-label">The task</span><span class="apv-plain-text" data-apv-plain-task>${esc(plain.task)}</span>
             ${plain.approve ? `<span class="apv-plain-label">If you approve</span><span class="apv-plain-text" data-apv-plain-approve>${esc(plain.approve)}</span>` : ''}
+            ${then ? `<span class="apv-plain-label apv-plain-then">Then your step</span><span class="apv-plain-text" data-apv-then-step="${esc(then.kind)}">${esc(then.text)}</span>` : ''}
         </div>
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
         <div data-apv-cross-slot="${t.id}">${apvCrossStripHtml(t.id)}</div>
