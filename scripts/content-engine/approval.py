@@ -164,7 +164,7 @@ def closing_line(m):
                 "scheduling the Summary and Learnings clips with their copy on %s through GoHighLevel." % (CLOSING, SOCIALS))
     return ("%s TEST MODE: uploading the full episode to YouTube as UNLISTED (only people with the link can see it) with this thumbnail and copy, "
             "then creating the Summary and Learnings posts for %s as DRAFTS in the GoHighLevel planner for you to open and check. "
-            "Nothing reaches a public feed until you switch the engine to live." % (CLOSING, SOCIALS))
+            "Nothing reaches a public feed until the engine is switched to live." % (CLOSING, SOCIALS))
 
 
 def verdict_patch(outcome, feedback, when):

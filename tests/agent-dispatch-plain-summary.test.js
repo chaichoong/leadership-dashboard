@@ -158,6 +158,9 @@ for mode in ('test', 'live'):
     for name, card in (('post card', od_lane.build_card(post, mode, tps)), ('thin card', od_lane.build_card(thin, mode, tps)),
                        ('newsletter card', od_lane.build_newsletter_card(ed, mode, tps))):
         out.append({'name': name + ' ' + mode, 'problem': m.kevin_step_in_line(m.carry_out_tail(card[2].strip()))})
+    # The Runpreneur episode card's closing line, in both modes (review, 27 Oct 2026: test mode said
+    # "until you switch the engine to live", which the closing-line check reads as his step).
+    out.append({'name': 'episode closing ' + mode, 'problem': m.kevin_step_in_line(m.carry_out_tail(approval.closing_line(mode)))})
 spec2 = importlib.util.spec_from_file_location('rnt', ${JSON.stringify(resolve(ROOT, 'scripts/rent_new_tenant.py'))})
 rnt = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rnt)
 out.append({'name': 'DWP form card', 'problem': m.approve_line_step_problem(rnt.FORM_PLAIN_APPROVE)})
@@ -165,7 +168,7 @@ print('---JSON---'); print(json.dumps(out))
 `;
     const raw = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
     const res = JSON.parse(raw.split('---JSON---')[1]);
-    expect(res.length).toBe(16);
+    expect(res.length).toBe(18);
     for (const r of res) expect(r.problem, r.name).toBe('');
   });
 

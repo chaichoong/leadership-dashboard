@@ -108,6 +108,15 @@ describe('the If you approve line says what Approve sets going, never a step of 
     gerund: 'Kevin updating the bank account registered for the payouts, then retrying the two bounced payouts.',
     getRequest: 'Once the new reader is built you get one sign-in request. The robot then sets up its own access.',
     untilYou: 'Nothing runs until you open one desktop session and paste the line on the card.',
+    // The independent review's slips (27 Oct 2026): each passed the first version.
+    promptOnCard: 'You get a ready prompt on the card to review the records.',
+    approveCardAndPay: 'You approve this card and pay the £53 fee on the council page.',
+    checkSignPost: 'The robot fills the form for you to check, sign and post to the council.',
+    ifYouSign: 'If you sign it today it goes in tomorrow.',
+    meansThat: 'Approve means that you pay £53 on the council page.',
+    adverb: 'You personally pay the £53 on the council page.',
+    beAsked: "You'll be asked to type the code from the text message.",
+    onceYouHave: 'Once you have paid, the robot books the slot.',
   };
   const clean = {
     reply: 'The agent sends one short no-thanks reply and stops answering.',
@@ -119,6 +128,9 @@ describe('the If you approve line says what Approve sets going, never a step of 
     agreeNoun: 'You agree the review and update of your main AI instructions can run when ready.',
     reminderCloses: 'The reminder closes as you decided on the other card today. Nothing is sent.',
     diary: 'A private entry goes in your diary for Monday at 11am. Nobody is emailed.',
+    // The rent check's own claim card: approving IS his proof that he sent it.
+    approveOnce: "Approve once you have sent it: the rent check notes it and asks for the council's answer in three weeks.",
+    asksIf: 'One email asks if you can attend on Friday at 10am.',
   };
 
   it('finds the step in every live shape that handed Kevin one', () => {
@@ -143,6 +155,7 @@ describe('the If you approve line says what Approve sets going, never a step of 
     const bad = run({ op: 'escalate', plainApprove: steps.onlyStep, stored: { status: 'Today' } });
     expect(bad.refused).toBe(true);
     expect(bad.error).toContain('gives Kevin a step of his own');
+    expect(bad.error).toContain('block --kind KEVIN');
     const good = run({ op: 'escalate', plainApprove: 'The lease is renewed for one more year on the same terms.', stored: { status: 'Today' } });
     expect(good.refused, good.error).toBe(false);
   });
@@ -163,6 +176,41 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     expect(r.error).toContain('no KEVIN ONLY line declares it');
   });
 
+  it('a declared step covers its own words only: a second step beside it is still refused', () => {
+    const PAY = 'KEVIN ONLY: payment: 1. Open the council page. 2. Pay the £53 fee.';
+    const signPost = run({ output: `${BODY}\n\n${PAY}\n\n**Carrying this out will involve:** the robot fills the form, then you sign it and you post it to the council.` });
+    expect(signPost.refused).toBe(true);
+    expect(signPost.error).toContain('you sign it');
+    const chat = run({ output: `${BODY}\n\n${PAY}\n\n${CLOSE_UNDECLARED}` });
+    expect(chat.refused).toBe(true);
+    expect(chat.error).toContain('while you run the review chat');
+    const own = run({ output: `${BODY}\n\n${PAY}\n\n**Carrying this out will involve:** the £53 goes on the costs list, and you pay it on the council page.` });
+    expect(own.refused, own.error).toBe(false);
+  });
+
+  it('a purchase covers the declarations that come with it', () => {
+    const r = run({ output: `${BODY}\n\nKEVIN ONLY: purchase: buy the chosen policy in one session. 1. Open the window. 2. Buy it.\n\n`
+      + '**Carrying this out will involve:** the robot fills the quote form, then you fill in the declarations and buy the policy if it is cheaper.' });
+    expect(r.refused, r.error).toBe(false);
+  });
+
+  it('a SIGN-IN NEEDED line covers the sign-in, never the work after it', () => {
+    const r = run({ output: `${BODY}\n\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n\n`
+      + '**Carrying this out will involve:** once signed in, the robot opens the letter, then you review the records and sign the declaration.' });
+    expect(r.refused).toBe(true);
+    expect(r.error).toContain('no KEVIN ONLY line declares it');
+  });
+
+  it('every KEVIN ONLY line is checked, and a review goes on a card of its own', () => {
+    const second = run({ output: `${BODY}\n\nKEVIN ONLY: payment: 1. Pay the £53 fee.\nKEVIN ONLY: quote: get three quotes.\n\n${CLOSE_CLEAN}` });
+    expect(second.refused).toBe(true);
+    expect(second.error).toContain("names 'quote'");
+    const beside = run({ output: `${BODY}\n\nKEVIN ONLY: payment: 1. Pay the £53 fee.\n${REVIEW_LINE}\n\n${CLOSE_CLEAN}`,
+      stored: { feedbackHistory: HIS_ASK } });
+    expect(beside.refused).toBe(true);
+    expect(beside.error).toContain('a KEVIN ONLY review goes on a card of its own');
+  });
+
   it('a closing line that leaves him nothing passes', () => {
     const r = run({ output: `${BODY}\n\n${CLOSE_CLEAN}` });
     expect(r.refused, r.error).toBe(false);
@@ -180,6 +228,16 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     const r = run({ output: `${BODY}\n\n${REVIEW_LINE}\n\n${CLOSE_CLEAN}`,
       stored: { approvalFeedback: 'Can we walk through it together before it goes?' } });
     expect(r.refused, r.error).toBe(false);
+  });
+
+  it.each([
+    ['says no', 'No need for a session or a chat on this one, just send it.'],
+    ['asks the agent', 'Please review the figures again.'],
+    ['uses the word in passing', 'Chase them for prompt payment.'],
+  ])('a note that %s is not an ask for a review', (_, note) => {
+    const r = run({ output: `${BODY}\n\n${REVIEW_LINE}\n\n${CLOSE_CLEAN}`, stored: { feedbackHistory: `[2026-10-20 10:00] ${note}` } });
+    expect(r.refused).toBe(true);
+    expect(r.error).toContain("a review step is Kevin's only when his own note on the task asked");
   });
 
   it('a review he never asked for is refused: the agent does the review and brings what it found', () => {

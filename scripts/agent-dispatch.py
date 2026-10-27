@@ -2781,11 +2781,12 @@ KEVIN_ONLY_LINE_RE = re.compile(
 # no list, because "Kevin visiting TopCashback" is the Swinton failure itself.
 KEVIN_REASON_WORDS = {
     "payment": r"pay|pays|paying|paid|payment|direct\s+debit|DD|standing\s+order|transfer|settle",
-    "purchase": r"buy|buys|buying|purchase|purchasing|pay|pays|paying",
+    # The declarations are his at the last step of a purchase (GUARDRAILS "PLANS FILL, KEVIN SUBMITS").
+    "purchase": r"buy|buys|buying|purchase|purchasing|pay|pays|paying|declar\w*",
     "signature": r"sign|signs|signing|signature|countersign",
-    "credential": r"log\s*in|logging|sign\s*in|signing\s+in|password|passcode|card|consent|re-?consent|authori[sz]e",
-    "identity": r"verify|verifies|verifying|verification|identity|ID|passport",
-    "physical": r"attend|collect|deliver|meet|hand\s+over",   # posting a letter is agent work (Pingen)
+    "credential": r"log\s*in|logging|sign\s*in|signing\s+in|password|passcode|card|consent|re-?consent|authori[sz]e|sign-in|log-in|keys?|token|site\s+list|robot'?s\s+list|settings?",
+    "identity": r"verify|verifies|verifying|verification|identity|ID|passport|statement|declar\w*|answer\w*",
+    "physical": r"attend|collect|deliver|meet|hand\s+over|by\s+hand|in\s+person",   # posting a letter is agent work (Pingen)
     "review": r"review|reviews|reviewing|go(?:es)?\s+through|going\s+through|work(?:s|ing)?\s+through|chat|session",
 }
 
@@ -2816,15 +2817,21 @@ def work_handoff_problem(output, kevin_step=None):
     return ""
 
 
+def kevin_only_steps(output):
+    """Every declared KEVIN ONLY step, in order, each as {reason, step[, invalid]}."""
+    steps = []
+    for m in KEVIN_ONLY_LINE_RE.finditer(output or ""):
+        step = {"reason": m.group("reason").lower(), "step": " ".join(m.group("step").split())[:300]}
+        if step["reason"] not in KEVIN_ONLY_REASONS:
+            step["invalid"] = True
+        steps.append(step)
+    return steps
+
+
 def kevin_only_step(output):
-    """The declared KEVIN ONLY step as {reason, step[, invalid]}, or None."""
-    m = KEVIN_ONLY_LINE_RE.search(output or "")
-    if not m:
-        return None
-    step = {"reason": m.group("reason").lower(), "step": " ".join(m.group("step").split())[:300]}
-    if step["reason"] not in KEVIN_ONLY_REASONS:
-        step["invalid"] = True
-    return step
+    """The first declared KEVIN ONLY step as {reason, step[, invalid]}, or None."""
+    steps = kevin_only_steps(output)
+    return steps[0] if steps else None
 
 
 def handback_problem(output, task_type=""):
@@ -2914,11 +2921,17 @@ _KEVIN_DOES = (
     "|printing|scan|scans|scanning|download|downloads|downloading|work|works|working|make|makes"
     "|making|reconnect|reconnects|reconnecting|switch|switches|switching|change|changes|changing"
     "|delete|deletes|deleting|install|installs|installing|turn\\s+(?:on|off)|turns\\s+(?:on|off)"
-    "|swap|swaps|swapping|ask|asks|asking|add|adds|adding|give|gives|giving|drop|drops|dropping")
+    "|swap|swaps|swapping|ask|asks|asking|add|adds|adding|give|gives|giving|drop|drops|dropping"
+    "|write|writes|writing")
 KEVIN_STEP_IN_LINE_RE = re.compile(
     # "You pay £53", "Kevin updating the bank account", "you then sign", "you'll need to open"
     r"\b(?:you|kevin)(?:\s+(?:or|and)\s+roy)?(?:'ll|\s+will|\s+can|\s+then|\s+also|\s+still|\s+just|\s+only|\s+first"
-    r"|\s+need\s+to|\s+needs\s+to|\s+must|\s+should|\s+have\s+to|\s+has\s+to)*\s+(?:%s)\b"
+    r"|\s+need\s+to|\s+needs\s+to|\s+must|\s+should|\s+have\s+to|\s+has\s+to|\s+\w+ly)*\s+(?:%s)\b"
+    # "You'll be asked to type the code"
+    r"|\byou(?:'ll|\s+will)?\s+be\s+asked\s+to\s+(?:%s)\b"
+    # "Once you have paid, the robot books it" ("Approve once you have sent it" makes the card his proof)
+    r"|(?<!approve )\bonce\s+you\s+have\s+(?:paid|signed|sent|filed|submitted|booked|bought|uploaded|posted"
+    r"|completed|entered|updated|called|phoned|rung|added|made|pasted|answered|reviewed|checked)\b"
     # "You get a ready prompt to review the records", "you get one Google Admin sign-in request"
     r"|\byou\s+(?:get|receive|are\s+given|will\s+get|'ll\s+get)\b[^.;\n]{0,80}?\bto\s+(?:%s)\b"
     r"|\byou\s+(?:get|receive|will\s+get|'ll\s+get)\s+(?:a|an|one|the)\s+(?:[\w-]+\s+){0,4}?"
@@ -2933,24 +2946,58 @@ KEVIN_STEP_IN_LINE_RE = re.compile(
     # "your only step is Pay", "your two-minute phone step", "your turn"
     r"|\byour\s+(?:[\w-]+\s+){0,3}?(?:step|job|turn)\b|\byour\s+part\b"
     # "ready for you to check"
-    r"|\bfor\s+(?:you|kevin)\s+to\s+(?:%s)\b" % ((_KEVIN_DOES,) * 5),
+    r"|\bfor\s+(?:you|kevin)\s+to\s+(?:%s)\b" % ((_KEVIN_DOES,) * 6),
     re.I)
-# Words around "you" that report what an email ASKS ("asking whether you can attend") rather
-# than give Kevin a step.
+# Words before "you" that report what an email ASKS ("asking whether you can attend") rather than
+# give Kevin a step. "if" and "that" alone are not on it: "if you sign it today" is still his step.
 _KEVIN_STEP_REPORTED_RE = re.compile(
-    r"\b(?:whether|if|asking|asks|ask|tells|telling|reminds|reminding|thanks|thanking|that)\s+$", re.I)
+    r"\b(?:whether|asking|asks|ask|tells|telling|reminds|reminding|thanks|thanking)"
+    r"(?:\s+(?:if|that|whether))?\s+$", re.I)
+# A card coming back to him is the gate, not a step: "you get a card to book". Only when the card
+# is what he gets, never "a ready prompt on the card to review" (review, 27 Oct 2026).
+_KEVIN_GETS_A_CARD_RE = re.compile(
+    r"you\s+(?:get|receive|will\s+get|'ll\s+get)\s+(?:(?:a|an|one|the|its|their|another|new|separate)\s+)*cards?\b", re.I)
+# A draft left for him to look at, as WORK_HANDOFF_RE allows (25 Sep 2026), unless the same
+# clause goes on to give him more: "for you to check, sign and post" is still his step.
+_KEVIN_DRAFT_RE = re.compile(r"for\s+you\s+to\s+(?:open\s+and\s+)?check\b(?P<rest>[^.;\n]{0,60})", re.I)
+_KEVIN_DRAFT_MORE_RE = re.compile(r"\s*(?:,|\band\b|\bthen\b)\s*(?:and\s+|then\s+)?(?:%s)\b" % _KEVIN_DOES, re.I)
 
 
-def kevin_step_in_line(line):
-    """The words of LINE that give Kevin a step of his own, or ''."""
+def _declared_cover(steps):
+    """A test of whether a match names one of the declared KEVIN ONLY steps (its kind's words, or a
+    verb its own text uses), or None when nothing is declared. Like work_handoff_problem: a declared
+    step covers its own words and nothing else (25 Sep 2026)."""
+    steps = [st for st in (steps or []) if st and not st.get("invalid")]
+    if not steps:
+        return None
+    kinds = re.compile(r"\b(?:%s)\b" % "|".join(KEVIN_REASON_WORDS[st["reason"]] for st in steps), re.I)
+    own = " ".join(str(st.get("step") or "") for st in steps).lower()
+
+    def covered(phrase, rest):
+        if re.match(r"your\b", phrase, re.I):
+            return True     # "your only step is", "your turn": the declared step itself
+        if kinds.search(phrase + " " + " ".join(rest.split()[:8])):
+            return True
+        verb = (re.findall(r"[a-z]+", phrase.lower()) or [""])[-1]
+        return len(verb) >= 3 and re.search(r"\b" + re.escape(verb[:4]), own) is not None
+    return covered
+
+
+def kevin_step_in_line(line, steps=None):
+    """The words of LINE that give Kevin a step of his own, or ''. STEPS are the output's declared
+    KEVIN ONLY steps: words naming one of them are his by rule and pass, any other step does not."""
     text = " ".join(str(line or "").split())
+    covered = _declared_cover(steps)
     for m in KEVIN_STEP_IN_LINE_RE.finditer(text):
-        if _KEVIN_STEP_REPORTED_RE.search(text[max(0, m.start() - 12): m.start()]):
+        if _KEVIN_STEP_REPORTED_RE.search(text[max(0, m.start() - 24): m.start()]):
             continue
-        if re.search(r"\bcards?\b", m.group(0), re.I):
-            continue    # "you get a card to book": a card coming back to him is the gate, not a step
-        if re.match(r"for\s+you\s+to\s+(?:open\s+and\s+)?check\b", text[m.start():], re.I):
-            continue    # a draft left for him to look at, as WORK_HANDOFF_RE allows (25 Sep 2026)
+        if _KEVIN_GETS_A_CARD_RE.match(text, m.start()):
+            continue
+        draft = _KEVIN_DRAFT_RE.match(text, m.start())
+        if draft and not _KEVIN_DRAFT_MORE_RE.match(draft.group("rest")):
+            continue
+        if covered and covered(m.group(0), text[m.end():]):
+            continue
         return text[max(0, m.start() - 30): m.end() + 40].strip()
     return ""
 
@@ -2976,17 +3023,31 @@ def approve_line_step_problem(approve_line):
 # KEVIN ONLY kind could carry that, so the step was left in prose. "review" is that kind: a
 # working session Kevin asked for himself. His own words on the task must ask for it (the live
 # Approval Feedback or the Feedback History it is archived into), or it is the agent's work.
+# Read sentence by sentence, and only an ask that puts HIM in it: a prompt for him, a session or
+# chat to go through it, going through it together, or "we need to" look at it. "Please review the
+# figures again" asks the agent; "no need for a session" asks for nothing (review, 27 Oct 2026).
 KEVIN_ASKED_FOR_REVIEW_RE = re.compile(
-    r"\b(?:review|go(?:ing)?\s+(?:through|over)|walk(?:ing)?\s+(?:me\s+)?through"
-    r"|work(?:ing)?\s+(?:on\s+it|through)|session|prompt|chat"
-    r"|look(?:ing)?\s+(?:at|over|through)\s+(?:it|this|them|these|that)\s+(?:together|with\s+me|first))\b",
+    r"\b(?:give|send|write|make)\s+(?:me|us)\s+(?:a\s+|the\s+)?prompt\b"
+    r"|\b(?:session|chat)\b[^.?!]{0,80}?\b(?:go(?:ing)?\s+(?:through|over)|review|work(?:ing)?\s+(?:on|through))\b"
+    r"|\b(?:go(?:ing)?|walk(?:ing)?|work(?:ing)?)\s+(?:through|over)\b[^.?!]{0,40}?\b(?:together|with\s+me|with\s+us)\b"
+    r"|\bwalk\s+me\s+through\b"
+    r"|\b(?:let's|let\s+us|can\s+we|could\s+we|shall\s+we|we\s+(?:need|should|must|will|definitely\s+need)\s+to)\s+"
+    r"(?:[\w']+\s+){0,4}?(?:go\s+through|go\s+over|walk\s+through|work\s+through|review|look\s+at|spend\s+(?:some\s+)?time)\b",
     re.I)
+_REVIEW_NOT_ASKED_RE = re.compile(r"\b(?:no\s+need|don't|do\s+not|not\s+needed|without|never)\b", re.I)
+
+
+def kevin_asked_for_review(fields):
+    """True when a sentence of Kevin's own on the task (Approval Feedback, or the Feedback History it
+    is archived into) asks to go through the work with him, and that sentence does not say no."""
+    said = " ".join(str((fields or {}).get(AF[k]) or "") for k in ("approvalFeedback", "feedbackHistory"))
+    return any(KEVIN_ASKED_FOR_REVIEW_RE.search(sen) and not _REVIEW_NOT_ASKED_RE.search(sen)
+               for sen in re.split(r"(?<=[.?!])\s+|\n+", said))
 
 
 def review_step_problem(fields):
     """Reason a KEVIN review step is refused on a task with these fields; '' if Kevin asked for it."""
-    said = " ".join(str((fields or {}).get(AF[k]) or "") for k in ("approvalFeedback", "feedbackHistory"))
-    if KEVIN_ASKED_FOR_REVIEW_RE.search(said):
+    if kevin_asked_for_review(fields):
         return ""
     return ("a review step is Kevin's only when his own note on the task asked to go through it with "
             "you (a session, a chat, a prompt, a review), and no note of his on this task does. "
@@ -4351,10 +4412,16 @@ def cmd_escalate(args):
         sys.exit(f"REFUSED: the brief file for {args.task} could not be read ({str(e)[:160]}).\n" + BRIEF_FORMAT_HELP)
     said = kevin_said(tf)
     problem = (decision_brief_problem(brief, ask, tf.get(AF["name"]) or "", said)
-               or plain_summary_problem(getattr(args, "plain_task", None), getattr(args, "plain_approve", None))
-               or approve_line_step_problem(getattr(args, "plain_approve", None)))
+               or plain_summary_problem(getattr(args, "plain_task", None), getattr(args, "plain_approve", None)))
     if problem:
         sys.exit(f"REFUSED: {args.task} is not ready for Kevin: {problem}.\n" + BRIEF_FORMAT_HELP)
+    problem = approve_line_step_problem(getattr(args, "plain_approve", None))
+    if problem:
+        sys.exit(f"REFUSED: {args.task} is not ready for Kevin: {problem}.\n"
+                 "       On a decision card the If you approve line says what his yes decides and what the agent\n"
+                 "       then does (Kevin, 27 Oct 2026). A step of his after his answer is recorded by the carry-out\n"
+                 f"       with block --kind KEVIN --subject <{'|'.join(KEVIN_ONLY_REASONS)}>, which brings it back\n"
+                 "       to him as a Your step card he proves.")
     record = decision_track_record(args.task, tf, emails=getattr(args, "email", None),
                                    refs=getattr(args, "ref", None), properties=getattr(args, "property", None),
                                    gmail=not getattr(args, "no_gmail", False))
@@ -5010,12 +5077,19 @@ def cmd_submit(args):
 
     # The work itself handed to Kevin or "someone" (25 Sep 2026, see
     # WORK_HANDOFF_RE). Refused unless the step is DECLARED as his.
-    kevin_step = kevin_only_step(output)
-    if kevin_step and kevin_step.get("invalid"):
-        sys.exit(
-            f"ERROR: refusing to submit {args.task}: its KEVIN ONLY line names "
-            f"{kevin_step['reason']!r}. Only these are Kevin's alone: "
-            f"{', '.join(KEVIN_ONLY_REASONS)}. Anything else an agent does, or blocks on.")
+    kevin_steps = kevin_only_steps(output)
+    kevin_step = kevin_steps[0] if kevin_steps else None
+    for st in kevin_steps:
+        if st.get("invalid"):
+            sys.exit(
+                f"ERROR: refusing to submit {args.task}: its KEVIN ONLY line names "
+                f"{st['reason']!r}. Only these are Kevin's alone: "
+                f"{', '.join(KEVIN_ONLY_REASONS)}. Anything else an agent does, or blocks on.")
+    if len(kevin_steps) > 1 and any(st["reason"] == "review" for st in kevin_steps):
+        # Only the first line opens the KEVIN wall, so a review beside another step would come back to
+        # him as nobody's (review, 27 Oct 2026).
+        sys.exit(f"ERROR: refusing to submit {args.task}: a KEVIN ONLY review goes on a card of its own, "
+                 "with no other KEVIN ONLY line. Submit the review first; the next step comes after it.")
     if kevin_step and kevin_plan_missing(args.task, "", kevin_step["step"]):
         # The submit path opens the same KEVIN wall `block` does, so it needs the same plan
         # (review, 7 Oct 2026). A plan file written before the submit counts (rent_new_tenant does).
@@ -5042,7 +5116,10 @@ def cmd_submit(args):
     # A step of Kevin's in the closing line with no KEVIN ONLY line (27 Oct 2026, see
     # KEVIN_STEP_IN_LINE_RE). The carry-out run works from this line, cannot take his step, and
     # nothing brings it back to him: "This job stays open while you run the review chat".
-    undeclared = "" if kevin_step or SIGNIN_NEEDED_RE.search(output) else kevin_step_in_line(carry_out_tail(output))
+    # Each declared step covers its own words only, and a SIGN-IN NEEDED line covers a sign-in only:
+    # "then you sign it and post it" beside a declared payment is still handed over (review, 27 Oct 2026).
+    covers = kevin_steps + ([{"reason": "credential", "step": ""}] if SIGNIN_NEEDED_RE.search(output) else [])
+    undeclared = kevin_step_in_line(carry_out_tail(output), covers)
     if undeclared:
         sys.exit(
             f"ERROR: refusing to submit {args.task}: its closing line leaves Kevin a step and no "
@@ -5087,7 +5164,7 @@ def cmd_submit(args):
     held = held_card_problem(tf_early)
     if held:
         sys.exit(f"ERROR: refusing to submit {args.task}: {held}.")
-    review = review_step_problem(tf_early) if kevin_step and kevin_step["reason"] == "review" else ""
+    review = review_step_problem(tf_early) if any(st["reason"] == "review" for st in kevin_steps) else ""
     if review:
         sys.exit(f"ERROR: refusing to submit {args.task}: its KEVIN ONLY line is a review, but {review}.")
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
