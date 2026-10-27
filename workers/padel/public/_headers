@@ -8,4 +8,4 @@
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
   Cache-Control: no-cache
-  Content-Security-Policy: default-src 'none'; script-src 'sha256-vC87q01k27XhW/UkBZqrJvja+sERQEz2ysH5n7mjTeM='; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'sha256-zRzoNPznCQMliY3lkZurjI+GjOSYfofVJV7x1+yUh8E='; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

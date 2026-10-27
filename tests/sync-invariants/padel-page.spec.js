@@ -50,7 +50,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // voteDelayMs: a number, or a function of the request number (0, 1, ...).
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const store = { votes: new Map(), headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
@@ -60,9 +60,10 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
   const state = () => {
     const now = Date.now();
     const at = new Date(now).toISOString();
-    // siClosedFrom: St Ives open (no court free) before that date number, "not open yet" from it.
+    // siClosedFrom: St Ives open before that date number, "not open yet" from it. An open day has
+    // no court free unless siFree gives its starts ({ 'HH:MM': { courts, min } }, the Worker's shape).
     const si = {};
-    if (siClosedFrom !== null) londonDates(now).forEach((d, i) => { si[d] = i >= siClosedFrom ? { status: 'closed' } : { status: 'ok', starts: {} }; });
+    if (siClosedFrom !== null) londonDates(now).forEach((d, i) => { si[d] = i >= siClosedFrom ? { status: 'closed' } : { status: 'ok', starts: siFree || {} }; });
     const availability = assembleAvailability(
       { readAt: at, goodAt: { si: at, pdl: at }, venues: { si, pdl: {} } },
       { fetchedAt: at, goodAt: at, days: {} },
@@ -473,7 +474,23 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await expect(siChip).toHaveClass(/striped/);
     await expect(siChip.locator('.sr')).toHaveText('St Ives: not open yet.');
     await page.locator(`[data-day="${dates[1]}"]`).click();                   // day 2: open, no court free
-    await expect(page.locator(`[data-slot="${dates[1]}|19"]`).locator('xpath=..').locator('.chip').first().locator('.sr')).toHaveText('St Ives: no court free.');
+    const busyChip = page.locator(`[data-slot="${dates[1]}|19"]`).locator('xpath=..').locator('.chip').first();
+    await expect(busyChip.locator('.sr')).toHaveText('St Ives: no court free.');
+    await expect(busyChip).toHaveClass(/busy/);                                // red with a cross (Kevin, 27 Oct 2026)
+    await expect(busyChip.locator('[aria-hidden]')).toHaveText('St Ives ✗');
+  });
+
+  test('chips are named by place, green with a tick when a court is free; the day strip shows the most people on one hour', async ({ page }) => {
+    await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } } });
+    const tomorrow = await openAsTestAnn(page);
+    const chips = page.locator(`[data-slot="${tomorrow}|19"]`).locator('xpath=..').locator('.chip');
+    await expect(chips.locator('[aria-hidden]')).toHaveText(['St Ives ✓', /^Cambridge /, /^Huntingdon /]);
+    await expect(chips.first()).toHaveClass(/free/);
+    await expect(chips.first().locator('.sr')).toHaveText('St Ives: court free at 19:00, shortest booking 60 min.');
+    await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('');
+    await page.locator(`[data-slot="${tomorrow}|19"]`).click();
+    await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('1 in');
+    await expect(page.locator(`[data-day="${tomorrow}"]`)).toHaveAttribute('aria-label', /up to 1 on one hour$/);
   });
 
   test.describe('no code (Kevin, 27 Oct 2026)', () => {

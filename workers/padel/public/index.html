@@ -40,6 +40,15 @@
   --danger-bg: #EED9D9;
   --stripe-a: #E5E8E1;
   --stripe-b: #F4F6F1;
+  /* Court chips and your own ticks (Kevin, 27 Oct 2026): universal colours, not the brand palette.
+     Green = a court is free, red = none, blue = you. A tick or a cross carries the meaning too. */
+  --free: #187F37;
+  --free-on: #FFFFFF;
+  --busy: #B3261E;
+  --busy-bg: #FBE4E2;
+  --busy-border: #F2B8B3;
+  --mine: #1F5FBF;
+  --mine-on: #FFFFFF;
   --bg-inverse: #1C2422;
   --font-family-base: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --fs-xs: 11px;
@@ -109,24 +118,27 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .nearly-btn { display: block; width: 100%; text-align: left; background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); overflow-wrap: anywhere; }
 .days { display: flex; gap: var(--space-2); overflow-x: auto; padding-bottom: var(--space-2); margin-bottom: var(--space-3); scrollbar-width: thin; }
 .day { flex: 0 0 auto; min-height: var(--tap); min-width: 64px; padding: var(--space-1) var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
-.day[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.day[aria-pressed="true"] { background: var(--mine); border-color: var(--mine); color: var(--mine-on); }
+.day.has-ready small { color: var(--free); }
+.day[aria-pressed="true"].has-ready small { color: var(--mine-on); }
 .day small { font-size: var(--fs-xs); font-weight: var(--fw-medium); min-height: 1em; }
 .day-note a { color: var(--accent); font-weight: var(--fw-semibold); }
 .day-note { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); background: var(--bg-surface-2); color: var(--text-secondary); font-size: var(--fs-base); }
 .grid { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: grid; gap: var(--space-2); }
 .row { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-2); }
-.row.mine { border-color: var(--accent); }
-.row.is-ready { box-shadow: 0 0 0 2px var(--success-border); }
+.row.mine { border-color: var(--mine); }
+.row.is-ready { box-shadow: 0 0 0 2px var(--free); }
 .tap { width: 100%; min-height: 52px; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface-2); text-align: left; transition: background var(--dur-fast); }
-.tap[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.tap[aria-pressed="true"] { background: var(--mine); border-color: var(--mine); color: var(--mine-on); }
 .time { font-weight: var(--fw-bold); font-size: var(--fs-xl); font-variant-numeric: tabular-nums; min-width: 3.2em; }
 .say { flex: 1; font-weight: var(--fw-medium); }
 .count { min-width: 30px; height: 30px; border-radius: var(--radius-full); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); background: var(--bg-subtle); color: var(--text-primary); }
-.tap[aria-pressed="true"] .count { background: var(--accent-on); color: var(--accent); }
+.tap[aria-pressed="true"] .count { background: var(--mine-on); color: var(--mine); }
 .meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-2); }
 .chips { display: flex; gap: var(--space-1); flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 var(--space-2); border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: var(--fw-semibold); border: 1px solid var(--border-strong); background: var(--bg-subtle); color: var(--text-secondary); }
-.chip.free { background: var(--success-bg); border-color: var(--success-border); color: var(--success); }
+.chip.free { background: var(--free); border-color: var(--free); color: var(--free-on); }
+.chip.busy { background: var(--busy-bg); border-color: var(--busy-border); color: var(--busy); }
 .chip.striped { background: repeating-linear-gradient(45deg, var(--stripe-a) 0 5px, var(--stripe-b) 5px 10px); color: var(--text-secondary); }
 .initials { color: var(--text-secondary); font-size: var(--fs-sm); overflow-wrap: anywhere; text-align: right; }
 .booked-line { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--success); font-weight: var(--fw-semibold); }
@@ -190,12 +202,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       <button type="button" id="check-now" class="btn small">Check now</button>
     </div>
     <ul class="legend" aria-label="What the venue chips mean">
-      <li><span class="chip free" aria-hidden="true">SI 60</span> court free (shortest booking, minutes)</li>
-      <li><span class="chip" aria-hidden="true">SI</span> no court free</li>
-      <li><span class="chip striped" aria-hidden="true">SI soon</span> not open yet</li>
-      <li><span class="chip striped" aria-hidden="true">SI ?</span> couldn't check</li>
+      <li><span class="chip free" aria-hidden="true">St Ives &#10003;</span> a court is free (at the last check)</li>
+      <li><span class="chip busy" aria-hidden="true">St Ives &#10007;</span> no court free</li>
+      <li><span class="chip striped" aria-hidden="true">St Ives soon</span> not open for booking yet</li>
+      <li><span class="chip striped" aria-hidden="true">St Ives ?</span> couldn't check</li>
     </ul>
-    <p class="note">SI St Ives Golf Club. PDL PDL Padel United Cambridge. PP Pulse Padel Huntingdon. St Ives and PDL are checked every 15 minutes from 06:30 to 23:00.</p>
+    <p class="note">St Ives = St Ives Golf Club. Cambridge = PDL Padel United. Huntingdon = Pulse Padel at the garden centre. St Ives and Cambridge are checked every 15 minutes from 06:30 to 23:00, Huntingdon every 15 to 30 minutes; a court can go between checks, so the booking site has the last word.</p>
   </footer>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -204,7 +216,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 (() => {
   'use strict';
   const CODES = ['si', 'pdl', 'pp'];
-  const ABBR = { si: 'SI', pdl: 'PDL', pp: 'PP' };
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const SAVE_RETRY_MS = [5000, 15000, 45000];        // a failed save tries again after 5, 15 and 45 s
@@ -445,11 +456,18 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     }).join('');
   }
 
+  // Under each day: the most people on any one hour that day (the group's interest, you included),
+  // green with a tick when that day has an hour ready to book. This is the home view (Kevin, 27 Oct 2026).
   function renderDays() {
+    const readyDays = new Set(S.ready.map((r) => r.slot.split('|')[0]));
     $('days').innerHTML = S.days.map((d) => {
-      let n = 0;
-      for (const s of mine) if (s.startsWith(d + '|')) n++;
-      return `<button type="button" class="day" data-day="${esc(d)}" aria-pressed="${d === day}" aria-label="${esc(dayLong(d))}${n ? ', ' + n + ' hours ticked' : ''}">${esc(dayShort(d))}<small>${n ? esc(n) + ' &#10003;' : ''}</small></button>`;
+      let best = 0;
+      const minH = d === S.today ? londonHour() : -1;         // today counts only the hours still to come, like the grid
+      for (const h of S.hours) if (h >= minH) best = Math.max(best, voters(d + '|' + pad(h)).length);
+      const ready = readyDays.has(d);
+      const note = best ? best + ' in' + (ready ? ' ✓' : '') : '';
+      const said = best ? ', up to ' + best + ' on one hour' + (ready ? ', ready to book' : '') : '';
+      return `<button type="button" class="day${ready ? ' has-ready' : ''}" data-day="${esc(d)}" aria-pressed="${d === day}" aria-label="${esc(dayLong(d))}${esc(said)}">${esc(dayShort(d))}<small>${esc(note)}</small></button>`;
     }).join('');
   }
 
@@ -461,17 +479,17 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const v = S.availability.venues[code][date];
     const name = S.venueInfo[code].short;
     let cls = 'chip striped';
-    let shown = ABBR[code] + ' ' + (STATUS_SHORT[v.status] || '?');
+    let shown = name + ' ' + (STATUS_SHORT[v.status] || '?');
     let said = name + ': ' + (STATUS_WORD[v.status] || "couldn't check");
     if (v.status === 'ok') {
       const h = v.hours[hh];
       if (h && h.free) {
         cls = 'chip free';
-        shown = ABBR[code] + ' ' + h.min;
+        shown = name + ' ✓';
         said = name + ': court free at ' + h.starts.join(', ') + ', shortest booking ' + h.min + ' min';
       } else {
-        cls = 'chip';
-        shown = ABBR[code];
+        cls = 'chip busy';
+        shown = name + ' ✗';
         said = name + ': no court free';
       }
     }
@@ -544,7 +562,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     $('save-now').hidden = !givenUp;
   }
 
-  // "St Ives and PDL checked 10:45, Pulse 10:50": venues read at the same minute share one time.
+  // "St Ives and Cambridge checked 10:45, Huntingdon 10:50": venues read at the same minute share one time.
   function renderFoot() {
     const a = S.availability;
     const groups = [];
