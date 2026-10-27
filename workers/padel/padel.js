@@ -40,8 +40,14 @@
 //
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
 //           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
+//
+// RATE LIMIT: every /api request, before any key check, counts one hit in D1's `rate` table under
+// "<client>|<minute>" and the 61st in a minute is refused (429). The ratelimit binding is kept, but
+// it counts per Cloudflare machine and never refused a burst (measured 27 Oct 2026), so the D1
+// count is the one that holds. A D1 failure there lets the request through (fail open): a broken
+// counter must not take the page down.
 
-export const VERSION = '2026-10-27.10';
+export const VERSION = '2026-10-27.11';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -54,6 +60,8 @@ export const PULSE_FRESH_MS = 20 * 60 * 1000;    // Pulse counts for 20 minutes 
 export const PULSE_EVERY_MS = 15 * 60 * 1000;    // Pulse is called at most once per 15 minutes
 export const REFRESH_GUARD_MS = 90 * 1000;       // no second Pulse read within 90 seconds
 export const READ_AT_SKEW_MS = 10 * 60 * 1000;   // a Mac read older (or newer) than this is refused
+export const RATE_LIMIT = 60;                    // requests a minute per client, every /api route
+export const RATE_KEEP_MS = 10 * 60 * 1000;      // rate rows older than this are deleted
 export const CLAIM_BUDGET_MS = 5000;             // no new claim once the background work has run this long
 export const SAVE_REPLY_RETRIES = 3;             // after a relay 200, the reply write is retried up to 3 times
 export const SAVE_REPLY_PAUSES_MS = [500, 1000, 2000];   // ...with these pauses between the tries
@@ -465,6 +473,15 @@ export function makeRepo(db) {
     async saveRelayReply(slot, reply) {
       await db.prepare('UPDATE alerts SET relay_reply = ? WHERE slot = ?').bind(reply, slot).run();
     },
+    // One statement: count this hit for its client and minute, and say how many there have been.
+    async countHit(key, nowIso) {
+      const r = await db.prepare('INSERT INTO rate (key, n, created_at) VALUES (?1, 1, ?2) ON CONFLICT(key) DO UPDATE SET n = n + 1 RETURNING n')
+        .bind(key, nowIso).first();
+      return Number(r?.n || 0);
+    },
+    async pruneRate(beforeIso) {
+      await db.prepare('DELETE FROM rate WHERE created_at < ?').bind(beforeIso).run();
+    },
     async getCache(key) {
       const r = await db.prepare('SELECT value FROM cache WHERE key = ?').bind(key).first();
       return r ? r.value : null;
@@ -813,6 +830,7 @@ async function handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sl
   if (prev?.readAt && Date.parse(prev.readAt) > Date.parse(clean.readAt)) return fail('A newer read is already stored', 409);
   await saveMatchi(repo, prev, clean);
   await repo.prune(londonDates(nowMs)[0]);
+  await repo.pruneRate(new Date(nowMs - RATE_KEEP_MS).toISOString());
   const pulse = await readJsonCache(repo, 'pulse');
   if (pulseDue(pulse, nowMs) && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) await refreshPulse(env, repo, nowMs, fetchImpl);
   const now = clock();
@@ -834,10 +852,18 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
   try {
     // The page is served as a static asset before this Worker runs; anything else is not ours.
     if (!path.startsWith('/api/')) return new Response('Not found', { status: 404, headers: BASE_HEADERS });
+    const caller = callerKey(request.headers.get('CF-Connecting-IP'));
     if (env.WRITE_LIMIT) {
-      const { success } = await env.WRITE_LIMIT.limit({ key: callerKey(request.headers.get('CF-Connecting-IP')) });
+      const { success } = await env.WRITE_LIMIT.limit({ key: caller });
       if (!success) return fail('slow down', 429);
     }
+    let hits = 0;
+    try {
+      hits = await repo.countHit(`${caller}|${Math.floor(nowMs / 60000)}`, new Date(nowMs).toISOString());
+    } catch (e) {
+      console.error('padel: rate count failed, request let through', String(e));
+    }
+    if (hits > RATE_LIMIT) return fail('slow down', 429);
     if (path === '/api/health' && request.method === 'GET') return json({ ok: true, version: VERSION });
     if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
     if (!keyOk(request.headers.get('X-Group-Key'), env.GROUP_KEY)) return fail(GATE_MSG, 401);

@@ -7,7 +7,7 @@
 -- that is there is skipped, columns and all). A change to the LIVE database goes through a
 -- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
 -- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
--- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql.
+-- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
@@ -56,4 +56,13 @@ CREATE TABLE IF NOT EXISTS cache (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- Requests per client per minute (sql-changes/0002-rate.sql, 27 Oct 2026). key = "<client>|<minute
+-- number>"; the Worker refuses the 61st request in a minute. Rows older than 10 minutes are
+-- deleted on each Mac post (/api/courts).
+CREATE TABLE IF NOT EXISTS rate (
+  key TEXT PRIMARY KEY,
+  n INTEGER NOT NULL,
+  created_at TEXT NOT NULL
 );

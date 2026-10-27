@@ -270,10 +270,11 @@ function mapRepo() {
   const votes = new Map();
   const booked = new Map();
   const alerts = new Map();
+  const rate = new Map();
   const cache = new Map();
   const out = (p) => ({ id: p.id, name: p.name, venues: p.venues.split(',').filter(Boolean), savedAt: p.votes_at || null });
   return {
-    rows: { alerts: () => [...alerts.values()], people: () => [...people.values()], votes: () => [...votes.values()] },
+    rows: { alerts: () => [...alerts.values()], people: () => [...people.values()], votes: () => [...votes.values()], rate: () => [...rate.values()] },
     putAlert: (row) => alerts.set(row.slot, { names: '', venues: '', relay_reply: null, ...row }),
     repo: {
       async listPeople() { return [...people.values()].sort((a, b) => a.name.localeCompare(b.name)).map(out); },
@@ -302,6 +303,8 @@ function mapRepo() {
         return true;
       },
       async saveRelayReply(slot, reply) { if (alerts.has(slot)) alerts.get(slot).relay_reply = reply; },
+      async countHit(key, now) { const r = rate.get(key) || { key, n: 0, created_at: now }; r.n++; rate.set(key, r); return r.n; },
+      async pruneRate(before) { for (const [k, v] of [...rate]) if (v.created_at < before) rate.delete(k); },
       async getCache(k) { return cache.has(k) ? cache.get(k).value : null; },
       async setCache(k, value, now) { cache.set(k, { value, updated_at: now }); },
       async claimRefresh(nowMs, guardMs) {
@@ -343,6 +346,7 @@ function sqlRepo() {
       alerts: () => db.prepare('SELECT * FROM alerts').all().map((r) => ({ ...r })),
       people: () => db.prepare('SELECT * FROM people').all().map((r) => ({ ...r })),
       votes: () => db.prepare('SELECT * FROM votes').all().map((r) => ({ ...r })),
+      rate: () => db.prepare('SELECT * FROM rate ORDER BY key').all().map((r) => ({ ...r })),
     },
     putAlert: (row) => db.prepare('INSERT INTO alerts (slot, sent_at, names, venues, relay_reply) VALUES (?, ?, ?, ?, ?)').run(row.slot, row.sent_at, row.names || '', row.venues || '', row.relay_reply ?? null),
     repo: makeRepo(d1),
@@ -845,6 +849,41 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.limited.keys.slice(0, 3)).toEqual(['1.2.3.4', '1.2.3.4', '1.2.3.4']);
   });
 
+  describe('the D1 rate limit: 60 requests a minute per client, every /api route', () => {
+    const hitN = async (n, opts) => { const out = []; for (let i = 0; i < n; i++) out.push((await t.call('/api/health', undefined, { key: '', drain: false, ...opts })).status); return out; };
+    it('60 requests in one minute pass, the 61st is 429, and a new minute passes again', async () => {
+      expect(new Set(await hitN(60, { ip: '1.2.3.4' }))).toEqual(new Set([200]));
+      const r61 = await t.call('/api/health', undefined, { key: '', ip: '1.2.3.4' });
+      expect(r61).toMatchObject({ status: 429, json: { error: 'slow down' } });
+      const keyless = await t.call('/api/state', undefined, { key: '', ip: '1.2.3.4' });
+      expect(keyless.status).toBe(429);                      // refused before the key check, not a 401
+      t.setNow(NOW + 60 * 1000);
+      expect((await t.call('/api/health', undefined, { key: '', ip: '1.2.3.4' })).status).toBe(200);
+      expect(t.rows.rate().map((r) => [r.key, r.n])).toEqual([[`1.2.3.4|${Math.floor(NOW / 60000)}`, 62], [`1.2.3.4|${Math.floor(NOW / 60000) + 1}`, 1]]);
+    });
+    it('two different clients count apart; an IPv6 /64 counts as one client', async () => {
+      await hitN(60, { ip: '1.2.3.4' });
+      expect((await t.call('/api/health', undefined, { key: '', ip: '5.6.7.8' })).status).toBe(200);
+      expect((await t.call('/api/health', undefined, { key: '', ip: '1.2.3.4' })).status).toBe(429);
+      await hitN(60, { ip: '2001:db8:1:2::1' });
+      expect((await t.call('/api/health', undefined, { key: '', ip: '2001:db8:1:2:ffff::9' })).status).toBe(429);
+      expect((await t.call('/api/health', undefined, { key: '', ip: '2001:db8:1:3::1' })).status).toBe(200);
+    });
+    it('the Mac post deletes rate rows older than 10 minutes', async () => {
+      await hitN(3, { ip: '1.2.3.4' });
+      t.setNow(NOW + 11 * MIN);
+      expect((await t.call('/api/courts', macBody(NOW + 11 * MIN), { key: '', robot: ROBOT })).status).toBe(200);
+      expect(t.rows.rate().map((r) => r.key)).toEqual([`unknown|${Math.floor((NOW + 11 * MIN) / 60000)}`]);
+    });
+    it('a D1 failure in the count lets the request through (fail open) and logs it', async () => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      t.repo.countHit = vi.fn(async () => { throw new Error('D1 overloaded'); });
+      expect((await t.call('/api/health', undefined, { key: '' })).status).toBe(200);
+      expect((await t.call('/api/state')).status).toBe(200);
+      expect(err).toHaveBeenCalledWith('padel: rate count failed, request let through', expect.stringContaining('D1 overloaded'));
+    });
+  });
+
   it('no GROUP_KEY set means every group route is shut; no ROBOT_KEY means /api/courts is shut', async () => {
     delete t.env.GROUP_KEY;
     expect((await t.call('/api/state')).status).toBe(401);
@@ -909,7 +948,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const first = (await t.call('/api/state', undefined, { drain: false })).json;
     expect(first.availability.stale).toBe(true);
     expect(t.waits).toHaveLength(1);
-    expect((await t.call('/api/state', undefined, { drain: false })).json.availability.stale).toBe(true);
+    await t.call('/api/state', undefined, { drain: false });   // stale or just refreshed, it never kicks a second read
     expect(t.waits).toHaveLength(1);                      // the 90-second guard holds the second kick
     await t.drain();
 

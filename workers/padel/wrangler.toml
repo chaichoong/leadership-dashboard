@@ -71,11 +71,10 @@ binding = "RELAY"
 service = "apple-inbound"
 
 # Every /api request (GET too) is asked of a limit of 60 a minute per client IP, before any key check.
-# Measured on 27 Oct 2026: the binding counts per Cloudflare machine, not per Worker. One request
-# that called limit() 70 times was refused from the 61st call, but 70, 200 and 400 requests in a
-# minute from one IP were never refused, because each landed on a fresh counter. So this caps a
-# runaway loop inside one machine only; it is not a defence against a burst. The group code
-# (96 bits) is what keeps strangers out.
+# Measured on 27 Oct 2026: this binding counts per Cloudflare machine, not per Worker, so 70, 200
+# and 400 requests in a minute from one IP were never refused by it. The limit that holds is the
+# D1 count in padel.js (table `rate`, the 61st request a minute per client is a 429); this binding
+# stays as a cheap first cap on a runaway loop inside one machine.
 [[ratelimits]]
 name = "WRITE_LIMIT"
 namespace_id = "2104"
