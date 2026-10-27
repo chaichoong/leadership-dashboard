@@ -260,6 +260,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   // so it survives the page being hidden or closed and is never sent twice.
   let inFlight = [];
   const saving = () => inFlight.length > 0;
+  // Two saves overlapped (a hide-send during a save in flight): their replies may land out of
+  // order, so once the last of them lands the truth is read again.
+  let overlapped = false;
+  function afterLanding() { if (overlapped && !saving()) { overlapped = false; load(); } }
   let saveTimer = null;
   let saveTry = 0;                            // failed saves in a row
   let backoffUntil = 0;
@@ -599,6 +603,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     pendingAdd = new Set();
     pendingRemove = new Set();
     inFlight = [];
+    overlapped = false;
   }
 
   function setBusy(on) {
@@ -640,6 +645,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     }
     // The owner is the save that started with nothing else in flight: only it may clear the back-off.
     const sent = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), owner: !saving() };
+    if (saving()) overlapped = true;
     pendingAdd = new Set();
     pendingRemove = new Set();
     inFlight.push(sent);
@@ -651,18 +657,21 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         inFlight = inFlight.filter((x) => x !== sent);
         if (sent.owner) { saveTry = 0; backoffUntil = 0; }
         if (!applyNewest(r)) load();                       // a newer reply was shown first: read the truth
+        afterLanding();
         if (hasPending() && !saving()) scheduleSave(1);
         return !hasPending();
       } catch (e) {
         if (!inFlight.includes(sent)) return false;
         inFlight = inFlight.filter((x) => x !== sent);
+        afterLanding();
         if (e.status === 401) return false;
         // "No such person": they were removed. Reading the state again shows the name list.
         if (e.status === 404) { await load(); return false; }
         // The failed changes are NOT put back (the server may have applied them): show the last
         // truth plus the unsent taps, read the truth again, and retry only what is still unsent.
         saveTry++;
-        if (saveTry === 1) toast("Couldn't save. The page shows what is saved; tap again to change it.");
+        // Every failed save that carried a change says so, however many failed before it.
+        if (sent.add.size || sent.remove.size) toast("Couldn't save. The page shows what is saved; tap again to change it.");
         clearTimeout(saveTimer);
         if (saveTry <= SAVE_RETRY_MS.length) {
           const wait = Math.max(SAVE_RETRY_MS[saveTry - 1], backoffUntil - Date.now());

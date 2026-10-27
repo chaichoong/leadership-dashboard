@@ -30,6 +30,9 @@
 //  16. A save whose reply is older than a Check-now reply still ends with the truth shown.
 //  17. A hide-send that fails with the page still open shows the truth and the toast.
 //  18. A hide-send reply older than a newer write's reply still ends with the truth shown.
+//  19. Every failed save that carried a change shows the toast, not only the first in a row.
+//  20. Two overlapping saves (a hide-send during a save in flight): the truth is read again once
+//      the last of them lands.
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -47,7 +50,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
-  const store = { votes: new Map(), bodies: [], times: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  const store = { votes: new Map(), bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   store.removePerson = () => { store.gone = true; };
   // The hours a person has ticked on the server (votes are keyed by person and hour).
   store.ticks = (pid = 1) => [...store.votes.values()].filter((v) => v.person_id === pid).map((v) => v.slot).sort();
@@ -66,7 +69,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
     const path = new URL(req.url()).pathname;
     if (store.offline) return route.abort('internetdisconnected');      // no signal at all
     if (req.headers()['x-group-key'] !== KEY) return reply(route, 401, { error: 'This link needs the group code. Ask Kevin.' });
-    if (path === '/api/state') return reply(route, 200, state());
+    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, state()); }
     if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false });
     if (path === '/api/vote') {
       const body = req.postDataJSON();
@@ -84,6 +87,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
       store.inflight--;
       store.inflightBy[pid]--;
       store.answered++;
+      store.replyTimes.push(Date.now());
       if (store.gone && pid === 1) return reply(route, 404, { error: 'No such person' });
       const apply = () => {
         for (const slot of body.add || []) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
@@ -404,5 +408,50 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await page.locator('#check-now').click();                                  // a newer write reply, taken before A landed
     await expect.poll(() => store.ticks(), { timeout: 6000 }).toEqual([A]);
     await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('true'); // the older reply lost: the truth was read
+  });
+
+  test('every failed save that carried a change shows the toast, not only the first in a row', async ({ page }) => {
+    test.setTimeout(45000);
+    const store = await mockPadel(page, { voteStatuses: [429, 429] });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    const B = `${day}|20`;
+    await page.evaluate(() => {
+      window.__toasts = [];
+      const t = document.getElementById('toast');
+      new MutationObserver(() => { if (!t.hidden) window.__toasts.push(t.textContent); }).observe(t, { attributes: true, childList: true, subtree: true, characterData: true });
+    });
+    await tap(page, A);
+    await expect.poll(() => store.bodies.length, { timeout: 3000 }).toBe(1);   // refused: 429
+    await expect.poll(() => pressed(page, A), { timeout: 3000 }).toBe('false');
+    await sleep(5500);
+    await page.evaluate(() => { window.__toasts = []; });
+    await tap(page, B);
+    await hide(page);                                                          // the hide-send, refused again
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
+    await show(page);
+    await expect.poll(() => pressed(page, B), { timeout: 3000 }).toBe('false');
+    expect(await page.evaluate(() => window.__toasts)).toContain("Couldn't save. The page shows what is saved; tap again to change it.");
+    expect(store.ticks()).toEqual([]);
+  });
+
+  test('two overlapping saves: the truth is read again once the last of them lands', async ({ page }) => {
+    // The save of A answers after 1 s; the hide-send of B, sent while A is out, after 2 s.
+    const store = await mockPadel(page, { voteDelayMs: (i) => (i === 0 ? 1000 : 2000) });
+    const day = await openAsTestAnn(page);
+    const A = `${day}|19`;
+    const B = `${day}|20`;
+    await tap(page, A);
+    await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);
+    await tap(page, B);
+    await hide(page);
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
+    await expect.poll(() => store.answered, { timeout: 5000 }).toBe(2);
+    const lastLanded = Math.max(...store.replyTimes);
+    await expect.poll(() => store.stateTimes.some((t) => t >= lastLanded), { timeout: 3000 }).toBe(true);
+    await show(page);
+    expect(store.ticks()).toEqual([A, B]);
+    expect(await pressed(page, A)).toBe('true');
+    expect(await pressed(page, B)).toBe('true');
   });
 });
