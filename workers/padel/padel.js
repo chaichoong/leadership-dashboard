@@ -32,8 +32,9 @@
 // londonDates from this file, so both sides parse one way. Pulse is read here.
 //
 // FRESHNESS. A venue's data counts only while it is fresh: St Ives and PDL for 45 minutes after
-// the Mac's read, Pulse for 20 minutes. A venue that is not fresh shows "couldn't check" with its
-// own booking link and is NEVER counted towards a DM.
+// the Mac's read (and the evening's last read, 22:30 London or later, until 06:45 the next
+// morning while the Mac sleeps: matchiFresh), Pulse for 20 minutes. A venue that is not fresh
+// shows "couldn't check" with its own booking link and is NEVER counted towards a DM.
 //
 // NO cron (all five free-plan triggers are used) and NO KV (free-tier writes starve the other
 // Workers). D1 holds everything; see schema.sql.
@@ -342,7 +343,10 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     for (const date of dates) {
       if (!fresh[code]) { venuesOut[code][date] = { status: 'error', reason: 'not checked recently', hours: {} }; continue; }
       const day = a.venues?.[code]?.[date];
-      if (!day) { venuesOut[code][date] = { status: 'pending', hours: {} }; continue; }
+      // A fresh read that lacks this date (after midnight the window gains a day the evening's
+      // read never covered): "couldn't check" with the booking link, never "checking", because
+      // nothing is checking until the next run. "pending" is only for a venue never read at all.
+      if (!day) { venuesOut[code][date] = fetchedAt[code] ? { status: 'error', reason: 'not in the last read', hours: {} } : { status: 'pending', hours: {} }; continue; }
       const out = { status: day.status, hours: day.status === 'ok' ? hoursFromStarts(futureStarts(day.starts, date, nowMs)) : {} };
       if (day.reason) out.reason = day.reason;
       venuesOut[code][date] = out;
@@ -404,10 +408,18 @@ function startsText(v) {
   return same ? `${v.starts.join(', ')} (${v.mins[0]} min)` : v.starts.map((t, i) => `${t} (${v.mins[i]} min)`).join(', ');
 }
 const slackSafe = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-function checkedText(venues, cfg) {
+// With nowMs, a read from another London day says so ("22:45 yesterday"): a DM sent at 02:00 on
+// the evening's last read must not read like a check made minutes ago.
+function checkedText(venues, cfg, nowMs) {
+  const today = Number.isFinite(nowMs) ? londonParts(nowMs).date : null;
   const groups = [];
   for (const v of venues) {
-    const t = v.checkedAt ? londonHHMM(v.checkedAt) : '?';
+    let t = '?';
+    if (v.checkedAt) {
+      t = londonHHMM(v.checkedAt);
+      const d = londonParts(Date.parse(v.checkedAt)).date;
+      if (today && d !== today) t += d === addDays(today, -1) ? ' yesterday' : ' on ' + d;
+    }
     const g = groups.find((x) => x.t === t);
     if (g) g.names.push(cfg[v.code].short); else groups.push({ t, names: [cfg[v.code].short] });
   }
@@ -415,9 +427,9 @@ function checkedText(venues, cfg) {
   return `Courts checked: ${groups.map((g) => `${g.names.join(' and ')} ${g.t}`).join(', ')}.`;
 }
 // One line per venue, each with its OWN count and names: people are never added up across venues.
-export function alertText(r, cfg, pageUrl) {
+export function alertText(r, cfg, pageUrl, nowMs) {
   const lines = r.venues.map((v) => `${cfg[v.code].short}: ${v.count} in (${v.names.map(slackSafe).join(', ')}), starts ${startsText(v)}, book <${v.book}>.`);
-  return `Padel: ${r.label}. ${lines.join(' ')} ${checkedText(r.venues, cfg)} Whoever books taps Booked on the page ${pageUrl}`;
+  return `Padel: ${r.label}. ${lines.join(' ')} ${checkedText(r.venues, cfg, nowMs)} Whoever books taps Booked on the page ${pageUrl}`;
 }
 
 // Names: one person, one row. Accents and case are folded before comparing, so "Zoë" and "ZOE"
@@ -681,7 +693,7 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep, bg
       res = await withTimeout(env.RELAY.fetch(new Request(RELAY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Relay-Key': env.RELAY_KEY },
-        body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.runpreneur.org.uk/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
+        body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.runpreneur.org.uk/', Date.parse(nowIso)).slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
       })), RELAY_TIMEOUT_MS);
     } catch (e) {
       // No answer in 20 s, or a dropped call: the DM may or may not have gone.
