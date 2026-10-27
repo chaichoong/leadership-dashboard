@@ -168,6 +168,10 @@ CATALOGUE = {
     "property_manager_session_secret": {"service": "property-manager Worker", "kind": "shared", "test": "", "purpose": "signs Roy's page sessions"},
     "proxy_service_token2": {"service": "claude-proxy", "kind": "shared", "test": "", "purpose": "the Claude proxy"},
     "slack_relay_key": {"service": "apple-inbound Worker", "kind": "shared", "test": "", "purpose": "Slack messages through the relay"},
+    # The padel group page's link code (27 Oct 2026). A new value changes the link the group uses,
+    # so a replace means Kevin re-shares the link in the WhatsApp group.
+    "padel_group_key": {"service": "padel Worker", "kind": "shared", "test": "padel",
+                        "purpose": "the code in the padel group page's link (#k=...), checked by the padel Worker"},
     "property_manager_passcode_kevin": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Kevin's passcode for Roy's page"},
     "property_manager_passcode_roy": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Roy's passcode for his page"},
 }
@@ -195,6 +199,8 @@ COPY_OF_AT = {
     ("claude-proxy", "PROXY_SERVICE_TOKEN_2"): "proxy_service_token2",    # od_compose.py's bearer
     ("money-confidence-daily", "PROXY_TOKEN"): "proxy_service_token2",    # its wrangler toml: = PROXY_SERVICE_TOKEN_2
     ("agent-runner", "PROXY_TOKEN"): "proxy_service_token2",              # its wrangler toml and anthropic-proxy.js
+    ("padel", "GROUP_KEY"): "padel_group_key",                            # the padel page's link code
+    ("padel", "RELAY_KEY"): "slack_relay_key",                            # its X-Relay-Key to apple-inbound's /slack-relay
 }
 # A Worker-only secret that is a key to an OUTSIDE service: any valid key from that service works, so
 # one paste may go to every Worker holding one. Any other Worker-only secret is a key we made that
@@ -612,10 +618,16 @@ def t_gdrive(v, row):
                                            "assertion": (signing + b"." + b64(sig)).decode()})
 
 
+def t_padel(v, row):
+    """A GET of the padel page's state with the code: 200 means the Worker holds this same code."""
+    s, _, b = _http("https://padel.kevinbrittain.workers.dev/api/state", {"X-Group-Key": v})
+    return _ok(s, b)
+
+
 EXPIRY_TESTS = ("github", "cloudflare")    # these read the key's own end date, so an "ok" without one clears it
 TESTS = {"airtable": t_airtable, "github": t_github, "cloudflare": t_cloudflare, "gemini": t_gemini,
          "homeassistant": t_homeassistant, "stripe": t_stripe, "ticketmaster": t_ticketmaster, "pingen": t_pingen,
-         "youtube": t_youtube, "gdrive": t_gdrive}
+         "youtube": t_youtube, "gdrive": t_gdrive, "padel": t_padel}
 
 
 def test_value(row, value):

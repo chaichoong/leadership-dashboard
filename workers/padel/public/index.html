@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Padel this week</title>
+<style>
+/* Colours, type and spacing copied from the dashboard's css/tokens.css (Sage Executive). The
+   Worker cannot link that file, so the values used here are copied into this :root. The dark
+   set reuses the same palette (forest, stone, green, gold, red) for phones in dark mode. */
+:root {
+  --bg-app: #F1F3EF;
+  --bg-surface: #FBFBF9;
+  --bg-surface-2: #F4F6F1;
+  --bg-subtle: #E5E8E1;
+  --border-subtle: #E5E8E1;
+  --border-default: #DDE1D9;
+  --border-strong: #C9CDC3;
+  --border-focus: #2C6E49;
+  --text-primary: #1C2422;
+  --text-secondary: #5A6660;
+  --text-muted: #8A928C;
+  --text-inverse: #FBFBF9;
+  --accent: #2C6E49;
+  --accent-hover: #1B4A30;
+  --accent-soft: #DDE8DF;
+  --accent-on: #FFFFFF;
+  --success: #2C6E49;
+  --success-bg: #DDE8DF;
+  --success-border: #C4D6C8;
+  --warning: #8A6B2D;
+  --warning-bg: #EFE3CA;
+  --warning-border: #E0CDA4;
+  --danger: #A33B3B;
+  --danger-bg: #EED9D9;
+  --stripe-a: #E5E8E1;
+  --stripe-b: #F4F6F1;
+  --bg-inverse: #1C2422;
+  --font-family-base: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 999px;
+  --shadow-sm: 0 1px 2px rgba(28, 36, 34, 0.04);
+  --shadow-md: 0 1px 3px rgba(28, 36, 34, 0.06), 0 4px 10px rgba(28, 36, 34, 0.04);
+  --tap: 44px;
+  --dur-fast: 120ms;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-app: #1C2422;
+    --bg-surface: #263330;
+    --bg-surface-2: #2F3D39;
+    --bg-subtle: #3B4A46;
+    --border-subtle: #2F3D39;
+    --border-default: #3B4A46;
+    --border-strong: #5A6660;
+    --border-focus: #4DA574;
+    --text-primary: #FBFBF9;
+    --text-secondary: #BFC3BD;
+    --text-muted: #8A928C;
+    --accent: #4DA574;
+    --accent-hover: #368859;
+    --accent-soft: #1B4A30;
+    --accent-on: #1C2422;
+    --success: #4DA574;
+    --success-bg: #1B4A30;
+    --success-border: #2C6E49;
+    --warning: #C6A15B;
+    --warning-bg: #3B4A46;
+    --warning-border: #8A6B2D;
+    --danger: #C25353;
+    --danger-bg: #3B4A46;
+    --stripe-a: #3B4A46;
+    --stripe-b: #2F3D39;
+    --bg-inverse: #FBFBF9;
+    --text-inverse: #1C2422;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; font-family: var(--font-family-base); font-size: var(--fs-md); line-height: 1.5;
+  color: var(--text-primary); background: var(--bg-app); -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.6; }
+:focus-visible { outline: 3px solid var(--border-focus); outline-offset: 2px; }
+.wrap { max-width: 640px; margin: 0 auto; padding: var(--space-4) var(--space-4) var(--space-8); }
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-4); }
+h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin: 0; }
+h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(--space-3); }
+.who { margin: 0; color: var(--text-secondary); font-size: var(--fs-md); }
+.link { background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); color: var(--accent); text-decoration: underline; font-weight: var(--fw-medium); }
+.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-4); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); }
+.note { color: var(--text-secondary); margin: 0 0 var(--space-3); }
+.gate p { font-size: var(--fs-lg); margin: 0; }
+.btn { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn.small { min-height: var(--tap); padding: 0 var(--space-3); font-size: var(--fs-md); }
+.names { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-4); }
+.names .btn { min-height: 56px; font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add label { display: block; font-weight: var(--fw-semibold); margin-bottom: var(--space-2); }
+.add-row { display: flex; gap: var(--space-2); }
+.add-row input { flex: 1; min-width: 0; min-height: var(--tap); padding: 0 var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-lg); }
+.block { border-radius: var(--radius-xl); padding: var(--space-4); margin-bottom: var(--space-4); border: 1px solid; }
+.block h2 { margin-bottom: var(--space-2); }
+.ready { background: var(--success-bg); border-color: var(--success-border); }
+.nearly { background: var(--warning-bg); border-color: var(--warning-border); }
+.item { padding: var(--space-2) 0; border-top: 1px solid var(--border-default); }
+.item:first-of-type { border-top: 0; }
+.item p { margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.venue-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-1) 0; }
+.venue-line span { flex: 1 1 140px; }
+.nearly-btn { display: block; width: 100%; text-align: left; background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); overflow-wrap: anywhere; }
+.days { display: flex; gap: var(--space-2); overflow-x: auto; padding-bottom: var(--space-2); margin-bottom: var(--space-3); scrollbar-width: thin; }
+.day { flex: 0 0 auto; min-height: var(--tap); min-width: 64px; padding: var(--space-1) var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.day[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.day small { font-size: var(--fs-xs); font-weight: var(--fw-medium); min-height: 1em; }
+.day-note a { color: var(--accent); font-weight: var(--fw-semibold); }
+.day-note { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); background: var(--bg-surface-2); color: var(--text-secondary); font-size: var(--fs-base); }
+.grid { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: grid; gap: var(--space-2); }
+.row { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-2); }
+.row.mine { border-color: var(--accent); }
+.row.is-ready { box-shadow: 0 0 0 2px var(--success-border); }
+.tap { width: 100%; min-height: 52px; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface-2); text-align: left; transition: background var(--dur-fast); }
+.tap[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.time { font-weight: var(--fw-bold); font-size: var(--fs-xl); font-variant-numeric: tabular-nums; min-width: 3.2em; }
+.say { flex: 1; font-weight: var(--fw-medium); }
+.count { min-width: 30px; height: 30px; border-radius: var(--radius-full); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); background: var(--bg-subtle); color: var(--text-primary); }
+.tap[aria-pressed="true"] .count { background: var(--accent-on); color: var(--accent); }
+.meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-2); }
+.chips { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 var(--space-2); border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: var(--fw-semibold); border: 1px solid var(--border-default); background: var(--bg-subtle); color: var(--text-muted); }
+.chip.free { background: var(--success-bg); border-color: var(--success-border); color: var(--success); }
+.chip.striped { background: repeating-linear-gradient(45deg, var(--stripe-a) 0 5px, var(--stripe-b) 5px 10px); color: var(--text-secondary); }
+.initials { color: var(--text-secondary); font-size: var(--fs-sm); overflow-wrap: anywhere; text-align: right; }
+.booked-line { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--success); font-weight: var(--fw-semibold); }
+.toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.toggle { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); }
+.toggle[aria-pressed="true"] { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); text-decoration: line-through; }
+.foot { color: var(--text-secondary); font-size: var(--fs-base); }
+.foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); }
+.legend { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; gap: var(--space-1); }
+.legend li { display: flex; align-items: center; gap: var(--space-2); }
+.toast { position: fixed; left: 50%; bottom: calc(var(--space-4) + env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: calc(100% - 32px); background: var(--bg-inverse); color: var(--text-inverse); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); font-weight: var(--fw-medium); z-index: 10; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (min-width: 720px) {
+  .wrap { padding-top: var(--space-8); }
+  .grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Padel this week</h1>
+    <p id="who" class="who" hidden>Playing as <strong id="who-name"></strong>. <button type="button" id="switch" class="link">Not you? Switch</button></p>
+  </header>
+
+  <main>
+    <div id="loading" class="card" role="status"><p class="note" id="loading-text">Loading...</p><button type="button" id="retry" class="btn" hidden>Try again</button></div>
+
+    <section id="gate" class="card gate" hidden><p>This link needs the group code. Ask Kevin.</p></section>
+
+    <section id="pick" class="card" hidden aria-labelledby="pick-h">
+      <h2 id="pick-h">Pick your name</h2>
+      <div id="names" class="names"></div>
+      <p id="names-empty" class="note" hidden>No names yet. Add yours below.</p>
+      <form id="add-form" class="add" novalidate>
+        <label for="add-name">Not on the list?</label>
+        <div class="add-row">
+          <input id="add-name" name="name" type="text" autocomplete="given-name" maxlength="30" placeholder="Your name">
+          <button type="submit" id="add-btn" class="btn primary">Add my name</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="board" hidden>
+      <div id="ready" class="block ready" hidden aria-live="polite"></div>
+      <div id="nearly" class="block nearly" hidden></div>
+      <nav id="days" class="days" aria-label="Pick a day"></nav>
+      <p id="day-note" class="day-note" hidden></p>
+      <ol id="grid" class="grid" aria-label="Hours"></ol>
+      <section class="card" aria-labelledby="cant-h">
+        <h2 id="cant-h">Can't do</h2>
+        <p class="note">Tap a venue you can't get to. You won't count towards a court there.</p>
+        <div id="venue-toggles" class="toggles"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer id="foot" class="foot" hidden>
+    <div class="foot-row">
+      <span id="checked" aria-live="polite">Courts not checked yet</span>
+      <button type="button" id="check-now" class="btn small">Check now</button>
+    </div>
+    <ul class="legend" aria-label="What the venue chips mean">
+      <li><span class="chip free">SI 60</span> court free (shortest booking, minutes)</li>
+      <li><span class="chip">SI</span> no court free</li>
+      <li><span class="chip striped">SI soon</span> not open yet</li>
+      <li><span class="chip striped">SI ?</span> couldn't check</li>
+    </ul>
+    <p class="note">SI St Ives Golf Club. PDL PDL Padel United Cambridge. PP Pulse Padel Huntingdon.</p>
+  </footer>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+  const GATE = 'This link needs the group code. Ask Kevin.';
+  const CODES = ['si', 'pdl', 'pp'];
+  const ABBR = { si: 'SI', pdl: 'PDL', pp: 'PP' };
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+
+  // localStorage can throw (private browsing, storage off). The page still works for this visit;
+  // the person is told once that it will not remember them.
+  let storageWarned = false;
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { warnStorage(); return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { warnStorage(); } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { warnStorage(); } },
+  };
+  function warnStorage() {
+    if (storageWarned) return;
+    storageWarned = true;
+    toast("This browser won't remember you, so you'll pick your name each visit.");
+  }
+
+  function readKey() {
+    const m = /(?:^#|[#&])k=([0-9a-fA-F]{8,64})/.exec(location.hash);
+    if (m) { store.set('padel.k', m[1]); return m[1]; }
+    return store.get('padel.k') || '';
+  }
+  const key = readKey();
+
+  let S = null;                               // last state from the server
+  let me = Number(store.get('padel.person')) || null;
+  let day = null;                             // the selected date
+  let mine = new Set();                       // my ticks (optimistic)
+  let dirty = false;
+  let saving = false;
+  let saveTimer = null;
+  let backoffUntil = 0;
+  let stalePolled = false;
+  let busy = false;
+
+  class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+  async function api(path, body) {
+    const opts = { method: body ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store' };
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    let res;
+    try { res = await fetch(path, opts); } catch (e) { throw new ApiError('No connection. Check your signal and try again.', 0); }
+    const data = await res.json().catch(() => null);
+    if (res.status === 401) { showGate(); throw new ApiError(GATE, 401); }
+    if (res.status === 429) { backoffUntil = Date.now() + 10000; throw new ApiError('Too many taps at once. Wait a few seconds.', 429); }
+    if (!res.ok) throw new ApiError((data && data.error) || 'Something went wrong (' + res.status + '). Try again.', res.status);
+    if (!data) throw new ApiError('The page got an answer it could not read. Try again.', res.status);
+    return data;
+  }
+
+  function showGate() {
+    $('loading').hidden = true;
+    $('pick').hidden = true;
+    $('board').hidden = true;
+    $('foot').hidden = true;
+    $('who').hidden = true;
+    $('gate').hidden = false;
+  }
+
+  const pad = (h) => String(h).padStart(2, '0');
+  function dayShort(date) {
+    const [y, m, d] = date.split('-').map(Number);
+    return WD[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()] + ' ' + d;
+  }
+  function dayLong(date) {
+    const [y, m, d] = date.split('-').map(Number);
+    return WD[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()] + ' ' + d + ' ' + MON[m - 1];
+  }
+  function londonHour() {
+    return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  }
+  function initials(name) {
+    const w = String(name).trim().split(/\s+/);
+    return (w.length > 1 ? w[0][0] + w[w.length - 1][0] : w[0].slice(0, 2)).toUpperCase();
+  }
+  const person = (id) => (S ? S.people.find((p) => p.id === id) : null);
+  function voters(slot) {
+    const ids = ((S && S.votes[slot]) || []).filter((id) => id !== me);
+    if (me && mine.has(slot)) ids.push(me);
+    return ids;
+  }
+
+  async function load() {
+    try {
+      apply(await api('/api/state'));
+    } catch (e) {
+      if (e.status === 401) return;
+      if (!S) {
+        $('loading-text').textContent = e.message;
+        $('retry').hidden = false;
+      } else {
+        toast(e.message);
+      }
+    }
+  }
+
+  function apply(s) {
+    S = s;
+    if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); }
+    if (!dirty && !saving) mine = new Set(Object.keys(S.votes).filter((k) => S.votes[k].includes(me)));
+    if (!day || !S.days.includes(day)) day = S.days[0];
+    render();
+    if (S.availability.stale && !stalePolled) { stalePolled = true; setTimeout(load, 6000); }
+    if (!S.availability.stale) stalePolled = false;
+  }
+
+  function render() {
+    $('loading').hidden = true;
+    $('gate').hidden = true;
+    $('foot').hidden = false;
+    const p = person(me);
+    $('who').hidden = !p;
+    $('who-name').textContent = p ? p.name : '';
+    $('pick').hidden = !!p;
+    $('board').hidden = !p;
+    if (!p) renderPick(); else renderBoard();
+    renderFoot();
+  }
+
+  function renderPick() {
+    const names = $('names');
+    names.innerHTML = S.people.map((x) => `<button type="button" class="btn" data-person="${esc(x.id)}">${esc(x.name)}</button>`).join('');
+    $('names-empty').hidden = S.people.length > 0;
+  }
+
+  function renderBoard() {
+    renderReady();
+    renderNearly();
+    renderDays();
+    renderGrid();
+    renderToggles();
+  }
+
+  function startsLabel(v) { return v.starts.join('/'); }
+  function renderReady() {
+    const box = $('ready');
+    if (!S.ready.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = '<h2>Ready to book</h2>' + S.ready.map((r) => {
+      const lines = r.venues.map((v) => `
+        <div class="venue-line">
+          <span>${esc(S.venueInfo[v.code].short)} ${esc(startsLabel(v))} (${esc(v.min)} min)</span>
+          <a class="btn small primary" href="${esc(v.book)}" target="_blank" rel="noopener noreferrer">Book</a>
+          <button type="button" class="btn small" data-book-slot="${esc(r.slot)}" data-book-venue="${esc(v.code)}"${busy ? ' disabled' : ''}>Booked</button>
+        </div>`).join('');
+      return `<div class="item"><p><strong>${esc(r.label)}</strong>: ${esc(r.names.join(', '))}.</p>${lines}</div>`;
+    }).join('');
+  }
+
+  function renderNearly() {
+    const box = $('nearly');
+    if (!S.nearly.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<h2>Nearly there (3)</h2>` + S.nearly.map((r) => {
+      const where = r.venues.map((v) => S.venueInfo[v.code].short).join(', ');
+      return `<button type="button" class="nearly-btn" data-goto="${esc(r.slot)}"><strong>${esc(r.label)}</strong>: ${esc(r.names.join(', '))}. One more for ${esc(where)}.</button>`;
+    }).join('');
+  }
+
+  function renderDays() {
+    $('days').innerHTML = S.days.map((d) => {
+      let n = 0;
+      for (const s of mine) if (s.startsWith(d + '|')) n++;
+      return `<button type="button" class="day" data-day="${esc(d)}" aria-pressed="${d === day}" aria-label="${esc(dayLong(d))}${n ? ', ' + n + ' hours ticked' : ''}">${esc(dayShort(d))}<small>${n ? esc(n) + ' &#10003;' : ''}</small></button>`;
+    }).join('');
+  }
+
+  const STATUS_WORD = { closed: 'not open yet', error: "couldn't check", pending: 'checking' };
+  const STATUS_SHORT = { closed: 'soon', error: '?', pending: '...' };
+  function chip(code, date, hh) {
+    const v = S.availability.venues[code][date];
+    const name = S.venueInfo[code].short;
+    if (v.status === 'ok') {
+      const h = v.hours[hh];
+      if (h && h.free) {
+        const t = `${name}: court free at ${h.starts.join(', ')}, shortest booking ${h.min} min`;
+        return `<span class="chip free" title="${esc(t)}" aria-label="${esc(t)}">${ABBR[code]} ${esc(h.min)}</span>`;
+      }
+      return `<span class="chip" title="${esc(name)}: no court free" aria-label="${esc(name)}: no court free">${ABBR[code]}</span>`;
+    }
+    const word = STATUS_WORD[v.status] || "couldn't check";
+    return `<span class="chip striped" title="${esc(name)}: ${esc(word)}" aria-label="${esc(name)}: ${esc(word)}">${ABBR[code]} ${esc(STATUS_SHORT[v.status] || '?')}</span>`;
+  }
+
+  function renderGrid() {
+    // A venue we could not read still gets its booking link, so the group can look by hand.
+    const note = [];
+    for (const code of CODES) {
+      const v = S.availability.venues[code][day];
+      const info = S.venueInfo[code];
+      const link = `<a href="${esc(info.book[day])}" target="_blank" rel="noopener noreferrer">look on its site</a>`;
+      if (v.status === 'closed') note.push(`${esc(info.short)}: not open yet for this day.`);
+      else if (v.status === 'error') note.push(`${esc(info.short)}: couldn't check, so ${link}.`);
+    }
+    $('day-note').hidden = !note.length;
+    $('day-note').innerHTML = note.join('<br>');
+    const readySlots = new Set(S.ready.map((r) => r.slot));
+    // Today shows only the hours still to come; after 21:00 it says so instead of an empty list.
+    const nowH = day === S.today ? londonHour() : -1;
+    const hours = S.hours.filter((h) => h >= nowH);
+    if (!hours.length) {
+      $('grid').innerHTML = '<li class="row"><p class="note">No more hours today. Pick another day above.</p></li>';
+      return;
+    }
+    $('grid').innerHTML = hours.map((h) => {
+      const hh = pad(h);
+      const slot = `${day}|${hh}`;
+      const on = mine.has(slot);
+      const ids = voters(slot);
+      const names = ids.map((id) => (person(id) || {}).name).filter(Boolean);
+      const b = S.booked[slot];
+      const cls = ['row', on ? 'mine' : '', readySlots.has(slot) ? 'is-ready' : ''].join(' ').trim();
+      const say = on ? 'I can play' : 'Tap if you can play';
+      const label = `${hh}:00, ${on ? 'you can play' : 'tap if you can play'}, ${ids.length} in`;
+      const booked = b ? `<p class="booked-line"><span>&#10003; Booked by ${esc((person(b.person_id) || {}).name || 'someone')} at ${esc((S.venueInfo[b.venue] || {}).short || b.venue || '?')}</span>
+        <button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button></p>` : '';
+      return `<li class="${esc(cls)}" id="row-${esc(hh)}">
+        <button type="button" class="tap" data-slot="${esc(slot)}" aria-pressed="${on}" aria-label="${esc(label)}"${saving ? ' disabled' : ''}>
+          <span class="time">${hh}:00</span><span class="say">${say}</span><span class="count" aria-hidden="true">${ids.length}</span>
+        </button>
+        <div class="meta">
+          <div class="chips">${CODES.map((c) => chip(c, day, hh)).join('')}</div>
+          <span class="initials" title="${esc(names.join(', '))}">${esc(names.map(initials).join(' '))}</span>
+        </div>${booked}
+      </li>`;
+    }).join('');
+  }
+
+  function renderToggles() {
+    const p = person(me);
+    $('venue-toggles').innerHTML = CODES.map((c) => {
+      const cant = !p.venues.includes(c);
+      const name = S.venueInfo[c].short;
+      return `<button type="button" class="toggle" data-venue="${c}" aria-pressed="${cant}" aria-label="Can't do ${esc(S.venueInfo[c].label)}"${busy ? ' disabled' : ''}>${esc(name)}</button>`;
+    }).join('');
+  }
+
+  function renderFoot() {
+    const a = S.availability;
+    let t = 'Courts not checked yet';
+    if (a.fetchedAt) {
+      t = 'Courts checked ' + new Date(a.fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+    }
+    if (a.stale) t += '. Updating...';
+    $('checked').textContent = t;
+  }
+
+  // ── Actions ──
+  function setBusy(on) {
+    busy = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-venue],#check-now,#add-btn')) b.disabled = on;
+  }
+
+  function toggle(slot) {
+    if (!me || saving) return;
+    if (mine.has(slot)) mine.delete(slot); else mine.add(slot);
+    dirty = true;
+    renderDays();
+    renderGrid();
+    scheduleSave();
+  }
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, Math.max(800, backoffUntil - Date.now()));
+  }
+  async function save() {
+    if (!dirty || !S) return;
+    saving = true;
+    dirty = false;
+    for (const b of document.querySelectorAll('.tap')) b.disabled = true;
+    const slots = [...mine].filter((s) => S.days.includes(s.split('|')[0]));
+    try {
+      const s = await api('/api/vote', { person_id: me, slots });
+      saving = false;
+      apply(s);
+    } catch (e) {
+      saving = false;
+      if (e.status === 401) return;
+      toast("Couldn't save your ticks: " + e.message);
+      await load();
+    } finally {
+      saving = false;
+      if (S && !$('board').hidden) renderGrid();
+    }
+  }
+
+  async function pickPerson(id) {
+    if (dirty) await save();
+    me = id;
+    store.set('padel.person', String(id));
+    mine = new Set(Object.keys(S.votes).filter((k) => S.votes[k].includes(me)));
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  async function addName(ev) {
+    ev.preventDefault();
+    const input = $('add-name');
+    const name = input.value.trim().replace(/\s+/g, ' ');
+    if (name.length < 2) { toast('Type your name first (2 letters or more).'); input.focus(); return; }
+    setBusy(true);
+    try {
+      const p = await api('/api/person', { name });
+      input.value = '';
+      await load();
+      await pickPerson(p.id);
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function postAndApply(path, body, done) {
+    setBusy(true);
+    try {
+      const s = await api(path, body);
+      if (s && s.days) apply(s); else await load();
+      if (done) toast(done);
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleVenue(code) {
+    const p = person(me);
+    const venues = p.venues.includes(code) ? p.venues.filter((v) => v !== code) : CODES.filter((v) => v === code || p.venues.includes(v));
+    setBusy(true);
+    try {
+      await api('/api/person', { id: me, venues });
+      await load();
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkNow() {
+    const btn = $('check-now');
+    btn.textContent = 'Checking...';
+    setBusy(true);
+    try {
+      const s = await api('/api/refresh', {});
+      apply(s);
+      if (!s.refreshed) toast('Courts were checked under 90 seconds ago. Try again shortly.');
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      btn.textContent = 'Check now';
+      setBusy(false);
+    }
+  }
+
+  function gotoSlot(slot) {
+    const [d, hh] = slot.split('|');
+    day = d;
+    renderDays();
+    renderGrid();
+    const row = $('row-' + hh);
+    if (row) { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.querySelector('.tap').focus({ preventScroll: true }); }
+  }
+
+  document.addEventListener('click', (ev) => {
+    const t = ev.target.closest('button');
+    if (!t || t.disabled) return;
+    if (t.dataset.person) pickPerson(Number(t.dataset.person));
+    else if (t.dataset.slot) toggle(t.dataset.slot);
+    else if (t.dataset.day) { day = t.dataset.day; renderDays(); renderGrid(); }
+    else if (t.dataset.venue) toggleVenue(t.dataset.venue);
+    else if (t.dataset.bookSlot) postAndApply('/api/booked', { slot: t.dataset.bookSlot, person_id: me, venue: t.dataset.bookVenue, booked: true }, 'Marked as booked. Thanks.');
+    else if (t.dataset.unbook) postAndApply('/api/booked', { slot: t.dataset.unbook, booked: false }, 'Booking mark removed.');
+    else if (t.dataset.goto) gotoSlot(t.dataset.goto);
+    else if (t.id === 'switch') { me = null; store.del('padel.person'); render(); }
+    else if (t.id === 'check-now') checkNow();
+    else if (t.id === 'retry') { $('retry').hidden = true; $('loading-text').textContent = 'Loading...'; load(); }
+  });
+  $('add-form').addEventListener('submit', addName);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S && !dirty && !saving) load(); });
+
+  if (!key) showGate(); else load();
+})();
+</script>
+</body>
+</html>

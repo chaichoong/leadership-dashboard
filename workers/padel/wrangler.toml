@@ -1,0 +1,68 @@
+# padel: the padel group's "who can play when" page (Kevin approved, 27 Oct 2026).
+#
+# One Worker: serves public/index.html from a private link, reads court availability from three
+# venues, stores who can play at which hours over the next 7 days in D1, and sends Kevin ONE Slack
+# DM the first time 4+ people line up on an hour where a court is free. See padel.js for the routes.
+#
+# Secrets (set from a 0600 file through stdin, never typed on a command line):
+#   GROUP_KEY  - the group code in the page link (#k=...). Mac copy: ~/.config/od/padel_group_key
+#                tr -d '\n' < ~/.config/od/padel_group_key | npx wrangler secret put GROUP_KEY -c workers/padel/wrangler.toml
+#   RELAY_KEY  - the apple-inbound Slack relay key. Mac copy: ~/.config/od/slack_relay_key
+#                tr -d '\n' < ~/.config/od/slack_relay_key | npx wrangler secret put RELAY_KEY -c workers/padel/wrangler.toml
+# (tr drops the file's trailing newline: both keys are compared byte for byte.)
+# Both are in scripts/key-register.py (COPY_OF_AT), so a key replace reaches this Worker too.
+#
+# Deploy: `npx wrangler deploy -c workers/padel/wrangler.toml` (merging to main does NOT deploy a Worker).
+# Logs:   `npx wrangler tail -c workers/padel/wrangler.toml`
+#
+# NO cron: all five free-plan cron triggers are taken (workers/ceo-brief-tenants/wrangler.toml).
+# Availability refreshes lazily when /api/state finds it older than 15 minutes.
+# NO KV: free-tier KV writes are 1,000 a day account-wide and starve the other Workers.
+
+name = "padel"
+main = "worker.js"
+compatibility_date = "2025-10-01"
+workers_dev = true
+
+# The page is a static asset. run_worker_first sends every request through the Worker so each
+# response, the page included, carries X-Robots-Tag: noindex and the security headers; the Worker
+# hands non-/api requests to the ASSETS binding.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[observability]
+enabled = true
+
+# Venue labels and public ids (ids, not secrets: they are in every booking link).
+[vars]
+SI_LABEL = "St Ives Golf Club"
+SI_SHORT = "St Ives"
+SI_MATCHI_ID = "2619"
+PDL_LABEL = "PDL Padel United Cambridge"
+PDL_SHORT = "PDL"
+PDL_MATCHI_ID = "3122"
+PP_LABEL = "Pulse Padel Huntingdon"
+PP_SHORT = "Pulse"
+PP_CLUB_ID = "VEqVgpQmiJLiEC1Lm4z3"
+PAGE_URL = "https://padel.kevinbrittain.workers.dev/"
+ALERT_TO = "kevin@runpreneur.org.uk"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "padel"
+database_id = "7cf15337-22ac-43fc-92ed-e48aa8adec94"
+
+# The Slack relay lives in apple-inbound. Workers cannot call each other by workers.dev URL
+# (error 1042), so it is a service binding.
+[[services]]
+binding = "RELAY"
+service = "apple-inbound"
+
+# Every write (POST) is limited to 60 a minute per client IP.
+[[unsafe.bindings]]
+name = "WRITE_LIMIT"
+type = "ratelimit"
+namespace_id = "2104"
+simple = { limit = 60, period = 60 }
