@@ -241,7 +241,7 @@
     function fmtDay(iso) {
         if (!iso) return 'Not yet';
         const d = new Date(iso + 'T12:00:00');
-        return isNaN(d) ? 'Not yet' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        return isNaN(d) ? 'Not yet' : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });   // DD/MM/YYYY, the app's standard
     }
 
     function renderWardrobePage() {
@@ -255,7 +255,7 @@
         const owned = (i) => i && (i.status === 'Own' || i.status === 'Bought');
         const ready = state.data.outfits.filter(o => o.itemIds.length && o.itemIds.every(id => owned(state.data.items[id]))).length;
         const ACTION = { Sell: 'wr-pill-warn', Donate: 'wr-pill-danger', Recycle: 'wr-pill-danger', 'Site drawer': 'wr-pill-muted' };
-        const tab = (key, label, n) => `<button type="button" role="tab" id="wrTab-${key}" aria-controls="wrPanel-${key}" aria-selected="${state.view === key}" data-wr-view="${key}">${label} <span class="wr-count">${n}</span></button>`;
+        const tab = (key, label, n) => `<button type="button" role="tab" id="wrTab-${key}" aria-controls="wrPanel-${key}" aria-selected="${state.view === key}" tabindex="${state.view === key ? 0 : -1}" data-wr-view="${key}">${label} <span class="wr-count">${n}</span></button>`;
         const table = (key, head, body, empty) => `<div class="wr-tablewrap" role="tabpanel" id="wrPanel-${key}" aria-labelledby="wrTab-${key}"${state.view === key ? '' : ' hidden'}>
             ${body ? `<table class="wr-table"><thead><tr>${head.map(h => `<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>` : `<p class="wear-muted">${empty}</p>`}</div>`;
         el.innerHTML = `<h1 class="wr-title">Wardrobe</h1>
@@ -306,7 +306,9 @@
 
     async function refresh(force) {
         if (!signedIn()) return;
-        if (typeof markTabRefreshing === 'function') markTabRefreshing(TAB);
+        // Only show "refreshing" when something is actually read; reopening Home with fresh data reads nothing.
+        const fetching = force || !state.data || !state.wx || state.wxDay !== today() || Date.now() - state.wxAt >= WEATHER_MAX_AGE_MS;
+        if (fetching && typeof markTabRefreshing === 'function') markTabRefreshing(TAB);
         await Promise.all([loadData(force), loadWeather(force)]);
         renderHomeCard();
         renderWardrobePage();
@@ -325,6 +327,17 @@
             }
             const v = e.target.closest('[data-wr-view]');
             if (v) { state.view = v.getAttribute('data-wr-view'); renderWardrobePage(); const t = document.getElementById('wrTab-' + state.view); if (t) t.focus(); }
+        });
+        // Arrow keys move between the Wardrobe tabs (roving tabindex).
+        document.addEventListener('keydown', (e) => {
+            const t = e.target.closest && e.target.closest('[data-wr-view]');
+            if (!t || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+            e.preventDefault();
+            const keys = ['own', 'add', 'out'];
+            const i = keys.indexOf(t.getAttribute('data-wr-view'));
+            const next = e.key === 'Home' ? 0 : e.key === 'End' ? keys.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length;
+            state.view = keys[next]; renderWardrobePage();
+            const b = document.getElementById('wrTab-' + state.view); if (b) b.focus();
         });
         const watch = (id, onOpen) => {
             const panel = document.getElementById(id);

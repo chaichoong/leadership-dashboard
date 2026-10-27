@@ -20,7 +20,7 @@ const wardrobe = () => [
   piece('recBoots', 'Test tan boots', 'Shoes', { [WR.layerRole]: 'Leather boots casual' }),
   piece('recRain', 'Test quilted jacket', 'Jacket', { [WR.layerRole]: 'Rain jacket' }),
   piece('recBeanie', 'Test olive beanie', 'Accessory', { [WR.layerRole]: 'Beanie' }),
-  piece('recRoll', 'Test black turtleneck', 'Knit'), piece('recBlack', 'Test black jeans', 'Trousers'),
+  piece('recRoll', 'Test black turtleneck', 'Knit', { [WR.lastWorn]: '2026-10-20' }), piece('recBlack', 'Test black jeans', 'Trousers'),
   piece('recChelsea', 'Test Chelsea boots', 'Shoes', { [WR.layerRole]: 'Leather boots smart' }),
   piece('recCoat', 'Test grey coat', 'Coat', { [WR.layerRole]: 'Smart coat', [WR.status]: 'Bought' }),
   piece('recSweat', 'Test grey sweatshirt', 'Lounge'), piece('recJog', 'Test navy joggers', 'Lounge'),
@@ -79,6 +79,15 @@ test.describe('What to wear today', () => {
     // None worn yet, all created in the same second (as live). Last in Order, returned first: without the sort it would be picked.
     await open(page, 'home', { fixtures: { outfits: [ordered[4], ordered[2], ordered[1], ordered[3], ordered[0]] } });
     await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('.wear-outfit')).toHaveText('Knit and denim', { timeout: 20000 });
+  });
+
+  test('on a phone the recommended option is shown first', async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 900 });
+    await open(page, 'home');
+    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(3, { timeout: 20000 });
+    const tops = await page.evaluate(() => [...document.querySelectorAll('#homeWear .wear-opt')].map(o => [o.classList.contains('wear-opt-best'), o.getBoundingClientRect().top]));
+    const best = tops.find(t => t[0])[1];
+    expect(tops.every(t => t[1] >= best)).toBe(true);
   });
 
   test('Wearing stamps today on the outfit and on every piece it lists, then holds it for the day', async ({ page }) => {
@@ -146,6 +155,12 @@ test.describe('Wardrobe page', () => {
     await expect(pageEl.locator('.wr-stats')).toContainText('3 / 4');
     await expect(pageEl.locator('#wrPanel-own')).toContainText('Test grey coat');
     await expect(pageEl.locator('#wrPanel-own')).not.toContainText('Test orange hoodie');
+    await expect(pageEl.locator('#wrPanel-own tr', { hasText: 'Test black turtleneck' })).toContainText('20/10/2026');
+    await pageEl.locator('[data-wr-view="own"]').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(pageEl.locator('[data-wr-view="add"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(pageEl.locator('[data-wr-view="add"]')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
     await pageEl.locator('[data-wr-view="add"]').click();
     await expect(pageEl.locator('#wrPanel-add')).toContainText('Test stripe top');
     await expect(pageEl.locator('#wrPanel-add')).toContainText('1 outfit');
