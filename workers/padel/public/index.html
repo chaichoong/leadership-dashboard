@@ -390,7 +390,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function apply(s) {
     S = s;
-    if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); }
+    if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); dropChanges(); }
     recomputeMine();
     // After 22:00 there is nothing left to tick today, so the page opens on tomorrow.
     if (!day || !S.days.includes(day)) day = londonHour() >= 22 && S.days.length > 1 ? S.days[1] : S.days[0];
@@ -595,11 +595,23 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (lastFlush && lastFlush.person === me) layer(mine, lastFlush);
     layer(mine, { add: pendingAdd, remove: pendingRemove });
   }
-  // Put unconfirmed changes back under any newer taps (a newer tap on the same hour wins).
+  // Put unconfirmed changes back under anything newer: an hour that has a newer tap pending, that
+  // a keepalive flush has already sent, or that a flush covered after this change went out (its
+  // `superseded`) keeps the newer change. Never someone else's changes.
   function putBack(d) {
-    if (!d) return;
-    for (const x of d.add) if (!pendingAdd.has(x) && !pendingRemove.has(x)) pendingAdd.add(x);
-    for (const x of d.remove) if (!pendingAdd.has(x) && !pendingRemove.has(x)) pendingRemove.add(x);
+    if (!d || d.person !== me) return;
+    const newer = (x) => pendingAdd.has(x) || pendingRemove.has(x)
+      || (lastFlush && (lastFlush.add.has(x) || lastFlush.remove.has(x))) || (d.superseded && d.superseded.has(x));
+    for (const x of d.add) if (!newer(x)) pendingAdd.add(x);
+    for (const x of d.remove) if (!newer(x)) pendingRemove.add(x);
+  }
+  // The person is gone (removed from the list): their unsaved changes go with them.
+  function dropChanges() {
+    clearTimeout(saveTimer);
+    pendingAdd = new Set();
+    pendingRemove = new Set();
+    inflight = null;
+    lastFlush = null;
   }
 
   function setBusy(on) {
@@ -625,7 +637,9 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!S || !me) return Promise.resolve(true);
     if (saving) return savingPromise;
     if (!hasPending()) return Promise.resolve(true);
-    inflight = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove) };
+    // Every way in ("Save now", the page shown again, switching person) waits out a back-off.
+    if (backoffUntil > Date.now() + 5) { scheduleSave(); return Promise.resolve(false); }
+    inflight = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), superseded: new Set() };
     pendingAdd = new Set();
     pendingRemove = new Set();
     saving = true;
@@ -634,7 +648,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const sent = inflight;
       try {
         const r = await api('/api/vote', { person_id: sent.person, add: [...sent.add].filter(inWindow), remove: [...sent.remove].filter(inWindow) });
-        inflight = null;
+        if (inflight === sent) inflight = null;
         saving = false;
         saveTry = 0;
         backoffUntil = 0;
@@ -642,7 +656,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         if (hasPending()) scheduleSave(1);
         return !hasPending();
       } catch (e) {
-        inflight = null;
+        if (inflight === sent) inflight = null;
         saving = false;
         putBack(sent);
         recomputeMine();
@@ -685,6 +699,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!add.size && !remove.size) return;
     clearTimeout(saveTimer);
     const sent = { person: me, add, remove };
+    // The save in flight is now behind this flush on every hour the flush sends.
+    if (inflight && inflight.person === me) for (const x of [...add, ...remove]) inflight.superseded.add(x);
     lastFlush = sent;
     pendingAdd = new Set();
     pendingRemove = new Set();

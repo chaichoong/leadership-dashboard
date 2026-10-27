@@ -11,6 +11,8 @@
 //      carries the second tap.
 //   3. Hiding the page with unsaved ticks sends them at once, even while a save is in flight.
 //   4. A 429 holds the retry for its own 10 s, never the shorter 5 s back-off.
+//   5. A save that fails AFTER a hide flush never puts its older change back over the newer one.
+//   6. When the person is removed from the list, their unsaved changes are dropped, never sent.
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -25,7 +27,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
+  const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const store = { votes: new Map(), bodies: [], times: [], inflight: 0, maxInflight: 0 };
+  store.removePerson = () => { store.gone = true; };
   const state = () => {
     const now = Date.now();
     const at = new Date(now).toISOString();
@@ -33,7 +37,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
       { readAt: at, goodAt: { si: at, pdl: at }, venues: { si: {}, pdl: {} } },
       { fetchedAt: at, goodAt: at, days: {} },
     );
-    return computeState({ people: [person], votes: [...store.votes.values()], booked: [], availability, dates: londonDates(now), nowMs: now });
+    return computeState({ people: store.gone ? [other] : [person, other], votes: [...store.votes.values()], booked: [], availability, dates: londonDates(now), nowMs: now });
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -46,10 +50,10 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [] } = {}) {
       store.bodies.push(body);
       store.times.push(Date.now());
       const status = voteStatuses.shift();
-      if (status && status !== 200) return reply(route, status, { error: status === 429 ? 'slow down' : 'boom' });
       store.inflight++;
       store.maxInflight = Math.max(store.maxInflight, store.inflight);
       if (voteDelayMs) await sleep(voteDelayMs);
+      if (status && status !== 200) { store.inflight--; return reply(route, status, { error: status === 429 ? 'slow down' : 'boom' }); }
       for (const slot of body.add || []) store.votes.set(slot, { person_id: body.person_id, slot });
       for (const slot of body.remove || []) store.votes.delete(slot);
       person.savedAt = new Date().toISOString();
@@ -140,5 +144,40 @@ test.describe('padel page: ticks reach the server', () => {
     await expect.poll(() => store.votes.has(`${day}|19`), { timeout: 20000 }).toBe(true);
     expect(store.bodies).toHaveLength(2);
     expect(store.times[1] - store.times[0]).toBeGreaterThanOrEqual(9500);
+  });
+
+  test('a save that fails after a hide flush never brings back the hour the flush removed', async ({ page }) => {
+    // The first save (adding 19:00) is slow and then fails; meanwhile 19:00 is unticked and the page hidden.
+    const store = await mockPadel(page, { voteDelayMs: 1500, voteStatuses: [500] });
+    const day = await openAsTestAnn(page);
+    await tap(page, `${day}|19`);
+    await expect.poll(() => store.inflight, { timeout: 3000 }).toBe(1);   // the add is out
+    await tap(page, `${day}|19`);                                          // untick while it is out
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect.poll(() => store.bodies.length, { timeout: 600 }).toBe(2);
+    expect(store.bodies[1]).toMatchObject({ add: [], remove: [`${day}|19`] });
+    // Past the failure, the 5 s retry and the flush's own reply: the server must not hold 19:00.
+    await sleep(8000);
+    expect(store.votes.has(`${day}|19`)).toBe(false);
+    expect(store.bodies.slice(2).some((b) => (b.add || []).includes(`${day}|19`))).toBe(false);
+  });
+
+  test('a person removed from the list loses their unsaved changes; they are never sent, not even as the next person', async ({ page }) => {
+    const store = await mockPadel(page);
+    const day = await openAsTestAnn(page);
+    await tap(page, `${day}|19`);
+    store.removePerson();
+    await page.evaluate(() => document.getElementById('retry').click());   // the page reads the state again
+    await expect(page.locator('#pick')).toBeVisible();
+    await page.locator('[data-person="2"]').click();                      // someone else picks their name
+    await page.locator(`[data-day="${day}"]`).click();
+    expect(await pressed(page, `${day}|19`)).toBe('false');                // Test Ann's tick is not shown as theirs
+    await tap(page, `${day}|20`);                                          // and their own tap goes alone
+    await expect.poll(() => store.bodies.length, { timeout: 3000 }).toBe(1);
+    expect(store.bodies[0]).toEqual({ person_id: 2, add: [`${day}|20`], remove: [] });
+    expect([...store.votes.keys()]).toEqual([`${day}|20`]);
   });
 });

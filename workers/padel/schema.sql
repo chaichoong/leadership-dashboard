@@ -5,13 +5,14 @@
 --   npx wrangler d1 execute padel --local --file=workers/padel/schema.sql -c workers/padel/wrangler.toml
 -- It never changes a database that already exists (every statement is IF NOT EXISTS, so a table
 -- that is there is skipped, columns and all). A change to the LIVE database goes through a
--- numbered file in migrations/, applied once with `wrangler d1 execute padel --remote --file`,
+-- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
+-- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
 -- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
 -- One row per player. venues = the venue codes this person can get to (si, pdl, pp). votes_at = when
--- this person last saved their ticks (migrations/0001-votes-at.sql, 27 Oct 2026).
+-- this person last saved their ticks (sql-changes/0001-votes-at.sql, 27 Oct 2026).
 CREATE TABLE IF NOT EXISTS people (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -37,7 +38,10 @@ CREATE TABLE IF NOT EXISTS booked (
 );
 
 -- One row per slot that has had its Slack DM. The row is inserted BEFORE the DM goes, so two
--- requests at once cannot both send; a failed DM deletes the row so the next check retries.
+-- requests at once cannot both send. A definite refusal from the relay (a non-200) deletes the row
+-- so the next check retries. A 200, or no answer in 20 s, keeps it with a relay_reply (the relay's
+-- own, or a placeholder) so the slot is never sent again. Only a row with relay_reply NULL over 2
+-- minutes old (the Worker stopped mid-send) is claimed again.
 CREATE TABLE IF NOT EXISTS alerts (
   slot TEXT PRIMARY KEY,
   sent_at TEXT NOT NULL,

@@ -287,6 +287,7 @@ function mapRepo() {
       async setVenues(id, venues) { const p = people.get(id); if (!p) return false; p.venues = venues.join(','); return true; },
       async listVotes(from) { return [...votes.values()].filter((v) => v.slot >= from).map(({ person_id, slot }) => ({ person_id, slot })); },
       async applyVotes(pid, add, remove, now) {
+        if (!add.length && !remove.length) return;
         for (const s of add) if (!votes.has(`${pid}|${s}`)) votes.set(`${pid}|${s}`, { person_id: pid, slot: s, created_at: now });
         for (const s of remove) votes.delete(`${pid}|${s}`);
         if (people.has(pid)) people.get(pid).votes_at = now;
@@ -593,8 +594,13 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const [id] = await t.addPeople(['Test Ann']);
     expect((await t.call('/api/state')).json.people[0].savedAt).toBeNull();
     t.setNow(NOW + MIN);
-    const s = (await t.call('/api/vote', { person_id: id, add: [] })).json;     // an empty save still stamps it
+    let s = (await t.call('/api/vote', { person_id: id, add: ['2026-10-28|07'] })).json;
     expect(s.people[0]).toMatchObject({ id, savedAt: iso(NOW + MIN) });
+    // Item 4: an empty save changes nothing, so it does not move the stamp.
+    t.setNow(NOW + 2 * MIN);
+    s = (await t.call('/api/vote', { person_id: id, add: [], remove: [] })).json;
+    expect(s.people[0]).toMatchObject({ id, savedAt: iso(NOW + MIN) });
+    expect(s.votes).toEqual({ '2026-10-28|07': [id] });
   });
 
   it('a failed DM leaves no alert row, logs, and the next save retries', async () => {
@@ -611,7 +617,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.rows.alerts()).toHaveLength(1);
   });
 
-  it('F20 and item 2: the vote answers before the DM; a relay that hangs is cut off at 8 s and the row KEPT for the re-claim', async () => {
+  it('F20 and item 2: the vote answers before the DM; a relay that hangs is cut off at 20 s and the row made final', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const ids = await t.addPeople(NAMES.slice(0, 4));
     for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, add: [SLOT] });
@@ -626,36 +632,46 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     await t.drain();
     expect(t.rows.alerts()[0].relay_reply).toBe(RELAY_OK);
 
-    // A relay that never answers: the row stays with no reply (the DM may have gone).
+    // A relay that never answers: cut off at 20 s, and the row gets a final placeholder reply.
     vi.useFakeTimers();
     t.env.RELAY.fetch = vi.fn(() => new Promise(() => {}));
     const state = (await t.call('/api/state', undefined, { drain: false })).json;
     state.ready = [{ ...state.ready[0], slot: '2026-10-29|19' }];
     const p = checkAlerts(state, t.env, t.repo, NOW, async () => {});
-    await vi.advanceTimersByTimeAsync(8001);
+    await vi.advanceTimersByTimeAsync(19000);
+    expect(t.rows.alerts().find((r) => r.slot === '2026-10-29|19').relay_reply).toBeNull();   // still waiting at 19 s
+    await vi.advanceTimersByTimeAsync(1001);
     expect(await p).toEqual([]);
     vi.useRealTimers();
-    expect(t.rows.alerts().map((r) => [r.slot, r.relay_reply === null])).toEqual([[SLOT, false], ['2026-10-29|19', true]]);
-    expect(err).toHaveBeenCalledWith('padel: alert DM unanswered, the re-claim will retry', '2026-10-29|19', expect.stringContaining('timed out'));
-    // A check 10 s later sends no second DM: the row is under 2 minutes old.
+    const row = t.rows.alerts().find((r) => r.slot === '2026-10-29|19');
+    expect(JSON.parse(row.relay_reply)).toEqual({ timeout: true, at: iso(NOW) });
+    expect(err).toHaveBeenCalledWith('padel: alert DM unanswered, not retried', '2026-10-29|19', expect.stringContaining('timed out'));
+    // Never claimed again: a check 10 s later, and one 3 minutes later, send nothing.
     t.env.RELAY.fetch = vi.fn(async () => new Response(RELAY_OK, { status: 200 }));
     expect(await checkAlerts(state, t.env, t.repo, NOW + 10 * 1000, async () => {})).toEqual([]);
+    expect(await checkAlerts(state, t.env, t.repo, NOW + 3 * MIN, async () => {})).toEqual([]);
     expect(t.env.RELAY.fetch).not.toHaveBeenCalled();
   });
 
-  it('item 7: /api/refresh runs the alert check in the background (waitUntil), and it sends the DM', async () => {
+  it('item 7: /api/refresh runs the alert check in the background: a relay that never answers does not hold the reply', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     // Pulse last read 20 minutes ago: not fresh, so the votes alone send nothing.
     await t.seedAvailability({ si: {}, pdl: {} }, NOW, NOW - 20 * MIN);
     const ids = await t.addPeople(NAMES.slice(0, 4));
     for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|21'] }, { drain: false });
     await t.drain();
     expect(t.relayCalls).toHaveLength(0);
+    vi.useFakeTimers();
+    t.env.RELAY.fetch = vi.fn(() => new Promise(() => {}));
     const r = await t.call('/api/refresh', {}, { drain: false });
+    expect(r.status).toBe(200);                              // answered while the relay still hangs
     expect(r.json.refreshed).toBe(true);
     expect(t.waits).toHaveLength(1);                         // the check was handed to waitUntil
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20001);
     await Promise.all(t.waits.splice(0));
-    expect(t.relayCalls).toHaveLength(1);
-    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Pulse: 4 in');
+    vi.useRealTimers();
+    expect(JSON.parse(t.rows.alerts()[0].relay_reply).timeout).toBe(true);
   });
 
   it('no DM when the only free venue is one the 4th person cannot do', async () => {

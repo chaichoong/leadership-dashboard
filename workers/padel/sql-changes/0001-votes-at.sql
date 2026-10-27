@@ -4,5 +4,5 @@
 -- built from ../schema.sql already has the column.
 --
 -- How it was applied:
---   npx wrangler d1 execute padel --remote -c workers/padel/wrangler.toml --file workers/padel/migrations/0001-votes-at.sql
+--   npx wrangler d1 execute padel --remote -c workers/padel/wrangler.toml --file workers/padel/sql-changes/0001-votes-at.sql
 ALTER TABLE people ADD COLUMN votes_at TEXT;

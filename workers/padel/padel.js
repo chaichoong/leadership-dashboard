@@ -41,7 +41,7 @@
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
 //           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
 
-export const VERSION = '2026-10-27.4';
+export const VERSION = '2026-10-27.5';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -59,7 +59,8 @@ export const SAVE_REPLY_RETRIES = 3;             // after a relay 200, the reply
 export const SAVE_REPLY_PAUSES_MS = [500, 1000, 2000];   // ...with these pauses between the tries
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const FETCH_TIMEOUT_MS = 8000;
-export const RELAY_TIMEOUT_MS = 8000;
+export const RELAY_TIMEOUT_MS = 20000;          // the background check has 30 s in all
+export const RELAY_BODY_TIMEOUT_MS = 5000;      // reading a 200's body, after the placeholder is in
 export const ALERT_AT = 4;
 const MAX_PEOPLE = 40;
 const MAX_BODY = 16 * 1024;
@@ -431,6 +432,7 @@ export function makeRepo(db) {
     // hours unticked are removed, in one batch, and votes_at says when this person last saved. Two
     // phones adding different hours therefore merge, and a late or repeated save does no harm.
     async applyVotes(personId, add, remove, nowIso) {
+      if (!add.length && !remove.length) return;            // nothing changed: votes_at keeps the last real save
       await db.batch([
         db.prepare('INSERT OR IGNORE INTO votes (person_id, slot, created_at) SELECT ?1, value, ?3 FROM json_each(?2)').bind(personId, JSON.stringify(add), nowIso),
         db.prepare('DELETE FROM votes WHERE person_id = ?1 AND slot IN (SELECT value FROM json_each(?2))').bind(personId, JSON.stringify(remove)),
@@ -624,9 +626,10 @@ async function saveMatchi(repo, prev, clean) {
 }
 
 // ── Alerts ──
-// The DM must never go twice for one slot. The row is claimed BEFORE the relay call; it is released
-// only when the relay call itself failed (no answer, a timeout or a non-200). After a 200 the DM is
-// out, so the row stays even when saving the relay's reply fails.
+// At most one DM per slot, ever. The row is claimed BEFORE the relay call. A definite refusal (a
+// non-200) releases it so the next check sends it. A 200 or no answer in 20 s makes it final with a
+// reply (the relay's, or a placeholder). Only a row with no reply at all over 2 minutes old (the
+// Worker was stopped mid-send) is claimed again.
 export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
   const nowIso = new Date(nowMs).toISOString();
   const reclaimBefore = new Date(nowMs - ALERT_RECLAIM_MS).toISOString();
@@ -650,10 +653,13 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
         body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.kevinbrittain.workers.dev/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
       })), RELAY_TIMEOUT_MS);
     } catch (e) {
-      // No answer (a timeout or a dropped call): the DM may or may not have gone. The row is KEPT
-      // with no reply, so the 2-minute re-claim tries again. A slow relay that did deliver can then
-      // send a second DM; that is accepted over a DM that never comes.
-      console.error('padel: alert DM unanswered, the re-claim will retry', r.slot, String(e));
+      // No answer in 20 s (or a dropped call): the DM may or may not have gone. The row is made
+      // FINAL with a placeholder reply, so it is never claimed again: at most one DM per slot, ever.
+      // A slow relay that did deliver is that one DM; one that did not is a miss, accepted over a
+      // DM repeated on every re-claim.
+      const timedOut = e && e.name === 'TimeoutError';
+      console.error('padel: alert DM unanswered, not retried', r.slot, String(e));
+      await writeReply(repo, r.slot, JSON.stringify(timedOut ? { timeout: true, at: nowIso } : { noAnswer: true, at: nowIso }), sleep);
       continue;
     }
     if (res.status !== 200) {
@@ -666,21 +672,12 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
     }
     sent.push(r.slot);
     // A 200: the DM is out. A placeholder reply goes in BEFORE the body is read, so a body that
-    // stalls never leaves the row looking unanswered (which the re-claim would send again). It is
-    // tried up to 3 more times with pauses; the row is never released from here on.
-    let saved = false;
-    for (let attempt = 0; attempt <= SAVE_REPLY_RETRIES && !saved; attempt++) {
-      if (attempt) await sleep(SAVE_REPLY_PAUSES_MS[attempt - 1]);
-      try {
-        await repo.saveRelayReply(r.slot, RELAY_PENDING);
-        saved = true;
-      } catch (e) {
-        console.error('padel: DM sent, reply not saved', r.slot, `attempt ${attempt + 1}`, String(e));
-      }
-    }
+    // stalls never leaves the row looking unanswered (which the re-claim would send again). The
+    // row is never released from here on.
+    await writeReply(repo, r.slot, RELAY_PENDING, sleep);
     // Then the relay's own words, best effort.
     try {
-      const body = await withTimeout(res.text(), RELAY_TIMEOUT_MS);
+      const body = await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS);
       await repo.saveRelayReply(r.slot, body || '(empty reply)');
     } catch (e) {
       console.error('padel: DM sent, its reply body was not stored', r.slot, String(e));
@@ -689,6 +686,19 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep) {
   return sent;
 }
 export const RELAY_PENDING = '{"ok":true,"pending":true}';
+// A reply that makes the row final, tried up to 3 more times with 0.5, 1 and 2 s pauses.
+async function writeReply(repo, slot, reply, sleep) {
+  for (let attempt = 0; attempt <= SAVE_REPLY_RETRIES; attempt++) {
+    if (attempt) await sleep(SAVE_REPLY_PAUSES_MS[attempt - 1]);
+    try {
+      await repo.saveRelayReply(slot, reply);
+      return true;
+    } catch (e) {
+      console.error('padel: DM sent, reply not saved', slot, `attempt ${attempt + 1}`, String(e));
+    }
+  }
+  return false;
+}
 
 // ── HTTP ──
 const BASE_HEADERS = { 'X-Robots-Tag': 'noindex, nofollow', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };

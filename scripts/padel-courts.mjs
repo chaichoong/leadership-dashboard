@@ -13,7 +13,7 @@
 // WHAT IT DOES
 // ------------
 // run       fetches the 14 pages one after another (250 ms apart, 10 s timeout each, one more try
-//           after 2 s for a page lost to the network, the same
+//           after 2 s for a page lost to a timeout, a 5xx or no connection, the same
 //           headers the Worker used), parses them with the Worker's own parseMatchi (imported
 //           from ../workers/padel/padel.js, so both sides read a page one way), POSTs them with
 //           X-Robot-Key from ~/.config/od/padel_robot_key, prints one summary line and appends one
@@ -33,9 +33,11 @@
 //   - the POST did not answer 200.
 // A venue that misses a few days to a network error (a timeout, a 5xx) is not a failure on its
 // own: those days read "couldn't check" on the page and the next run is 15 minutes later.
-// A read that took over 5 minutes (the Mac slept in the middle) is thrown away and not posted:
-// its first pages would be old. A POST that fails after such a sleep (the Worker refuses an old
-// read) is logged as "slept", not as a failure.
+// SLEPT, not failed: the clock is read before every fetch and before the POST. When one gap
+// between two consecutive reads is over 60 s, the Mac slept mid-run (no fetch takes that long:
+// each has a 10 s timeout), so the read is thrown away and not posted, and the run exits 0. A
+// POST that fails with a gap over 60 s across it is "slept" too. A long run with no such gap (14
+// pages timing out one after another) is a FAILED run, never "slept".
 //
 // Usage:
 //   node scripts/padel-courts.mjs run
@@ -54,8 +56,8 @@ export const VENUES = [{ code: 'si', id: '2619', name: 'St Ives' }, { code: 'pdl
 export const GAP_MS = 250;
 export const PAGE_TIMEOUT_MS = 10000;
 export const POST_TIMEOUT_MS = 30000;
-export const MAX_READ_MS = 5 * 60 * 1000;
-export const RETRY_MS = 2000;        // a page lost to the network is fetched once more after this
+export const MAX_GAP_MS = 60 * 1000;  // one gap this long between two clock reads means the Mac slept
+export const RETRY_MS = 2000;        // a page lost to a timeout, a 5xx or no connection is fetched once more after this
 const QUIET_FROM = 23 * 60;          // 23:00 London
 const QUIET_UNTIL = 6 * 60 + 30;     // 06:30 London
 
@@ -73,6 +75,9 @@ export function mustBeOpen(code, index) {
 // The reasons readDay gives for a page that never arrived. Every other error reason comes from
 // parseMatchi: the page arrived and could not be read.
 export const isNetworkReason = (reason) => /^HTTP \d{3}$/.test(reason || '') || reason === 'timed out' || reason === 'could not reach the site';
+// Worth one more try: a timeout, a 5xx or no connection. Never a 4xx or a 429 (Matchi refusing
+// us, which another request at once would only make worse).
+export const isRetryable = (reason) => /^HTTP 5\d\d$/.test(reason || '') || reason === 'timed out' || reason === 'could not reach the site';
 
 // Fetch one page. Never throws: a failure is an error day with its reason.
 export async function readDay(fetchImpl, id, date) {
@@ -94,7 +99,7 @@ export function toPayloadDay(day) {
 }
 
 // Read the 14 pages one after another.
-export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs }) {
+export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs, beforeFetch = () => {} }) {
   const dates = londonDates(nowMs);
   const raw = {};
   let first = true;
@@ -103,12 +108,13 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
     for (const date of dates) {
       if (!first) await sleep(GAP_MS);
       first = false;
+      beforeFetch();
       let day = await readDay(fetchImpl, v.id, date);
-      // A page that never arrived (an HTTP error, a timeout, no connection) gets one more try
-      // before it counts. A page that arrived and could not be parsed does not: it would fail the
-      // same way again.
-      if (day.status === 'error' && isNetworkReason(day.reason)) {
+      // A page lost to a timeout, a 5xx or no connection gets one more try before it counts. A
+      // 4xx, a 429, or a page that arrived and could not be parsed does not.
+      if (day.status === 'error' && isRetryable(day.reason)) {
         await sleep(RETRY_MS);
+        beforeFetch();
         day = await readDay(fetchImpl, v.id, date);
       }
       raw[v.code][date] = day;
@@ -173,6 +179,13 @@ export async function postCourts(fetchImpl, payload, robotKey) {
   }
 }
 
+// The longest gap between two consecutive clock reads.
+export function maxGap(stamps) {
+  let gap = 0;
+  for (let i = 1; i < stamps.length; i++) gap = Math.max(gap, stamps[i] - stamps[i - 1]);
+  return gap;
+}
+
 function readKey() {
   try { return readFileSync(KEY_FILE, 'utf8').trim(); } catch { return ''; }
 }
@@ -190,26 +203,28 @@ export async function run({
   const startMs = now();
   if (isQuiet(startMs)) { log('quiet hours'); return 0; }
   if (!robotKey) { log(`FAILED: no robot key at ${KEY_FILE}`); return 1; }
-  const { dates, raw } = await readAll({ fetchImpl, sleep, nowMs: startMs });
+  const stamps = [startMs];
+  const { dates, raw } = await readAll({ fetchImpl, sleep, nowMs: startMs, beforeFetch: () => stamps.push(now()) });
   const counts = countStatuses(raw);
   const endMs = now();
+  stamps.push(endMs);
   if (isQuiet(endMs)) { log('quiet hours'); return 0; }
   const seconds = Math.round((endMs - startMs) / 1000);
-  if (endMs - startMs > MAX_READ_MS) {
-    log(`padel-courts: read took ${seconds} s (the Mac slept?), not posted; ${summaryOf(counts)}`);
-    record({ ts: new Date(endMs).toISOString(), ok: true, posted: false, seconds, counts });
+  const gap = maxGap(stamps);
+  if (gap > MAX_GAP_MS) {
+    log(`padel-courts: the Mac slept mid-read (a ${Math.round(gap / 1000)} s gap), not posted; ${summaryOf(counts)}`);
+    record({ ts: new Date(endMs).toISOString(), ok: true, posted: false, seconds, counts, slept: true });
     return 0;
   }
   // readAt is when the read STARTED: the oldest page in it.
   const post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
   if (post.status !== 200) {
-    // Read the clock again: a Mac that slept between the read and the POST gets a 400 or 409 for
-    // an old read. That is the sleep, not a fault.
+    // A Mac that slept while the POST was out gets a 400 or 409 for an old read: the sleep, not a
+    // fault. Judged by the gap across the POST alone (its own timeout is 30 s).
     const afterMs = now();
-    if (afterMs - startMs > MAX_READ_MS) {
-      const slept = Math.round((afterMs - startMs) / 1000);
-      log(`padel-courts: slept before the POST landed (${slept} s since the read started), Worker answered ${post.status || 'nothing'}; not counted; ${summaryOf(counts)}`);
-      record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds: slept, counts, slept: true });
+    if (afterMs - endMs > MAX_GAP_MS) {
+      log(`padel-courts: the Mac slept while posting (a ${Math.round((afterMs - endMs) / 1000)} s gap), Worker answered ${post.status || 'nothing'}; not counted; ${summaryOf(counts)}`);
+      record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds, counts, slept: true });
       return 0;
     }
   }

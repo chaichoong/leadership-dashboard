@@ -22,7 +22,9 @@ const ROBOT = 'robot-key-for-tests';
 const WORKER_OK = { ok: true, matchiFetchedAt: '2026-10-28T09:00:00.000Z', pulseFetchedAt: '2026-10-28T08:50:00.000Z', alerted: 'checking', ready: 0 };
 
 // A fake Matchi and Worker. page(id, date) decides each page; post decides the Worker's answer.
-function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { status: 200 }), clock = [START, START + 20 * 1000] } = {}) {
+// clock: an array (each call takes the next value, the last one repeats) or a function of the call
+// number. postClock, when set, is what the clock reads once the POST has gone out.
+function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { status: 200 }), clock = [START, START + 20 * 1000], postClock } = {}) {
   const pages = [];
   const posts = [];
   const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -37,14 +39,21 @@ function stubs({ page, post = () => new Response(JSON.stringify(WORKER_OK), { st
     }
     throw new Error(`unexpected fetch ${url}`);
   });
-  const times = [...clock];
+  const times = Array.isArray(clock) ? [...clock] : null;
+  let calls = 0;
+  const now = () => {
+    if (postClock !== undefined && posts.length) return postClock;
+    const n = calls++;
+    if (!times) return clock(n);
+    return times.length > 1 ? times.shift() : times[0];
+  };
   const lines = [];
   const records = [];
   const sleeps = [];
   return {
     pages, posts, lines, records, sleeps, fetchImpl,
     go: (extra = {}) => run({
-      fetchImpl, robotKey: ROBOT, now: () => (times.length > 1 ? times.shift() : times[0]),
+      fetchImpl, robotKey: ROBOT, now,
       sleep: async (ms) => { sleeps.push(ms); }, log: (l) => lines.push(l), record: (e) => records.push(e), ...extra,
     }),
   };
@@ -111,11 +120,21 @@ describe('a normal run', () => {
     expect(s.records).toEqual([{ ts: '2026-10-28T09:00:20.000Z', ok: true, posted: true, http: 200, seconds: 20, counts: { si: { ok: 6, closed: 1, error: 0 }, pdl: { ok: 7, closed: 0, error: 0 } }, problems: 0 }]);
   });
 
-  it('a read that took over 5 minutes (the Mac slept) is thrown away, not posted, and is not a failure', async () => {
-    const s = stubs({ page: livePage, clock: [START, START + 6 * 60 * 1000] });
+  it('item 1: one gap over 60 s between two clock reads is a sleep: thrown away, not posted, exit 0', async () => {
+    // A clock read before each fetch, 1 s apart, with one 90 s jump after the 5th.
+    const s = stubs({ page: livePage, clock: (n) => START + n * 1000 + (n >= 6 ? 90 * 1000 : 0) });
     expect(await s.go()).toBe(0);
     expect(s.posts).toHaveLength(0);
-    expect(s.lines[0]).toMatch(/^padel-courts: read took 360 s \(the Mac slept\?\), not posted/);
+    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept mid-read \(a 91 s gap\), not posted/);
+    expect(s.records[0]).toMatchObject({ posted: false, slept: true });
+  });
+
+  it('item 1: 14 pages timing out with no gap (each read 10 s on) is a FAILED run, never "slept"', async () => {
+    const s = stubs({ page: () => { throw new DOMException('signal timed out', 'TimeoutError'); }, clock: (n) => START + n * 10 * 1000 });
+    expect(await s.go()).toBe(1);
+    expect(s.pages).toHaveLength(28);                          // each page tried twice
+    expect(s.posts).toHaveLength(1);
+    expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(timed out\)/);
   });
 });
 
@@ -123,6 +142,7 @@ describe('fails loudly', () => {
   it('when every page of both venues errored (still posts, so the page says "couldn\'t check")', async () => {
     const s = stubs({ page: () => new Response('<title>429 Too Many Requests</title>', { status: 429 }) });
     expect(await s.go()).toBe(1);
+    expect(s.pages).toHaveLength(14);                          // a 429 is never retried
     expect(s.posts).toHaveLength(1);
     expect(s.posts[0].body.venues.si[DATES[0]]).toEqual({ status: 'error', reason: 'HTTP 429' });
     expect(s.lines[0]).toMatch(/^FAILED: every Matchi page errored \(HTTP 429\)/);
@@ -169,6 +189,9 @@ describe('fails loudly', () => {
     let s = stubs({ page: (id, date) => (id === '3122' ? new Response('gone', { status: 404 }) : livePage(id, date)) });
     expect(await s.go()).toBe(1);
     expect(s.lines[0]).toMatch(/^FAILED: PDL errored on every day that should be open \(HTTP 404\)/);
+    // Item 1: a 404 is not retried (only a timeout, a 5xx or no connection is).
+    expect(s.pages).toHaveLength(14);
+    expect(s.sleeps).not.toContain(RETRY_MS);
     // St Ives must be open today and tomorrow: both lost is a failure even with the rest fine.
     s = stubs({ page: (id, date) => (id === '2619' && date <= DATES[1] ? new Response('x', { status: 502 }) : livePage(id, date)) });
     expect(await s.go()).toBe(1);
@@ -210,16 +233,16 @@ describe('fails loudly', () => {
   });
 
   it('item 4: a 409 (or a 400, or a lost connection) after the Mac slept past 5 minutes is "slept", not a failure', async () => {
-    let s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), clock: [START, START + 20 * 1000, START + 7 * 60 * 1000] });
+    let s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), postClock: START + 20 * 1000 + 7 * 60 * 1000 });
     expect(await s.go()).toBe(0);
-    expect(s.lines[0]).toMatch(/^padel-courts: slept before the POST landed \(420 s since the read started\), Worker answered 409; not counted/);
+    expect(s.lines[0]).toMatch(/^padel-courts: the Mac slept while posting \(a 420 s gap\), Worker answered 409; not counted/);
     expect(s.records[0]).toMatchObject({ ok: true, posted: false, http: 409, slept: true });
-    s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), clock: [START, START + 20 * 1000, START + 7 * 60 * 1000] });
+    s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), postClock: START + 20 * 1000 + 7 * 60 * 1000 });
     expect(await s.go()).toBe(0);
-    s = stubs({ page: livePage, post: () => { throw new TypeError('fetch failed'); }, clock: [START, START + 20 * 1000, START + 6 * 60 * 1000] });
+    s = stubs({ page: livePage, post: () => { throw new TypeError('fetch failed'); }, postClock: START + 20 * 1000 + 6 * 60 * 1000 });
     expect(await s.go()).toBe(0);
-    // The same 409 with no sleep is a real failure.
-    s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), clock: [START, START + 20 * 1000, START + 40 * 1000] });
+    // The same 409 with no sleep (a 20 s POST) is a real failure.
+    s = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }), postClock: START + 40 * 1000 });
     expect(await s.go()).toBe(1);
     expect(s.lines[0]).toMatch(/^FAILED: the Worker answered 409 \(A newer read is already stored\)/);
   });
