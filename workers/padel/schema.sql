@@ -7,12 +7,16 @@
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
--- One row per player. venues = the venue codes this person can get to (si, pdl, pp).
+-- One row per player. venues = the venue codes this person can get to (si, pdl, pp). votes_at = when
+-- this person's tick list was last saved (the page uses it to decide whether ticks it kept on the
+-- phone are still unsaved). Added 27 Oct 2026; the live database got it once with:
+--   npx wrangler d1 execute padel --remote -c workers/padel/wrangler.toml --command "ALTER TABLE people ADD COLUMN votes_at TEXT"
 CREATE TABLE IF NOT EXISTS people (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   venues TEXT NOT NULL DEFAULT 'si,pdl,pp',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  votes_at TEXT
 );
 
 -- "I can play" ticks. A person's whole list is replaced in one batch on every save.

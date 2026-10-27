@@ -24,12 +24,17 @@
 // just before the POST, because the Mac can sleep mid-run.
 //
 // FAILS LOUDLY (exit 1, a line starting "FAILED:", which ~/tools/run-job.sh records):
-//   - every page of BOTH venues errored (Matchi is refusing this Mac too, or the network is down);
-//   - the POST did not answer 200;
-//   - a day whose booking window must be open (St Ives today and tomorrow, PDL all 7 days) came
-//     back with no court cells at all (Matchi changed its page, or a login wall).
+//   - any day the parser could not read (an error that is not a network one: Matchi changed its
+//     page, or a login wall), on ANY day, even when every other page read fine;
+//   - a venue that errored on every day whose booking window must be open (St Ives today and
+//     tomorrow, PDL all 7 days), whatever the reason (a 404 on all 7 PDL days fails);
+//   - a must-be-open day that came back closed (no court cells at all);
+//   - the POST did not answer 200.
+// A venue that misses a few days to a network error (a timeout, a 5xx) is not a failure on its
+// own: those days read "couldn't check" on the page and the next run is 15 minutes later.
 // A read that took over 5 minutes (the Mac slept in the middle) is thrown away and not posted:
-// its first pages would be old. The next run is 15 minutes later.
+// its first pages would be old. A POST that fails after such a sleep (the Worker refuses an old
+// read) is logged as "slept", not as a failure.
 //
 // Usage:
 //   node scripts/padel-courts.mjs run
@@ -63,7 +68,9 @@ export function isQuiet(nowMs) {
 export function mustBeOpen(code, index) {
   return code === 'si' ? index < 2 : true;
 }
-const NO_CELLS = new Set(['no court cells recognised', 'not a schedule page']);
+// The reasons readDay gives for a page that never arrived. Every other error reason comes from
+// parseMatchi: the page arrived and could not be read.
+export const isNetworkReason = (reason) => /^HTTP \d{3}$/.test(reason || '') || reason === 'timed out' || reason === 'could not reach the site';
 
 // Fetch one page. Never throws: a failure is an error day with its reason.
 export async function readDay(fetchImpl, id, date) {
@@ -119,19 +126,23 @@ export function countStatuses(raw) {
 }
 
 // The read's own problems, before any POST. Each is a sentence for the FAILED line.
+const reasonsOf = (days) => [...new Set(days.map((d) => d.reason))].slice(0, 3).join(', ');
 export function readProblems(raw, dates) {
   const problems = [];
   const all = Object.values(raw).flatMap((days) => Object.values(days));
-  if (all.length && all.every((d) => d.status === 'error')) {
-    const reasons = [...new Set(all.map((d) => d.reason))].slice(0, 3).join(', ');
-    problems.push(`every Matchi page errored (${reasons})`);
-  }
+  const everyPage = all.length > 0 && all.every((d) => d.status === 'error');
+  if (everyPage) problems.push(`every Matchi page errored (${reasonsOf(all)})`);
   for (const v of VENUES) {
+    const open = [];
     dates.forEach((date, i) => {
       const d = raw[v.code]?.[date];
-      if (!d || !mustBeOpen(v.code, i)) return;
-      if (d.status === 'closed' || (d.status === 'error' && NO_CELLS.has(d.reason))) problems.push(`${v.name} ${date} has no court cells`);
+      if (!d) return;
+      if (d.status === 'error' && !isNetworkReason(d.reason)) problems.push(`${v.name} ${date} could not be read (${d.reason})`);
+      if (!mustBeOpen(v.code, i)) return;
+      open.push(d);
+      if (d.status === 'closed') problems.push(`${v.name} ${date} has no court cells`);
     });
+    if (!everyPage && open.length && open.every((d) => d.status === 'error')) problems.push(`${v.name} errored on every day that should be open (${reasonsOf(open)})`);
   }
   return problems;
 }
@@ -181,12 +192,22 @@ export async function run({
   }
   // readAt is when the read STARTED: the oldest page in it.
   const post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
+  if (post.status !== 200) {
+    // Read the clock again: a Mac that slept between the read and the POST gets a 400 or 409 for
+    // an old read. That is the sleep, not a fault.
+    const afterMs = now();
+    if (afterMs - startMs > MAX_READ_MS) {
+      const slept = Math.round((afterMs - startMs) / 1000);
+      log(`padel-courts: slept before the POST landed (${slept} s since the read started), Worker answered ${post.status || 'nothing'}; not counted; ${summaryOf(counts)}`);
+      record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds: slept, counts, slept: true });
+      return 0;
+    }
+  }
   const problems = readProblems(raw, dates);
   if (post.status !== 200) problems.push(`the Worker answered ${post.status || 'nothing'} (${String(post.body?.error || 'no reason').slice(0, 120)})`);
-  const alerted = Array.isArray(post.body?.alerted) ? post.body.alerted.length : 0;
-  record({ ts: new Date(endMs).toISOString(), ok: !problems.length, posted: post.status === 200, http: post.status, seconds, counts, alerts: alerted, problems: problems.length });
+  record({ ts: new Date(endMs).toISOString(), ok: !problems.length, posted: post.status === 200, http: post.status, seconds, counts, problems: problems.length });
   if (problems.length) { log(`FAILED: ${problems.join('; ')}. ${summaryOf(counts)}`); return 1; }
-  log(`padel-courts: ${summaryOf(counts)}; posted 200 in ${seconds} s; Pulse read ${hhmm(post.body?.pulseFetchedAt)}; alerts ${alerted}`);
+  log(`padel-courts: ${summaryOf(counts)}; posted 200 in ${seconds} s; Pulse read ${hhmm(post.body?.pulseFetchedAt)}`);
   return 0;
 }
 

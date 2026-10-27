@@ -255,7 +255,7 @@ function mapRepo() {
   const booked = new Map();
   const alerts = new Map();
   const cache = new Map();
-  const out = (p) => ({ id: p.id, name: p.name, venues: p.venues.split(',').filter(Boolean) });
+  const out = (p) => ({ id: p.id, name: p.name, venues: p.venues.split(',').filter(Boolean), savedAt: p.votes_at || null });
   return {
     rows: { alerts: () => [...alerts.values()], people: () => [...people.values()], votes: () => [...votes.values()] },
     putAlert: (row) => alerts.set(row.slot, { names: '', venues: '', relay_reply: null, ...row }),
@@ -273,11 +273,12 @@ function mapRepo() {
       async replaceVotes(pid, slots, now) {
         for (const [k, v] of [...votes]) if (v.person_id === pid && !slots.includes(v.slot)) votes.delete(k);
         for (const s of slots) if (!votes.has(`${pid}|${s}`)) votes.set(`${pid}|${s}`, { person_id: pid, slot: s, created_at: now });
+        if (people.has(pid)) people.get(pid).votes_at = now;
       },
       async listBooked(from) { return [...booked.values()].filter((b) => b.slot >= from); },
       async setBooked(slot, person_id, venue, now) { booked.set(slot, { slot, person_id, venue, created_at: now }); },
       async clearBooked(slot) { booked.delete(slot); },
-      async alertSlots(from) { return [...alerts.keys()].filter((s) => s >= from); },
+      async alertSlots(from, reclaimBefore) { return [...alerts.values()].filter((a) => a.slot >= from && !(a.relay_reply === null && a.sent_at < reclaimBefore)).map((a) => a.slot); },
       async claimAlert(slot, names, venues, now, reclaimBefore) {
         const row = alerts.get(slot);
         if (row && !(row.relay_reply === null && row.sent_at < reclaimBefore)) return false;
@@ -504,18 +505,57 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(await r.claimAlert('2026-10-28|11', 'a', 'si', iso(NOW), before)).toBe(true);
   });
 
-  it('F9: relay 200 then saving its reply throws: one DM, and no second one on the next save', async () => {
+  it('F9: relay 200 then every reply write fails: one DM, 4 tries, the row kept, no second DM on the next save', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     t.repo.saveRelayReply = vi.fn(async () => { throw new Error('D1 busy'); });
     const ids = await t.addPeople(NAMES);
     for (const id of ids.slice(0, 4)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
     expect(t.rows.alerts()).toHaveLength(1);                // the row stays: the DM went
+    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(4);  // the write, then 3 retries
+    expect(err).toHaveBeenCalledWith('padel: DM sent, reply not saved', SLOT, 'attempt 4', expect.stringContaining('D1 busy'));
     await t.call('/api/vote', { person_id: ids[4], slots: [SLOT] });
     await t.call('/api/state');
+    expect(t.relayCalls).toHaveLength(1);                   // under 2 minutes old: never claimed again
+  });
+
+  it('item 1: relay 200, the reply write fails twice then succeeds: one DM and the reply stored', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const real = t.repo.saveRelayReply.bind(t.repo);
+    let n = 0;
+    t.repo.saveRelayReply = vi.fn(async (slot, reply) => { n++; if (n <= 2) throw new Error('D1 busy'); return real(slot, reply); });
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
-    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(2);  // tried once more, then logged
-    expect(err).toHaveBeenCalledWith('padel: DM sent, reply still not saved', SLOT, expect.stringContaining('D1 busy'));
+    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(3);
+    expect(t.rows.alerts().map((r) => [r.slot, r.relay_reply])).toEqual([[SLOT, RELAY_OK]]);
+  });
+
+  it('item 1: a stuck row (no relay reply) over 2 minutes old is retried through the vote route: exactly one DM', async () => {
+    t.putAlert({ slot: SLOT, sent_at: iso(NOW - 3 * MIN), relay_reply: null });
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    await t.call('/api/state');
+    expect(t.relayCalls).toHaveLength(1);
+    const rows = t.rows.alerts();
+    expect(rows.map((r) => [r.slot, r.sent_at, r.relay_reply])).toEqual([[SLOT, iso(NOW), RELAY_OK]]);
+  });
+
+  it('item 1: a stuck row only 1 minute old is left alone: no DM', async () => {
+    t.putAlert({ slot: SLOT, sent_at: iso(NOW - 1 * MIN), relay_reply: null });
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    await t.call('/api/state');
+    expect(t.relayCalls).toHaveLength(0);
+    expect(t.rows.alerts().map((r) => [r.sent_at, r.relay_reply])).toEqual([[iso(NOW - 1 * MIN), null]]);
+  });
+
+  it('item 7: a save stamps the person with savedAt, which the page compares with its kept copy', async () => {
+    const [id] = await t.addPeople(['Test Ann']);
+    expect((await t.call('/api/state')).json.people[0].savedAt).toBeNull();
+    t.setNow(NOW + MIN);
+    const s = (await t.call('/api/vote', { person_id: id, slots: [] })).json;     // an empty list still stamps it
+    expect(s.people[0]).toMatchObject({ id, savedAt: iso(NOW + MIN) });
   });
 
   it('a failed DM leaves no alert row, logs, and the next save retries', async () => {
@@ -671,7 +711,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const a = (await t.call('/api/person', { name: '  test   ann ' })).json;
     const b = (await t.call('/api/person', { name: 'TEST ANN' })).json;
     expect(a.id).toBe(b.id);
-    expect(a).toEqual({ id: a.id, name: 'test ann', venues: ['si', 'pdl', 'pp'] });
+    expect(a).toEqual({ id: a.id, name: 'test ann', venues: ['si', 'pdl', 'pp'], savedAt: null });
     const z = (await t.call('/api/person', { name: 'Test Zoë' })).json;
     expect((await t.call('/api/person', { name: 'TEST ZOË' })).json.id).toBe(z.id);
     expect((await t.call('/api/person', { name: 'test zoe' })).json.id).toBe(z.id);
@@ -764,9 +804,12 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       await t.drain();
       t.relayCalls.length = 0;
       t.calls.length = 0;
-      const r = await t.call('/api/courts', macBody(NOW - 30 * 1000), { key: '', robot: ROBOT });
+      const r = await t.call('/api/courts', macBody(NOW - 30 * 1000), { key: '', robot: ROBOT, drain: false });
       expect(r.status).toBe(200);
-      expect(r.json).toEqual({ ok: true, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW), alerted: ['2026-10-28|07'] });
+      // The alert check runs in waitUntil: the reply only says it is under way.
+      expect(r.json).toEqual({ ok: true, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW), alerted: 'checking', ready: 1 });
+      expect(t.waits).toHaveLength(1);                        // handed to waitUntil, not awaited by the reply
+      await t.drain();
       expect(t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'))).toHaveLength(1);
       expect(t.relayCalls).toHaveLength(1);
       expect(t.relayCalls[0].body.text).toMatch(/^Padel: Wed 28 Oct 07:00\. St Ives: 4 in .* Pulse: 4 in .* Courts checked: St Ives 09:44, Pulse 09:45\./);
@@ -801,10 +844,11 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     });
 
     it('validates strictly: venues, statuses, start times, whole numbers', async () => {
-      const day = (d) => ({ readAt: iso(NOW), venues: { si: { '2026-10-28': d } } });
+      const day = (d) => ({ readAt: iso(NOW), venues: { si: { '2026-10-28': d }, pdl: {} } });
+      const both = (v) => ({ readAt: iso(NOW), venues: { pdl: {}, ...v } });
       const bad = [
-        { readAt: iso(NOW), venues: { pp: { '2026-10-28': { status: 'closed' } } } },
-        { readAt: iso(NOW), venues: { si: [] } },
+        both({ si: {}, pp: { '2026-10-28': { status: 'closed' } } }),
+        both({ si: [] }),
         { readAt: iso(NOW), venues: [] },
         day({ status: 'open' }),
         day({ status: 'ok' }),
@@ -814,19 +858,25 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
         day({ status: 'ok', starts: { '19:00': { courts: 1, min: 1.5 } } }),
         day({ status: 'ok', starts: { '19:00': { courts: '1', min: 60 } } }),
         day('ok'),
-        { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'closed' }, '2026-10-26': { status: 'closed' } } } },   // nothing inside the window
+        both({ si: { '2026-11-03': { status: 'closed' }, '2026-10-26': { status: 'closed' } } }),   // nothing inside the window
       ];
       for (const b of bad) expect((await t.call('/api/courts', b, { robot: ROBOT })).status, JSON.stringify(b)).toBe(400);
+      // Item 3: both venues every time. A body without pdl would have kept PDL's old days under the
+      // new readAt, reading as fresh.
+      const noPdl = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT });
+      expect(noPdl).toMatchObject({ status: 400, json: { error: 'venues.pdl is needed' } });
+      expect((await t.call('/api/courts', { readAt: iso(NOW), venues: { pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT })).json).toEqual({ error: 'venues.si is needed' });
       // Dates outside the window are ignored without refusing the rest; an error day keeps its reason.
-      const ok = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'nonsense' }, '2026-10-28': { status: 'error', reason: 'HTTP 500' } } } }, { robot: ROBOT });
+      const ok = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'nonsense' }, '2026-10-28': { status: 'error', reason: 'HTTP 500' } }, pdl: { '2026-10-28': { status: 'closed' } } } }, { robot: ROBOT });
       expect(ok.status).toBe(200);
       const s = (await t.call('/api/state')).json;
       expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'HTTP 500', hours: {} });
-      expect(s.availability.venues.pdl['2026-10-28'].status).toBe('ok');    // pdl not posted: kept
+      expect(s.availability.venues.pdl['2026-10-28']).toEqual({ status: 'closed', hours: {} });
+      expect(s.availability.venues.pdl['2026-10-29']).toEqual({ status: 'pending', hours: {} });   // not posted: never the old day
     });
 
     it('takes a body up to 64 KB, refuses one over it', async () => {
-      const filler = { readAt: iso(NOW), venues: { si: { '2026-10-28': { status: 'closed' }, '2030-01-01': { status: 'error', reason: 'x'.repeat(30000) } } } };
+      const filler = { readAt: iso(NOW), venues: { pdl: {}, si: { '2026-10-28': { status: 'closed' }, '2030-01-01': { status: 'error', reason: 'x'.repeat(30000) } } } };
       expect((await t.call('/api/courts', filler, { robot: ROBOT })).status).toBe(200);
       filler.venues.si['2030-01-01'].reason = 'x'.repeat(70000);
       expect((await t.call('/api/courts', filler, { robot: ROBOT })).status).toBe(413);
@@ -882,6 +932,23 @@ describe('the page and its headers (workers/padel/public)', () => {
     expect(csp).toContain(`script-src 'sha256-${hash}'`);
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
     expect(csp).toContain("connect-src 'self'");
+    // The live page is served with no charset in its content-type, so this meta line is what makes
+    // the browser decode the script as UTF-8, the bytes the hash was taken from.
+    expect(page).toMatch(/^<!doctype html>\s*<html[^>]*>\s*<head>\s*<meta charset="utf-8">/i);
+  });
+  it('item 7: the kept-ticks copy is replayed only while the server still shows the stamp it was made against', () => {
+    const src = page.match(/\/\/ <unsavedDecision>\n([\s\S]*?)\n\s*\/\/ <\/unsavedDecision>/);
+    expect(src, 'the marked function (control)').not.toBeNull();
+    const unsavedDecision = new Function(`${src[1]}\nreturn unsavedDecision;`)();
+    const copy = { p: 7, s: ['2026-10-28|19'], at: 1, base: '2026-10-27T09:00:00.000Z' };
+    expect(unsavedDecision(copy, 7, '2026-10-27T09:00:00.000Z')).toBe('replay');      // nothing saved since: send it
+    expect(unsavedDecision(copy, 7, '2026-10-27T09:05:00.000Z')).toBe('drop');        // the keepalive landed, or another browser saved
+    expect(unsavedDecision({ ...copy, base: null }, 7, null)).toBe('replay');          // first ticks ever, never saved
+    expect(unsavedDecision({ ...copy, base: null }, 7, '2026-10-27T09:05:00.000Z')).toBe('drop');
+    expect(unsavedDecision(copy, 8, '2026-10-27T09:00:00.000Z')).toBe('keep');        // someone else's copy on this phone
+    expect(unsavedDecision({ p: 7, s: ['x'] }, 7, null)).toBe('drop');                // no stamp: never overwrite
+    expect(unsavedDecision(null, 7, null)).toBe('drop');
+    expect(unsavedDecision({ p: 7, s: 'x', base: null }, 7, null)).toBe('drop');
   });
   it('S4: the page headers live in _headers, for every path', () => {
     expect(headers).toMatch(/^\/\*$/m);

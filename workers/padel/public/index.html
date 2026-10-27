@@ -265,24 +265,44 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let staleTimer = null;
   let reqSeq = 0;                             // every request is numbered...
   let handledSeq = 0;                         // ...and a state older than the newest one shown is ignored
+  let lastWriteSeq = 0;                       // the newest write whose reply was shown
+  let lastWriteDone = 0;                      // when the last write finished (performance.now())
+  let refetchTimer = null;
 
   class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
   async function api(path, body) {
     const n = ++reqSeq;
-    const opts = { method: body ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store' };
-    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    const write = !!body;
+    const startedAt = performance.now();
+    const opts = { method: write ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store' };
+    if (write) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     let res;
-    try { res = await fetch(path, opts); } catch (e) { throw new ApiError('No connection. Check your signal and try again.', 0); }
+    try { res = await fetch(path, opts); } catch (e) { if (write) lastWriteDone = performance.now(); throw new ApiError('No connection. Check your signal and try again.', 0); }
     const data = await res.json().catch(() => null);
+    if (write) lastWriteDone = performance.now();
     if (res.status === 401) { showGate(); throw new ApiError(GATE, 401); }
     if (res.status === 429) { backoffUntil = Date.now() + 10000; throw new ApiError('Too many taps at once. Wait a few seconds.', 429); }
     if (!res.ok) throw new ApiError((data && data.error) || 'Something went wrong (' + res.status + '). Try again.', res.status);
     if (!data) throw new ApiError('The page got an answer it could not read. Try again.', res.status);
-    return { data, n };
+    return { data, n, write, startedAt };
   }
-  // Apply a state reply only when no newer reply has been shown already.
+  // Apply a state reply only when no newer reply has been shown already. A write's own reply is the
+  // state after that write, so it is shown. A read that STARTED before the last write finished may
+  // have been answered before the write landed (the tick would look missing): it is ignored, and
+  // the state is asked for once more.
   function applyNewest(r) {
+    if (r.write) {
+      if (r.n < lastWriteSeq) return false;
+      lastWriteSeq = r.n;
+      handledSeq = Math.max(handledSeq, r.n);
+      apply(r.data);
+      return true;
+    }
     if (r.n < handledSeq) return false;
+    if (r.startedAt < lastWriteDone) {
+      if (!refetchTimer) refetchTimer = setTimeout(() => { refetchTimer = null; load(); }, 0);
+      return false;
+    }
     handledSeq = r.n;
     apply(r.data);
     return true;
@@ -558,13 +578,31 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   // A tick is kept on this phone (localStorage) until the server confirms it, so a closed tab, a
   // dropped signal or WhatsApp's in-app browser shutting the page never loses it.
   function currentSlots() { return [...mine].filter((s) => S.days.includes(s.split('|')[0])).sort(); }
-  function persistUnsaved() { if (me) store.set('padel.unsaved', JSON.stringify({ p: me, s: [...mine] })); }
+  // The copy carries `base`: the person's savedAt (the server's stamp of their last save) as the
+  // page saw it when the copy was made. On the next visit the copy is sent again only while the
+  // server still shows that same stamp. A keepalive save that landed after the page closed, or ticks
+  // saved later from another browser, move the stamp, and the copy is dropped instead of
+  // overwriting them. No phone clock is involved.
+  // <unsavedDecision>
+  function unsavedDecision(copy, personId, serverSavedAt) {
+    if (!copy || typeof copy !== 'object' || !Array.isArray(copy.s)) return 'drop';
+    if (copy.p !== personId) return 'keep';                   // someone else's on this phone: leave it
+    if (!Object.prototype.hasOwnProperty.call(copy, 'base')) return 'drop';
+    return (copy.base || null) === (serverSavedAt || null) ? 'replay' : 'drop';
+  }
+  // </unsavedDecision>
+  function persistUnsaved() {
+    const p = person(me);
+    if (me) store.set('padel.unsaved', JSON.stringify({ p: me, s: [...mine], at: Date.now(), base: (p && p.savedAt) || null }));
+  }
   function clearUnsaved() { store.del('padel.unsaved'); }
   function restoreUnsaved() {
     restored = true;
     let u = null;
     try { u = JSON.parse(store.get('padel.unsaved') || 'null'); } catch (e) { clearUnsaved(); toast("Some ticks from your last visit couldn't be read."); }
-    if (!u || u.p !== me || !Array.isArray(u.s)) return;
+    const decision = unsavedDecision(u, me, (person(me) || {}).savedAt);
+    if (decision === 'drop' && u) clearUnsaved();
+    if (decision !== 'replay') return;
     mine = new Set(u.s.filter((s) => typeof s === 'string' && S.days.includes(s.split('|')[0])));
     dirty = true;
     scheduleSave(800);
@@ -600,9 +638,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         const r = await api('/api/vote', { person_id: me, slots });
         saving = false;
         saveTry = 0;
+        backoffUntil = 0;
         if (!dirty) clearUnsaved();
         applyNewest(r);
-        if (dirty) scheduleSave();
+        if (dirty) { persistUnsaved(); scheduleSave(); }   // newer ticks: their copy takes the new stamp
         return !dirty;
       } catch (e) {
         saving = false;
@@ -610,7 +649,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         if (e.status === 401) return false;
         saveTry++;
         if (saveTry === 1) toast("Couldn't save your ticks. Trying again.");
-        if (saveTry <= SAVE_RETRY_MS.length) saveTimer = setTimeout(save, SAVE_RETRY_MS[saveTry - 1]);
+        // One timer only: a tap during the failing save had set its own 800 ms one. The back-off
+        // holds every later tap too (scheduleSave waits for backoffUntil).
+        clearTimeout(saveTimer);
+        if (saveTry <= SAVE_RETRY_MS.length) {
+          const wait = SAVE_RETRY_MS[saveTry - 1];
+          backoffUntil = Math.max(backoffUntil, Date.now() + wait);
+          saveTimer = setTimeout(save, wait);
+        }
         return false;
       } finally {
         if (S && !$('board').hidden) keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
@@ -631,7 +677,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const slots = currentSlots();
     const sent = JSON.stringify(slots);
     fetch('/api/vote', { method: 'POST', keepalive: true, cache: 'no-store', headers: { 'X-Group-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: me, slots }) })
-      .then((res) => { if (res.ok && JSON.stringify(currentSlots()) === sent) { dirty = false; clearUnsaved(); } else { flushFailed = true; } })
+      .then((res) => { lastWriteDone = performance.now(); if (res.ok && JSON.stringify(currentSlots()) === sent) { dirty = false; clearUnsaved(); } else { flushFailed = true; } })
       .catch(() => { flushFailed = true; });        // kept in localStorage; saved when the page is next shown
   }
 

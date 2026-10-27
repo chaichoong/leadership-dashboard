@@ -7,7 +7,7 @@
 // Routes (JSON). Every /api request is rate limited per caller BEFORE any key check.
 //   GET  /api/health                        -> { ok, version }                 no key, no data
 //   GET  /api/courts      (X-Robot-Key)     -> { ok, version, matchiFetchedAt, pulseFetchedAt, venueStatus }
-//   POST /api/courts      (X-Robot-Key)     -> { ok, matchiFetchedAt, pulseFetchedAt, alerted }
+//   POST /api/courts      (X-Robot-Key)     -> { ok, matchiFetchedAt, pulseFetchedAt, alerted: 'checking', ready }
 //        { readAt, venues: { si: { "<date>": day }, pdl: { ... } } }  the Mac mini's Matchi read
 //   Every other route needs X-Group-Key = GROUP_KEY:
 //   GET  /api/ping                          -> { ok }                          the key register's test
@@ -55,6 +55,7 @@ export const PULSE_EVERY_MS = 15 * 60 * 1000;    // Pulse is called at most once
 export const REFRESH_GUARD_MS = 90 * 1000;       // no second Pulse read within 90 seconds
 export const READ_AT_SKEW_MS = 10 * 60 * 1000;   // a Mac read older (or newer) than this is refused
 export const ALERT_RECLAIM_MS = 2 * 60 * 1000;   // an alert row with no relay reply after this may be retried
+export const SAVE_REPLY_RETRIES = 3;             // after a relay 200, the reply write is retried up to 3 times
 export const FETCH_TIMEOUT_MS = 8000;
 export const RELAY_TIMEOUT_MS = 8000;
 export const ALERT_AT = 4;
@@ -283,7 +284,7 @@ export function assembleAvailability(matchi, pulse) {
 export function computeState({ people, votes, booked, availability, dates, nowMs, cfg = venueConfig() }) {
   const today = dates[0];
   const inWindow = new Set(dates);
-  const ppl = people.map((p) => ({ id: p.id, name: p.name, venues: Array.isArray(p.venues) ? p.venues : splitVenues(p.venues) }));
+  const ppl = people.map((p) => ({ id: p.id, name: p.name, venues: Array.isArray(p.venues) ? p.venues : splitVenues(p.venues), savedAt: p.savedAt ?? null }));
   const byId = new Map(ppl.map((p) => [p.id, p]));
   const voteMap = {};
   for (const v of votes) {
@@ -393,15 +394,15 @@ export function alertText(r, cfg, pageUrl) {
 export const foldName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ── D1 access, behind one small object so tests can swap in a Map-backed copy ──
-const toPerson = (r) => ({ id: r.id, name: r.name, venues: splitVenues(r.venues) });
+const toPerson = (r) => ({ id: r.id, name: r.name, venues: splitVenues(r.venues), savedAt: r.votes_at || null });
 export function makeRepo(db) {
   return {
     async listPeople() {
-      const r = await db.prepare('SELECT id, name, venues FROM people ORDER BY name COLLATE NOCASE').all();
+      const r = await db.prepare('SELECT id, name, venues, votes_at FROM people ORDER BY name COLLATE NOCASE').all();
       return (r.results || []).map(toPerson);
     },
     async getPerson(id) {
-      const r = await db.prepare('SELECT id, name, venues FROM people WHERE id = ?').bind(id).first();
+      const r = await db.prepare('SELECT id, name, venues, votes_at FROM people WHERE id = ?').bind(id).first();
       return r ? toPerson(r) : null;
     },
     async countPeople() {
@@ -410,7 +411,7 @@ export function makeRepo(db) {
     },
     async addPerson(name, nowIso) {
       await db.prepare("INSERT INTO people (name, venues, created_at) VALUES (?, 'si,pdl,pp', ?) ON CONFLICT(name) DO NOTHING").bind(name, nowIso).run();
-      const r = await db.prepare('SELECT id, name, venues FROM people WHERE name = ? COLLATE NOCASE').bind(name).first();
+      const r = await db.prepare('SELECT id, name, venues, votes_at FROM people WHERE name = ? COLLATE NOCASE').bind(name).first();
       return r ? toPerson(r) : null;
     },
     async setVenues(id, venues) {
@@ -421,13 +422,15 @@ export function makeRepo(db) {
       const r = await db.prepare('SELECT person_id, slot FROM votes WHERE slot >= ? ORDER BY slot').bind(fromDate).all();
       return r.results || [];
     },
-    // One batch, two statements, whatever the number of slots: drop the ticks not in the list, add
-    // the new ones (a kept tick keeps its first created_at).
+    // One batch, whatever the number of slots: drop the ticks not in the list, add the new ones (a
+    // kept tick keeps its first created_at), and stamp the person's votes_at with this save. The page
+    // compares that stamp with the one it saw when it kept unsaved ticks on the phone.
     async replaceVotes(personId, slots, nowIso) {
       const list = JSON.stringify(slots);
       await db.batch([
         db.prepare('DELETE FROM votes WHERE person_id = ?1 AND slot NOT IN (SELECT value FROM json_each(?2))').bind(personId, list),
         db.prepare('INSERT OR IGNORE INTO votes (person_id, slot, created_at) SELECT ?1, value, ?3 FROM json_each(?2)').bind(personId, list, nowIso),
+        db.prepare('UPDATE people SET votes_at = ?2 WHERE id = ?1').bind(personId, nowIso),
       ]);
     },
     async listBooked(fromDate) {
@@ -441,8 +444,11 @@ export function makeRepo(db) {
     async clearBooked(slot) {
       await db.prepare('DELETE FROM booked WHERE slot = ?').bind(slot).run();
     },
-    async alertSlots(fromDate) {
-      const r = await db.prepare('SELECT slot FROM alerts WHERE slot >= ?').bind(fromDate).all();
+    // The slots whose DM is done or under way. A row with no relay reply that is over 2 minutes old
+    // (the Worker stopped between the claim and the reply) is left out, so it is offered to
+    // claimAlert again.
+    async alertSlots(fromDate, reclaimBeforeIso) {
+      const r = await db.prepare('SELECT slot FROM alerts WHERE slot >= ?1 AND NOT (relay_reply IS NULL AND sent_at < ?2)').bind(fromDate, reclaimBeforeIso).all();
       return (r.results || []).map((x) => x.slot);
     },
     // Only the request whose write changed a row sends the DM. A row whose DM never got a relay reply
@@ -584,6 +590,9 @@ export function cleanCourts(body, nowMs) {
   if (!Number.isFinite(readAtMs)) return { error: 'readAt must be a date and time' };
   if (Math.abs(nowMs - readAtMs) > READ_AT_SKEW_MS) return { error: 'readAt is not within 10 minutes of now' };
   if (!isObj(body.venues)) return { error: 'venues must be an object' };
+  // Both venues, every time: a venue left out would keep its old days under the new readAt and
+  // read as fresh.
+  for (const code of MATCHI_VENUES) if (!isObj(body.venues[code])) return { error: `venues.${code} is needed` };
   const window = new Set(londonDates(nowMs));
   const venues = {};
   let kept = 0;
@@ -619,7 +628,7 @@ async function saveMatchi(repo, prev, clean) {
 export async function checkAlerts(state, env, repo, nowMs) {
   const nowIso = new Date(nowMs).toISOString();
   const reclaimBefore = new Date(nowMs - ALERT_RECLAIM_MS).toISOString();
-  const due = decideAlerts(state, await repo.alertSlots(state.today));
+  const due = decideAlerts(state, await repo.alertSlots(state.today, reclaimBefore));
   const cfg = venueConfig(env);
   const sent = [];
   for (const r of due) {
@@ -645,11 +654,16 @@ export async function checkAlerts(state, env, repo, nowMs) {
       continue;
     }
     sent.push(r.slot);
-    try {
-      await repo.saveRelayReply(r.slot, reply || '(empty reply)');
-    } catch (e) {
-      console.error('padel: DM sent but its reply was not saved, retrying once', r.slot, String(e));
-      try { await repo.saveRelayReply(r.slot, '(sent; reply not saved first time)'); } catch (e2) { console.error('padel: DM sent, reply still not saved', r.slot, String(e2)); }
+    // The DM is out: the row is never released from here on. The reply write is tried up to 3 more
+    // times, because a row left with no reply could be claimed again after 2 minutes.
+    let saved = false;
+    for (let attempt = 0; attempt <= SAVE_REPLY_RETRIES && !saved; attempt++) {
+      try {
+        await repo.saveRelayReply(r.slot, reply || '(empty reply)');
+        saved = true;
+      } catch (e) {
+        console.error('padel: DM sent, reply not saved', r.slot, `attempt ${attempt + 1}`, String(e));
+      }
     }
   }
   return sent;
@@ -784,9 +798,11 @@ async function handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock) {
   if (pulseDue(pulse, nowMs) && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) await refreshPulse(env, repo, nowMs, fetchImpl);
   const now = clock();
   const state = await loadState(env, repo, now);
-  const alerted = await checkAlerts(state, env, repo, now);
+  // In waitUntil, so the Mac going away cannot stop a DM between its claim and its reply. The reply
+  // says only that the check is under way; the Mac does not depend on what it sends.
+  ctx.waitUntil(alertSafely(state, env, repo, now));
   const { availability } = await loadAvailability(repo);
-  return json({ ok: true, matchiFetchedAt: availability.matchiFetchedAt, pulseFetchedAt: availability.pulseFetchedAt, alerted });
+  return json({ ok: true, matchiFetchedAt: availability.matchiFetchedAt, pulseFetchedAt: availability.pulseFetchedAt, alerted: 'checking', ready: state.ready.length });
 }
 
 export async function handleRequest(request, env, ctx, repo, deps = {}) {
@@ -820,8 +836,13 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
 
     if (path === '/api/refresh') {
       let refreshed = false;
-      if (await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) refreshed = await refreshAndAlert(env, repo, nowMs, fetchImpl, clock);
-      const state = await loadState(env, repo, clock());
+      if (await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {
+        try { refreshed = await refreshPulse(env, repo, nowMs, fetchImpl); } catch (e) { console.error('padel: Pulse read failed', String(e && e.stack || e)); }
+      }
+      const now = clock();
+      const state = await loadState(env, repo, now);
+      // The alert check runs in waitUntil: a caller going away cannot stop it between claim and reply.
+      ctx.waitUntil(alertSafely(state, env, repo, now));
       return json({ ...state, refreshed });
     }
 
