@@ -88,7 +88,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .link { background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); color: var(--accent); text-decoration: underline; font-weight: var(--fw-medium); }
 .card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-4); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); }
 .note { color: var(--text-secondary); margin: 0 0 var(--space-3); }
-.gate p { font-size: var(--fs-lg); margin: 0; }
+.gate > p { font-size: var(--fs-lg); margin: 0 0 var(--space-4); }
+.code-error { margin: var(--space-2) 0 0; color: var(--danger); font-weight: var(--fw-semibold); }
 .btn { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
@@ -157,7 +158,18 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   <main>
     <div id="loading" class="card" role="status"><p class="note" id="loading-text">Loading...</p><button type="button" id="retry" class="btn" hidden>Try again</button></div>
 
-    <section id="gate" class="card gate" hidden><p>This link needs the group code. Ask Kevin.</p></section>
+    <section id="gate" class="card gate" hidden>
+      <p>This link needs the group code. Ask Kevin.</p>
+      <form id="code-form" class="add" novalidate>
+        <label for="code-input">Group code</label>
+        <div class="add-row">
+          <input id="code-input" name="code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200" aria-describedby="code-hint code-error">
+          <button type="submit" id="code-btn" class="btn primary" aria-label="Open the page with this group code">Open</button>
+        </div>
+        <p id="code-hint" class="note">It is the part after #k= in the link Kevin shared.</p>
+        <p id="code-error" class="code-error" role="alert" hidden></p>
+      </form>
+    </section>
 
     <section id="pick" class="card" hidden aria-labelledby="pick-h">
       <h2 id="pick-h">Pick your name</h2>
@@ -246,7 +258,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const saved = store.get('padel.k') || '';
     return /^[0-9a-fA-F]{16,64}$/.test(saved) ? saved : '';
   }
-  const key = readKey();
+  let key = readKey();
 
   let S = null;                               // last state from the server
   let me = Number(store.get('padel.person')) || null;
@@ -316,6 +328,38 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     handledSeq = r.n;
     apply(r.data);
     return true;
+  }
+
+  // The gate's code box: for a link typed by hand without #k=. The code is checked with /api/ping
+  // (sent only in the X-Group-Key header, never in a URL); only a code that works is kept, the same
+  // way the #k= path keeps it, and put in the address bar so a bookmark or a share carries it.
+  async function submitCode(ev) {
+    ev.preventDefault();
+    const input = $('code-input');
+    const err = $('code-error');
+    const btn = $('code-btn');
+    const say = (msg) => { err.textContent = msg; err.hidden = false; input.focus(); };
+    const raw = input.value.trim().toLowerCase();
+    const m = /(?:^|k=)([0-9a-f]{16,64})$/.exec(raw);          // the code, or a pasted link ending in #k=<code>
+    if (!m) { say('That does not look like the code.'); return; }
+    const code = m[1];
+    btn.disabled = true;
+    try {
+      let res;
+      try { res = await fetch('/api/ping', { headers: { 'X-Group-Key': code }, cache: 'no-store' }); } catch (e) { say('No connection. Check your signal and try again.'); return; }
+      if (res.status === 401) { say('Wrong code. Ask Kevin.'); return; }
+      if (!res.ok) { say('Could not check the code (' + res.status + '). Try again.'); return; }
+      key = code;
+      store.set('padel.k', code);
+      history.replaceState(null, '', location.pathname + location.search + '#k=' + code);
+      err.hidden = true;
+      input.value = '';
+      $('gate').hidden = true;
+      $('loading').hidden = false;
+      await load();
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function showGate() {
@@ -798,6 +842,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (t.id === 'retry') { $('retry').hidden = true; $('loading-text').textContent = 'Loading...'; load(); }
   });
   $('add-form').addEventListener('submit', addName);
+  $('code-form').addEventListener('submit', submitCode);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { sendNow(); return; }
     if (!S) return;
