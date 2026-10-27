@@ -56,6 +56,13 @@ rc.HISTORY = os.path.join(SCRATCH, "history.jsonl")
 rc.PRE_SLATE_PATH = os.path.join(SCRATCH, "pre-slate.json")
 # No test may reach Airtable either: the task state is read through this, replaced per test.
 rc.read_task_state = lambda: {"on": False, "status": "Building", "keys": {}}
+# Nor any other way: every Airtable call goes through rc.api, so a test that needs one sets its own.
+# On 27 Oct 2026 the benefit-cap lane's own cap task went out through rc.raise_task, past every stub
+# below, and posted to the live Tasks table (refused only because the test's ids were not real).
+REAL_API = rc.api   # for a test that fakes urlopen itself, below the network
+def _no_airtable(method, path, *a, **k):
+    raise AssertionError("a rent-check test reached Airtable: %s %s" % (method, path))
+rc.api = _no_airtable
 # Lane B (scripts/rent_new_tenant.py) reads and writes through these. No test here may reach
 # Airtable or email Roy; its own cases are in tests/rent-new-tenant.test.js.
 rc.lane_b_rules.read_tasks = lambda _rc: []
@@ -113,6 +120,9 @@ def tenancy(i, due, rent, status="In Payment", start="2025-04-10", tenant="recT_
          TY["tenants"]: [tenant], TY["tenantStatus"]: ["Active"], TY["unitRef"]: [unit or ("Unit " + i)]}
     f.update(extra)
     return rec(i, f)
+# A run that pays "today" is paid on the cycle's due date instead: in the last days of a month
+# today's payment is read as early rent for next month (the early split), so 20 tenancies read
+# "paid short" and five tests failed from 27 Oct 2026 to the month end.
 def paid(tid, day, amount, account="recA_main"):
     return rec("tx_" + tid + day, {TX["date"]: day, TX["tenancy"]: [tid], TX["amount"]: amount, TX["account"]: [account]})
 def waiting(day, amount, account="recA_main"):
@@ -417,7 +427,7 @@ print(json.dumps({"small": out}))`);
     const r = py(`
 rows = []
 today = rc.today_london()
-rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(5)], [paid("rec%02d" % i, today.isoformat(), 500) for i in range(5)], day=today)
+rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(5)], [paid("rec%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(5)], day=today)
 rc.write_row = lambda status, text, payload, now: rows.append([status, payload])
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
@@ -517,7 +527,7 @@ print(json.dumps({"code": code, "rows": len(rows), "hasLights": "lights" in rows
     const r = py(`
 rows = []
 today = rc.today_london()
-rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(20)], [paid("rec%02d" % i, today.isoformat(), 500) for i in range(20)],
+rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(20)], [paid("rec%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)],
                             day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 rc.append_history = lambda *a, **k: None
@@ -1167,6 +1177,7 @@ def fake_open(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 429, "slow down", {}, io.BytesIO(b"{}"))
     return Resp(json.dumps(SCHEMA).encode())
 rc.urllib.request.urlopen = fake_open
+rc.api = REAL_API   # the network itself is faked above
 rc._pat = lambda: "x"
 rc.time.sleep = lambda s: sleeps.append(s)
 got = rc.field_choices("tblX4elTuu01gwBYh", "fldOOi3d1P4vDedm6")
@@ -1221,7 +1232,7 @@ print(json.dumps({"on": [live["on"], built["on"], building["on"], paused["on"]],
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 def unread(): raise RuntimeError("control failed: the Cash Flow Voids register row could not be read")
 rc.read_task_state = unread
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
@@ -1243,7 +1254,7 @@ print(json.dumps({"code": code, "status": rows[0][0], "laneB": line("New-tenant 
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 line = lambda n, start: next(l for l in rows[n][1].splitlines() if l.startswith(start))
@@ -1265,7 +1276,7 @@ print(json.dumps({"codes": [calm, broken], "status": [rows[0][0], rows[1][0]], "
 rows, prints = [], []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
 line = lambda n: next(l for l in rows[n][1].splitlines() if l.startswith("Text check"))
@@ -1295,7 +1306,7 @@ print(json.dumps({"codes": [quiet, flagged, blind], "status": [x[0] for x in row
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
 line = lambda n: next(l for l in rows[n][1].splitlines() if l.startswith("Proof of residency"))
@@ -1325,7 +1336,7 @@ print(json.dumps({"codes": [quiet, holding, blind], "status": [x[0] for x in row
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
 line = lambda n, start: next(l for l in rows[n][1].splitlines() if l.startswith(start))
