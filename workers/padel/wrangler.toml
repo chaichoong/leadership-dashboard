@@ -1,22 +1,20 @@
 # padel: the padel group's "who can play when" page (Kevin approved, 27 Oct 2026).
 #
-# One Worker: the static page public/index.html behind a private link, who can play at which hours
-# over the next 7 days in D1, the courts free at three venues, and ONE Slack DM to Kevin the first
-# time 4+ people line up on an hour where a court is free. See padel.js for the routes.
+# One Worker: the static page public/index.html (no code, no login: Kevin, 27 Oct 2026), who can
+# play at which hours over the next 14 days in D1, the courts free at three venues, and ONE Slack DM
+# to Kevin the first time 4+ people line up on an hour where a court is free. See padel.js for the routes.
 #
 # St Ives and PDL (Matchi) are read on the Mac mini by scripts/padel-courts.mjs every 15 minutes,
 # because Matchi answers Cloudflare with HTTP 429; it POSTs to /api/courts with ROBOT_KEY. Pulse is
 # read by this Worker, at most once per 15 minutes, when the page asks.
 #
 # Secrets (set from a 0600 file through stdin, never typed on a command line):
-#   GROUP_KEY  - the group code in the page link (#k=...). Mac copy: ~/.config/od/padel_group_key
-#                tr -d '\n' < ~/.config/od/padel_group_key | npx wrangler secret put GROUP_KEY -c workers/padel/wrangler.toml
 #   ROBOT_KEY  - the Mac job's key for /api/courts. Mac copy: ~/.config/od/padel_robot_key
 #                tr -d '\n' < ~/.config/od/padel_robot_key | npx wrangler secret put ROBOT_KEY -c workers/padel/wrangler.toml
 #   RELAY_KEY  - the apple-inbound Slack relay key. Mac copy: ~/.config/od/slack_relay_key
 #                tr -d '\n' < ~/.config/od/slack_relay_key | npx wrangler secret put RELAY_KEY -c workers/padel/wrangler.toml
 # (tr drops the file's trailing newline: every key is compared byte for byte.)
-# All three are in scripts/key-register.py (COPY_OF_AT), so a key replace reaches this Worker too.
+# Both are in scripts/key-register.py (COPY_OF_AT), so a key replace reaches this Worker too.
 #
 # Deploy: `npx wrangler deploy -c workers/padel/wrangler.toml` (merging to main does NOT deploy a Worker).
 # Logs:   `npx wrangler tail -c workers/padel/wrangler.toml`

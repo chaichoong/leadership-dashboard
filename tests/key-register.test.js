@@ -165,6 +165,24 @@ print(json.dumps({"air": [by["airtable_pat"]["status"], by["airtable_pat"]["said
     expect(out.gone).toEqual(['red', 'the key file is missing']);
   });
 
+  it('a row whose test was retired from the script is a grey row that says so, never a crash of the whole check (27 Oct 2026)', () => {
+    // The padel group code's test ("padel") was removed on 27 Oct 2026 while the private register still
+    // held its row: test_value returned None and judge_row died on res.get, taking the daily check with it.
+    const env = home();
+    const out = py(env, `
+kr.seed(None, with_readers=False)
+reg = kr.load_register()
+# The shape the padel row had: described by an older catalogue (kind "shared", test "padel"), then
+# dropped from the catalogue, so seed no longer refreshes it and the stale test name stays.
+reg["keys"]["mystery_file"].update({"kind": "shared", "test": "retired-test"})
+kr.save_register(reg)
+res = kr.check(NOW, None)
+by = {r["name"]: r for r in res["rows"]}
+print(json.dumps({"row": [by["mystery_file"]["status"], by["mystery_file"]["said"]], "rows": len(res["rows"])}))`);
+    expect(out.row).toEqual(['grey', 'could not test: this row\'s test (retired-test) no longer exists; remove the row or give it a test']);
+    expect(out.rows).toBeGreaterThan(1);
+  });
+
   it('a pasted key left behind for over an hour is deleted and named, never kept', () => {
     const env = home();
     mkdirSync(join(env.od, '.incoming'), { mode: 0o700 });
