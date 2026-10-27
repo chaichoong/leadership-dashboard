@@ -9,8 +9,8 @@
 //   GET  /api/courts      (X-Robot-Key)     -> { ok, version, matchiFetchedAt, pulseFetchedAt, venueStatus }
 //   POST /api/courts      (X-Robot-Key)     -> { ok, matchiFetchedAt, pulseFetchedAt, alerted: 'checking', ready }
 //        { readAt, venues: { si: { "<date>": day }, pdl: { ... } } }  the Mac mini's Matchi read
-//   Every other route needs X-Group-Key = GROUP_KEY:
-//   GET  /api/ping                          -> { ok }                          the key register's test
+//   Every other route is open: no code, no header (Kevin, 27 Oct 2026: "do we really need the code?").
+//   The rate limit is the only guard; anyone with the address can add a name and tick hours.
 //   GET  /api/state                         -> the whole page state (kicks a lazy Pulse read)
 //   POST /api/person  { name }              -> { id, name, venues }   creates the name if absent
 //   POST /api/person  { id, venues:[...] }  -> { id, name, venues }   venue preferences
@@ -39,7 +39,7 @@
 // Workers). D1 holds everything; see schema.sql.
 //
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
-//           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
+//           (ratelimit, optional). Secrets: ROBOT_KEY, RELAY_KEY.
 //
 // RATE LIMIT: every /api request, before any key check, counts one hit in D1's `rate` table under
 // "<client>|<minute>" and the 61st in a minute is refused (429). The ratelimit binding is kept, but
@@ -47,7 +47,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-27.13';
+export const VERSION = '2026-10-27.14';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -84,7 +84,6 @@ export const MATCHI_HEADERS = Object.freeze({ 'User-Agent': UA, Accept: 'text/ht
 const PULSE_RPC = 'https://europe-west1-nettle-prod-2024.cloudfunctions.net/rpc/availability/search';
 const PULSE_PAGE = 'https://pulsepadel.co.uk/venue/huntingdon/';
 const RELAY_URL = 'https://apple-inbound/slack-relay';
-const GATE_MSG = 'This link needs the group code. Ask Kevin.';
 
 // ── Venue config: labels and ids live in wrangler.toml [vars]; these defaults match it ──
 export function venueConfig(env = {}) {
@@ -866,9 +865,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     if (hits > RATE_LIMIT) return fail('slow down', 429);
     if (path === '/api/health' && request.method === 'GET') return json({ ok: true, version: VERSION });
     if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
-    if (!keyOk(request.headers.get('X-Group-Key'), env.GROUP_KEY)) return fail(GATE_MSG, 401);
 
-    if (path === '/api/ping' && request.method === 'GET') return json({ ok: true });
     if (path === '/api/state' && request.method === 'GET') {
       const state = await loadState(env, repo, nowMs);
       if (state.availability.stale && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {

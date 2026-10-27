@@ -33,7 +33,6 @@ const countClass = (html, cls) => (html.match(new RegExp(`class="slot ${cls}"`, 
 
 // 09:45 London on Tue 27 Oct 2026 (GMT since 25 Oct): the window is 27 Oct to 2 Nov.
 const NOW = Date.parse('2026-10-27T09:45:00Z');
-const KEY = 'feedc0de1234567890abcdef';
 const ROBOT = 'robot0000111122223333444455556666';
 const RELAY_OK = JSON.stringify({ ok: true, sent: [{ email: 'kevin@runpreneur.org.uk', ok: true, ts: '1793000000.000100', error: null }], refused: [] });
 const iso = (ms) => new Date(ms).toISOString();
@@ -385,7 +384,6 @@ function harness(make) {
   const limited = { n: 0, max: Infinity, keys: [] };
   const sleeps = [];
   const env = {
-    GROUP_KEY: KEY,
     ROBOT_KEY: ROBOT,
     RELAY_KEY: 'relay-key-test',
     PAGE_URL: 'https://padel.kevinbrittain.workers.dev/',
@@ -396,9 +394,8 @@ function harness(make) {
   let now = NOW;
   let fetchImpl = pulseFetch(calls);
   const drain = async () => { while (waits.length) await Promise.all(waits.splice(0)); };
-  const call = async (path, body, { key = KEY, robot, method, raw, drain: doDrain = true, ip } = {}) => {
+  const call = async (path, body, { robot, method, raw, drain: doDrain = true, ip } = {}) => {
     const headers = { 'Content-Type': 'application/json' };
-    if (key) headers['X-Group-Key'] = key;
     if (robot) headers['X-Robot-Key'] = robot;
     if (ip) headers['CF-Connecting-IP'] = ip;
     const payload = raw !== undefined ? raw : (body ? JSON.stringify(body) : undefined);
@@ -476,7 +473,6 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(dm.body.text).toBe('Padel: Wed 28 Oct 19:00. PDL: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), '
       + 'book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. Courts checked 09:45. '
       + 'Whoever books taps Booked on the page https://padel.kevinbrittain.workers.dev/');
-    expect(dm.body.text).not.toContain(KEY);
     const rows = t.rows.alerts();
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].relay_reply).ok).toBe(true);
@@ -821,79 +817,68 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.rows.votes().map((v) => v.slot)).toEqual(['2026-10-27|20']);
   });
 
-  it('the key gate: 401 without it or with a wrong one; health needs none and says only ok and version', async () => {
+  it('no code (Kevin, 27 Oct 2026): the page routes answer with no header at all, /api/ping is gone, health says only ok and version', async () => {
     await t.addPeople(['Test Ann']);
-    for (const path of ['/api/state', '/api/ping']) {
-      const none = await t.call(path, undefined, { key: '' });
-      expect(none.status).toBe(401);
-      expect(none.json).toEqual({ error: 'This link needs the group code. Ask Kevin.' });
-      expect((await t.call(path, undefined, { key: 'feedc0de1234567890abcdee' })).status).toBe(401);
-      expect((await t.call(path, undefined, { key: '', robot: ROBOT })).status).toBe(401);   // the robot key is not the group key
-    }
-    for (const path of ['/api/vote', '/api/person', '/api/booked', '/api/refresh']) {
-      expect((await t.call(path, { name: 'Test Bob' }, { key: '' })).status, path).toBe(401);
-    }
-    const health = await t.call('/api/health', undefined, { key: '' });
+    expect((await t.call('/api/state')).status).toBe(200);
+    expect((await t.call('/api/refresh', {})).status).toBe(200);
+    const made = await t.call('/api/person', { name: 'Test Bob' });
+    expect(made.status).toBe(200);
+    expect(made.json.name).toBe('Test Bob');
+    expect((await t.call('/api/vote', { person_id: made.json.id, add: ['2026-10-28|19'], remove: [] })).status).toBe(200);
+    expect((await t.call('/api/booked', { slot: '2026-10-28|19', person_id: made.json.id, venue: 'pdl', booked: true })).status).toBe(200);
+    expect(t.rows.people().map((p) => p.name)).toEqual(['Test Ann', 'Test Bob']);
+    expect((await t.call('/api/ping')).status).toBe(404);
+    const health = await t.call('/api/health');
     expect(health.status).toBe(200);
     expect(health.json).toEqual({ ok: true, version: VERSION });
     expect(health.headers.get('X-Robots-Tag')).toContain('noindex');
   });
 
-  it('/api/ping answers { ok } with the group key and reads no venue', async () => {
-    await t.seedAvailability(EVENING, NOW - 60 * MIN);
-    const r = await t.call('/api/ping', undefined, { drain: false });
-    expect(r).toMatchObject({ status: 200, json: { ok: true } });
-    expect(t.waits).toHaveLength(0);
-    expect(t.calls).toHaveLength(0);
-  });
-
-  it('S1: every /api request is rate limited per caller BEFORE the key check, GETs included', async () => {
+  it('S1: every /api request is rate limited per caller, GETs included', async () => {
     t.limited.max = 2;
-    expect((await t.call('/api/health', undefined, { key: '', ip: '::ffff:1.2.3.4' })).status).toBe(200);
-    expect((await t.call('/api/state', undefined, { key: '', ip: '::ffff:1.2.3.4' })).status).toBe(401);
-    expect((await t.call('/api/state', undefined, { key: '', ip: '::ffff:1.2.3.4' })).status).toBe(429);
-    expect((await t.call('/api/courts', undefined, { key: '', robot: ROBOT })).status).toBe(429);
+    expect((await t.call('/api/health', undefined, { ip: '::ffff:1.2.3.4' })).status).toBe(200);
+    expect((await t.call('/api/state', undefined, { ip: '::ffff:1.2.3.4' })).status).toBe(200);
+    expect((await t.call('/api/state', undefined, { ip: '::ffff:1.2.3.4' })).status).toBe(429);
+    expect((await t.call('/api/courts', undefined, { robot: ROBOT })).status).toBe(429);
     expect(t.limited.keys.slice(0, 3)).toEqual(['1.2.3.4', '1.2.3.4', '1.2.3.4']);
   });
 
   describe('the D1 rate limit: 60 requests a minute per client, every /api route', () => {
-    const hitN = async (n, opts) => { const out = []; for (let i = 0; i < n; i++) out.push((await t.call('/api/health', undefined, { key: '', drain: false, ...opts })).status); return out; };
+    const hitN = async (n, opts) => { const out = []; for (let i = 0; i < n; i++) out.push((await t.call('/api/health', undefined, { drain: false, ...opts })).status); return out; };
     it('60 requests in one minute pass, the 61st is 429, and a new minute passes again', async () => {
       expect(new Set(await hitN(60, { ip: '1.2.3.4' }))).toEqual(new Set([200]));
-      const r61 = await t.call('/api/health', undefined, { key: '', ip: '1.2.3.4' });
+      const r61 = await t.call('/api/health', undefined, { ip: '1.2.3.4' });
       expect(r61).toMatchObject({ status: 429, json: { error: 'slow down' } });
-      const keyless = await t.call('/api/state', undefined, { key: '', ip: '1.2.3.4' });
-      expect(keyless.status).toBe(429);                      // refused before the key check, not a 401
+      const stateToo = await t.call('/api/state', undefined, { ip: '1.2.3.4' });
+      expect(stateToo.status).toBe(429);                     // every route, not only health
       t.setNow(NOW + 60 * 1000);
-      expect((await t.call('/api/health', undefined, { key: '', ip: '1.2.3.4' })).status).toBe(200);
+      expect((await t.call('/api/health', undefined, { ip: '1.2.3.4' })).status).toBe(200);
       expect(t.rows.rate().map((r) => [r.key, r.n])).toEqual([[`1.2.3.4|${Math.floor(NOW / 60000)}`, 62], [`1.2.3.4|${Math.floor(NOW / 60000) + 1}`, 1]]);
     });
     it('two different clients count apart; an IPv6 /64 counts as one client', async () => {
       await hitN(60, { ip: '1.2.3.4' });
-      expect((await t.call('/api/health', undefined, { key: '', ip: '5.6.7.8' })).status).toBe(200);
-      expect((await t.call('/api/health', undefined, { key: '', ip: '1.2.3.4' })).status).toBe(429);
+      expect((await t.call('/api/health', undefined, { ip: '5.6.7.8' })).status).toBe(200);
+      expect((await t.call('/api/health', undefined, { ip: '1.2.3.4' })).status).toBe(429);
       await hitN(60, { ip: '2001:db8:1:2::1' });
-      expect((await t.call('/api/health', undefined, { key: '', ip: '2001:db8:1:2:ffff::9' })).status).toBe(429);
-      expect((await t.call('/api/health', undefined, { key: '', ip: '2001:db8:1:3::1' })).status).toBe(200);
+      expect((await t.call('/api/health', undefined, { ip: '2001:db8:1:2:ffff::9' })).status).toBe(429);
+      expect((await t.call('/api/health', undefined, { ip: '2001:db8:1:3::1' })).status).toBe(200);
     });
     it('the Mac post deletes rate rows older than 10 minutes', async () => {
       await hitN(3, { ip: '1.2.3.4' });
       t.setNow(NOW + 11 * MIN);
-      expect((await t.call('/api/courts', macBody(NOW + 11 * MIN), { key: '', robot: ROBOT })).status).toBe(200);
+      expect((await t.call('/api/courts', macBody(NOW + 11 * MIN), { robot: ROBOT })).status).toBe(200);
       expect(t.rows.rate().map((r) => r.key)).toEqual([`unknown|${Math.floor((NOW + 11 * MIN) / 60000)}`]);
     });
     it('a D1 failure in the count lets the request through (fail open) and logs it', async () => {
       const err = vi.spyOn(console, 'error').mockImplementation(() => {});
       t.repo.countHit = vi.fn(async () => { throw new Error('D1 overloaded'); });
-      expect((await t.call('/api/health', undefined, { key: '' })).status).toBe(200);
+      expect((await t.call('/api/health', undefined, {})).status).toBe(200);
       expect((await t.call('/api/state')).status).toBe(200);
       expect(err).toHaveBeenCalledWith('padel: rate count failed, request let through', expect.stringContaining('D1 overloaded'));
     });
   });
 
-  it('no GROUP_KEY set means every group route is shut; no ROBOT_KEY means /api/courts is shut', async () => {
-    delete t.env.GROUP_KEY;
-    expect((await t.call('/api/state')).status).toBe(401);
+  it('no ROBOT_KEY means /api/courts is shut', async () => {
     delete t.env.ROBOT_KEY;
     expect((await t.call('/api/courts', undefined, { robot: ROBOT })).status).toBe(401);
     expect((await t.call('/api/courts', undefined, { robot: '' })).status).toBe(401);
@@ -1004,8 +989,8 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   });
 
   describe('POST /api/courts (the Mac\'s Matchi read)', () => {
-    it('needs the robot key: none, the group key, or a wrong one is 401', async () => {
-      for (const robot of ['', KEY, `${ROBOT}x`]) expect((await t.call('/api/courts', macBody(), { robot })).status, robot).toBe(401);
+    it('needs the robot key: none, another key, or a wrong one is 401', async () => {
+      for (const robot of ['', 'feedc0de1234567890abcdef', `${ROBOT}x`]) expect((await t.call('/api/courts', macBody(), { robot })).status, robot).toBe(401);
     });
 
     it('stores the saved pages, reads Pulse once (it is due), alerts, and answers with both read times', async () => {
@@ -1017,7 +1002,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       t.calls.length = 0;
       const body = macBody(NOW - 30 * 1000);
       expect([Object.keys(body.venues.si).length, Object.keys(body.venues.pdl).length]).toEqual([14, 14]);   // 14 dates per venue
-      const r = await t.call('/api/courts', body, { key: '', robot: ROBOT, drain: false });
+      const r = await t.call('/api/courts', body, { robot: ROBOT, drain: false });
       expect(r.status).toBe(200);
       // The alert check runs in waitUntil: the reply only says it is under way.
       expect(r.json).toEqual({ ok: true, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW), alerted: 'checking', ready: 1 });
@@ -1034,7 +1019,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect(s.availability.venues.pdl['2026-10-28'].hours['09'].free).toBe(true);
       expect(s.availability.checkedAt).toEqual({ si: iso(NOW - 30 * 1000), pdl: iso(NOW - 30 * 1000), pp: iso(NOW) });
 
-      const g = await t.call('/api/courts', undefined, { key: '', robot: ROBOT });
+      const g = await t.call('/api/courts', undefined, { robot: ROBOT });
       expect(g.json).toEqual({
         ok: true, version: VERSION, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW),
         venueStatus: { si: { ok: 7, closed: 7 }, pdl: { ok: 14 }, pp: { ok: 14 } },
@@ -1163,10 +1148,10 @@ describe('the page and its headers (workers/padel/public)', () => {
       expect(headers).toContain(`  ${h}`);
     }
   });
-  it('F25: light only, no dark theme (design-system rule 3), and the code in the link is 16+ hex characters', () => {
+  it('F25: light only, no dark theme (design-system rule 3), and no code box or code header anywhere', () => {
     expect(page).not.toMatch(/prefers-color-scheme/);
     expect(page).toContain('content="light"');
-    expect(page).toContain('k=([0-9a-fA-F]{16,64})');
+    expect(page).not.toMatch(/X-Group-Key|code-input|id="gate"|\/api\/ping/);
   });
 });
 

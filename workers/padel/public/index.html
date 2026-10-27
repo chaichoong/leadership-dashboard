@@ -88,8 +88,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .link { background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); color: var(--accent); text-decoration: underline; font-weight: var(--fw-medium); }
 .card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-4); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); }
 .note { color: var(--text-secondary); margin: 0 0 var(--space-3); }
-.gate > p { font-size: var(--fs-lg); margin: 0 0 var(--space-4); }
-.code-error { margin: var(--space-2) 0 0; color: var(--danger); font-weight: var(--fw-semibold); }
 .btn { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
@@ -158,19 +156,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   <main>
     <div id="loading" class="card" role="status"><p class="note" id="loading-text">Loading...</p><button type="button" id="retry" class="btn" hidden>Try again</button></div>
 
-    <section id="gate" class="card gate" hidden>
-      <p>This link needs the group code. Ask Kevin.</p>
-      <form id="code-form" class="add" novalidate>
-        <label for="code-input">Group code</label>
-        <div class="add-row">
-          <input id="code-input" name="code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200" aria-describedby="code-hint code-error">
-          <button type="submit" id="code-btn" class="btn primary" aria-label="Open the page with this group code">Open</button>
-        </div>
-        <p id="code-hint" class="note">It is the part after #k= in the link Kevin shared.</p>
-        <p id="code-error" class="code-error" role="alert" hidden></p>
-      </form>
-    </section>
-
     <section id="pick" class="card" hidden aria-labelledby="pick-h">
       <h2 id="pick-h">Pick your name</h2>
       <div id="names" class="names"></div>
@@ -218,7 +203,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 <script>
 (() => {
   'use strict';
-  const GATE = 'This link needs the group code. Ask Kevin.';
   const CODES = ['si', 'pdl', 'pp'];
   const ABBR = { si: 'SI', pdl: 'PDL', pp: 'PP' };
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -250,15 +234,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     storageWarned = true;
     toast("This browser won't remember you, so you'll pick your name each visit.");
   }
-
-  // The group code is 16 to 64 hex characters, from the link (#k=...) or from this phone's memory.
-  function readKey() {
-    const m = /(?:^#|[#&])k=([0-9a-fA-F]{16,64})(?:&|$)/.exec(location.hash);
-    if (m) { store.set('padel.k', m[1]); return m[1]; }
-    const saved = store.get('padel.k') || '';
-    return /^[0-9a-fA-F]{16,64}$/.test(saved) ? saved : '';
-  }
-  let key = readKey();
 
   let S = null;                               // last state from the server
   let me = Number(store.get('padel.person')) || null;
@@ -295,13 +270,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const write = !!body;
     const startedAt = performance.now();
     // A write is sent with keepalive (its body is tiny), so it completes even if the page closes.
-    const opts = { method: write ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store', keepalive: write };
+    const opts = { method: write ? 'POST' : 'GET', headers: {}, cache: 'no-store', keepalive: write };
     if (write) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     let res;
     try { res = await fetch(path, opts); } catch (e) { if (write) lastWriteDone = performance.now(); throw new ApiError('No connection. Check your signal and try again.', 0); }
     const data = await res.json().catch(() => null);
     if (write) lastWriteDone = performance.now();
-    if (res.status === 401) { showGate(); throw new ApiError(GATE, 401); }
     if (res.status === 429) { backoffUntil = Date.now() + 10000; throw new ApiError('Too many taps at once. Wait a few seconds.', 429); }
     if (!res.ok) throw new ApiError((data && data.error) || 'Something went wrong (' + res.status + '). Try again.', res.status);
     if (!data) throw new ApiError('The page got an answer it could not read. Try again.', res.status);
@@ -328,47 +302,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     handledSeq = r.n;
     apply(r.data);
     return true;
-  }
-
-  // The gate's code box: for a link typed by hand without #k=. The code is checked with /api/ping
-  // (sent only in the X-Group-Key header, never in a URL); only a code that works is kept, the same
-  // way the #k= path keeps it, and put in the address bar so a bookmark or a share carries it.
-  async function submitCode(ev) {
-    ev.preventDefault();
-    const input = $('code-input');
-    const err = $('code-error');
-    const btn = $('code-btn');
-    const say = (msg) => { err.textContent = msg; err.hidden = false; input.focus(); };
-    const raw = input.value.trim().toLowerCase();
-    const m = /(?:^|k=)([0-9a-f]{16,64})$/.exec(raw);          // the code, or a pasted link ending in #k=<code>
-    if (!m) { say('That does not look like the code.'); return; }
-    const code = m[1];
-    btn.disabled = true;
-    try {
-      let res;
-      try { res = await fetch('/api/ping', { headers: { 'X-Group-Key': code }, cache: 'no-store' }); } catch (e) { say('No connection. Check your signal and try again.'); return; }
-      if (res.status === 401) { say('Wrong code. Ask Kevin.'); return; }
-      if (!res.ok) { say('Could not check the code (' + res.status + '). Try again.'); return; }
-      key = code;
-      store.set('padel.k', code);
-      history.replaceState(null, '', location.pathname + location.search + '#k=' + code);
-      err.hidden = true;
-      input.value = '';
-      $('gate').hidden = true;
-      $('loading').hidden = false;
-      await load();
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  function showGate() {
-    $('loading').hidden = true;
-    $('pick').hidden = true;
-    $('board').hidden = true;
-    $('foot').hidden = true;
-    $('who').hidden = true;
-    $('gate').hidden = false;
   }
 
   const pad = (h) => String(h).padStart(2, '0');
@@ -427,7 +360,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     try {
       applyNewest(await api('/api/state'));
     } catch (e) {
-      if (e.status === 401) return;
       if (!S) {
         $('loading-text').textContent = e.message;
         $('retry').hidden = false;
@@ -459,7 +391,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function render() {
     $('loading').hidden = true;
-    $('gate').hidden = true;
     $('foot').hidden = false;
     const p = person(me);
     $('who').hidden = !p;
@@ -708,7 +639,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         if (!inFlight.includes(sent)) return false;
         inFlight = inFlight.filter((x) => x !== sent);
         afterLanding();
-        if (e.status === 401) return false;
         // "No such person": they were removed. Reading the state again shows the name list.
         if (e.status === 404) { await load(); return false; }
         // The failed changes are NOT put back (the server may have applied them): show the last
@@ -768,7 +698,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       await load();
       await pickPerson(p.id);
     } catch (e) {
-      if (e.status !== 401) toast(e.message);
+      toast(e.message);
     } finally {
       setBusy(false);
     }
@@ -781,7 +711,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       if (r.data && r.data.days) applyNewest(r); else await load();
       if (done) toast(done);
     } catch (e) {
-      if (e.status !== 401) toast(e.message);
+      toast(e.message);
     } finally {
       setBusy(false);
     }
@@ -795,7 +725,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       await api('/api/person', { id: me, venues });
       await load();
     } catch (e) {
-      if (e.status !== 401) toast(e.message);
+      toast(e.message);
     } finally {
       setBusy(false);
     }
@@ -810,7 +740,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       applyNewest(r);
       if (!r.data.refreshed) toast('Courts are checked every 15 minutes. Nothing new to check yet.');
     } catch (e) {
-      if (e.status !== 401) toast(e.message);
+      toast(e.message);
     } finally {
       btn.textContent = 'Check now';
       setBusy(false);
@@ -842,7 +772,6 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (t.id === 'retry') { $('retry').hidden = true; $('loading-text').textContent = 'Loading...'; load(); }
   });
   $('add-form').addEventListener('submit', addName);
-  $('code-form').addEventListener('submit', submitCode);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { sendNow(); return; }
     if (!S) return;
@@ -851,7 +780,9 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   window.addEventListener('pagehide', sendNow);
 
   store.del('padel.unsaved');                 // the old whole-list copy (before 27 Oct 2026, 4th pass) is never used
-  if (!key) showGate(); else load();
+  store.del('padel.k');                       // the group code (dropped 27 Oct 2026): an old link's #k= is ignored
+  if (/[#&]k=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+  load();
 })();
 </script>
 </body>

@@ -34,9 +34,9 @@
 //  20. Two overlapping saves (a hide-send during a save in flight): the truth is read again once
 //      the last of them lands.
 //  21. The day strip shows 14 days; a St Ives day beyond its booking window reads "not open yet".
-//  22. The gate has a code box for a link typed by hand: a bad shape is refused without sending
-//      anything, a wrong code reads "Wrong code", a right one opens the page and puts #k= in the
-//      address bar; the #k= link still opens straight away.
+//  22. No code (Kevin, 27 Oct 2026): the bare address opens straight to the name list with no
+//      header sent, and an old #k= link still opens, with the code dropped from the address bar
+//      and from this phone's memory.
 //
 // The page is the real file served by the suite's static server; /api/** is mocked by an
 // in-memory store that applies the page's changes, and its state is built by the Worker's own
@@ -45,7 +45,6 @@
 const { test, expect } = require('@playwright/test');
 const { computeState, londonDates, assembleAvailability } = require('../../workers/padel/padel.js');
 
-const KEY = '0123456789abcdef0123';
 const PAGE = '/workers/padel/public/index.html';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -54,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
-  const store = { votes: new Map(), bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  const store = { votes: new Map(), headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   store.removePerson = () => { store.gone = true; };
   // The hours a person has ticked on the server (votes are keyed by person and hour).
   store.ticks = (pid = 1) => [...store.votes.values()].filter((v) => v.person_id === pid).map((v) => v.slot).sort();
@@ -75,8 +74,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     const req = route.request();
     const path = new URL(req.url()).pathname;
     if (store.offline) return route.abort('internetdisconnected');      // no signal at all
-    if (req.headers()['x-group-key'] !== KEY) return reply(route, 401, { error: 'This link needs the group code. Ask Kevin.' });
-    if (path === '/api/ping') { store.pings = (store.pings || 0) + 1; return reply(route, 200, { ok: true }); }
+    store.headers.push(req.headers());
     if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, state()); }
     if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false });
     if (path === '/api/vote') {
@@ -113,7 +111,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
 
 async function openAsTestAnn(page) {
   await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
-  await page.goto(`${PAGE}#k=${KEY}`);
+  await page.goto(PAGE);
   const tomorrow = londonDates(Date.now())[1];
   await page.locator(`[data-day="${tomorrow}"]`).click();
   return tomorrow;
@@ -478,79 +476,25 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await expect(page.locator(`[data-slot="${dates[1]}|19"]`).locator('xpath=..').locator('.chip').first().locator('.sr')).toHaveText('St Ives: no court free.');
   });
 
-  test.describe('the gate\'s code box (a link typed by hand, no #k=)', () => {
-    async function openBare(page) {
+  test.describe('no code (Kevin, 27 Oct 2026)', () => {
+    test('the bare address opens straight to the name list, with no code header and no gate', async ({ page }) => {
       const store = await mockPadel(page);
-      const apiCalls = [];
-      page.on('request', (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) apiCalls.push(r); });
       await page.goto(PAGE);
-      return { store, apiCalls };
-    }
-
-    test('shows the box, its label, the hint and a 44 px Open button when there is no code', async ({ page }) => {
-      const { apiCalls } = await openBare(page);
-      await expect(page.locator('#gate')).toBeVisible();
-      await expect(page.locator('#gate')).toContainText('This link needs the group code. Ask Kevin.');
-      await expect(page.getByLabel('Group code', { exact: true })).toBeVisible();
-      await expect(page.locator('#code-hint')).toHaveText('It is the part after #k= in the link Kevin shared.');
-      const open = page.getByRole('button', { name: 'Open the page with this group code' });
-      await expect(open).toHaveText('Open');
-      expect((await open.boundingBox()).height).toBeGreaterThanOrEqual(44);
-      const box = page.locator('#code-input');
-      expect(await box.getAttribute('type')).toBe('text');
-      expect([await box.getAttribute('autocomplete'), await box.getAttribute('autocapitalize'), await box.getAttribute('spellcheck')]).toEqual(['off', 'off', 'false']);
-      expect(apiCalls).toHaveLength(0);
-    });
-
-    test('a bad shape shows the message and sends nothing', async ({ page }) => {
-      const { apiCalls } = await openBare(page);
-      await page.locator('#code-input').fill('hello there');
-      await page.locator('#code-input').press('Enter');
-      await expect(page.locator('#code-error')).toHaveText('That does not look like the code.');
-      await page.locator('#code-input').fill('abc123');                    // hex, but under 16 characters
-      await page.locator('#code-btn').click();
-      await expect(page.locator('#code-error')).toHaveText('That does not look like the code.');
-      expect(apiCalls).toHaveLength(0);
-      expect(page.url()).not.toContain('#k=');
-    });
-
-    test('a wrong code shows "Wrong code. Ask Kevin.", keeps the box, and is kept nowhere', async ({ page }) => {
-      const { apiCalls } = await openBare(page);
-      const wrong = 'ffffffffffffffffffff';
-      await page.locator('#code-input').fill(wrong);
-      await page.locator('#code-btn').click();
-      await expect(page.locator('#code-error')).toHaveText('Wrong code. Ask Kevin.');
-      await expect(page.locator('#code-input')).toBeVisible();
-      expect(apiCalls.map((r) => new URL(r.url()).pathname)).toEqual(['/api/ping']);
-      expect(apiCalls.every((r) => !r.url().includes(wrong))).toBe(true);   // only ever in the header
-      expect(page.url()).not.toContain('#k=');
-      expect(await page.evaluate(() => localStorage.getItem('padel.k'))).toBeNull();
-    });
-
-    test('a right code (pasted with spaces and capitals) opens the page and puts #k= in the address bar', async ({ page }) => {
-      await openBare(page);
-      await page.locator('#code-input').fill(`  ${KEY.toUpperCase()}  `);
-      await page.locator('#code-input').press('Enter');
       await expect(page.locator('#pick')).toBeVisible();
-      await expect(page.locator('#gate')).toBeHidden();
-      expect(page.url().endsWith(`#k=${KEY}`)).toBe(true);
-      expect(await page.evaluate(() => localStorage.getItem('padel.k'))).toBe(KEY);
+      await expect(page.locator('#gate')).toHaveCount(0);
+      await expect(page.locator('#code-input')).toHaveCount(0);
+      expect(store.headers.length).toBeGreaterThan(0);
+      expect(store.headers.every((h) => !('x-group-key' in h))).toBe(true);
     });
 
-    test('a whole pasted link works too', async ({ page }) => {
-      await openBare(page);
-      await page.locator('#code-input').fill(`https://padel.runpreneur.org.uk/#k=${KEY}`);
-      await page.locator('#code-btn').click();
-      await expect(page.locator('#pick')).toBeVisible();
-      expect(page.url().endsWith(`#k=${KEY}`)).toBe(true);
-    });
-
-    test('the #k= link still opens the page straight away, with no gate', async ({ page }) => {
+    test('an old #k= link still opens, and the code is dropped from the address bar and from this phone', async ({ page }) => {
       await mockPadel(page);
-      await page.goto(`${PAGE}#k=${KEY}`);
+      await page.addInitScript(() => { localStorage.setItem('padel.k', '0123456789abcdef0123'); });
+      await page.goto(`${PAGE}#k=0123456789abcdef0123`);
       await expect(page.locator('#pick')).toBeVisible();
-      await expect(page.locator('#gate')).toBeHidden();
-      expect(await page.evaluate(() => localStorage.getItem('padel.k'))).toBe(KEY);
+      expect(page.url()).not.toContain('#k=');
+      expect(page.url().endsWith(PAGE)).toBe(true);
+      expect(await page.evaluate(() => localStorage.getItem('padel.k'))).toBeNull();
     });
   });
 });
