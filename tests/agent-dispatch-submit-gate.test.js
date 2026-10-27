@@ -460,7 +460,9 @@ describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
 // app turns into a tap.
 describe('hand-backs are refused at submit (4 Sep 2026)', () => {
   const report = 'Portfolio arrears review.\n' + 'Detail line. '.repeat(30) + '\n';
-  const CARRY = '**Carrying this out will involve:** Kevin reviews the findings and decides.';
+  // What Approve sets going, never a step of Kevin's (27 Oct 2026: "Kevin reviews the findings and
+  // decides" left him a step no card brings back, and is refused in tests/agent-dispatch-approve-line.test.js).
+  const CARRY = '**Carrying this out will involve:** filing the findings on the task; nothing is sent.';
   it.each([
     'Kevin must log into pingen.com and click Send on letter b8caaaf2.',
     'You will need to log in to the Stripe dashboard and complete the verification.',
