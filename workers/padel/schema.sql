@@ -39,8 +39,9 @@ CREATE TABLE IF NOT EXISTS booked (
 
 -- One row per slot that has had its Slack DM. The row is inserted BEFORE the DM goes, with
 -- relay_reply {"claimed":true,...}, so two requests at once cannot both send and a claim is final.
--- The relay's reply (or a timeout or error marker) overwrites it. Only a definite refusal from the
--- relay (a non-200) deletes the row, so a later check retries. At most one DM per slot, ever.
+-- The relay's reply, or a final marker for a non-200, a timeout or an error, overwrites it. A row is
+-- never deleted once the relay has been called (a 502 can arrive after Slack posted). At most one
+-- DM per slot, ever.
 CREATE TABLE IF NOT EXISTS alerts (
   slot TEXT PRIMARY KEY,
   sent_at TEXT NOT NULL,

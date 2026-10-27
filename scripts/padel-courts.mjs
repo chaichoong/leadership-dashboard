@@ -33,11 +33,12 @@
 //   - the POST did not answer 200.
 // A venue that misses a few days to a network error (a timeout, a 5xx) is not a failure on its
 // own: those days read "couldn't check" on the page and the next run is 15 minutes later.
-// SLEPT, not failed: the clock is read before every fetch and before the POST. When one gap
-// between two consecutive reads is over 60 s, the Mac slept mid-run (no fetch takes that long:
-// each has a 10 s timeout), so the read is thrown away and not posted, and the run exits 0. A
-// POST that fails with a gap over 60 s across it is "slept" too. A long run with no such gap (14
-// pages timing out one after another) is a FAILED run, never "slept".
+// SLEPT, not failed: ONE measure, the drift between the wall clock and the monotonic clock
+// (process.hrtime, which does not advance while macOS sleeps), read at the start, just before the
+// POST and right after it. Over 60 s of drift means the Mac slept during the run: the data may be
+// old, so it is not posted (or, if the sleep came during the POST, its answer is not counted), and
+// the run exits 0; the next run is 15 minutes away. With no drift, a slow run (14 pages timing out
+// one after another) is judged like any other run: FAILED.
 //
 // Usage:
 //   node scripts/padel-courts.mjs run
@@ -56,8 +57,8 @@ export const VENUES = [{ code: 'si', id: '2619', name: 'St Ives' }, { code: 'pdl
 export const GAP_MS = 250;
 export const PAGE_TIMEOUT_MS = 10000;
 export const POST_TIMEOUT_MS = 30000;
-export const MAX_GAP_MS = 60 * 1000;  // one gap this long between two clock reads means the Mac slept
-export const LONG_READ_MS = 9 * 60 * 1000;   // a read this long meets the Worker's 10-minute readAt limit
+export const MAX_DRIFT_MS = 60 * 1000;   // wall clock ahead of the monotonic clock by this much: the Mac slept
+const monoMs = () => Number(process.hrtime.bigint() / 1000000n);
 export const RETRY_MS = 2000;        // a page lost to a timeout, a 5xx or no connection is fetched once more after this
 const QUIET_FROM = 23 * 60;          // 23:00 London
 const QUIET_UNTIL = 6 * 60 + 30;     // 06:30 London
@@ -100,7 +101,7 @@ export function toPayloadDay(day) {
 }
 
 // Read the 14 pages one after another.
-export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs, beforeFetch = () => {} }) {
+export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs }) {
   const dates = londonDates(nowMs);
   const raw = {};
   let first = true;
@@ -109,13 +110,11 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
     for (const date of dates) {
       if (!first) await sleep(GAP_MS);
       first = false;
-      beforeFetch();
       let day = await readDay(fetchImpl, v.id, date);
       // A page lost to a timeout, a 5xx or no connection gets one more try before it counts. A
       // 4xx, a 429, or a page that arrived and could not be parsed does not.
       if (day.status === 'error' && isRetryable(day.reason)) {
         await sleep(RETRY_MS);
-        beforeFetch();
         day = await readDay(fetchImpl, v.id, date);
       }
       raw[v.code][date] = day;
@@ -180,13 +179,6 @@ export async function postCourts(fetchImpl, payload, robotKey) {
   }
 }
 
-// The longest gap between two consecutive clock reads.
-export function maxGap(stamps) {
-  let gap = 0;
-  for (let i = 1; i < stamps.length; i++) gap = Math.max(gap, stamps[i] - stamps[i - 1]);
-  return gap;
-}
-
 function readKey() {
   try { return readFileSync(KEY_FILE, 'utf8').trim(); } catch { return ''; }
 }
@@ -198,45 +190,30 @@ const summaryOf = (counts) => VENUES.map((v) => {
 
 // One run. Everything outside is passed in, so the tests drive this exact code.
 export async function run({
-  fetchImpl = globalThis.fetch, now = Date.now, sleep, robotKey = readKey(), log = (line) => process.stdout.write(`${line}\n`),
+  fetchImpl = globalThis.fetch, now = Date.now, mono = monoMs, sleep, robotKey = readKey(), log = (line) => process.stdout.write(`${line}\n`),
   record = (entry) => { mkdirSync(LOG_DIR, { recursive: true }); appendFileSync(join(LOG_DIR, 'runs.jsonl'), `${JSON.stringify(entry)}\n`); },
 } = {}) {
   const startMs = now();
+  const mono0 = mono();
+  const drift = () => (now() - startMs) - (mono() - mono0);
   if (isQuiet(startMs)) { log('quiet hours'); return 0; }
   if (!robotKey) { log(`FAILED: no robot key at ${KEY_FILE}`); return 1; }
-  const stamps = [startMs];
-  const { dates, raw } = await readAll({ fetchImpl, sleep, nowMs: startMs, beforeFetch: () => stamps.push(now()) });
+  const { dates, raw } = await readAll({ fetchImpl, sleep, nowMs: startMs });
   const counts = countStatuses(raw);
   const endMs = now();
-  stamps.push(endMs);
   if (isQuiet(endMs)) { log('quiet hours'); return 0; }
   const seconds = Math.round((endMs - startMs) / 1000);
-  const gap = maxGap(stamps);
-  if (gap > MAX_GAP_MS) {
-    log(`padel-courts: the Mac slept mid-read (a ${Math.round(gap / 1000)} s gap), not posted; ${summaryOf(counts)}`);
-    record({ ts: new Date(endMs).toISOString(), ok: true, posted: false, seconds, counts, slept: true });
+  const slept = (d, posted, http) => {
+    log(`padel-courts: the Mac slept during the run (${Math.round(d / 1000)} s of drift), ${posted ? `Worker answered ${http || 'nothing'}, not counted` : 'not posted'}; ${summaryOf(counts)}`);
+    record({ ts: new Date(now()).toISOString(), ok: true, posted: posted && http === 200, http, seconds, counts, slept: true });
     return 0;
-  }
+  };
+  const before = drift();
+  if (before > MAX_DRIFT_MS) return slept(before, false);
   // readAt is when the read STARTED: the oldest page in it.
   const post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
-  if (post.status !== 200) {
-    // A Mac that slept while the POST was out gets a 400 or 409 for an old read: the sleep, not a
-    // fault. Judged by the gap across the POST, less the POST's own 30 s timeout.
-    const afterMs = now();
-    const postGap = afterMs - endMs - POST_TIMEOUT_MS;
-    if (postGap > MAX_GAP_MS) {
-      log(`padel-courts: the Mac slept while posting (a ${Math.round(postGap / 1000)} s gap past the POST's own timeout), Worker answered ${post.status || 'nothing'}; not counted; ${summaryOf(counts)}`);
-      record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds, counts, slept: true });
-      return 0;
-    }
-    // The Worker refuses a read older than 10 minutes. A read that itself took over 9 minutes
-    // (only possible on a Mac that kept dozing in short naps) is that, not a fault.
-    if (post.status === 400 && /within 10 minutes/.test(String(post.body?.error || '')) && endMs - startMs > LONG_READ_MS) {
-      log(`padel-courts: the read took ${seconds} s, past the Worker's 10-minute limit; not counted; ${summaryOf(counts)}`);
-      record({ ts: new Date(afterMs).toISOString(), ok: true, posted: false, http: post.status, seconds, counts, slept: true });
-      return 0;
-    }
-  }
+  const after = drift();
+  if (after > MAX_DRIFT_MS) return slept(after, true, post.status);
   const problems = readProblems(raw, dates);
   if (post.status !== 200) problems.push(`the Worker answered ${post.status || 'nothing'} (${String(post.body?.error || 'no reason').slice(0, 120)})`);
   record({ ts: new Date(endMs).toISOString(), ok: !problems.length, posted: post.status === 200, http: post.status, seconds, counts, problems: problems.length });

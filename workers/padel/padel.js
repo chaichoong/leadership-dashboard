@@ -41,7 +41,7 @@
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
 //           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
 
-export const VERSION = '2026-10-27.6';
+export const VERSION = '2026-10-27.7';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -54,7 +54,7 @@ export const PULSE_FRESH_MS = 20 * 60 * 1000;    // Pulse counts for 20 minutes 
 export const PULSE_EVERY_MS = 15 * 60 * 1000;    // Pulse is called at most once per 15 minutes
 export const REFRESH_GUARD_MS = 90 * 1000;       // no second Pulse read within 90 seconds
 export const READ_AT_SKEW_MS = 10 * 60 * 1000;   // a Mac read older (or newer) than this is refused
-export const CLAIM_BUDGET_MS = 5000;             // a check claims no new slot once it has run this long
+export const CLAIM_BUDGET_MS = 5000;             // no new claim once the background work has run this long
 export const SAVE_REPLY_RETRIES = 3;             // after a relay 200, the reply write is retried up to 3 times
 export const SAVE_REPLY_PAUSES_MS = [500, 1000, 2000];   // ...with these pauses between the tries
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -465,9 +465,6 @@ export function makeRepo(db) {
     async saveRelayReply(slot, reply) {
       await db.prepare('UPDATE alerts SET relay_reply = ? WHERE slot = ?').bind(reply, slot).run();
     },
-    async releaseAlert(slot) {
-      await db.prepare('DELETE FROM alerts WHERE slot = ?').bind(slot).run();
-    },
     async getCache(key) {
       const r = await db.prepare('SELECT value FROM cache WHERE key = ?').bind(key).first();
       return r ? r.value : null;
@@ -624,29 +621,27 @@ async function saveMatchi(repo, prev, clean) {
 }
 
 // ── Alerts ──
-// At most one DM per slot, ever. A claim is FINAL: the row goes in with a "claimed" reply before the
-// relay call, and the relay's own reply (or a timeout or error marker) overwrites it. Only a definite
-// refusal (a non-200) deletes the row, so a later check sends it. A Worker stopped between the claim
-// and the reply leaves the slot claimed: a miss, accepted over a second DM.
-// One check claims no new slot once it has run 5 s, so a check with several slots due is never cut
-// off (the background limit is 30 s) between a claim and its relay call; the rest wait for the next
-// check.
-export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep, clock = Date.now) {
+// ONE CLAIM, ONE ATTEMPT, AT MOST ONE DM, EVER. The row goes in with a "claimed" reply before the
+// relay is called, and the row is never deleted once the relay has been called: its reply, a
+// non-200 (a 502 can arrive after Slack has posted, so a retry could double), a timeout or an error
+// each overwrite the claim with a final marker. A Worker stopped between the claim and the relay
+// call leaves the slot claimed: a miss, accepted over a second DM.
+// Claims stop 5 s after the BACKGROUND WORK started (bgStart: before a lazy Pulse read, or when a
+// request handed the check to waitUntil), so no claim is ever made close to the 30 s limit where
+// the Worker could be stopped before its relay call. Slots left over wait for the next check.
+export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep, bgStart = Date.now(), clock = Date.now) {
   const nowIso = new Date(nowMs).toISOString();
-  const started = clock();
+  if (!env.RELAY || !env.RELAY_KEY) {
+    if (state.ready.length) console.error('padel: alert check skipped, relay not configured');
+    return [];
+  }
   const due = decideAlerts(state, await repo.alertSlots(state.today));
   const cfg = venueConfig(env);
   const sent = [];
   for (const r of due) {
-    if (clock() - started > CLAIM_BUDGET_MS) break;
+    if (clock() - bgStart >= CLAIM_BUDGET_MS) break;
     const claimed = await repo.claimAlert(r.slot, r.names.join(', '), r.venues.map((v) => v.code).join(','), nowIso);
     if (!claimed) continue;
-    if (!env.RELAY || !env.RELAY_KEY) {
-      // Nothing was sent: free the slot so a configured Worker can send it.
-      console.error('padel: alert DM not sent, relay not configured', r.slot);
-      try { await repo.releaseAlert(r.slot); } catch (e) { console.error('padel: alert row not released', r.slot, String(e)); }
-      continue;
-    }
     let res;
     try {
       res = await withTimeout(env.RELAY.fetch(new Request(RELAY_URL, {
@@ -655,30 +650,23 @@ export async function checkAlerts(state, env, repo, nowMs, sleep = realSleep, cl
         body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.kevinbrittain.workers.dev/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
       })), RELAY_TIMEOUT_MS);
     } catch (e) {
-      // No answer in 20 s, or a dropped call: the DM may or may not have gone. The row stays final,
-      // with a marker saying which.
+      // No answer in 20 s, or a dropped call: the DM may or may not have gone.
       const timedOut = e && e.name === 'TimeoutError';
       console.error('padel: alert DM unanswered, not retried', r.slot, String(e));
       await writeReply(repo, r.slot, JSON.stringify(timedOut ? { timeout: true, at: nowIso } : { error: String(e && e.message || e).slice(0, 200), at: nowIso }), sleep);
       continue;
     }
+    // Every reply body is read under the 5 s limit.
+    let body;
+    try { body = await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS); } catch (e) { body = null; }
     if (res.status !== 200) {
-      // A definite "not sent": delete the row so a later check sends it.
-      let said = '';
-      try { said = await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS); } catch (e) { said = '(reply unreadable)'; }
-      console.error('padel: alert DM failed, will retry', r.slot, `relay HTTP ${res.status}: ${said.slice(0, 300)}`);
-      try { await repo.releaseAlert(r.slot); } catch (e) { console.error('padel: alert row not released', r.slot, String(e)); }
+      console.error('padel: alert DM refused, not retried', r.slot, `relay HTTP ${res.status}: ${String(body ?? '(reply unreadable)').slice(0, 300)}`);
+      await writeReply(repo, r.slot, JSON.stringify({ relay: res.status, body: String(body ?? '(reply unreadable)').slice(0, 200), at: nowIso }), sleep);
       continue;
     }
     sent.push(r.slot);
-    // A 200: the DM is out. The relay's own words replace the claim marker (a body that stalls
-    // past 5 s is stored as "pending"). The row stays final even if this write fails.
-    let reply;
-    try { reply = (await withTimeout(res.text(), RELAY_BODY_TIMEOUT_MS)) || '(empty reply)'; } catch (e) {
-      console.error('padel: DM sent, its reply body was not read', r.slot, String(e));
-      reply = RELAY_PENDING;
-    }
-    await writeReply(repo, r.slot, reply, sleep);
+    if (body === null) console.error('padel: DM sent, its reply body was not read', r.slot);
+    await writeReply(repo, r.slot, body === null ? RELAY_PENDING : (body || '(empty reply)'), sleep);
   }
   return sent;
 }
@@ -767,18 +755,21 @@ async function loadState(env, repo, nowMs) {
 // Read Pulse (when due), then run the alert check on the fresh state. Never throws: it runs inside
 // waitUntil, where a throw would vanish.
 async function refreshAndAlert(env, repo, nowMs, fetchImpl, clock, sleep) {
+  const bgStart = Date.now();                      // the background work starts here, before the Pulse read
   try {
     const read = await refreshPulse(env, repo, nowMs, fetchImpl);
     const now = clock();
-    await checkAlerts(await loadState(env, repo, now), env, repo, now, sleep);
+    await checkAlerts(await loadState(env, repo, now), env, repo, now, sleep, bgStart);
     return read;
   } catch (e) {
     console.error('padel: refresh failed', String(e && e.stack || e));
     return false;
   }
 }
+// Called as ctx.waitUntil(alertSafely(...)): the background work starts now.
 async function alertSafely(state, env, repo, nowMs, sleep) {
-  try { return await checkAlerts(state, env, repo, nowMs, sleep); } catch (e) { console.error('padel: alert check failed', String(e && e.stack || e)); return []; }
+  const bgStart = Date.now();
+  try { return await checkAlerts(state, env, repo, nowMs, sleep, bgStart); } catch (e) { console.error('padel: alert check failed', String(e && e.stack || e)); return []; }
 }
 
 // Bytes, not characters: a body of emoji is four bytes a character.

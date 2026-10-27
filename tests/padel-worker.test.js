@@ -302,7 +302,6 @@ function mapRepo() {
         return true;
       },
       async saveRelayReply(slot, reply) { if (alerts.has(slot)) alerts.get(slot).relay_reply = reply; },
-      async releaseAlert(slot) { alerts.delete(slot); },
       async getCache(k) { return cache.has(k) ? cache.get(k).value : null; },
       async setCache(k, value, now) { cache.set(k, { value, updated_at: now }); },
       async claimRefresh(nowMs, guardMs) {
@@ -626,18 +625,62 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.votes).toEqual({ '2026-10-28|07': [id] });
   });
 
-  it('a failed DM leaves no alert row, logs, and the next save retries', async () => {
+  it('B1: a 502 from the relay leaves the row final with its marker; a later check sends nothing', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     t.setRelay(() => new Response('{"ok":false,"sent":[{"ok":false,"error":"channel_not_found"}]}', { status: 502 }));
     const ids = await t.addPeople(NAMES.slice(0, 4));
     for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
-    expect(t.rows.alerts()).toHaveLength(0);
-    expect(err).toHaveBeenCalledWith('padel: alert DM failed, will retry', SLOT, expect.stringContaining('relay HTTP 502'));
+    const rows = t.rows.alerts();
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].relay_reply)).toEqual({ relay: 502, body: '{"ok":false,"sent":[{"ok":false,"error":"channel_not_found"}]}', at: iso(NOW) });
+    expect(err).toHaveBeenCalledWith('padel: alert DM refused, not retried', SLOT, expect.stringContaining('relay HTTP 502'));
     t.setRelay(() => new Response(RELAY_OK, { status: 200 }));
-    await t.call('/api/vote', { person_id: ids[0], add: [SLOT] });
-    expect(t.relayCalls).toHaveLength(2);
-    expect(t.rows.alerts()).toHaveLength(1);
+    t.setNow(NOW + 3 * MIN);
+    await t.call('/api/vote', { person_id: ids[0], add: ['2026-10-29|08'] });
+    await t.call('/api/state');
+    expect(t.relayCalls).toHaveLength(1);                    // never sent twice
+  });
+
+  it('B3: a 503 whose body never finishes ends at 5 s with the final marker written', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    t.env.RELAY.fetch = vi.fn(async () => new Response(new ReadableStream({ start() {} }), { status: 503 }));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: [SLOT] }, { drain: false });
+    const p = t.drain();
+    await vi.advanceTimersByTimeAsync(4900);
+    expect(JSON.parse(t.rows.alerts()[0].relay_reply)).toEqual({ claimed: true, at: iso(NOW) });   // still reading at 4.9 s
+    await vi.advanceTimersByTimeAsync(200);
+    await p;
+    vi.useRealTimers();
+    expect(JSON.parse(t.rows.alerts()[0].relay_reply)).toEqual({ relay: 503, body: '(reply unreadable)', at: iso(NOW) });
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('B2: claims stop 5 s after the background work started: after a 24 s Pulse read nothing is claimed; a later check claims', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    // Pulse is due, and free at 21:00 on 28 Oct: four people tick it while Pulse reads as stale.
+    await t.seedAvailability({ si: {}, pdl: {} }, NOW, NOW - 20 * MIN);
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|21'] }, { drain: false });
+    await t.drain();
+    expect(t.relayCalls).toHaveLength(0);
+    // The lazy refresh (GET /api/state) reads Pulse; this read takes 24 s.
+    const slow = pulseFetch([]);
+    t.setFetch(vi.fn(async (url, init) => { await new Promise((r) => setTimeout(r, 24 * 1000)); return slow(url, init); }));
+    await t.call('/api/state', undefined, { drain: false });
+    expect(t.waits).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(24 * 1000 + 10);
+    await Promise.all(t.waits.splice(0));
+    expect(t.relayCalls).toHaveLength(0);                    // Pulse is fresh now, but the window was spent
+    expect(t.rows.alerts()).toEqual([]);
+    // The next check (a vote, its own background work) claims the slot.
+    await t.call('/api/vote', { person_id: ids[0], add: ['2026-10-29|20'] });
+    vi.useRealTimers();
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Pulse: 4 in');
   });
 
   it('F20 and item 2: the vote answers before the DM; a relay that hangs is cut off at 20 s and the row made final', async () => {

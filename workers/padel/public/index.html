@@ -251,17 +251,16 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let S = null;                               // last state from the server
   let me = Number(store.get('padel.person')) || null;
   let day = null;                             // the selected date
-  let mine = new Set();                       // my ticks as shown: the server's plus my unconfirmed changes
-  // A save sends CHANGES, never the whole list: the hours ticked and unticked since the last
-  // completed save. A tap moves an hour between the two sets, so tap then untap cancels out.
-  let pendingAdd = new Set();
+  // THE INVARIANT: after every reply, what is shown = the server's truth in that reply + the
+  // changes not yet sent. A save sends CHANGES (add these hours, remove those), never the list.
+  let mine = new Set();                       // my ticks as shown
+  let pendingAdd = new Set();                 // unsent changes
   let pendingRemove = new Set();
-  let inflight = null;                        // { person, add, remove } sent and not yet answered
-  let lastFlush = null;                       // the changes sent with keepalive, not yet confirmed
-  let shownFlush = null;                      // a flush put back when the page was shown again, still landing
-  let flushFailed = false;
+  let inflight = null;                        // the one save on its way: { person, add, remove, token }
+  let flushing = null;                        // a hide-flush not yet confirmed: { person, add, remove, timer }
   let saving = false;
   let savingPromise = null;
+  let savingToken = null;                     // only the save holding this may clear saving and the back-off
   let saveTimer = null;
   let saveTry = 0;                            // failed saves in a row
   let backoffUntil = 0;
@@ -274,6 +273,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let lastWriteSeq = 0;                       // the newest write whose reply was shown
   let lastWriteDone = 0;                      // when the last write finished (performance.now())
   let refetchTimer = null;
+  const FLUSH_WAIT_MS = 10000;                // no save goes while a hide-flush is unconfirmed, up to this
 
   class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
   async function api(path, body) {
@@ -293,9 +293,9 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     return { data, n, write, startedAt };
   }
   // Apply a state reply only when no newer reply has been shown already. A write's own reply is the
-  // state after that write, so it is shown. A read that STARTED before the last write finished may
-  // have been answered before the write landed (the tick would look missing): it is ignored, and
-  // the state is asked for once more.
+  // state after that write, so it is shown. A read is not shown while a save or a flush is on its
+  // way (that write's own reply will show the truth), and a read that STARTED before the last write
+  // finished may have been answered before the write landed: it is ignored and asked for again.
   function applyNewest(r) {
     if (r.write) {
       if (r.n < lastWriteSeq) return false;
@@ -305,6 +305,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       return true;
     }
     if (r.n < handledSeq) return false;
+    if (saving || flushing) return false;
     if (r.startedAt < lastWriteDone) {
       if (!refetchTimer) refetchTimer = setTimeout(() => { refetchTimer = null; load(); }, 0);
       return false;
@@ -392,7 +393,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function apply(s) {
     S = s;
     if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); dropChanges(); }
-    recomputeMine();
+    showTruth();
     // After 22:00 there is nothing left to tick today, so the page opens on tomorrow.
     if (!day || !S.days.includes(day)) day = londonHour() >= 22 && S.days.length > 1 ? S.days[1] : S.days[0];
     keepFocus(render);
@@ -558,7 +559,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const box = $('unsaved');
     if (!box) return;
     const dirty = hasPending();
-    if (!dirty && !saving) { box.hidden = true; return; }
+    if (!dirty && !saving && !flushing) { box.hidden = true; return; }
     box.hidden = false;
     const givenUp = dirty && !saving && saveTry > SAVE_RETRY_MS.length;
     $('unsaved-text').textContent = saving ? 'Saving your ticks...' : givenUp ? 'Your ticks are not saved. Check your signal.' : dirty && saveTry ? 'Not saved yet. Trying again shortly.' : 'Saving your ticks...';
@@ -581,60 +582,53 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
 
   // ── Saving ticks ──
-  // Changes, in the order they were made: the server's list, then the save in flight, then what
-  // was sent with keepalive, then the taps since. Each is "add these hours, remove those".
   const inWindow = (slot) => S.days.includes(slot.split('|')[0]);
   const hasPending = () => pendingAdd.size > 0 || pendingRemove.size > 0;
-  function layer(set, d) {
-    if (!d) return;
-    for (const x of d.add) set.add(x);
-    for (const x of d.remove) set.delete(x);
-  }
-  function recomputeMine() {
+  const serverHas = (slot) => !!(me && S && (S.votes[slot] || []).includes(me));
+  // The server's truth for me, plus my unsent changes.
+  function showTruth() {
     mine = new Set(me ? Object.keys(S.votes).filter((k) => S.votes[k].includes(me)) : []);
-    if (inflight && inflight.person === me) layer(mine, inflight);
-    if (lastFlush && lastFlush.person === me) layer(mine, lastFlush);
-    layer(mine, { add: pendingAdd, remove: pendingRemove });
+    for (const x of pendingAdd) mine.add(x);
+    for (const x of pendingRemove) mine.delete(x);
   }
-  // Put unconfirmed changes back under anything newer: an hour that has a newer tap pending, that
-  // a keepalive flush has already sent, or that a flush covered after this change went out (its
-  // `superseded`) keeps the newer change. Never someone else's changes.
-  function putBack(d) {
-    if (!d || d.person !== me) return;
-    const newer = (x) => pendingAdd.has(x) || pendingRemove.has(x)
-      || (lastFlush && (lastFlush.add.has(x) || lastFlush.remove.has(x))) || (d.superseded && d.superseded.has(x));
-    for (const x of d.add) if (!newer(x)) pendingAdd.add(x);
-    for (const x of d.remove) if (!newer(x)) pendingRemove.add(x);
-  }
-  // The person is gone (removed from the list): their unsaved changes go with them.
+  // Is a request on its way (the save in flight, or a hide-flush) carrying this hour?
+  const carried = (d, slot) => !!d && d.person === me && (d.add.has(slot) || d.remove.has(slot));
+  const onTheWay = (slot) => carried(inflight, slot) || carried(flushing, slot);
+  // The person is gone (removed from the list): their changes go with them, and any answer still
+  // on its way for them no longer owns anything.
   function dropChanges() {
     clearTimeout(saveTimer);
+    if (flushing) clearTimeout(flushing.timer);
     pendingAdd = new Set();
     pendingRemove = new Set();
     inflight = null;
-    lastFlush = null;
-    shownFlush = null;
+    flushing = null;
     saving = false;
     savingPromise = null;
+    savingToken = null;
   }
-  // Does a change already on its way to the server (the save in flight, or a keepalive flush that
-  // may still land) carry this hour? Then a tap must be sent as its own change, not cancelled.
-  const carried = (d, slot) => !!d && d.person === me && (d.add.has(slot) || d.remove.has(slot));
-  const lowerHas = (slot) => carried(inflight, slot) || carried(lastFlush, slot) || carried(shownFlush, slot);
 
   function setBusy(on) {
     busy = on;
     for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-venue],#check-now,#add-btn')) b.disabled = on;
   }
 
+  // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is
+  // only pending, otherwise send a remove. Tick a shown blank: cancel its pending remove if the
+  // server has the hour, otherwise send an add. An hour carried by a request on its way is never
+  // cancelled: the tap becomes the explicit opposite change.
   function toggle(slot) {
     if (!me) return;
-    // Tap then untap cancels the pending change, unless a change already on its way carries the
-    // hour: then the opposite change is sent, so the server ends where the page shows.
-    const [from, to] = mine.has(slot) ? [pendingAdd, pendingRemove] : [pendingRemove, pendingAdd];
-    if (from.has(slot) && !lowerHas(slot)) from.delete(slot);
-    else { from.delete(slot); to.add(slot); }
-    recomputeMine();
+    const way = onTheWay(slot);
+    if (mine.has(slot)) {
+      if (pendingAdd.has(slot) && !way && !serverHas(slot)) pendingAdd.delete(slot);
+      else { pendingAdd.delete(slot); pendingRemove.add(slot); }
+      mine.delete(slot);
+    } else {
+      if (pendingRemove.has(slot) && !way && serverHas(slot)) pendingRemove.delete(slot);
+      else { pendingRemove.delete(slot); pendingAdd.add(slot); }
+      mine.add(slot);
+    }
     keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
     scheduleSave();
   }
@@ -642,49 +636,54 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, Math.max(ms || 800, backoffUntil - Date.now()));
   }
-  // One save in flight at a time. A tap during a save waits; the follow-up save goes when the
-  // reply lands. Changes are idempotent, so a save repeated after a lost reply does no harm.
+  // One save at a time, none while a hide-flush is unconfirmed, none inside a back-off.
   function save() {
     clearTimeout(saveTimer);
     if (!S || !me) return Promise.resolve(true);
     if (saving) return savingPromise;
+    if (flushing) return Promise.resolve(false);           // flushDone carries on when the flush answers
     if (!hasPending()) return Promise.resolve(true);
-    // Every way in ("Save now", the page shown again, switching person) waits out a back-off.
     if (backoffUntil > Date.now() + 5) { scheduleSave(); return Promise.resolve(false); }
-    inflight = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), superseded: new Set() };
+    const token = {};
+    const sent = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), token };
+    inflight = sent;
     pendingAdd = new Set();
     pendingRemove = new Set();
     saving = true;
+    savingToken = token;
     renderUnsaved();
     savingPromise = (async () => {
-      const sent = inflight;
       try {
         const r = await api('/api/vote', { person_id: sent.person, add: [...sent.add].filter(inWindow), remove: [...sent.remove].filter(inWindow) });
-        if (inflight === sent) inflight = null;
+        if (savingToken !== token) return false;           // a late answer for a dropped save
+        inflight = null;
         saving = false;
+        savingToken = null;
         saveTry = 0;
         backoffUntil = 0;
         applyNewest(r);
         if (hasPending()) scheduleSave(1);
         return !hasPending();
       } catch (e) {
-        if (inflight === sent) inflight = null;
+        if (savingToken !== token) return false;
+        inflight = null;
         saving = false;
-        putBack(sent);
-        recomputeMine();
+        savingToken = null;
         if (e.status === 401) return false;
         // "No such person": they were removed. Reading the state again shows the name list.
-        if (e.status === 404) { load(); return false; }
+        if (e.status === 404) { await load(); return false; }
+        // The failed changes are NOT put back (the server may have applied them): show the last
+        // truth plus the unsent taps, read the truth again, and retry only what is still unsent.
         saveTry++;
-        if (saveTry === 1) toast("Couldn't save your ticks. Trying again.");
-        // One timer only: a tap during the failing save had set its own 800 ms one. The back-off
-        // holds every later tap too, and never cuts short a 429's own back-off.
+        if (saveTry === 1) toast("Couldn't save. The page shows what is saved; tap again to change it.");
         clearTimeout(saveTimer);
         if (saveTry <= SAVE_RETRY_MS.length) {
           const wait = Math.max(SAVE_RETRY_MS[saveTry - 1], backoffUntil - Date.now());
           backoffUntil = Math.max(backoffUntil, Date.now() + wait);
-          saveTimer = setTimeout(save, wait);
         }
+        showTruth();
+        await load();
+        if (hasPending() && saveTry <= SAVE_RETRY_MS.length) scheduleSave(1);
         return false;
       } finally {
         if (S && !$('board').hidden) keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
@@ -694,40 +693,51 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
   async function saveAndWait() {
     if (saving) await savingPromise;
+    if (flushing) return false;
     if (hasPending()) await save();
     if (saving) await savingPromise;
-    return !hasPending() && !inflight;
+    return !hasPending() && !saving && !flushing;
   }
   // The page is being hidden or closed: every unconfirmed change (the save in flight too, which
-  // the browser cancels on close) goes with keepalive so the request outlives the page. Order does
-  // not matter for changes, so it goes even while a save is in flight.
+  // the browser cancels on close) goes with keepalive so the request outlives the page. No save
+  // goes until this flush answers (or 10 s pass); then the truth is shown and saving carries on.
   function flush() {
-    if (!me || !S) return;
+    if (!me || !S || flushing) return;
     const add = new Set();
     const remove = new Set();
-    for (const d of [inflight, lastFlush, { person: me, add: pendingAdd, remove: pendingRemove }]) {
+    for (const d of [inflight, { person: me, add: pendingAdd, remove: pendingRemove }]) {
       if (!d || d.person !== me) continue;
       for (const x of d.add) { remove.delete(x); add.add(x); }
       for (const x of d.remove) { add.delete(x); remove.add(x); }
     }
     if (!add.size && !remove.size) return;
     clearTimeout(saveTimer);
-    const sent = { person: me, add, remove };
-    // The save in flight is now behind this flush on every hour the flush sends.
-    if (inflight && inflight.person === me) for (const x of [...add, ...remove]) inflight.superseded.add(x);
-    lastFlush = sent;
     pendingAdd = new Set();
     pendingRemove = new Set();
+    const n = ++reqSeq;
+    const startedAt = performance.now();
+    const f = { person: me, add, remove };
+    flushing = f;
+    f.timer = setTimeout(() => flushDone(f, null), FLUSH_WAIT_MS);
     fetch('/api/vote', { method: 'POST', keepalive: true, cache: 'no-store', headers: { 'X-Group-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: me, add: [...add].filter(inWindow), remove: [...remove].filter(inWindow) }) })
-      .then((res) => { lastWriteDone = performance.now(); if (res.ok) { if (lastFlush === sent) lastFlush = null; if (shownFlush === sent) shownFlush = null; } else { flushFailed = true; } })
-      .catch(() => { flushFailed = true; });        // resent as a normal save when the page is shown again
+      .then((res) => (res.ok ? res.json().catch(() => null) : null))
+      .then((data) => flushDone(f, data, n, startedAt), () => flushDone(f, null));
+  }
+  function flushDone(f, data, n, startedAt) {
+    if (flushing !== f) return;
+    clearTimeout(f.timer);
+    flushing = null;
+    lastWriteDone = performance.now();
+    if (data && data.days) applyNewest({ data, n, write: true, startedAt }); else load();
+    if (hasPending()) scheduleSave(1);
+    if (S && !$('board').hidden) renderUnsaved();
   }
 
   async function pickPerson(id) {
     if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
     me = id;
     store.set('padel.person', String(id));
-    recomputeMine();
+    showTruth();
     render();
     window.scrollTo(0, 0);
   }
@@ -827,10 +837,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   $('add-form').addEventListener('submit', addName);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { flush(); return; }
-    if (!S) return;
-    // Shown again: changes sent with keepalive and not confirmed go again as a normal save.
-    if (lastFlush) { const d = lastFlush; lastFlush = null; if (d.person === me) { putBack(d); shownFlush = d; } }
-    flushFailed = false;
+    if (!S || flushing) return;                 // a flush on its way: flushDone shows the truth
     if (hasPending()) { saveTry = 0; save(); } else if (!saving) load();
   });
   window.addEventListener('pagehide', flush);
