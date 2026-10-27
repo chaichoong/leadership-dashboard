@@ -21,20 +21,20 @@
   "United States": "United States of America",
   "Singapore": "Singapore"
  },
- "days": 2339,
- "total_km": 17902.36,
+ "days": 2340,
+ "total_km": 17909.82,
  "lap_km": 40075.0,
- "lap_pct": 44.67,
- "km_left": 22172.64,
+ "lap_pct": 44.69,
+ "km_left": 22165.18,
  "raised": 76840.0,
  "raise_target": 1000000,
  "avg_km_per_day": 7.65,
- "runs_counted": 2437,
+ "runs_counted": 2438,
  "countries_count": 19,
  "countries": [
   {
    "name": "United Kingdom",
-   "runs": 2208
+   "runs": 2209
   },
   {
    "name": "Spain",
@@ -115,13 +115,13 @@
  },
  "equivalent": "Cambridge to Tasmania",
  "next_km_milestone": 18000,
- "days_to_next_km_milestone": 13,
+ "days_to_next_km_milestone": 12,
  "next_day_milestone": 2400,
- "date_of_next_day_milestone": "2026-12-27",
- "lap_finish_estimate": "2034-10-02",
+ "date_of_next_day_milestone": "2026-12-26",
+ "lap_finish_estimate": "2034-10-01",
  "marker": {
-  "lat": -40.646,
-  "lon": 157.4951,
+  "lat": -40.6254,
+  "lon": 157.5888,
   "leg": "Hobart, Tasmania to Auckland"
  },
  "route": [
