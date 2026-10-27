@@ -117,6 +117,9 @@ describe('the If you approve line says what Approve sets going, never a step of 
     adverb: 'You personally pay the £53 on the council page.',
     beAsked: "You'll be asked to type the code from the text message.",
     onceYouHave: 'Once you have paid, the robot books the slot.',
+    // Round 2 of the review.
+    cardsPrompt: "You get the card's prompt to review the records with Claude.",
+    checkApproveSign: 'The robot fills it for you to check and approve, then sign and post it.',
   };
   const clean = {
     reply: 'The agent sends one short no-thanks reply and stops answering.',
@@ -131,6 +134,7 @@ describe('the If you approve line says what Approve sets going, never a step of 
     // The rent check's own claim card: approving IS his proof that he sent it.
     approveOnce: "Approve once you have sent it: the rent check notes it and asks for the council's answer in three weeks.",
     asksIf: 'One email asks if you can attend on Friday at 10am.',
+    saysYou: 'Her record is updated to say you will write to her again.',
   };
 
   it('finds the step in every live shape that handed Kevin one', () => {
@@ -188,15 +192,33 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     expect(own.refused, own.error).toBe(false);
   });
 
+  it('a covered step does not cover the next verb in its clause, a "your part" or a review in its own text', () => {
+    const SIGN = 'KEVIN ONLY: signature: 1. Open the email. 2. Sign the agreement.';
+    const deposit = run({ output: `${BODY}\n\n${SIGN}\n\n**Carrying this out will involve:** the robot opens the agreement, and you sign it and then pay the deposit by card.` });
+    expect(deposit.refused).toBe(true);
+    expect(deposit.error).toContain('pay the deposit');
+    const part = run({ output: `${BODY}\n\n${SIGN}\n\n**Carrying this out will involve:** the agreement goes out, and your part is the review session with Claude.` });
+    expect(part.refused).toBe(true);
+    const smuggled = run({ output: `${BODY}\n\nKEVIN ONLY: payment: 1. Pay the £53 fee. 2. Then review the records in a chat with Claude.\n\n`
+      + '**Carrying this out will involve:** the fee goes on the list, and you review the records with Claude in a chat.' });
+    expect(smuggled.refused).toBe(true);
+    const yourStep = run({ output: `${BODY}\n\nKEVIN ONLY: physical: 1. Swap the two cameras by hand.\n\n`
+      + '**Carrying this out will involve:** the task stays open as your step, with no agent sending, paying or changing anything.' });
+    expect(yourStep.refused, yourStep.error).toBe(false);
+  });
+
   it('a purchase covers the declarations that come with it', () => {
     const r = run({ output: `${BODY}\n\nKEVIN ONLY: purchase: buy the chosen policy in one session. 1. Open the window. 2. Buy it.\n\n`
       + '**Carrying this out will involve:** the robot fills the quote form, then you fill in the declarations and buy the policy if it is cheaper.' });
     expect(r.refused, r.error).toBe(false);
   });
 
-  it('a SIGN-IN NEEDED line covers the sign-in, never the work after it', () => {
-    const r = run({ output: `${BODY}\n\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n\n`
-      + '**Carrying this out will involve:** once signed in, the robot opens the letter, then you review the records and sign the declaration.' });
+  it.each([
+    ['the work after it', 'once signed in, the robot opens the letter, then you review the records and sign the declaration.'],
+    ['a payment by card', 'once signed in, the robot opens the account, then you pay the £53 with your card.'],
+    ['handing over keys', 'once signed in, the robot opens the lease, then you sign the lease and hand over the keys.'],
+  ])('a SIGN-IN NEEDED line covers the sign-in, never %s', (_, close) => {
+    const r = run({ output: `${BODY}\n\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n\n**Carrying this out will involve:** ${close}` });
     expect(r.refused).toBe(true);
     expect(r.error).toContain('no KEVIN ONLY line declares it');
   });
@@ -222,6 +244,15 @@ describe('a step of Kevin\'s in the closing line must be declared, so it comes b
     expect(r.refused, r.error).toBe(false);
     expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
     expect(r.captured.fields[r.fieldMap.notes]).toMatch(/BLOCKER OPEN \(KEVIN review\)/);
+  });
+
+  it.each([
+    "Don't send it yet, can we go through it together first?",
+    "Hold off without sending anything, let's go through the records in a chat first.",
+    'I want to go through this with you before it goes.',
+  ])('a real ask beside a "no" about something else still counts: %s', (note) => {
+    const r = run({ output: `${BODY}\n\n${REVIEW_LINE}\n\n${CLOSE_CLEAN}`, stored: { feedbackHistory: `[2026-10-20 10:00] ${note}` } });
+    expect(r.refused, r.error).toBe(false);
   });
 
   it('his words in the live note box count as well as the archive', () => {
@@ -263,5 +294,28 @@ describe('block takes a review wall only when Kevin asked for one', () => {
     expect(r.refused).toBe(true);
     expect(r.error).toContain('refusing a KEVIN review wall');
     expect(r.captured.fields).toBeUndefined();
+  });
+});
+
+// Review round 2 (27 Oct 2026): the new check's cover words live apart from KEVIN_REASON_WORDS,
+// because work_handoff_problem reads those, and widening them let these past the older check.
+describe('the older closing-line check is no looser than before', () => {
+  it.each([
+    ['identity', "you will then need to answer the insurer's questions"],
+    ['credential', 'you will need to change settings on the bank account and add the payee'],
+    ['credential', 'for Kevin to get the token from Google and paste it in'],
+    ['purchase', 'you will need to declare the claims history and buy it'],
+  ])('a %s step does not cover: %s', (kind, close) => {
+    const script = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+k, c = json.loads(sys.argv[1])
+print('---JSON---')
+print(json.dumps(m.work_handoff_problem('Report.\\n\\n**Carrying this out will involve:** ' + c, {'reason': k, 'step': '1. Do it. 2. Prove it.'})))
+`;
+    const raw = execFileSync('python3', ['-c', script, JSON.stringify([kind, close])], { encoding: 'utf8' });
+    expect(JSON.parse(raw.split('---JSON---')[1])).not.toBe('');
   });
 });

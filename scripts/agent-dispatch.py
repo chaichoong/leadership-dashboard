@@ -2781,12 +2781,11 @@ KEVIN_ONLY_LINE_RE = re.compile(
 # no list, because "Kevin visiting TopCashback" is the Swinton failure itself.
 KEVIN_REASON_WORDS = {
     "payment": r"pay|pays|paying|paid|payment|direct\s+debit|DD|standing\s+order|transfer|settle",
-    # The declarations are his at the last step of a purchase (GUARDRAILS "PLANS FILL, KEVIN SUBMITS").
-    "purchase": r"buy|buys|buying|purchase|purchasing|pay|pays|paying|declar\w*",
+    "purchase": r"buy|buys|buying|purchase|purchasing|pay|pays|paying",
     "signature": r"sign|signs|signing|signature|countersign",
-    "credential": r"log\s*in|logging|sign\s*in|signing\s+in|password|passcode|card|consent|re-?consent|authori[sz]e|sign-in|log-in|keys?|token|site\s+list|robot'?s\s+list|settings?",
-    "identity": r"verify|verifies|verifying|verification|identity|ID|passport|statement|declar\w*|answer\w*",
-    "physical": r"attend|collect|deliver|meet|hand\s+over|by\s+hand|in\s+person",   # posting a letter is agent work (Pingen)
+    "credential": r"log\s*in|logging|sign\s*in|signing\s+in|password|passcode|card|consent|re-?consent|authori[sz]e",
+    "identity": r"verify|verifies|verifying|verification|identity|ID|passport",
+    "physical": r"attend|collect|deliver|meet|hand\s+over",   # posting a letter is agent work (Pingen)
     "review": r"review|reviews|reviewing|go(?:es)?\s+through|going\s+through|work(?:s|ing)?\s+through|chat|session",
 }
 
@@ -2951,33 +2950,65 @@ KEVIN_STEP_IN_LINE_RE = re.compile(
 # Words before "you" that report what an email ASKS ("asking whether you can attend") rather than
 # give Kevin a step. "if" and "that" alone are not on it: "if you sign it today" is still his step.
 _KEVIN_STEP_REPORTED_RE = re.compile(
-    r"\b(?:whether|asking|asks|ask|tells|telling|reminds|reminding|thanks|thanking)"
+    r"\b(?:whether|asking|asks|ask|tells|telling|reminds|reminding|thanks|thanking|say|says|saying)"
     r"(?:\s+(?:if|that|whether))?\s+$", re.I)
 # A card coming back to him is the gate, not a step: "you get a card to book". Only when the card
 # is what he gets, never "a ready prompt on the card to review" (review, 27 Oct 2026).
 _KEVIN_GETS_A_CARD_RE = re.compile(
-    r"you\s+(?:get|receive|will\s+get|'ll\s+get)\s+(?:(?:a|an|one|the|its|their|another|new|separate)\s+)*cards?\b", re.I)
+    r"you\s+(?:get|receive|will\s+get|'ll\s+get)\s+(?:(?:a|an|one|the|its|their|another|new|separate)\s+)*cards?\b(?!['’])", re.I)
 # A draft left for him to look at, as WORK_HANDOFF_RE allows (25 Sep 2026), unless the same
 # clause goes on to give him more: "for you to check, sign and post" is still his step.
 _KEVIN_DRAFT_RE = re.compile(r"for\s+you\s+to\s+(?:open\s+and\s+)?check\b(?P<rest>[^.;\n]{0,60})", re.I)
-_KEVIN_DRAFT_MORE_RE = re.compile(r"\s*(?:,|\band\b|\bthen\b)\s*(?:and\s+|then\s+)?(?:%s)\b" % _KEVIN_DOES, re.I)
+# Where his clause ends: someone else takes over the sentence.
+_KEVIN_CLAUSE_END_RE = re.compile(
+    r"\b(?:the\s+robot|robots?|an?\s+agent|the\s+agent|agents?|no\s+one|nobody|nothing|no|we|they|roy|the\s+task|the\s+card)\b", re.I)
+# Another of his verbs further on in the same clause: "check and approve, then sign and post it",
+# "you sign it and then pay the deposit".
+_KEVIN_MORE_RE = re.compile(r"(?:,|\band\b|\bthen\b)\s*(?:and\s+|then\s+)?(?P<verb>%s)\b" % _KEVIN_DOES, re.I)
+
+
+# What a declared step covers in the closing line, on top of its kind's KEVIN_REASON_WORDS. Kept
+# apart from those on purpose: work_handoff_problem reads them too, and widening them let "you
+# will then need to answer the insurer's questions" past it (review, 27 Oct 2026).
+_COVER_EXTRA = {
+    "purchase": r"declar\w*",                  # the declarations are his at a purchase's last step
+    "credential": r"sign-in|log-in|key|token|site\s+list|robot'?s\s+list|settings?",
+    "identity": r"statement|declar\w*",        # a statement only he can give ("your own statement")
+    "physical": r"by\s+hand|in\s+person",
+}
+# A SIGN-IN NEEDED line covers the sign-in itself and nothing more: not a card, keys or a payment.
+SIGNIN_COVER = r"log[\s-]*in|logging\s+in|sign[\s-]*in|signing\s+in|password|passcode"
+# "your step", "your turn" name the declared step itself; "your part is the review session" does not.
+_YOUR_DECLARED_STEP_RE = re.compile(r"your\s+(?:only\s+|one\s+|own\s+|next\s+)?(?:step|turn)$", re.I)
 
 
 def _declared_cover(steps):
-    """A test of whether a match names one of the declared KEVIN ONLY steps (its kind's words, or a
-    verb its own text uses), or None when nothing is declared. Like work_handoff_problem: a declared
-    step covers its own words and nothing else (25 Sep 2026)."""
+    """A test of whether a match names one of the declared KEVIN ONLY steps (its kind's words within the
+    phrase and the next eight words, or a verb its own text uses), or None when nothing is declared.
+    Like work_handoff_problem: a declared step covers its own words and nothing else (25 Sep 2026)."""
     steps = [st for st in (steps or []) if st and not st.get("invalid")]
     if not steps:
         return None
-    kinds = re.compile(r"\b(?:%s)\b" % "|".join(KEVIN_REASON_WORDS[st["reason"]] for st in steps), re.I)
+    words = []
+    for st in steps:
+        words.append(st.get("words") or KEVIN_REASON_WORDS[st["reason"]])
+        if not st.get("words") and st["reason"] in _COVER_EXTRA:
+            words.append(_COVER_EXTRA[st["reason"]])
+    kinds = re.compile(r"\b(?:%s)\b" % "|".join(words), re.I)
     own = " ".join(str(st.get("step") or "") for st in steps).lower()
+    review = re.compile(r"\b(?:%s)\b" % KEVIN_REASON_WORDS["review"], re.I)
+    reviewed = any(st["reason"] == "review" for st in steps)
 
     def covered(phrase, rest):
-        if re.match(r"your\b", phrase, re.I):
-            return True     # "your only step is", "your turn": the declared step itself
-        if kinds.search(phrase + " " + " ".join(rest.split()[:8])):
+        near = phrase + " " + " ".join(rest.split()[:8])
+        if _YOUR_DECLARED_STEP_RE.match(phrase):
             return True
+        if kinds.search(near):
+            return True
+        if review.search(near) and not reviewed:
+            return False    # a review is his only as a declared review, which meets the review gate
+        # A verb the declared step's own text uses ("make a new key, paste it"): that step is on the
+        # KEVIN ONLY line, so it comes back to him on the Your step card with the rest of it.
         verb = (re.findall(r"[a-z]+", phrase.lower()) or [""])[-1]
         return len(verb) >= 3 and re.search(r"\b" + re.escape(verb[:4]), own) is not None
     return covered
@@ -2993,11 +3024,20 @@ def kevin_step_in_line(line, steps=None):
             continue
         if _KEVIN_GETS_A_CARD_RE.match(text, m.start()):
             continue
+        # His clause runs until the sentence ends or someone else takes over: "your step, with no agent
+        # sending, paying or changing anything" gives him nothing more.
+        clause = _KEVIN_CLAUSE_END_RE.split(re.match(r"[^.;\n]*", text[m.end():]).group(0), 1)[0]
         draft = _KEVIN_DRAFT_RE.match(text, m.start())
-        if draft and not _KEVIN_DRAFT_MORE_RE.match(draft.group("rest")):
+        if draft and not _KEVIN_MORE_RE.search(draft.group("rest")):
             continue
         if covered and covered(m.group(0), text[m.end():]):
-            continue
+            # Covered, but the clause may go on to hand him more: each further verb needs cover too.
+            more = [v for v in _KEVIN_MORE_RE.finditer(clause)
+                    if not covered(v.group("verb"), clause[v.end():])]
+            if not more:
+                continue
+            at = m.end() + more[0].start()
+            return text[max(0, m.start() - 30): at + 40].strip()
         return text[max(0, m.start() - 30): m.end() + 40].strip()
     return ""
 
@@ -3029,12 +3069,16 @@ def approve_line_step_problem(approve_line):
 KEVIN_ASKED_FOR_REVIEW_RE = re.compile(
     r"\b(?:give|send|write|make)\s+(?:me|us)\s+(?:a\s+|the\s+)?prompt\b"
     r"|\b(?:session|chat)\b[^.?!]{0,80}?\b(?:go(?:ing)?\s+(?:through|over)|review|work(?:ing)?\s+(?:on|through))\b"
-    r"|\b(?:go(?:ing)?|walk(?:ing)?|work(?:ing)?)\s+(?:through|over)\b[^.?!]{0,40}?\b(?:together|with\s+me|with\s+us)\b"
+    r"|\b(?:go(?:ing)?|walk(?:ing)?|work(?:ing)?)\s+(?:through|over)\b[^.?!]{0,40}?\b(?:together|with\s+me|with\s+us|with\s+you)\b"
     r"|\bwalk\s+me\s+through\b"
     r"|\b(?:let's|let\s+us|can\s+we|could\s+we|shall\s+we|we\s+(?:need|should|must|will|definitely\s+need)\s+to)\s+"
     r"(?:[\w']+\s+){0,4}?(?:go\s+through|go\s+over|walk\s+through|work\s+through|review|look\s+at|spend\s+(?:some\s+)?time)\b",
     re.I)
-_REVIEW_NOT_ASKED_RE = re.compile(r"\b(?:no\s+need|don't|do\s+not|not\s+needed|without|never)\b", re.I)
+# A "no" only counts when it is about the review itself: "no need for a session" says no, while
+# "Don't send it yet, can we go through it together first?" is still an ask (review, 27 Oct 2026).
+_REVIEW_NOT_ASKED_RE = re.compile(
+    r"\b(?:no\s+need|don't\s+need|do\s+not\s+need|not\s+needed|without|never|no)\b[^.?!,]{0,25}?"
+    r"\b(?:a\s+|the\s+|any\s+)?(?:session|chat|prompt|review|go(?:ing)?\s+through|walk(?:ing)?\s+through)\b", re.I)
 
 
 def kevin_asked_for_review(fields):
@@ -5118,7 +5162,8 @@ def cmd_submit(args):
     # nothing brings it back to him: "This job stays open while you run the review chat".
     # Each declared step covers its own words only, and a SIGN-IN NEEDED line covers a sign-in only:
     # "then you sign it and post it" beside a declared payment is still handed over (review, 27 Oct 2026).
-    covers = kevin_steps + ([{"reason": "credential", "step": ""}] if SIGNIN_NEEDED_RE.search(output) else [])
+    covers = kevin_steps + ([{"reason": "credential", "step": "", "words": SIGNIN_COVER}]
+                            if SIGNIN_NEEDED_RE.search(output) else [])
     undeclared = kevin_step_in_line(carry_out_tail(output), covers)
     if undeclared:
         sys.exit(
