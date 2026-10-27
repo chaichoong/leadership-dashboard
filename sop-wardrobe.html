@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wardrobe &mdash; Standard Operating Procedure</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { line-height: 1.6; color: var(--text-primary); background: var(--bg-app); }
+.header { background: var(--accent); color: var(--accent-on); padding: 2.5rem 2rem 2rem; }
+.header-inner, .container { max-width: 900px; margin: 0 auto; }
+.header a { color: var(--accent-on); opacity: .8; font-size: var(--fs-sm); text-decoration: none; }
+.header h1 { font-size: var(--fs-3xl); margin: 1rem 0 .3rem; }
+.header p { opacity: .88; }
+.container { padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.25rem; }
+h2 { font-size: var(--fs-xl); color: var(--accent); padding-bottom: .4rem; border-bottom: 3px solid var(--accent-soft); margin-bottom: 1rem; }
+.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+.card p + p, .card ul, .card ol { margin-top: .6rem; }
+li { margin-left: 1.2rem; margin-bottom: .35rem; }
+table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin-top: .5rem; }
+th { background: var(--bg-subtle); text-align: left; padding: .5rem .75rem; color: var(--text-secondary); }
+td { padding: .5rem .75rem; border-top: 1px solid var(--border-default); vertical-align: top; }
+code { background: var(--bg-subtle); padding: .1rem .35rem; border-radius: var(--radius-sm); font-size: .88em; }
+</style>
+</head>
+<body>
+<header class="header"><div class="header-inner">
+  <a href="index.html#wardrobe">&larr; Back to Wardrobe</a>
+  <h1>Wardrobe</h1>
+  <p>The "What to wear today" card on My Dashboard, and the Wardrobe page. Version 1.0, 27 October 2026.</p>
+</div></header>
+<main class="container">
+  <section class="section">
+    <h2>What it is for</h2>
+    <div class="card">
+      <p>Each morning My Dashboard opens with today's day, date, place, the "feels like" temperature and the conditions, a one-line reason, and three outfits: <b>Stay at home</b>, <b>Out casual</b> and <b>Out smart casual</b>.</p>
+      <p>Press <b>Wearing this</b> on the one you put on. It saves today's date on that outfit and its clothes, so the card offers something else tomorrow.</p>
+      <p>The Wardrobe page lists the clothes you own, the recommended additions and what to clear out.</p>
+    </div>
+  </section>
+  <section class="section">
+    <h2>How the outfits are chosen</h2>
+    <div class="card">
+      <ol>
+        <li>For each option, the card takes an outfit from the <b>Outfits</b> table that is in season (October to March is autumn and winter) and whose clothes are all owned.</li>
+        <li>The outfit worn longest ago comes first. Once you press Wearing, that outfit stays on the card for the rest of the day.</li>
+        <li>The weather then adds the rest:</li>
+      </ol>
+      <table>
+        <thead><tr><th>When</th><th>Out casual</th><th>Out smart casual</th></tr></thead>
+        <tbody>
+          <tr><td>Feels-like low under 12°</td><td>Adds a jacket: the rain jacket if rain is 50% or more, else the casual jacket</td><td>&mdash;</td></tr>
+          <tr><td>Feels-like low under 10°</td><td>&mdash;</td><td>Adds the smart coat</td></tr>
+          <tr><td>Rain 50% or more</td><td colspan="2">Swaps trainers for that option's leather boots</td></tr>
+          <tr><td>Low of 6° or below</td><td colspan="2">Adds a beanie</td></tr>
+          <tr><td>Low of 4° or below</td><td colspan="2">Adds a scarf</td></tr>
+        </tbody>
+      </table>
+      <p>An outfit that already includes a jacket or coat gets no extra one. Stay at home never gets layers. The rules live in <code>js/wardrobe-pick.js</code> and are pinned by <code>tests/wardrobe-pick.test.js</code>.</p>
+    </div>
+  </section>
+  <section class="section">
+    <h2>Where the data lives</h2>
+    <div class="card">
+      <ul>
+        <li><b>Wardrobe</b> table: one row per piece. <b>Status</b> is Own, Bought, Need, Clear out or Skip. <b>Layer role</b> marks the pieces the weather adds (rain jacket, casual jacket, smart coat, beanie, scarf, leather boots).</li>
+        <li><b>Outfits</b> table: one row per outfit, with its option, season and linked clothes.</li>
+        <li>Weather: Open-Meteo, free and with no key. It uses your location when the browser allows it, otherwise central Cambridge. Press "Use my location" on the card to switch.</li>
+      </ul>
+      <p>To add a piece, add a Wardrobe row. To add an outfit, add an Outfits row and link its clothes. To retire a piece, set its Status to Clear out with an Action.</p>
+    </div>
+  </section>
+  <section class="section">
+    <h2>Health bar checks (Wardrobe page)</h2>
+    <div class="card">
+      <ul>
+        <li>Wardrobe table read</li>
+        <li>Outfits table read</li>
+        <li>Every outfit links to clothes that exist</li>
+        <li>Today's weather read</li>
+        <li>An outfit ready for every option today</li>
+      </ul>
+    </div>
+  </section>
+  <section class="section">
+    <h2>Troubleshooting</h2>
+    <div class="card">
+      <ul>
+        <li><b>"No outfit ready for this season"</b>: every outfit for that option uses something not owned, or is out of season. Add or edit an Outfits row.</li>
+        <li><b>"Today's weather could not be read"</b>: the options still show, without weather layers. Press Refresh on the Wardrobe page's bar.</li>
+        <li><b>"That did not save"</b>: nothing changed in Airtable. Press Wearing again.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,62 @@
+/* Wardrobe (Kevin, 27 Oct 2026): the "What to wear today" card at the top of My Dashboard (#homeWear)
+   and the Wardrobe page (#wardrobePage). js/wardrobe.js draws both. Tokens only; the colour swatches
+   are each garment's own colour, read from Airtable. */
+
+/* ── What to wear today ── */
+.wear-card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-5); margin: 0 0 var(--space-4); }
+.wear-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-4); align-items: flex-start; }
+.wear-date { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .06em; }
+.wear-card h2 { margin: var(--space-1) 0 0; font-size: var(--fs-xl); color: var(--text-primary); }
+.wear-wx { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; }
+.wear-temp { font-size: var(--fs-3xl); font-weight: var(--fw-bold); line-height: 1; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.wear-temp small { display: block; margin-top: var(--space-1); font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--text-secondary); }
+.wear-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.wear-chip { font-size: var(--fs-xs); font-weight: var(--fw-semibold); border-radius: var(--radius-full); padding: 3px 10px; background: var(--bg-subtle); color: var(--text-secondary); }
+.wear-chip-rain { background: var(--info-bg); color: var(--info); }
+.wear-chip-wind { background: var(--warning-bg); color: var(--warning); }
+.wear-why { margin: var(--space-4) 0 0; padding: var(--space-3); border-left: 3px solid var(--accent); background: var(--bg-surface-2); border-radius: 0 var(--radius-md) var(--radius-md) 0; color: var(--text-secondary); max-width: 75ch; }
+.wear-opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
+.wear-opt { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); background: var(--bg-surface); min-width: 0; }
+.wear-opt-best { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.wear-opt h3 { margin: 0; font-size: var(--fs-md); display: flex; justify-content: space-between; gap: var(--space-2); align-items: baseline; color: var(--text-primary); }
+.wear-best { font-size: var(--fs-xs); font-weight: var(--fw-bold); color: var(--accent); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 2px 6px; white-space: nowrap; }
+.wear-outfit { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.wear-opt ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
+.wear-opt li { display: flex; gap: var(--space-2); align-items: flex-start; }
+.wear-sw { width: 12px; height: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); flex: none; display: inline-block; vertical-align: middle; margin-top: 3px; }
+.wear-name { min-width: 0; word-break: break-word; color: var(--text-primary); }
+.wear-added { display: block; font-size: var(--fs-xs); color: var(--accent); }
+.wear-note { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.wear-btn { margin-top: auto; align-self: flex-start; font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-semibold); border-radius: var(--radius-md); padding: 7px 12px; border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text-primary); cursor: pointer; }
+.wear-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.wear-btn-done { background: var(--success-bg); border-color: var(--success-border); color: var(--success); cursor: default; }
+.wear-btn:disabled:not(.wear-btn-done) { opacity: .6; cursor: progress; }
+.wear-btn:focus-visible, .wear-link:focus-visible, .wr-tabs button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.wear-src { margin: var(--space-3) 0 0; font-size: var(--fs-xs); color: var(--text-muted); display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.wear-link { font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semibold); background: none; border: 0; padding: 0; color: var(--text-link); cursor: pointer; text-decoration: underline; }
+.wear-muted { color: var(--text-muted); margin: var(--space-3) 0 0; }
+.wear-error { color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); margin: var(--space-3) 0 0; }
+@media (max-width: 900px) { .wear-opts { grid-template-columns: 1fr; } }
+
+/* ── Wardrobe page ── */
+.wr-title { margin: 0 0 var(--space-4); font-size: var(--fs-2xl); color: var(--text-primary); }
+.wr-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); }
+.wr-stat { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3); }
+.wr-stat b { display: block; font-size: var(--fs-xl); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.wr-stat span { font-size: var(--fs-xs); color: var(--text-secondary); }
+.wr-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); border-bottom: 1px solid var(--border-default); margin-bottom: var(--space-3); }
+.wr-tabs button { font: inherit; font-weight: var(--fw-semibold); background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: var(--space-2) var(--space-3); color: var(--text-secondary); cursor: pointer; }
+.wr-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.wr-count { font-size: var(--fs-xs); color: var(--text-muted); }
+.wr-tablewrap { overflow-x: auto; }
+.wr-table { width: 100%; border-collapse: collapse; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); font-size: var(--fs-sm); }
+.wr-table th { background: var(--bg-subtle); text-align: left; font-weight: var(--fw-semibold); color: var(--text-secondary); padding: var(--space-2) var(--space-3); white-space: nowrap; }
+.wr-table td { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); vertical-align: middle; color: var(--text-primary); }
+.wr-name { word-break: break-word; }
+.wr-pill { display: inline-block; font-size: var(--fs-xs); font-weight: var(--fw-semibold); border-radius: var(--radius-full); padding: 2px 8px; background: var(--bg-subtle); color: var(--text-secondary); white-space: nowrap; }
+.wr-pill-new { background: var(--info-bg); color: var(--info); }
+.wr-pill-warn { background: var(--warning-bg); color: var(--warning); }
+.wr-pill-danger { background: var(--danger-bg); color: var(--danger); }
+.wr-pill-muted { background: var(--accent-gold-soft); color: var(--text-secondary); }
+@media (max-width: 700px) { .wr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .wear-btn, .wear-src, .wr-tabs { display: none; } }

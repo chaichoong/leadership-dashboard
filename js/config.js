@@ -23,10 +23,12 @@
         // It replaced the Leadership Dashboard sidebar item; the 'overview' entry below is still the page it shows, and opens by link.
         { id: 'home',        name: 'My Dashboard',                   icon: '📊', pageVer: '1.15', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.153', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.81', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.82', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.197', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.45', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
+        // Wardrobe (Leadership, 27 Oct 2026): clothes, spring buys and the clear-out. Its "What to wear today" card sits at the top of My Dashboard.
+        { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.2', sopFile: 'sop-wardrobe.html',           sopVer: '1.0', standalone: 'index.html#wardrobe' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
@@ -36,7 +38,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.86', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.76', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.77', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -51,10 +53,10 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.220', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.221', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.55', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.56', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -106,6 +108,8 @@
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         runpreneurMoney: 'tblsH8x6fjWJC26Sa', // Runpreneur Money Record: one row per payment to a cause (10 Oct 2026)
         runpreneurPartners: 'tbl34aBkmSbY2XxTL', // Runpreneur Partners: the Dream 100, one row per partner (10 Oct 2026)
+        wardrobe:      'tblxcSDis9Tl1dFge', // Wardrobe: Kevin's clothes, one row per piece (What to wear card + Wardrobe page, 27 Oct 2026)
+        outfits:       'tblqGdFI6VUH1wUdq', // Outfits: base outfits linked to Wardrobe rows (27 Oct 2026)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
@@ -538,6 +542,17 @@
     // of slack — long enough not to cry wolf, short enough that Kevin finds out
     // within a week rather than after seventy days.
     const PAYMENT_RUN_STALE_DAYS = 8;
+
+    // Wardrobe + Outfits field IDs (read 27 Oct 2026 from the base schema). The rows are personal and
+    // live only in Airtable; nothing about the clothes themselves goes in this public repo.
+    const WR = { name: 'fldG9hxGddp8ijUwW', planId: 'fldFSQswPqxR2OvED', type: 'fldnUA7o3eR62r1FW', colour: 'fldbA3Yql3NAjdUAq',
+        swatch: 'fld44tZ76VsKRH0Db', usedFor: 'fldqINoZ665Tdmb0V', status: 'fld8Z9QI5pP97cymY', action: 'fldoYeCu7oAqgPZd8',
+        layerRole: 'fld7VonuseNOhkCcw', buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk',
+        lastWorn: 'fldc0Wa3pND9EbAI2', notes: 'fldZZULHcZYAFLEEl' };
+    const OF = { name: 'fldLpZormElc2HJ3s', planId: 'fldFgSJztt3TCKoEp', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o',
+        season: 'fldz3FqdChXD0ZRK5', why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z' };
+    // Weather for the What to wear card when the browser has no location permission: central Cambridge.
+    const WEATHER_FALLBACK = { lat: 52.205, lon: 0.119, place: 'Cambridge' };
 
     // ── Net Worth field IDs (Airtable: Specific Net Worth Statement by Month / tblvtDXCBJCHu9hnK) ──
     // One row per asset/liability item per month. Used by the Wealth tab.

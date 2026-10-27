@@ -303,6 +303,8 @@ const TABLE_MAP = {
   'tblvtDXCBJCHu9hnK': 'netWorthByMonth',
   'tbljHVGJoKJf8acy3': 'prospects',
   'tblB5tZrXNaKFe02j': 'prospectKeywords',
+  'tblxcSDis9Tl1dFge': 'wardrobe',
+  'tblqGdFI6VUH1wUdq': 'outfits',
 };
 
 // The app pulls two things off the public internet on every page load: Chart.js from
@@ -344,7 +346,16 @@ async function stubExternalHosts(page) {
   await page.route('**/*.workers.dev/**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
+  // Open-Meteo (the What to wear card on My Dashboard, 27 Oct 2026): a fixed drizzly autumn day, the
+  // weather of Kevin's first worked example. Specs that need other weather route it again themselves.
+  await page.route('**/api.open-meteo.com/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(WEATHER_FIXTURE) });
+  });
 }
+const WEATHER_FIXTURE = {
+  current: { temperature_2m: 14.5, apparent_temperature: 10.5, weather_code: 1, wind_speed_10m: 26.6 },
+  daily: { apparent_temperature_max: [13.0], apparent_temperature_min: [5.3], precipitation_probability_max: [80], weather_code: [53] },
+};
 
 /**
  * Set up route interception so Airtable API calls return fixture data.
@@ -446,4 +457,4 @@ async function loadDashboardWithFixtures(page, fixtureOverrides, hash = '') {
   await page.waitForTimeout(1500);
 }
 
-module.exports = { MOCK_PAT, localTodayISO, FIELDS, TABLE_MAP, BYNAME_FETCH_ALLOWLIST, tableIdFromUrl, assertByNameFetchesAllowed, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };
+module.exports = { WEATHER_FIXTURE, MOCK_PAT, localTodayISO, FIELDS, TABLE_MAP, BYNAME_FETCH_ALLOWLIST, tableIdFromUrl, assertByNameFetchesAllowed, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };
