@@ -71,6 +71,8 @@ monitoring/hmrc-*
 # `wrangler dev`, never source. 11 of these sat untracked under workers/drive-upload/
 # on 21 Sep 2026.
 .wrangler/
+# `wrangler dev` local secrets (workers/padel/.dev.vars holds the padel group code, 27 Oct 2026).
+.dev.vars
 
 # Session scratch under a root logs/ folder (a dispatch quote-check script on 21 Sep 2026).
 # Robots keep their working files in ~/knowledge-os/logs, and no tracked file lives here.

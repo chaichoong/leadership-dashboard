@@ -1,0 +1,11 @@
+# Headers for the padel page (a static asset: wrangler.toml run_worker_first = ["/api/*"], so the
+# Worker never sees a page request and cannot add them). script-src allows only the page's one
+# inline script, by its sha256 hash; tests/padel-worker.test.js recomputes it from index.html and
+# fails when this line drifts. After any change to that script, put the new hash here.
+/*
+  X-Robots-Tag: noindex, nofollow
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Cache-Control: no-cache
+  Content-Security-Policy: default-src 'none'; script-src 'sha256-/iR3TcOxDRDkyOiVbebhr3amw26Pcx5Y6puzbQbZvtg='; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

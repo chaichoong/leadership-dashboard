@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light">
+<title>Padel this week</title>
+<style>
+/* Tokens: the values are copied from the dashboard's css/tokens.css (Sage Executive), the source
+   of truth. This page is a single static file served by the padel Worker with a CSP that allows
+   no outside loads, so it cannot link that file or load DM Sans from Google Fonts; the font
+   stack below falls back to the system font for that reason. Light only, like the platform
+   (.claude/rules/design-system.md rule 3). */
+:root {
+  --bg-app: #F1F3EF;
+  --bg-surface: #FBFBF9;
+  --bg-surface-2: #F4F6F1;
+  --bg-subtle: #E5E8E1;
+  --border-subtle: #E5E8E1;
+  --border-default: #DDE1D9;
+  --border-strong: #C9CDC3;
+  --border-focus: #2C6E49;
+  --text-primary: #1C2422;
+  --text-secondary: #5A6660;
+  --text-muted: #8A928C;
+  --text-inverse: #FBFBF9;
+  --accent: #2C6E49;
+  --accent-hover: #1B4A30;
+  --accent-soft: #DDE8DF;
+  --accent-on: #FFFFFF;
+  --success: #2C6E49;
+  --success-bg: #DDE8DF;
+  --success-border: #C4D6C8;
+  --warning: #8A6B2D;
+  --warning-bg: #EFE3CA;
+  --warning-border: #E0CDA4;
+  --danger: #A33B3B;
+  --danger-bg: #EED9D9;
+  --stripe-a: #E5E8E1;
+  --stripe-b: #F4F6F1;
+  --bg-inverse: #1C2422;
+  --font-family-base: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 999px;
+  --shadow-sm: 0 1px 2px rgba(28, 36, 34, 0.04);
+  --shadow-md: 0 1px 3px rgba(28, 36, 34, 0.06), 0 4px 10px rgba(28, 36, 34, 0.04);
+  --tap: 44px;
+  --dur-fast: 120ms;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* a class's display must never undo the hidden attribute */
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; font-family: var(--font-family-base); font-size: var(--fs-md); line-height: 1.5;
+  color: var(--text-primary); background: var(--bg-app); -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.6; }
+:focus-visible { outline: 3px solid var(--border-focus); outline-offset: 2px; }
+.wrap { max-width: 640px; margin: 0 auto; padding: var(--space-4) var(--space-4) var(--space-8); }
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-4); }
+h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin: 0; }
+h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(--space-3); }
+.who { margin: 0; color: var(--text-secondary); font-size: var(--fs-md); }
+.link { background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); color: var(--accent); text-decoration: underline; font-weight: var(--fw-medium); }
+.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-4); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); }
+.note { color: var(--text-secondary); margin: 0 0 var(--space-3); }
+.gate p { font-size: var(--fs-lg); margin: 0; }
+.btn { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn.small { min-height: var(--tap); padding: 0 var(--space-3); font-size: var(--fs-md); }
+.names { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-4); }
+.names .btn { min-height: 56px; font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add label { display: block; font-weight: var(--fw-semibold); margin-bottom: var(--space-2); }
+.add-row { display: flex; gap: var(--space-2); }
+.add-row input { flex: 1; min-width: 0; min-height: var(--tap); padding: 0 var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-lg); }
+.block { border-radius: var(--radius-xl); padding: var(--space-4); margin-bottom: var(--space-4); border: 1px solid; }
+.block h2 { margin-bottom: var(--space-2); }
+.ready { background: var(--success-bg); border-color: var(--success-border); }
+.nearly { background: var(--warning-bg); border-color: var(--warning-border); }
+.item { padding: var(--space-2) 0; border-top: 1px solid var(--border-default); }
+.item:first-of-type { border-top: 0; }
+.item p { margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.venue-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-1) 0; }
+.venue-line span { flex: 1 1 140px; }
+.nearly-btn { display: block; width: 100%; text-align: left; background: none; border: 0; padding: var(--space-2) 0; min-height: var(--tap); overflow-wrap: anywhere; }
+.days { display: flex; gap: var(--space-2); overflow-x: auto; padding-bottom: var(--space-2); margin-bottom: var(--space-3); scrollbar-width: thin; }
+.day { flex: 0 0 auto; min-height: var(--tap); min-width: 64px; padding: var(--space-1) var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.day[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.day small { font-size: var(--fs-xs); font-weight: var(--fw-medium); min-height: 1em; }
+.day-note a { color: var(--accent); font-weight: var(--fw-semibold); }
+.day-note { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); background: var(--bg-surface-2); color: var(--text-secondary); font-size: var(--fs-base); }
+.grid { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: grid; gap: var(--space-2); }
+.row { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: var(--space-2); }
+.row.mine { border-color: var(--accent); }
+.row.is-ready { box-shadow: 0 0 0 2px var(--success-border); }
+.tap { width: 100%; min-height: 52px; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--border-strong); background: var(--bg-surface-2); text-align: left; transition: background var(--dur-fast); }
+.tap[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.time { font-weight: var(--fw-bold); font-size: var(--fs-xl); font-variant-numeric: tabular-nums; min-width: 3.2em; }
+.say { flex: 1; font-weight: var(--fw-medium); }
+.count { min-width: 30px; height: 30px; border-radius: var(--radius-full); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); background: var(--bg-subtle); color: var(--text-primary); }
+.tap[aria-pressed="true"] .count { background: var(--accent-on); color: var(--accent); }
+.meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-2); }
+.chips { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 var(--space-2); border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: var(--fw-semibold); border: 1px solid var(--border-strong); background: var(--bg-subtle); color: var(--text-secondary); }
+.chip.free { background: var(--success-bg); border-color: var(--success-border); color: var(--success); }
+.chip.striped { background: repeating-linear-gradient(45deg, var(--stripe-a) 0 5px, var(--stripe-b) 5px 10px); color: var(--text-secondary); }
+.initials { color: var(--text-secondary); font-size: var(--fs-sm); overflow-wrap: anywhere; text-align: right; }
+.booked-line { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--success); font-weight: var(--fw-semibold); }
+.toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.toggle { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); }
+.toggle[aria-pressed="true"] { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); text-decoration: line-through; }
+.foot { color: var(--text-secondary); font-size: var(--fs-base); }
+.foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); }
+.legend { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; gap: var(--space-1); }
+.legend li { display: flex; align-items: center; gap: var(--space-2); }
+.toast { position: fixed; left: 50%; bottom: calc(var(--space-4) + env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: calc(100% - 32px); background: var(--bg-inverse); color: var(--text-inverse); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); font-weight: var(--fw-medium); z-index: 10; }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.unsaved { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); background: var(--warning-bg); border: 1px solid var(--warning-border); color: var(--text-primary); font-size: var(--fs-base); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+@media (min-width: 720px) {
+  .wrap { padding-top: var(--space-8); }
+  .grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Padel this week</h1>
+    <p id="who" class="who" hidden>Playing as <strong id="who-name"></strong>. <button type="button" id="switch" class="link">Not you? Switch</button></p>
+  </header>
+
+  <main>
+    <div id="loading" class="card" role="status"><p class="note" id="loading-text">Loading...</p><button type="button" id="retry" class="btn" hidden>Try again</button></div>
+
+    <section id="gate" class="card gate" hidden><p>This link needs the group code. Ask Kevin.</p></section>
+
+    <section id="pick" class="card" hidden aria-labelledby="pick-h">
+      <h2 id="pick-h">Pick your name</h2>
+      <div id="names" class="names"></div>
+      <p id="names-empty" class="note" hidden>No names yet. Add yours below.</p>
+      <form id="add-form" class="add" novalidate>
+        <label for="add-name">Not on the list?</label>
+        <div class="add-row">
+          <input id="add-name" name="name" type="text" autocomplete="given-name" maxlength="30" placeholder="Your name">
+          <button type="submit" id="add-btn" class="btn primary">Add my name</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="board" hidden>
+      <div id="ready" class="block ready" hidden aria-live="polite"></div>
+      <div id="nearly" class="block nearly" hidden></div>
+      <nav id="days" class="days" aria-label="Pick a day"></nav>
+      <p id="day-note" class="day-note" hidden></p>
+      <p id="unsaved" class="unsaved" role="status" hidden><span id="unsaved-text"></span><button type="button" id="save-now" class="btn small" hidden>Save now</button></p>
+      <ol id="grid" class="grid" aria-label="Hours"></ol>
+      <section class="card" aria-labelledby="cant-h">
+        <h2 id="cant-h">Can't do</h2>
+        <p class="note">Tap a venue you can't get to. You won't count towards a court there.</p>
+        <div id="venue-toggles" class="toggles"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer id="foot" class="foot" hidden>
+    <div class="foot-row">
+      <span id="checked" aria-live="polite">Courts not checked yet</span>
+      <button type="button" id="check-now" class="btn small">Check now</button>
+    </div>
+    <ul class="legend" aria-label="What the venue chips mean">
+      <li><span class="chip free" aria-hidden="true">SI 60</span> court free (shortest booking, minutes)</li>
+      <li><span class="chip" aria-hidden="true">SI</span> no court free</li>
+      <li><span class="chip striped" aria-hidden="true">SI soon</span> not open yet</li>
+      <li><span class="chip striped" aria-hidden="true">SI ?</span> couldn't check</li>
+    </ul>
+    <p class="note">SI St Ives Golf Club. PDL PDL Padel United Cambridge. PP Pulse Padel Huntingdon. St Ives and PDL are checked every 15 minutes from 06:30 to 23:00.</p>
+  </footer>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+  const GATE = 'This link needs the group code. Ask Kevin.';
+  const CODES = ['si', 'pdl', 'pp'];
+  const ABBR = { si: 'SI', pdl: 'PDL', pp: 'PP' };
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const SAVE_RETRY_MS = [5000, 15000, 45000];        // a failed save tries again after 5, 15 and 45 s
+  const STALE_CHECK_MS = [6000, 12000, 24000, 48000]; // while a court read is under way: re-check at these, then stop
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+
+  // localStorage can throw (private browsing, storage off). The page still works for this visit;
+  // the person is told once that it will not remember them.
+  let storageWarned = false;
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { warnStorage(); return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { warnStorage(); } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { warnStorage(); } },
+  };
+  function warnStorage() {
+    if (storageWarned) return;
+    storageWarned = true;
+    toast("This browser won't remember you, so you'll pick your name each visit.");
+  }
+
+  // The group code is 16 to 64 hex characters, from the link (#k=...) or from this phone's memory.
+  function readKey() {
+    const m = /(?:^#|[#&])k=([0-9a-fA-F]{16,64})(?:&|$)/.exec(location.hash);
+    if (m) { store.set('padel.k', m[1]); return m[1]; }
+    const saved = store.get('padel.k') || '';
+    return /^[0-9a-fA-F]{16,64}$/.test(saved) ? saved : '';
+  }
+  const key = readKey();
+
+  let S = null;                               // last state from the server
+  let me = Number(store.get('padel.person')) || null;
+  let day = null;                             // the selected date
+  // THE INVARIANT: after every reply, what is shown = the server's truth in that reply + the
+  // changes not yet sent. A save sends CHANGES (add these hours, remove those), never the list.
+  let mine = new Set();                       // my ticks as shown
+  let pendingAdd = new Set();                 // unsent changes
+  let pendingRemove = new Set();
+  // Saves on their way: [{ person, add, remove, owner, promise }]. Every save is sent with keepalive,
+  // so it survives the page being hidden or closed and is never sent twice.
+  let inFlight = [];
+  const saving = () => inFlight.length > 0;
+  // Two saves overlapped (a hide-send during a save in flight): their replies may land out of
+  // order, so once the last of them lands the truth is read again.
+  let overlapped = false;
+  function afterLanding() { if (overlapped && !saving()) { overlapped = false; load(); } }
+  let saveTimer = null;
+  let saveTry = 0;                            // failed saves in a row
+  let backoffUntil = 0;
+  let busy = false;
+  let staleStart = 0;
+  let staleIdx = 0;
+  let staleTimer = null;
+  let reqSeq = 0;                             // every request is numbered...
+  let handledSeq = 0;                         // ...and a state older than the newest one shown is ignored
+  let lastWriteSeq = 0;                       // the newest write whose reply was shown
+  let lastWriteDone = 0;                      // when the last write finished (performance.now())
+  let refetchTimer = null;
+
+  class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+  async function api(path, body) {
+    const n = ++reqSeq;
+    const write = !!body;
+    const startedAt = performance.now();
+    // A write is sent with keepalive (its body is tiny), so it completes even if the page closes.
+    const opts = { method: write ? 'POST' : 'GET', headers: { 'X-Group-Key': key }, cache: 'no-store', keepalive: write };
+    if (write) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    let res;
+    try { res = await fetch(path, opts); } catch (e) { if (write) lastWriteDone = performance.now(); throw new ApiError('No connection. Check your signal and try again.', 0); }
+    const data = await res.json().catch(() => null);
+    if (write) lastWriteDone = performance.now();
+    if (res.status === 401) { showGate(); throw new ApiError(GATE, 401); }
+    if (res.status === 429) { backoffUntil = Date.now() + 10000; throw new ApiError('Too many taps at once. Wait a few seconds.', 429); }
+    if (!res.ok) throw new ApiError((data && data.error) || 'Something went wrong (' + res.status + '). Try again.', res.status);
+    if (!data) throw new ApiError('The page got an answer it could not read. Try again.', res.status);
+    return { data, n, write, startedAt };
+  }
+  // Apply a state reply only when no newer reply has been shown already. A write's own reply is the
+  // state after that write, so it is shown. A read is not shown while a save is on its
+  // way (that write's own reply will show the truth), and a read that STARTED before the last write
+  // finished may have been answered before the write landed: it is ignored and asked for again.
+  function applyNewest(r) {
+    if (r.write) {
+      if (r.n < lastWriteSeq) return false;
+      lastWriteSeq = r.n;
+      handledSeq = Math.max(handledSeq, r.n);
+      apply(r.data);
+      return true;
+    }
+    if (r.n < handledSeq) return false;
+    if (saving()) return false;
+    if (r.startedAt < lastWriteDone) {
+      if (!refetchTimer) refetchTimer = setTimeout(() => { refetchTimer = null; load(); }, 0);
+      return false;
+    }
+    handledSeq = r.n;
+    apply(r.data);
+    return true;
+  }
+
+  function showGate() {
+    $('loading').hidden = true;
+    $('pick').hidden = true;
+    $('board').hidden = true;
+    $('foot').hidden = true;
+    $('who').hidden = true;
+    $('gate').hidden = false;
+  }
+
+  const pad = (h) => String(h).padStart(2, '0');
+  function dayShort(date) {
+    const [y, m, d] = date.split('-').map(Number);
+    return WD[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()] + ' ' + d;
+  }
+  function dayLong(date) {
+    const [y, m, d] = date.split('-').map(Number);
+    return WD[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()] + ' ' + d + ' ' + MON[m - 1];
+  }
+  function londonHour() {
+    return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  }
+  function londonDate(iso) {
+    const p = {};
+    for (const x of new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso))) p[x.type] = x.value;
+    return p.year + '-' + p.month + '-' + p.day;
+  }
+  // "10:45" today, "Mon 26 Oct 18:00" on another day.
+  function timeLabel(iso) {
+    const t = new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+    const d = londonDate(iso);
+    return d === S.today ? t : dayLong(d) + ' ' + t;
+  }
+  function initials(name) {
+    const w = String(name).trim().split(/\s+/);
+    return (w.length > 1 ? w[0][0] + w[w.length - 1][0] : w[0].slice(0, 2)).toUpperCase();
+  }
+  const person = (id) => (S ? S.people.find((p) => p.id === id) : null);
+  function voters(slot) {
+    const ids = ((S && S.votes[slot]) || []).filter((id) => id !== me);
+    if (me && mine.has(slot)) ids.push(me);
+    return ids;
+  }
+
+  // ── Focus survives a rebuild: the element that had it is found again by its data attribute ──
+  function focusSelector() {
+    const el = document.activeElement;
+    if (!el || el === document.body || !el.dataset) return null;
+    if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
+    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook']) {
+      if (el.dataset[k]) return '[data-' + k + '="' + CSS.escape(el.dataset[k]) + '"]';
+    }
+    return el.id ? '#' + CSS.escape(el.id) : null;
+  }
+  function keepFocus(fn) {
+    const sel = focusSelector();
+    fn();
+    if (!sel) return;
+    const el = document.querySelector(sel);
+    if (el && el !== document.activeElement && !el.closest('[hidden]')) el.focus({ preventScroll: true });
+  }
+
+  async function load() {
+    try {
+      applyNewest(await api('/api/state'));
+    } catch (e) {
+      if (e.status === 401) return;
+      if (!S) {
+        $('loading-text').textContent = e.message;
+        $('retry').hidden = false;
+      } else {
+        toast(e.message);
+      }
+    }
+  }
+
+  function apply(s) {
+    S = s;
+    if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); dropChanges(); }
+    showTruth();
+    // After 22:00 there is nothing left to tick today, so the page opens on tomorrow.
+    if (!day || !S.days.includes(day)) day = londonHour() >= 22 && S.days.length > 1 ? S.days[1] : S.days[0];
+    keepFocus(render);
+    watchStale();
+  }
+
+  // While the Worker is reading Pulse, look again at 6, 12, 24 and 48 seconds, then stop.
+  function watchStale() {
+    if (!S.availability.stale) { staleStart = 0; staleIdx = 0; clearTimeout(staleTimer); staleTimer = null; return; }
+    if (staleTimer || staleIdx >= STALE_CHECK_MS.length) return;
+    if (!staleStart) staleStart = Date.now();
+    const wait = Math.max(0, staleStart + STALE_CHECK_MS[staleIdx] - Date.now());
+    staleIdx++;
+    staleTimer = setTimeout(() => { staleTimer = null; load(); }, wait);
+  }
+
+  function render() {
+    $('loading').hidden = true;
+    $('gate').hidden = true;
+    $('foot').hidden = false;
+    const p = person(me);
+    $('who').hidden = !p;
+    $('who-name').textContent = p ? p.name : '';
+    $('pick').hidden = !!p;
+    $('board').hidden = !p;
+    if (!p) renderPick(); else renderBoard();
+    renderFoot();
+  }
+
+  function renderPick() {
+    const names = $('names');
+    names.innerHTML = S.people.map((x) => `<button type="button" class="btn" data-person="${esc(x.id)}">${esc(x.name)}</button>`).join('');
+    $('names-empty').hidden = S.people.length > 0;
+  }
+
+  function renderBoard() {
+    renderReady();
+    renderNearly();
+    renderDays();
+    renderGrid();
+    renderToggles();
+    renderUnsaved();
+  }
+
+  function startsLabel(v) {
+    const same = v.mins.every((m) => m === v.mins[0]);
+    return same ? v.starts.join(', ') + ' (' + v.mins[0] + ' min)' : v.starts.map((t, i) => t + ' (' + v.mins[i] + ' min)').join(', ');
+  }
+  function renderReady() {
+    const box = $('ready');
+    if (!S.ready.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = '<h2>Ready to book</h2>' + S.ready.map((r) => {
+      const lines = r.venues.map((v) => `
+        <div class="venue-line">
+          <span><strong>${esc(S.venueInfo[v.code].short)}</strong>: ${esc(v.count)} in (${esc(v.names.join(', '))}), starts ${esc(startsLabel(v))}</span>
+          <a class="btn small primary" href="${esc(v.book)}" target="_blank" rel="noopener noreferrer">Book</a>
+          <button type="button" class="btn small" data-book-slot="${esc(r.slot)}" data-book-venue="${esc(v.code)}"${busy ? ' disabled' : ''}>Booked</button>
+        </div>`).join('');
+      return `<div class="item"><p><strong>${esc(r.label)}</strong></p>${lines}</div>`;
+    }).join('');
+  }
+
+  function renderNearly() {
+    const box = $('nearly');
+    if (!S.nearly.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<h2>Nearly there (3)</h2>` + S.nearly.map((r) => {
+      const where = r.venues.map((v) => S.venueInfo[v.code].short).join(', ');
+      return `<button type="button" class="nearly-btn" data-goto="${esc(r.slot)}"><strong>${esc(r.label)}</strong>: ${esc(r.names.join(', '))}. One more for ${esc(where)}.</button>`;
+    }).join('');
+  }
+
+  function renderDays() {
+    $('days').innerHTML = S.days.map((d) => {
+      let n = 0;
+      for (const s of mine) if (s.startsWith(d + '|')) n++;
+      return `<button type="button" class="day" data-day="${esc(d)}" aria-pressed="${d === day}" aria-label="${esc(dayLong(d))}${n ? ', ' + n + ' hours ticked' : ''}">${esc(dayShort(d))}<small>${n ? esc(n) + ' &#10003;' : ''}</small></button>`;
+    }).join('');
+  }
+
+  const STATUS_WORD = { closed: 'not open yet', error: "couldn't check", pending: 'checking' };
+  const STATUS_SHORT = { closed: 'soon', error: '?', pending: '...' };
+  // The chip's meaning is in hidden text inside it, which screen readers read; the visible
+  // letters are hidden from them.
+  function chip(code, date, hh) {
+    const v = S.availability.venues[code][date];
+    const name = S.venueInfo[code].short;
+    let cls = 'chip striped';
+    let shown = ABBR[code] + ' ' + (STATUS_SHORT[v.status] || '?');
+    let said = name + ': ' + (STATUS_WORD[v.status] || "couldn't check");
+    if (v.status === 'ok') {
+      const h = v.hours[hh];
+      if (h && h.free) {
+        cls = 'chip free';
+        shown = ABBR[code] + ' ' + h.min;
+        said = name + ': court free at ' + h.starts.join(', ') + ', shortest booking ' + h.min + ' min';
+      } else {
+        cls = 'chip';
+        shown = ABBR[code];
+        said = name + ': no court free';
+      }
+    }
+    return `<span class="${cls}" title="${esc(said)}"><span aria-hidden="true">${esc(shown)}</span><span class="sr">${esc(said)}.</span></span>`;
+  }
+
+  function renderGrid() {
+    // A venue we could not read still gets its booking link, so the group can look by hand.
+    const note = [];
+    for (const code of CODES) {
+      const v = S.availability.venues[code][day];
+      const info = S.venueInfo[code];
+      const link = `<a href="${esc(info.book[day])}" target="_blank" rel="noopener noreferrer">look on its site</a>`;
+      const last = S.availability.checkedAt[code];
+      if (v.status === 'closed') note.push(`${esc(info.short)}: not open yet for this day.`);
+      else if (v.status === 'error' && !S.availability.fresh[code]) note.push(`${esc(info.short)}: couldn't check${last ? ' since ' + esc(timeLabel(last)) : ''}, so ${link}.`);
+      else if (v.status === 'error') note.push(`${esc(info.short)}: couldn't check, so ${link}.`);
+    }
+    $('day-note').hidden = !note.length;
+    $('day-note').innerHTML = note.join('<br>');
+    const readySlots = new Set(S.ready.map((r) => r.slot));
+    // Today shows only the hours still to come; after 21:00 it says so instead of an empty list.
+    const nowH = day === S.today ? londonHour() : -1;
+    const hours = S.hours.filter((h) => h >= nowH);
+    if (!hours.length) {
+      $('grid').innerHTML = '<li class="row"><p class="note">No more hours today. Pick another day above.</p></li>';
+      return;
+    }
+    $('grid').innerHTML = hours.map((h) => {
+      const hh = pad(h);
+      const slot = `${day}|${hh}`;
+      const on = mine.has(slot);
+      const ids = voters(slot);
+      const names = ids.map((id) => (person(id) || {}).name).filter(Boolean);
+      const b = S.booked[slot];
+      const cls = ['row', on ? 'mine' : '', readySlots.has(slot) ? 'is-ready' : ''].join(' ').trim();
+      const say = on ? 'I can play' : 'Tap if you can play';
+      const label = `${hh}:00, ${on ? 'you can play' : 'tap if you can play'}, ${ids.length} in`;
+      const booked = b ? `<p class="booked-line"><span>&#10003; Booked by ${esc((person(b.person_id) || {}).name || 'someone')} at ${esc((S.venueInfo[b.venue] || {}).short || b.venue || '?')}</span>
+        <button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button></p>` : '';
+      return `<li class="${esc(cls)}" id="row-${esc(hh)}">
+        <button type="button" class="tap" data-slot="${esc(slot)}" aria-pressed="${on}" aria-label="${esc(label)}">
+          <span class="time">${hh}:00</span><span class="say">${say}</span><span class="count" aria-hidden="true">${ids.length}</span>
+        </button>
+        <div class="meta">
+          <div class="chips">${CODES.map((c) => chip(c, day, hh)).join('')}</div>
+          <span class="initials" title="${esc(names.join(', '))}">${esc(names.map(initials).join(' '))}</span>
+        </div>${booked}
+      </li>`;
+    }).join('');
+  }
+
+  function renderToggles() {
+    const p = person(me);
+    $('venue-toggles').innerHTML = CODES.map((c) => {
+      const cant = !p.venues.includes(c);
+      const name = S.venueInfo[c].short;
+      return `<button type="button" class="toggle" data-venue="${c}" aria-pressed="${cant}" aria-label="Can't do ${esc(S.venueInfo[c].label)}"${busy ? ' disabled' : ''}>${esc(name)}</button>`;
+    }).join('');
+  }
+
+  function renderUnsaved() {
+    const box = $('unsaved');
+    if (!box) return;
+    const dirty = hasPending();
+    if (!dirty && !saving()) { box.hidden = true; return; }
+    box.hidden = false;
+    const givenUp = dirty && !saving() && saveTry > SAVE_RETRY_MS.length;
+    $('unsaved-text').textContent = saving() ? 'Saving your ticks...' : givenUp ? 'Your ticks are not saved. Check your signal.' : dirty && saveTry ? 'Not saved yet. Trying again shortly.' : 'Saving your ticks...';
+    $('save-now').hidden = !givenUp;
+  }
+
+  // "St Ives and PDL checked 10:45, Pulse 10:50": venues read at the same minute share one time.
+  function renderFoot() {
+    const a = S.availability;
+    const groups = [];
+    for (const c of CODES) {
+      if (!a.checkedAt[c]) continue;
+      const t = timeLabel(a.checkedAt[c]);
+      const g = groups.find((x) => x.t === t);
+      if (g) g.names.push(S.venueInfo[c].short); else groups.push({ t, names: [S.venueInfo[c].short] });
+    }
+    let t = groups.length ? groups.map((g) => g.names.join(' and ') + ' checked ' + g.t).join(', ') : 'Courts not checked yet';
+    if (a.stale) t += '. Updating...';
+    $('checked').textContent = t;
+  }
+
+  // ── Saving ticks ──
+  const inWindow = (slot) => S.days.includes(slot.split('|')[0]);
+  const hasPending = () => pendingAdd.size > 0 || pendingRemove.size > 0;
+  const serverHas = (slot) => !!(me && S && (S.votes[slot] || []).includes(me));
+  // The server's truth for me, plus my unsent changes.
+  function showTruth() {
+    mine = new Set(me ? Object.keys(S.votes).filter((k) => S.votes[k].includes(me)) : []);
+    for (const x of pendingAdd) mine.add(x);
+    for (const x of pendingRemove) mine.delete(x);
+  }
+  // Is a save on its way carrying this hour?
+  const onTheWay = (slot) => inFlight.some((d) => d.person === me && (d.add.has(slot) || d.remove.has(slot)));
+  // The person is gone (removed from the list): their changes go with them, and any answer still
+  // on its way for them no longer owns anything.
+  function dropChanges() {
+    clearTimeout(saveTimer);
+    pendingAdd = new Set();
+    pendingRemove = new Set();
+    inFlight = [];
+    overlapped = false;
+  }
+
+  function setBusy(on) {
+    busy = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-venue],#check-now,#add-btn')) b.disabled = on;
+  }
+
+  // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is
+  // only pending, otherwise send a remove. Tick a shown blank: cancel its pending remove if the
+  // server has the hour, otherwise send an add. An hour carried by a request on its way is never
+  // cancelled: the tap becomes the explicit opposite change.
+  function toggle(slot) {
+    if (!me) return;
+    const way = onTheWay(slot);
+    if (mine.has(slot)) {
+      if (pendingAdd.has(slot) && !way && !serverHas(slot)) pendingAdd.delete(slot);
+      else { pendingAdd.delete(slot); pendingRemove.add(slot); }
+      mine.delete(slot);
+    } else {
+      if (pendingRemove.has(slot) && !way && serverHas(slot)) pendingRemove.delete(slot);
+      else { pendingRemove.delete(slot); pendingAdd.add(slot); }
+      mine.add(slot);
+    }
+    keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
+    scheduleSave();
+  }
+  function scheduleSave(ms) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, Math.max(ms || 800, backoffUntil - Date.now()));
+  }
+  // One save at a time, none inside a back-off. The one exception is `now` (the page being hidden
+  // or closed): the unsent changes go at once, even alongside a save in flight.
+  function save(now = false) {
+    clearTimeout(saveTimer);
+    if (!S || !me || !hasPending()) return Promise.resolve(true);
+    if (!now) {
+      if (saving()) return inFlight[inFlight.length - 1].promise;
+      if (backoffUntil > Date.now() + 5) { scheduleSave(); return Promise.resolve(false); }
+    }
+    // The owner is the save that started with nothing else in flight: only it may clear the back-off.
+    const sent = { person: me, add: new Set(pendingAdd), remove: new Set(pendingRemove), owner: !saving() };
+    if (saving()) overlapped = true;
+    pendingAdd = new Set();
+    pendingRemove = new Set();
+    inFlight.push(sent);
+    renderUnsaved();
+    sent.promise = (async () => {
+      try {
+        const r = await api('/api/vote', { person_id: sent.person, add: [...sent.add].filter(inWindow), remove: [...sent.remove].filter(inWindow) });
+        if (!inFlight.includes(sent)) return false;        // a late answer for a dropped save
+        inFlight = inFlight.filter((x) => x !== sent);
+        if (sent.owner) { saveTry = 0; backoffUntil = 0; }
+        if (!applyNewest(r)) load();                       // a newer reply was shown first: read the truth
+        afterLanding();
+        if (hasPending() && !saving()) scheduleSave(1);
+        return !hasPending();
+      } catch (e) {
+        if (!inFlight.includes(sent)) return false;
+        inFlight = inFlight.filter((x) => x !== sent);
+        afterLanding();
+        if (e.status === 401) return false;
+        // "No such person": they were removed. Reading the state again shows the name list.
+        if (e.status === 404) { await load(); return false; }
+        // The failed changes are NOT put back (the server may have applied them): show the last
+        // truth plus the unsent taps, read the truth again, and retry only what is still unsent.
+        saveTry++;
+        // Every failed save that carried a change says so, however many failed before it.
+        if (sent.add.size || sent.remove.size) toast("Couldn't save. The page shows what is saved; tap again to change it.");
+        clearTimeout(saveTimer);
+        if (saveTry <= SAVE_RETRY_MS.length) {
+          const wait = Math.max(SAVE_RETRY_MS[saveTry - 1], backoffUntil - Date.now());
+          backoffUntil = Math.max(backoffUntil, Date.now() + wait);
+        }
+        showTruth();
+        await load();
+        if (hasPending() && !saving() && saveTry <= SAVE_RETRY_MS.length) scheduleSave(1);
+        return false;
+      } finally {
+        if (S && !$('board').hidden) keepFocus(() => { renderDays(); renderGrid(); renderUnsaved(); });
+      }
+    })();
+    return sent.promise;
+  }
+  async function saveAndWait() {
+    await Promise.all(inFlight.map((d) => d.promise));
+    if (hasPending()) await save();
+    await Promise.all(inFlight.map((d) => d.promise));
+    return !hasPending() && !saving();
+  }
+  // Hidden or closing: send the unsent changes now (keepalive, no debounce wait).
+  function sendNow() { if (hasPending()) save(true); }
+
+  async function pickPerson(id) {
+    if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
+    me = id;
+    store.set('padel.person', String(id));
+    showTruth();
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  async function switchPerson() {
+    if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
+    me = null;
+    store.del('padel.person');
+    render();
+  }
+
+  async function addName(ev) {
+    ev.preventDefault();
+    const input = $('add-name');
+    const name = input.value.trim().replace(/\s+/g, ' ');
+    if (name.length < 2) { toast('Type your name first (2 letters or more).'); input.focus(); return; }
+    setBusy(true);
+    try {
+      const p = (await api('/api/person', { name })).data;
+      input.value = '';
+      await load();
+      await pickPerson(p.id);
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function postAndApply(path, body, done) {
+    setBusy(true);
+    try {
+      const r = await api(path, body);
+      if (r.data && r.data.days) applyNewest(r); else await load();
+      if (done) toast(done);
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleVenue(code) {
+    const p = person(me);
+    const venues = p.venues.includes(code) ? p.venues.filter((v) => v !== code) : CODES.filter((v) => v === code || p.venues.includes(v));
+    setBusy(true);
+    try {
+      await api('/api/person', { id: me, venues });
+      await load();
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkNow() {
+    const btn = $('check-now');
+    btn.textContent = 'Checking...';
+    setBusy(true);
+    try {
+      const r = await api('/api/refresh', {});
+      applyNewest(r);
+      if (!r.data.refreshed) toast('Courts are checked every 15 minutes. Nothing new to check yet.');
+    } catch (e) {
+      if (e.status !== 401) toast(e.message);
+    } finally {
+      btn.textContent = 'Check now';
+      setBusy(false);
+    }
+  }
+
+  function gotoSlot(slot) {
+    const [d, hh] = slot.split('|');
+    day = d;
+    renderDays();
+    renderGrid();
+    const row = $('row-' + hh);
+    if (row) { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.querySelector('.tap').focus({ preventScroll: true }); }
+  }
+
+  document.addEventListener('click', (ev) => {
+    const t = ev.target.closest('button');
+    if (!t || t.disabled) return;
+    if (t.dataset.person) pickPerson(Number(t.dataset.person));
+    else if (t.dataset.slot) toggle(t.dataset.slot);
+    else if (t.dataset.day) { day = t.dataset.day; keepFocus(() => { renderDays(); renderGrid(); }); }
+    else if (t.dataset.venue) toggleVenue(t.dataset.venue);
+    else if (t.dataset.bookSlot) postAndApply('/api/booked', { slot: t.dataset.bookSlot, person_id: me, venue: t.dataset.bookVenue, booked: true }, 'Marked as booked. Thanks.');
+    else if (t.dataset.unbook) postAndApply('/api/booked', { slot: t.dataset.unbook, booked: false }, 'Booking mark removed.');
+    else if (t.dataset.goto) gotoSlot(t.dataset.goto);
+    else if (t.id === 'switch') switchPerson();
+    else if (t.id === 'save-now') { saveTry = 0; save(); }
+    else if (t.id === 'check-now') checkNow();
+    else if (t.id === 'retry') { $('retry').hidden = true; $('loading-text').textContent = 'Loading...'; load(); }
+  });
+  $('add-form').addEventListener('submit', addName);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { sendNow(); return; }
+    if (!S) return;
+    if (hasPending()) { saveTry = 0; save(); } else if (!saving()) load();
+  });
+  window.addEventListener('pagehide', sendNow);
+
+  store.del('padel.unsaved');                 // the old whole-list copy (before 27 Oct 2026, 4th pass) is never used
+  if (!key) showGate(); else load();
+})();
+</script>
+</body>
+</html>

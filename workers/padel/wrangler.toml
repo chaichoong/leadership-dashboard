@@ -1,0 +1,82 @@
+# padel: the padel group's "who can play when" page (Kevin approved, 27 Oct 2026).
+#
+# One Worker: the static page public/index.html behind a private link, who can play at which hours
+# over the next 7 days in D1, the courts free at three venues, and ONE Slack DM to Kevin the first
+# time 4+ people line up on an hour where a court is free. See padel.js for the routes.
+#
+# St Ives and PDL (Matchi) are read on the Mac mini by scripts/padel-courts.mjs every 15 minutes,
+# because Matchi answers Cloudflare with HTTP 429; it POSTs to /api/courts with ROBOT_KEY. Pulse is
+# read by this Worker, at most once per 15 minutes, when the page asks.
+#
+# Secrets (set from a 0600 file through stdin, never typed on a command line):
+#   GROUP_KEY  - the group code in the page link (#k=...). Mac copy: ~/.config/od/padel_group_key
+#                tr -d '\n' < ~/.config/od/padel_group_key | npx wrangler secret put GROUP_KEY -c workers/padel/wrangler.toml
+#   ROBOT_KEY  - the Mac job's key for /api/courts. Mac copy: ~/.config/od/padel_robot_key
+#                tr -d '\n' < ~/.config/od/padel_robot_key | npx wrangler secret put ROBOT_KEY -c workers/padel/wrangler.toml
+#   RELAY_KEY  - the apple-inbound Slack relay key. Mac copy: ~/.config/od/slack_relay_key
+#                tr -d '\n' < ~/.config/od/slack_relay_key | npx wrangler secret put RELAY_KEY -c workers/padel/wrangler.toml
+# (tr drops the file's trailing newline: every key is compared byte for byte.)
+# All three are in scripts/key-register.py (COPY_OF_AT), so a key replace reaches this Worker too.
+#
+# Deploy: `npx wrangler deploy -c workers/padel/wrangler.toml` (merging to main does NOT deploy a Worker).
+# Logs:   `npx wrangler tail -c workers/padel/wrangler.toml`
+#
+# NO cron: all five free-plan cron triggers are taken (workers/ceo-brief-tenants/wrangler.toml).
+# NO KV: free-tier KV writes are 1,000 a day account-wide and starve the other Workers.
+
+name = "padel"
+main = "worker.js"
+compatibility_date = "2025-10-01"
+workers_dev = true
+
+# The page is a plain static asset: only /api/* runs the Worker, so loading the page costs no
+# Worker request. Its headers (noindex, nosniff, no-referrer, DENY, the CSP with the inline
+# script's hash, no-cache) are in public/_headers; tests/padel-worker.test.js fails when that hash
+# drifts from the page.
+[assets]
+directory = "./public"
+run_worker_first = ["/api/*"]
+
+# Console logs are kept; invocation logs are off so request headers (the keys) are never stored.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+# Venue labels and public ids (ids, not secrets: they are in every booking link).
+[vars]
+SI_LABEL = "St Ives Golf Club"
+SI_SHORT = "St Ives"
+SI_MATCHI_ID = "2619"
+PDL_LABEL = "PDL Padel United Cambridge"
+PDL_SHORT = "PDL"
+PDL_MATCHI_ID = "3122"
+PP_LABEL = "Pulse Padel Huntingdon"
+PP_SHORT = "Pulse"
+PP_CLUB_ID = "VEqVgpQmiJLiEC1Lm4z3"
+PAGE_URL = "https://padel.kevinbrittain.workers.dev/"
+ALERT_TO = "kevin@runpreneur.org.uk"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "padel"
+database_id = "7cf15337-22ac-43fc-92ed-e48aa8adec94"
+
+# The Slack relay lives in apple-inbound. Workers cannot call each other by workers.dev URL
+# (error 1042), so it is a service binding.
+[[services]]
+binding = "RELAY"
+service = "apple-inbound"
+
+# Every /api request (GET too) is asked of a limit of 60 a minute per client IP, before any key check.
+# Measured on 27 Oct 2026: the binding counts per Cloudflare machine, not per Worker. One request
+# that called limit() 70 times was refused from the 61st call, but 70, 200 and 400 requests in a
+# minute from one IP were never refused, because each landed on a fresh counter. So this caps a
+# runaway loop inside one machine only; it is not a defence against a burst. The group code
+# (96 bits) is what keeps strangers out.
+[[ratelimits]]
+name = "WRITE_LIMIT"
+namespace_id = "2104"
+simple = { limit = 60, period = 60 }
