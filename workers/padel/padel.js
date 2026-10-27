@@ -47,7 +47,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-27.15';
+export const VERSION = '2026-10-27.16';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -280,6 +280,24 @@ function futureStarts(starts, date, nowMs) {
 const splitVenues = (s) => String(s ?? '').split(',').map((x) => x.trim()).filter((x) => VENUES.includes(x));
 const ageOk = (iso, nowMs, limit) => { const t = Date.parse(iso || ''); return Number.isFinite(t) && nowMs - t < limit; };
 
+// The Mac reads Matchi every 15 minutes from 06:30 to 23:00 London and sleeps overnight. A read
+// counts for 45 minutes while the Mac is awake; the evening's last read (22:30 London or later)
+// counts until 06:45 London the next morning, by when the day's first run has landed. Kevin,
+// 27 Oct 2026: the page must not read "couldn't check" on two venues all night. A read older
+// than nine hours never counts, so a Mac that slept through the morning still shows loudly.
+export const MATCHI_QUIET_FROM = '22:30';
+export const MATCHI_QUIET_UNTIL = '06:45';
+export function matchiFresh(iso, nowMs) {
+  if (ageOk(iso, nowMs, MATCHI_FRESH_MS)) return true;
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t) || nowMs - t > 9 * 60 * 60 * 1000) return false;
+  const read = londonParts(t);
+  const now = londonParts(nowMs);
+  const readClock = read.hh + ':' + read.mm;
+  const nowClock = now.hh + ':' + now.mm;
+  return readClock >= MATCHI_QUIET_FROM && (nowClock >= MATCHI_QUIET_FROM || nowClock < MATCHI_QUIET_UNTIL);
+}
+
 // The cache keeps the Mac's Matchi read and the Worker's Pulse read under separate keys, so a Pulse
 // read that finishes after a Mac POST can never overwrite the Mac's fresh St Ives and PDL days.
 //   matchi: { readAt, goodAt: { si, pdl }, venues: { si: { date: day }, pdl: {...} } }
@@ -313,8 +331,8 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
   const a = availability || {};
   const fetchedAt = { si: a.matchiFetchedAt || null, pdl: a.matchiFetchedAt || null, pp: a.pulseFetchedAt || null };
   const fresh = {
-    si: ageOk(fetchedAt.si, nowMs, MATCHI_FRESH_MS),
-    pdl: ageOk(fetchedAt.pdl, nowMs, MATCHI_FRESH_MS),
+    si: matchiFresh(fetchedAt.si, nowMs),
+    pdl: matchiFresh(fetchedAt.pdl, nowMs),
     pp: ageOk(fetchedAt.pp, nowMs, PULSE_FRESH_MS),
   };
   const checkedAt = { si: a.goodAt?.si || null, pdl: a.goodAt?.pdl || null, pp: a.goodAt?.pp || null };
