@@ -1,46 +1,74 @@
 // Padel Worker logic (worker.js is the entry point): the padel group's "who can play when" page (Kevin approved the plan, 27 Oct 2026).
 //
 // WHAT IT DOES: an 11-person WhatsApp group ticks the hours they can play over the next 7 days on
-// one phone page. The Worker reads which courts are free at three venues and sends Kevin ONE Slack
+// one phone page. The Worker knows which courts are free at three venues and sends Kevin ONE Slack
 // DM the first time 4+ people line up on an hour where a court is free. Nobody has to count.
 //
-// Routes (JSON; every /api route except /api/health needs header X-Group-Key = GROUP_KEY):
-//   GET  /api/state                         -> the whole page state (kicks a lazy venue refresh)
+// Routes (JSON). Every /api request is rate limited per caller BEFORE any key check.
+//   GET  /api/health                        -> { ok, version }                 no key, no data
+//   GET  /api/courts      (X-Robot-Key)     -> { ok, version, matchiFetchedAt, pulseFetchedAt, venueStatus }
+//   POST /api/courts      (X-Robot-Key)     -> { ok, matchiFetchedAt, pulseFetchedAt, alerted }
+//        { readAt, venues: { si: { "<date>": day }, pdl: { ... } } }  the Mac mini's Matchi read
+//   Every other route needs X-Group-Key = GROUP_KEY:
+//   GET  /api/ping                          -> { ok }                          the key register's test
+//   GET  /api/state                         -> the whole page state (kicks a lazy Pulse read)
 //   POST /api/person  { name }              -> { id, name, venues }   creates the name if absent
 //   POST /api/person  { id, venues:[...] }  -> { id, name, venues }   venue preferences
 //   POST /api/vote    { person_id, slots }  -> state                  replaces that person's ticks
 //   POST /api/booked  { slot, person_id, venue, booked } -> state
-//   POST /api/refresh                       -> state + { refreshed }  "Check courts now"
-//   GET  /api/health                        -> { ok, fetchedAt, venueStatus }   no key, no data
-// Anything else is the static page in ./public (wrangler.toml [assets]).
+//   POST /api/refresh                       -> state + { refreshed }  "Check now" (Pulse only)
+// The page itself is a static asset in ./public, served without this Worker (wrangler.toml
+// run_worker_first = ["/api/*"]); its headers live in public/_headers.
 //
 // A slot is "YYYY-MM-DD|HH": the London date and two-digit start hour, 07 to 21.
 // Venues: si = St Ives Golf Club (Matchi 2619), pdl = PDL Padel United Cambridge (Matchi 3122),
 // pp = Pulse Padel Huntingdon (the Nettla booking widget's public availability endpoint, called
 // at most once per 15 minutes: Kevin's go-ahead, 27 Oct 2026).
 //
+// WHO READS WHAT. Matchi answers every /book/schedule request from Cloudflare's edge with HTTP 429
+// (12 of 12 probes on 27 Oct 2026) and 200 from the Mac mini. So St Ives and PDL are read by
+// scripts/padel-courts.mjs on the Mac every 15 minutes (06:30 to 23:00 London), which POSTs the
+// parsed days to /api/courts. That script imports parseMatchi, matchiUrl, MATCHI_HEADERS and
+// londonDates from this file, so both sides parse one way. Pulse is read here.
+//
+// FRESHNESS. A venue's data counts only while it is fresh: St Ives and PDL for 45 minutes after
+// the Mac's read, Pulse for 20 minutes. A venue that is not fresh shows "couldn't check" with its
+// own booking link and is NEVER counted towards a DM.
+//
 // NO cron (all five free-plan triggers are used) and NO KV (free-tier writes starve the other
 // Workers). D1 holds everything; see schema.sql.
 //
-// Bindings: DB (D1), ASSETS (static page), RELAY (service binding to apple-inbound's /slack-relay),
-//           WRITE_LIMIT (ratelimit, optional). Secrets: GROUP_KEY, RELAY_KEY.
+// Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
+//           (ratelimit, optional). Secrets: GROUP_KEY, ROBOT_KEY, RELAY_KEY.
 
+export const VERSION = '2026-10-27.2';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
+const MATCHI_VENUES = ['si', 'pdl'];
 export const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);          // 7..21
 const HH = new Set(HOURS.map((h) => String(h).padStart(2, '0')));
 export const DAYS = 7;
 export const MAX_MIN = 90;                       // an hour counts as free only for a start of 90 min or less
-export const STALE_MS = 15 * 60 * 1000;          // availability older than this is refreshed
-export const REFRESH_GUARD_MS = 90 * 1000;       // no second refresh within 90 seconds
+export const MATCHI_FRESH_MS = 45 * 60 * 1000;   // St Ives and PDL count for 45 minutes after the Mac's read
+export const PULSE_FRESH_MS = 20 * 60 * 1000;    // Pulse counts for 20 minutes after its read
 export const PULSE_EVERY_MS = 15 * 60 * 1000;    // Pulse is called at most once per 15 minutes
+export const REFRESH_GUARD_MS = 90 * 1000;       // no second Pulse read within 90 seconds
+export const READ_AT_SKEW_MS = 10 * 60 * 1000;   // a Mac read older (or newer) than this is refused
+export const ALERT_RECLAIM_MS = 2 * 60 * 1000;   // an alert row with no relay reply after this may be retried
 export const FETCH_TIMEOUT_MS = 8000;
+export const RELAY_TIMEOUT_MS = 8000;
 export const ALERT_AT = 4;
 const MAX_PEOPLE = 40;
 const MAX_BODY = 16 * 1024;
-const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} '’-]*$/u;
+const MAX_COURTS_BODY = 64 * 1024;
+// Latin letters only (A-Z, a-z and the Latin-1 letters), spaces, hyphens and straight apostrophes.
+const NAME_RE = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/;
+const NAME_LETTER_RE = /[A-Za-zÀ-ÖØ-öø-ÿ]/g;
 const SLOT_RE = /^(\d{4}-\d{2}-\d{2})\|(\d{2})$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const START_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+export const MATCHI_HEADERS = Object.freeze({ 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' });
 const PULSE_RPC = 'https://europe-west1-nettle-prod-2024.cloudfunctions.net/rpc/availability/search';
 const PULSE_PAGE = 'https://pulsepadel.co.uk/venue/huntingdon/';
 const RELAY_URL = 'https://apple-inbound/slack-relay';
@@ -101,13 +129,16 @@ export function dayLabel(date) {
   const [y, m, d] = date.split('-').map(Number);
   return `${WD[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()]} ${d} ${MON[m - 1]}`;
 }
+const londonHHMM = (iso) => { const p = londonParts(Date.parse(iso)); return `${p.hh}:${p.mm}`; };
 
-// ── Matchi: one schedule page per venue per date ──
+// ── Matchi: one schedule page per venue per date (parsed on the Mac, see the header) ──
 // Each 30-minute cell is a <td class="slot free|red|can-not-start|not-available">. A bookable start
 // is a "slot free" cell with data-slot-can-start="true"; its title reads "Available<br>Court 1<br>
 // 07:00 - 08:00" (the court and the MINIMUM booking from that cell) and data-slot-min-duration is
 // 60 or 90. Attribute order is not fixed and titles can hold newlines, so each cell's tag is read
-// whole, quote-aware. indexOf, not one big regex: 14 pages a refresh must stay cheap on CPU.
+// whole, quote-aware, and classes count in any order ("free slot" is "slot free"). A free, bookable
+// cell this parser cannot read makes the whole day an error: a court it failed to see must never
+// read as "no court".
 function tagEnd(s, from) {
   let q = '';
   for (let j = from; j < s.length; j++) {
@@ -126,29 +157,31 @@ function tagAttrs(text) {
 }
 const unent = (s) => s.replace(/&nbsp;/g, ' ').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 const TITLE_RE = /Available\s*<br\s*\/?>\s*([\s\S]*?)\s*<br\s*\/?>\s*(\d{1,2}):(\d{2})\s*-\s*\d{1,2}:\d{2}/i;
+const CELL_KINDS = ['free', 'red', 'can-not-start', 'not-available'];
 
 export function parseMatchi(html) {
   if (typeof html !== 'string' || !/class="schedule[\s"]/.test(html)) return { status: 'error', reason: 'not a schedule page' };
   const starts = {};
   let cells = 0;
   let i = 0;
-  while ((i = html.indexOf('class="slot', i)) !== -1) {
-    const at0 = i;
-    i += 11;
-    const open = html.lastIndexOf('<td', at0);
-    if (open === -1) continue;
+  while ((i = html.indexOf('<td', i)) !== -1) {           // every cell, whatever order its classes are in
+    const open = i;
+    i += 3;
+    if (!/[\s>]/.test(html[open + 3] || '')) continue;       // <tdx...> is not a cell
     const end = tagEnd(html, open);
-    if (end === -1 || end < at0) continue;                 // the class is not inside this <td>
+    if (end === -1) break;
+    i = end;
     const at = tagAttrs(html.slice(open + 3, end));
     const cls = String(at.class || '').split(/\s+/);
-    if (!cls.includes('slot')) continue;
+    if (!cls.includes('slot') || !CELL_KINDS.some((k) => cls.includes(k))) continue;
     cells++;
     if (!cls.includes('free') || at['data-slot-can-start'] !== 'true') continue;
     const m = TITLE_RE.exec(at.title || '');
-    if (!m) continue;
+    if (!m) return { status: 'error', reason: 'a free court cell could not be read' };
+    const min = Number(at['data-slot-min-duration']);
+    if (!Number.isInteger(min) || min <= 0) return { status: 'error', reason: 'a free court cell has no minimum booking' };
     const court = unent(m[1]).replace(/\s+/g, ' ').trim();
     if (/single/i.test(court)) continue;                  // two players only: never a doubles court
-    const min = Number(at['data-slot-min-duration']) || 60;
     const t = `${m[2].padStart(2, '0')}:${m[3]}`;
     const s = starts[t] || (starts[t] = { courts: 0, min, names: [] });
     if (!s.names.includes(court)) { s.names.push(court); s.courts++; }
@@ -156,9 +189,10 @@ export function parseMatchi(html) {
   }
   if (cells === 0) {
     // St Ives beyond its 7-day window (checked 27 Oct 2026 on 5 Nov) sends no table at all, only
-    // "... allows bookings no more than 7 days in the future". That is "not open yet".
-    if (/allows bookings no more than/i.test(html) || html.includes('id="schedule-table"')) return { status: 'closed' };
-    return { status: 'error', reason: 'no schedule table' };
+    // "... allows bookings no more than 7 days in the future". That is "not open yet". A table
+    // with no cell this parser recognises is an error: Matchi changed its page.
+    if (/allows bookings no more than/i.test(html)) return { status: 'closed' };
+    return { status: 'error', reason: 'no court cells recognised' };
   }
   return { status: 'ok', starts };
 }
@@ -230,6 +264,20 @@ function futureStarts(starts, date, nowMs) {
 }
 
 const splitVenues = (s) => String(s ?? '').split(',').map((x) => x.trim()).filter((x) => VENUES.includes(x));
+const ageOk = (iso, nowMs, limit) => { const t = Date.parse(iso || ''); return Number.isFinite(t) && nowMs - t < limit; };
+
+// The cache keeps the Mac's Matchi read and the Worker's Pulse read under separate keys, so a Pulse
+// read that finishes after a Mac POST can never overwrite the Mac's fresh St Ives and PDL days.
+//   matchi: { readAt, goodAt: { si, pdl }, venues: { si: { date: day }, pdl: {...} } }
+//   pulse:  { fetchedAt, goodAt, format, days: { date: day } }
+export function assembleAvailability(matchi, pulse) {
+  return {
+    matchiFetchedAt: matchi?.readAt || null,
+    pulseFetchedAt: pulse?.fetchedAt || null,
+    goodAt: { si: matchi?.goodAt?.si || null, pdl: matchi?.goodAt?.pdl || null, pp: pulse?.goodAt || null },
+    venues: { si: matchi?.venues?.si || {}, pdl: matchi?.venues?.pdl || {}, pp: pulse?.days || {} },
+  };
+}
 
 // ── The whole page state, pure ──
 export function computeState({ people, votes, booked, availability, dates, nowMs, cfg = venueConfig() }) {
@@ -248,12 +296,20 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     const m = SLOT_RE.exec(b.slot);
     if (m && inWindow.has(m[1])) bookedMap[b.slot] = { person_id: b.person_id ?? null, venue: b.venue ?? null };
   }
-  const fetchedAt = availability?.fetchedAt || null;
+  const a = availability || {};
+  const fetchedAt = { si: a.matchiFetchedAt || null, pdl: a.matchiFetchedAt || null, pp: a.pulseFetchedAt || null };
+  const fresh = {
+    si: ageOk(fetchedAt.si, nowMs, MATCHI_FRESH_MS),
+    pdl: ageOk(fetchedAt.pdl, nowMs, MATCHI_FRESH_MS),
+    pp: ageOk(fetchedAt.pp, nowMs, PULSE_FRESH_MS),
+  };
+  const checkedAt = { si: a.goodAt?.si || null, pdl: a.goodAt?.pdl || null, pp: a.goodAt?.pp || null };
   const venuesOut = {};
   for (const code of VENUES) {
     venuesOut[code] = {};
     for (const date of dates) {
-      const day = availability?.venues?.[code]?.[date];
+      if (!fresh[code]) { venuesOut[code][date] = { status: 'error', reason: 'not checked recently', hours: {} }; continue; }
+      const day = a.venues?.[code]?.[date];
       if (!day) { venuesOut[code][date] = { status: 'pending', hours: {} }; continue; }
       const out = { status: day.status, hours: day.status === 'ok' ? hoursFromStarts(futureStarts(day.starts, date, nowMs)) : {} };
       if (day.reason) out.reason = day.reason;
@@ -269,7 +325,7 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     const counts = [];
     for (const code of VENUES) {
       const h = venuesOut[code][date];
-      if (h.status !== 'ok' || !h.hours[hh]?.free) continue;
+      if (!fresh[code] || h.status !== 'ok' || !h.hours[hh]?.free) continue;
       const in_ = voters.filter((p) => p.venues.includes(code));
       counts.push({ code, count: in_.length, people: in_, hour: h.hours[hh] });
     }
@@ -283,7 +339,10 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
       for (const c of q) for (const p of c.people) if (!ids.includes(p.id)) { ids.push(p.id); names.push(p.name); }
       ready.push({
         slot, date, hh, label, count: best, names, person_ids: ids,
-        venues: q.map((c) => ({ code: c.code, count: c.count, starts: c.hour.starts, mins: c.hour.mins, min: c.hour.min, book: bookUrl(cfg, c.code, date) })),
+        venues: q.map((c) => ({
+          code: c.code, count: c.count, names: c.people.map((p) => p.name), starts: c.hour.starts, mins: c.hour.mins,
+          min: c.hour.min, book: bookUrl(cfg, c.code, date), checkedAt: fetchedAt[c.code],
+        })),
       });
     } else if (best === ALERT_AT - 1) {
       const q = counts.filter((c) => c.count === best);
@@ -298,7 +357,7 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
   }
   return {
     today, days: dates, hours: HOURS, people: ppl, votes: voteMap, booked: bookedMap,
-    availability: { fetchedAt, stale: false, venues: venuesOut }, venueInfo, ready, nearly,
+    availability: { stale: false, fresh, checkedAt, fetchedAt, venues: venuesOut }, venueInfo, ready, nearly,
   };
 }
 
@@ -313,11 +372,25 @@ function startsText(v) {
   return same ? `${v.starts.join(', ')} (${v.mins[0]} min)` : v.starts.map((t, i) => `${t} (${v.mins[i]} min)`).join(', ');
 }
 const slackSafe = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-export function alertText(r, cfg, pageUrl) {
-  const courts = r.venues.map((v) => `${cfg[v.code].short} ${startsText(v)} <${v.book}|book>`).join('; ');
-  return `Padel: ${r.names.length} in for ${r.label}: ${r.names.map(slackSafe).join(', ')}. `
-    + `Courts free: ${courts}. Whoever books: tap Booked on the page ${pageUrl}`;
+function checkedText(venues, cfg) {
+  const groups = [];
+  for (const v of venues) {
+    const t = v.checkedAt ? londonHHMM(v.checkedAt) : '?';
+    const g = groups.find((x) => x.t === t);
+    if (g) g.names.push(cfg[v.code].short); else groups.push({ t, names: [cfg[v.code].short] });
+  }
+  if (groups.length === 1) return `Courts checked ${groups[0].t}.`;
+  return `Courts checked: ${groups.map((g) => `${g.names.join(' and ')} ${g.t}`).join(', ')}.`;
 }
+// One line per venue, each with its OWN count and names: people are never added up across venues.
+export function alertText(r, cfg, pageUrl) {
+  const lines = r.venues.map((v) => `${cfg[v.code].short}: ${v.count} in (${v.names.map(slackSafe).join(', ')}), starts ${startsText(v)}, book <${v.book}>.`);
+  return `Padel: ${r.label}. ${lines.join(' ')} ${checkedText(r.venues, cfg)} Whoever books taps Booked on the page ${pageUrl}`;
+}
+
+// Names: one person, one row. Accents and case are folded before comparing, so "Zoë" and "ZOE"
+// find the same person.
+export const foldName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ── D1 access, behind one small object so tests can swap in a Map-backed copy ──
 const toPerson = (r) => ({ id: r.id, name: r.name, venues: splitVenues(r.venues) });
@@ -372,9 +445,11 @@ export function makeRepo(db) {
       const r = await db.prepare('SELECT slot FROM alerts WHERE slot >= ?').bind(fromDate).all();
       return (r.results || []).map((x) => x.slot);
     },
-    // INSERT OR IGNORE first: only the request whose insert changed a row sends the DM.
-    async claimAlert(slot, names, venues, nowIso) {
-      const r = await db.prepare('INSERT OR IGNORE INTO alerts (slot, sent_at, names, venues) VALUES (?, ?, ?, ?)').bind(slot, nowIso, names, venues).run();
+    // Only the request whose write changed a row sends the DM. A row whose DM never got a relay reply
+    // (the Worker was stopped mid-call) can be claimed again once it is over 2 minutes old.
+    async claimAlert(slot, names, venues, nowIso, reclaimBeforeIso) {
+      const r = await db.prepare('INSERT INTO alerts (slot, sent_at, names, venues) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(slot) DO UPDATE SET sent_at = excluded.sent_at, names = excluded.names, venues = excluded.venues WHERE alerts.relay_reply IS NULL AND alerts.sent_at < ?5')
+        .bind(slot, nowIso, names, venues, reclaimBeforeIso).run();
       return (r.meta?.changes || 0) === 1;
     },
     async saveRelayReply(slot, reply) {
@@ -407,32 +482,24 @@ export function makeRepo(db) {
   };
 }
 
-// ── Venue reads ──
-async function fetchWithTimeout(fetchImpl, url, init) {
-  return fetchImpl(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+// ── Cache reads ──
+async function readJsonCache(repo, key) {
+  const raw = await repo.getCache(key);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { console.error('padel: cached value unreadable', key, String(e)); return null; }
 }
+async function loadAvailability(repo) {
+  const [matchi, pulse] = await Promise.all([readJsonCache(repo, 'matchi'), readJsonCache(repo, 'pulse')]);
+  return { matchi, pulse, availability: assembleAvailability(matchi, pulse) };
+}
+const pulseDue = (pulse, nowMs) => !ageOk(pulse?.fetchedAt, nowMs, PULSE_EVERY_MS);
+
+// ── Pulse read ──
 const failReason = (e) => (e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'timed out' : 'could not reach the site');
-
-async function readMatchiDay(fetchImpl, id, date) {
-  try {
-    const res = await fetchWithTimeout(fetchImpl, matchiUrl(id, date), {
-      headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' },
-    });
-    if (res.status !== 200) return { status: 'error', reason: `HTTP ${res.status}` };
-    return parseMatchi(await res.text());
-  } catch (e) {
-    return { status: 'error', reason: failReason(e) };
-  }
-}
-
-// One venue's 7 days. The first date goes alone: a 429 there means Matchi is refusing this caller
-// (on 27 Oct 2026 every /book/schedule request from Cloudflare's edge got "429 Too Many Requests"
-// from Matchi's nginx while the same request from the Mac got 200), so the other 6 are not sent.
-async function readMatchiVenue(fetchImpl, id, dates) {
-  const first = await readMatchiDay(fetchImpl, id, dates[0]);
-  if (first.status === 'error' && first.reason === 'HTTP 429') return dates.map(() => ({ ...first }));
-  const rest = await Promise.allSettled(dates.slice(1).map((d) => readMatchiDay(fetchImpl, id, d)));
-  return [first, ...rest.map((r) => (r.status === 'fulfilled' ? r.value : { status: 'error', reason: 'read failed' }))];
+function withTimeout(promise, ms) {
+  let timer;
+  const t = new Promise((_, reject) => { timer = setTimeout(() => { const e = new Error('timed out'); e.name = 'TimeoutError'; reject(e); }, ms); });
+  return Promise.race([promise, t]).finally(() => clearTimeout(timer));
 }
 
 // One search for the whole 7-day range. Three body formats, the one that worked last first:
@@ -440,97 +507,149 @@ async function readMatchiVenue(fetchImpl, id, dates) {
 //            both other formats got HTTP 400 {"json":{"code":"BAD_REQUEST","message":"Input
 //            validation failed", ... "expected object, received undefined"}}, an oRPC reply.
 //   plain    the bare body; envelope: Firebase callable { data } in, { result } out.
+// Only an HTTP 400 (the endpoint refusing the body format) moves on to the next format. A timeout,
+// a 429, a 5xx or a reply in a shape we do not know stops at once with that reason: trying again
+// in another format would only hide the real fault and spend more calls.
 const PULSE_FORMATS = {
   orpc: { wrap: (b) => ({ json: b }), unwrap: (j) => j?.json },
   plain: { wrap: (b) => b, unwrap: (j) => j },
   envelope: { wrap: (b) => ({ data: b }), unwrap: (j) => j?.result },
 };
-async function readPulse(fetchImpl, clubId, dates, nowMs, preferred) {
+export async function readPulse(fetchImpl, clubId, dates, nowMs, preferred) {
   const startDateTime = new Date(londonMidnightMs(dates[0])).toISOString();
   const endDateTime = new Date(londonMidnightMs(addDays(dates[dates.length - 1], 1)) - 1).toISOString();
   const body = { clubId, startDateTime, endDateTime };
   const order = ['orpc', 'plain', 'envelope'].sort((a, b) => (b === preferred) - (a === preferred));
   let last = { status: 'error', reason: 'no answer' };
   for (const format of order) {
+    let res;
     try {
-      const res = await fetchWithTimeout(fetchImpl, PULSE_RPC, {
+      res = await fetchImpl(PULSE_RPC, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'User-Agent': UA, Origin: 'https://pulsepadel.co.uk', Referer: PULSE_PAGE },
         body: JSON.stringify(PULSE_FORMATS[format].wrap(body)),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
-      if (res.status !== 200) { last = { status: 'error', reason: `HTTP ${res.status}` }; continue; }
-      const json = await res.json();
-      const parsed = parsePulse(PULSE_FORMATS[format].unwrap(json), nowMs);
-      if (parsed.status === 'ok') return { ...parsed, format };
-      last = parsed;
     } catch (e) {
-      last = { status: 'error', reason: failReason(e) };
+      return { status: 'error', reason: failReason(e) };
     }
+    if (res.status === 400) { last = { status: 'error', reason: 'HTTP 400' }; continue; }
+    if (res.status !== 200) return { status: 'error', reason: `HTTP ${res.status}` };
+    let json;
+    try { json = await res.json(); } catch (e) { return { status: 'error', reason: 'unexpected shape' }; }
+    const parsed = parsePulse(PULSE_FORMATS[format].unwrap(json), nowMs);
+    return parsed.status === 'ok' ? { ...parsed, format } : parsed;
   }
   return last;
 }
 
-export async function refreshAvailability(env, repo, nowMs, fetchImpl = globalThis.fetch, clock = Date.now) {
+// Read Pulse when its last read is 15 minutes old or more; returns whether it read.
+export async function refreshPulse(env, repo, nowMs, fetchImpl = globalThis.fetch) {
+  const prev = await readJsonCache(repo, 'pulse');
+  if (!pulseDue(prev, nowMs)) return false;
   const cfg = venueConfig(env);
   const dates = londonDates(nowMs);
-  const prevRaw = await repo.getCache('availability');
-  let prev = null;
-  try { prev = prevRaw ? JSON.parse(prevRaw) : null; } catch (e) { console.error('padel: cached availability unreadable', String(e)); }
-  const pulseDue = !prev?.pulseFetchedAt || nowMs - Date.parse(prev.pulseFetchedAt) >= PULSE_EVERY_MS;
+  const got = await readPulse(fetchImpl, cfg.pp.clubId, dates, nowMs, prev?.format);
+  const nowIso = new Date(nowMs).toISOString();
+  const days = {};
+  for (const date of dates) days[date] = got.status === 'ok' ? { status: 'ok', starts: got.byDate[date] || {} } : { status: 'error', reason: got.reason };
+  const next = { fetchedAt: nowIso, goodAt: got.status === 'ok' ? nowIso : (prev?.goodAt || null), format: got.format || prev?.format || null, days };
+  await repo.setCache('pulse', JSON.stringify(next), nowIso);
+  await repo.prune(dates[0]);
+  return true;
+}
 
-  const [si, pdl, pp] = await Promise.allSettled([
-    readMatchiVenue(fetchImpl, cfg.si.matchiId, dates),
-    readMatchiVenue(fetchImpl, cfg.pdl.matchiId, dates),
-    pulseDue ? readPulse(fetchImpl, cfg.pp.clubId, dates, nowMs, prev?.pulseFormat) : Promise.resolve(null),
-  ]);
-  const failed = { status: 'error', reason: 'read failed' };
-  const venues = { si: {}, pdl: {}, pp: {} };
-  for (const [code, got] of [['si', si], ['pdl', pdl]]) {
-    dates.forEach((date, i) => { venues[code][date] = got.status === 'fulfilled' ? got.value[i] : failed; });
+// ── The Mac's Matchi read ──
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const posInt = (v, max) => Number.isInteger(v) && v > 0 && v <= max;
+function cleanDay(day) {
+  if (!isObj(day)) return { error: 'a day must be an object' };
+  if (day.status === 'closed') return { day: { status: 'closed' } };
+  if (day.status === 'error') return { day: { status: 'error', reason: typeof day.reason === 'string' && day.reason.trim() ? day.reason.trim().slice(0, 120) : 'unknown' } };
+  if (day.status !== 'ok') return { error: 'status must be ok, closed or error' };
+  if (!isObj(day.starts)) return { error: 'an ok day needs starts' };
+  const keys = Object.keys(day.starts);
+  if (keys.length > 96) return { error: 'too many starts' };
+  const starts = {};
+  for (const t of keys) {
+    const s = day.starts[t];
+    if (!START_RE.test(t)) return { error: `not a start time: ${t.slice(0, 10)}` };
+    if (!isObj(s) || !posInt(s.courts, 50) || !posInt(s.min, 600)) return { error: `courts and min must be positive whole numbers (${t})` };
+    starts[t] = { courts: s.courts, min: s.min };
   }
-  const pulse = pp.status === 'fulfilled' ? pp.value : failed;
-  let pulseFetchedAt = prev?.pulseFetchedAt || null;
-  let pulseFormat = prev?.pulseFormat || null;
-  if (pulse === null) {
-    for (const date of dates) venues.pp[date] = prev?.venues?.pp?.[date] || { status: 'pending' };
-  } else {
-    pulseFetchedAt = new Date(nowMs).toISOString();
-    if (pulse.status === 'ok') {
-      pulseFormat = pulse.format;
-      for (const date of dates) venues.pp[date] = { status: 'ok', starts: pulse.byDate[date] || {} };
-    } else {
-      for (const date of dates) venues.pp[date] = { status: 'error', reason: pulse.reason };
+  return { day: { status: 'ok', starts } };
+}
+export function cleanCourts(body, nowMs) {
+  const readAtMs = Date.parse(typeof body.readAt === 'string' ? body.readAt : '');
+  if (!Number.isFinite(readAtMs)) return { error: 'readAt must be a date and time' };
+  if (Math.abs(nowMs - readAtMs) > READ_AT_SKEW_MS) return { error: 'readAt is not within 10 minutes of now' };
+  if (!isObj(body.venues)) return { error: 'venues must be an object' };
+  const window = new Set(londonDates(nowMs));
+  const venues = {};
+  let kept = 0;
+  for (const [code, days] of Object.entries(body.venues)) {
+    if (!MATCHI_VENUES.includes(code)) return { error: `unknown venue: ${code.slice(0, 10)}` };
+    if (!isObj(days)) return { error: `${code} must be an object of dates` };
+    venues[code] = {};
+    for (const [date, day] of Object.entries(days)) {
+      if (!DATE_RE.test(date) || !window.has(date)) continue;          // outside the 7 days: ignored
+      const c = cleanDay(day);
+      if (c.error) return { error: `${code} ${date}: ${c.error}` };
+      venues[code][date] = c.day;
+      kept++;
     }
   }
-  // fetchedAt = when the refresh FINISHED (never earlier than it started).
-  const availability = { fetchedAt: new Date(Math.max(clock(), nowMs)).toISOString(), pulseFetchedAt, pulseFormat, venues };
-  await repo.setCache('availability', JSON.stringify(availability), availability.fetchedAt);
-  await repo.prune(dates[0]);
-  return availability;
+  if (!kept) return { error: 'no dates inside the next 7 days' };
+  return { readAt: new Date(readAtMs).toISOString(), venues };
+}
+async function saveMatchi(repo, prev, clean) {
+  const next = { readAt: clean.readAt, goodAt: { si: prev?.goodAt?.si || null, pdl: prev?.goodAt?.pdl || null }, venues: { si: prev?.venues?.si || {}, pdl: prev?.venues?.pdl || {} } };
+  for (const [code, days] of Object.entries(clean.venues)) {
+    next.venues[code] = days;
+    if (Object.values(days).some((d) => d.status !== 'error')) next.goodAt[code] = clean.readAt;
+  }
+  await repo.setCache('matchi', JSON.stringify(next), clean.readAt);
+  return next;
 }
 
 // ── Alerts ──
-export async function checkAlerts(state, env, repo, nowIso) {
+// The DM must never go twice for one slot. The row is claimed BEFORE the relay call; it is released
+// only when the relay call itself failed (no answer, a timeout or a non-200). After a 200 the DM is
+// out, so the row stays even when saving the relay's reply fails.
+export async function checkAlerts(state, env, repo, nowMs) {
+  const nowIso = new Date(nowMs).toISOString();
+  const reclaimBefore = new Date(nowMs - ALERT_RECLAIM_MS).toISOString();
   const due = decideAlerts(state, await repo.alertSlots(state.today));
   const cfg = venueConfig(env);
   const sent = [];
   for (const r of due) {
-    const claimed = await repo.claimAlert(r.slot, r.names.join(', '), r.venues.map((v) => v.code).join(','), nowIso);
+    const claimed = await repo.claimAlert(r.slot, r.names.join(', '), r.venues.map((v) => v.code).join(','), nowIso, reclaimBefore);
     if (!claimed) continue;
+    let res;
     try {
       if (!env.RELAY || !env.RELAY_KEY) throw new Error('relay not configured');
-      const res = await env.RELAY.fetch(new Request(RELAY_URL, {
+      res = await withTimeout(env.RELAY.fetch(new Request(RELAY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Relay-Key': env.RELAY_KEY },
         body: JSON.stringify({ text: alertText(r, cfg, env.PAGE_URL || 'https://padel.kevinbrittain.workers.dev/').slice(0, 4000), recipients: [env.ALERT_TO || 'kevin@runpreneur.org.uk'] }),
-      }));
-      const reply = await res.text();
-      if (res.status !== 200) throw new Error(`relay HTTP ${res.status}: ${reply.slice(0, 300)}`);
-      await repo.saveRelayReply(r.slot, reply);
-      sent.push(r.slot);
+      })), RELAY_TIMEOUT_MS);
     } catch (e) {
+      res = null;
       console.error('padel: alert DM failed, will retry', r.slot, String(e));
-      await repo.releaseAlert(r.slot);
+    }
+    let reply = '';
+    if (res) { try { reply = await res.text(); } catch (e) { reply = '(reply unreadable)'; } }
+    if (!res || res.status !== 200) {
+      if (res) console.error('padel: alert DM failed, will retry', r.slot, `relay HTTP ${res.status}: ${reply.slice(0, 300)}`);
+      try { await repo.releaseAlert(r.slot); } catch (e) { console.error('padel: alert row not released', r.slot, String(e)); }
+      continue;
+    }
+    sent.push(r.slot);
+    try {
+      await repo.saveRelayReply(r.slot, reply || '(empty reply)');
+    } catch (e) {
+      console.error('padel: DM sent but its reply was not saved, retrying once', r.slot, String(e));
+      try { await repo.saveRelayReply(r.slot, '(sent; reply not saved first time)'); } catch (e2) { console.error('padel: DM sent, reply still not saved', r.slot, String(e2)); }
     }
   }
   return sent;
@@ -538,12 +657,6 @@ export async function checkAlerts(state, env, repo, nowIso) {
 
 // ── HTTP ──
 const BASE_HEADERS = { 'X-Robots-Tag': 'noindex, nofollow', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
-const PAGE_HEADERS = {
-  ...BASE_HEADERS,
-  'Cache-Control': 'no-cache',
-  'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-};
 export function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...BASE_HEADERS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
@@ -557,33 +670,42 @@ function timingSafeEqual(a, b) {
   for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
   return diff === 0;
 }
-// IPv6 hands out whole blocks, so a caller is counted by its /64 (copied in spirit from property-manager).
+const keyOk = (given, want) => !!want && timingSafeEqual(given || '', want);
+
+// Copied from workers/property-manager/worker.js. IPv6 hands out whole blocks, so a caller is
+// counted by its /64; an IPv4 address written inside IPv6 (::ffff:1.2.3.4) is counted as itself.
 export function callerKey(ip) {
   const s = String(ip || '').trim().toLowerCase();
   if (!s) return 'unknown';
   if (!s.includes(':')) return s;
+  const v4 = s.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) return v4[1];
   const halves = s.split('::');
   if (halves.length > 2) return s;
   const head = halves[0] ? halves[0].split(':') : [];
   const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
   const groups = halves.length === 2 ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
-  if (groups.length !== 8) return s;
-  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
+  if (groups.length !== 8 || groups.some(g => !/^[0-9a-f]{1,4}$/.test(g))) return s;
+  return groups.slice(0, 4).map(g => parseInt(g, 16).toString(16)).join(':') + '::/64';
 }
 
 export function cleanName(raw) {
-  const name = String(raw ?? '').normalize('NFC').trim().replace(/\s+/g, ' ');
+  const name = String(raw ?? '').normalize('NFC').replace(/[‘’ʼ]/g, "'").trim().replace(/\s+/g, ' ');
   if (name.length < 2 || name.length > 30) return { error: 'A name is 2 to 30 letters.' };
   if (!NAME_RE.test(name)) return { error: 'Use letters, spaces, hyphens or apostrophes only.' };
+  if ((name.match(NAME_LETTER_RE) || []).length < 2) return { error: 'A name needs at least two letters.' };
   return { name };
 }
+// Past dates are dropped (a page left open over midnight still sends yesterday's ticks); anything
+// else outside the next 7 days or the hours 07 to 21 refuses the whole list.
 export function cleanSlots(raw, dates) {
   if (!Array.isArray(raw)) return { error: 'slots must be a list' };
-  if (raw.length > dates.length * HOURS.length) return { error: 'too many slots' };
+  if (raw.length > (dates.length + 1) * HOURS.length) return { error: 'too many slots' };
   const ok = new Set(dates);
   const out = new Set();
   for (const s of raw) {
     const m = SLOT_RE.exec(String(s));
+    if (m && m[1] < dates[0] && HH.has(m[2])) continue;
     if (!m || !ok.has(m[1]) || !HH.has(m[2])) return { error: `Not an hour in the next 7 days: ${String(s).slice(0, 20)}` };
     out.add(m[0]);
   }
@@ -592,46 +714,80 @@ export function cleanSlots(raw, dates) {
 
 async function loadState(env, repo, nowMs) {
   const dates = londonDates(nowMs);
-  const [availabilityRaw, people, votes, booked] = await Promise.all([
-    repo.getCache('availability'), repo.listPeople(), repo.listVotes(dates[0]), repo.listBooked(dates[0]),
+  const [{ pulse, availability }, people, votes, booked] = await Promise.all([
+    loadAvailability(repo), repo.listPeople(), repo.listVotes(dates[0]), repo.listBooked(dates[0]),
   ]);
-  let availability = null;
-  try { availability = availabilityRaw ? JSON.parse(availabilityRaw) : null; } catch (e) { console.error('padel: cached availability unreadable', String(e)); }
   const state = computeState({ people, votes, booked, availability, dates, nowMs, cfg: venueConfig(env) });
-  const age = availability?.fetchedAt ? nowMs - Date.parse(availability.fetchedAt) : Infinity;
-  state.availability.stale = !(age < STALE_MS);
+  state.availability.stale = pulseDue(pulse, nowMs);
   return state;
 }
 
-// Refresh the venues, then run the alert check on the fresh state. Never throws: it runs inside
+// Read Pulse (when due), then run the alert check on the fresh state. Never throws: it runs inside
 // waitUntil, where a throw would vanish.
 async function refreshAndAlert(env, repo, nowMs, fetchImpl, clock) {
   try {
-    await refreshAvailability(env, repo, nowMs, fetchImpl, clock);
+    const read = await refreshPulse(env, repo, nowMs, fetchImpl);
     const now = clock();
-    const state = await loadState(env, repo, now);
-    await checkAlerts(state, env, repo, new Date(now).toISOString());
-    return true;
+    await checkAlerts(await loadState(env, repo, now), env, repo, now);
+    return read;
   } catch (e) {
     console.error('padel: refresh failed', String(e && e.stack || e));
     return false;
   }
 }
+async function alertSafely(state, env, repo, nowMs) {
+  try { return await checkAlerts(state, env, repo, nowMs); } catch (e) { console.error('padel: alert check failed', String(e && e.stack || e)); return []; }
+}
 
-async function readBody(request) {
+// Bytes, not characters: a body of emoji is four bytes a character.
+async function readBody(request, limit = MAX_BODY) {
   const declared = Number(request.headers.get('Content-Length') || 0);
-  if (declared > MAX_BODY) return { error: 'Too big', status: 413 };
+  if (declared > limit) return { error: 'Too big', status: 413 };
   try {
-    const text = await request.text();
-    if (text.length > MAX_BODY) return { error: 'Too big', status: 413 };
-    const body = JSON.parse(text || '{}');
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'Bad request', status: 400 };
+    const buf = await request.arrayBuffer();
+    if (buf.byteLength > limit) return { error: 'Too big', status: 413 };
+    const body = JSON.parse(new TextDecoder().decode(buf) || '{}');
+    if (!isObj(body)) return { error: 'Bad request', status: 400 };
     return { body };
   } catch {
     return { error: 'Bad request', status: 400 };
   }
 }
 const intId = (v) => (Number.isInteger(v) && v > 0 ? v : (typeof v === 'string' && /^\d{1,9}$/.test(v) ? Number(v) : null));
+
+function venueStatus(a, dates) {
+  const out = {};
+  for (const code of VENUES) {
+    const counts = {};
+    for (const d of dates) { const s = a.venues[code]?.[d]?.status || 'missing'; counts[s] = (counts[s] || 0) + 1; }
+    out[code] = counts;
+  }
+  return out;
+}
+
+async function handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock) {
+  if (!keyOk(request.headers.get('X-Robot-Key'), env.ROBOT_KEY)) return fail('Robot key needed', 401);
+  if (request.method === 'GET') {
+    const { availability } = await loadAvailability(repo);
+    return json({ ok: true, version: VERSION, matchiFetchedAt: availability.matchiFetchedAt, pulseFetchedAt: availability.pulseFetchedAt, venueStatus: venueStatus(availability, londonDates(nowMs)) });
+  }
+  if (request.method !== 'POST') return fail('Not found', 404);
+  const parsed = await readBody(request, MAX_COURTS_BODY);
+  if (parsed.error) return fail(parsed.error, parsed.status);
+  const clean = cleanCourts(parsed.body, nowMs);
+  if (clean.error) return fail(clean.error, 400);
+  const prev = await readJsonCache(repo, 'matchi');
+  if (prev?.readAt && Date.parse(prev.readAt) > Date.parse(clean.readAt)) return fail('A newer read is already stored', 409);
+  await saveMatchi(repo, prev, clean);
+  await repo.prune(londonDates(nowMs)[0]);
+  const pulse = await readJsonCache(repo, 'pulse');
+  if (pulseDue(pulse, nowMs) && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) await refreshPulse(env, repo, nowMs, fetchImpl);
+  const now = clock();
+  const state = await loadState(env, repo, now);
+  const alerted = await checkAlerts(state, env, repo, now);
+  const { availability } = await loadAvailability(repo);
+  return json({ ok: true, matchiFetchedAt: availability.matchiFetchedAt, pulseFetchedAt: availability.pulseFetchedAt, alerted });
+}
 
 export async function handleRequest(request, env, ctx, repo, deps = {}) {
   const url = new URL(request.url);
@@ -640,31 +796,17 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
   const clock = deps.now || Date.now;
   const nowMs = clock();
   try {
-    if (!path.startsWith('/api/')) {
-      if (!env.ASSETS) return new Response('Not found', { status: 404, headers: BASE_HEADERS });
-      const res = await env.ASSETS.fetch(request);
-      const out = new Response(res.body, res);
-      for (const [k, v] of Object.entries(PAGE_HEADERS)) out.headers.set(k, v);
-      return out;
-    }
-    if (path === '/api/health' && request.method === 'GET') {
-      const raw = await repo.getCache('availability');
-      let a = null;
-      try { a = raw ? JSON.parse(raw) : null; } catch (e) { console.error('padel: cached availability unreadable', String(e)); }
-      const venueStatus = {};
-      for (const code of VENUES) {
-        const counts = {};
-        for (const d of Object.values(a?.venues?.[code] || {})) counts[d.status] = (counts[d.status] || 0) + 1;
-        venueStatus[code] = counts;
-      }
-      return json({ ok: true, fetchedAt: a?.fetchedAt || null, venueStatus });
-    }
-    if (request.method === 'POST' && env.WRITE_LIMIT) {
+    // The page is served as a static asset before this Worker runs; anything else is not ours.
+    if (!path.startsWith('/api/')) return new Response('Not found', { status: 404, headers: BASE_HEADERS });
+    if (env.WRITE_LIMIT) {
       const { success } = await env.WRITE_LIMIT.limit({ key: callerKey(request.headers.get('CF-Connecting-IP')) });
       if (!success) return fail('slow down', 429);
     }
-    if (!env.GROUP_KEY || !timingSafeEqual(request.headers.get('X-Group-Key') || '', env.GROUP_KEY)) return fail(GATE_MSG, 401);
+    if (path === '/api/health' && request.method === 'GET') return json({ ok: true, version: VERSION });
+    if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock);
+    if (!keyOk(request.headers.get('X-Group-Key'), env.GROUP_KEY)) return fail(GATE_MSG, 401);
 
+    if (path === '/api/ping' && request.method === 'GET') return json({ ok: true });
     if (path === '/api/state' && request.method === 'GET') {
       const state = await loadState(env, repo, nowMs);
       if (state.availability.stale && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {
@@ -698,12 +840,11 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       }
       const clean = cleanName(body.name);
       if (clean.error) return fail(clean.error, 400);
-      if ((await repo.countPeople()) >= MAX_PEOPLE) {
-        const people = await repo.listPeople();
-        const found = people.find((p) => p.name.toLowerCase() === clean.name.toLowerCase());
-        if (!found) return fail('The group list is full. Ask Kevin.', 409);
-        return json(found);
-      }
+      const people = await repo.listPeople();
+      const fold = foldName(clean.name);
+      const found = people.find((p) => foldName(p.name) === fold);
+      if (found) return json(found);
+      if (people.length >= MAX_PEOPLE) return fail('The group list is full. Ask Kevin.', 409);
       const person = await repo.addPerson(clean.name, nowIso);
       if (!person) return fail('Could not save that name. Try again.', 500);
       return json(person);
@@ -717,13 +858,14 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       if (!(await repo.getPerson(id))) return fail('No such person', 404);
       await repo.replaceVotes(id, clean.slots, nowIso);
       const state = await loadState(env, repo, nowMs);
-      await checkAlerts(state, env, repo, nowIso);
+      // The save answers at once; the DM (up to 8 s on the relay) goes in the background.
+      ctx.waitUntil(alertSafely(state, env, repo, nowMs));
       return json(state);
     }
 
     if (path === '/api/booked') {
       const clean = cleanSlots([body.slot], dates);
-      if (clean.error) return fail(clean.error, 400);
+      if (clean.error || !clean.slots.length) return fail(clean.error || 'That hour has passed', 400);
       const slot = clean.slots[0];
       if (body.booked === false) {
         await repo.clearBooked(slot);

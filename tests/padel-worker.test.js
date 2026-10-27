@@ -4,15 +4,21 @@
 // (beyond its 7-day window), and the Pulse Padel availability reply for 27 Oct to 2 Nov. Every
 // person in here is invented. The alert rules run twice: on a Map-backed repo, and on the Worker's
 // own makeRepo SQL over an in-memory SQLite database built from workers/padel/schema.sql.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+//
+// Second pass (27 Oct 2026): Matchi refuses Cloudflare, so St Ives and PDL now arrive from the Mac
+// (POST /api/courts with the robot key) and the Worker reads Pulse only. Each review finding fixed
+// in that pass has its own test below, named with the finding's number.
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import worker from '../workers/padel/worker.js';
 import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
-  decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig,
+  decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
+  readPulse, checkAlerts, assembleAvailability, VERSION,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,7 +32,10 @@ const countClass = (html, cls) => (html.match(new RegExp(`class="slot ${cls}"`, 
 // 09:45 London on Tue 27 Oct 2026 (GMT since 25 Oct): the window is 27 Oct to 2 Nov.
 const NOW = Date.parse('2026-10-27T09:45:00Z');
 const KEY = 'feedc0de1234567890abcdef';
+const ROBOT = 'robot0000111122223333444455556666';
 const RELAY_OK = JSON.stringify({ ok: true, sent: [{ email: 'kevin@runpreneur.org.uk', ok: true, ts: '1793000000.000100', error: null }], refused: [] });
+const iso = (ms) => new Date(ms).toISOString();
+const MIN = 60 * 1000;
 
 describe('fixtures are the live pages they claim to be (controls)', () => {
   it('St Ives 28 Oct: 31 free, 8 booked, 6 cannot-start cells', () => {
@@ -42,6 +51,7 @@ describe('fixtures are the live pages they claim to be (controls)', () => {
   });
 });
 
+const table = (cells) => `<div class="schedule"><table id="schedule-table"><tr>${cells}</tr></table></div>`;
 describe('parseMatchi', () => {
   it('worked example 1: St Ives Court 1 at 07:00 is free, can start, 60 min', () => {
     const r = parseMatchi(ST_IVES);
@@ -74,21 +84,42 @@ describe('parseMatchi', () => {
   });
 
   it('reads a cell whatever the attribute order and with newlines in the title', () => {
-    const html = `<div class="schedule"><table id="schedule-table"><tr><td title="Available<br>
+    const html = table(`<td title="Available<br>
         Court 2<br>
         18:30 - 20:00" data-slot-can-start="true" data-slot-min-duration="90" class="slot free"></td>
-      <td class="slot free" data-slot-can-start="false" data-slot-min-duration="60" title="Available<br>Court 1<br> 19:00 - 20:00"></td></tr></table></div>`;
+      <td class="slot free" data-slot-can-start="false" data-slot-min-duration="60" title="Available<br>Court 1<br> 19:00 - 20:00"></td>`);
     expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '18:30': { courts: 1, min: 90, names: ['Court 2'] } } });
   });
 
+  it('F3: class="free slot" still parses as free (class order carries no meaning)', () => {
+    const html = table('<td class="free slot" data-slot-can-start="true" data-slot-min-duration="60" title="Available<br>Court 1<br>19:00 - 20:00"></td>');
+    expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '19:00': { courts: 1, min: 60, names: ['Court 1'] } } });
+  });
+
+  it('F3: a schedule table whose cells all carry an unknown class is an error, never closed or empty', () => {
+    const html = table('<td class="slot vacant" data-slot-can-start="true" data-slot-min-duration="60" title="Available<br>Court 1<br>19:00 - 20:00"></td><td class="slot taken"></td>');
+    expect(parseMatchi(html)).toEqual({ status: 'error', reason: 'no court cells recognised' });
+    // An empty schedule table is the same error (it used to read as "closed").
+    expect(parseMatchi(table('')).status).toBe('error');
+  });
+
+  it('F4: a free, bookable cell whose title cannot be read makes the day an error', () => {
+    const html = table('<td class="slot red"></td><td class="slot free" data-slot-can-start="true" data-slot-min-duration="60" title="Ledig<br>Bana 1<br>19.00"></td>');
+    expect(parseMatchi(html)).toEqual({ status: 'error', reason: 'a free court cell could not be read' });
+  });
+
+  it('F4: a free, bookable cell with no minimum booking makes the day an error', () => {
+    const html = table('<td class="slot free" data-slot-can-start="true" title="Available<br>Court 1<br>19:00 - 20:00"></td>');
+    expect(parseMatchi(html)).toEqual({ status: 'error', reason: 'a free court cell has no minimum booking' });
+  });
+
   it('a schedule with only not-available cells is open with no courts (grey), not closed', () => {
-    const html = '<div class="schedule"><table id="schedule-table"><tr><td class="slot not-available" title="x"></td></tr></table></div>';
-    expect(parseMatchi(html)).toEqual({ status: 'ok', starts: {} });
+    expect(parseMatchi(table('<td class="slot not-available" title="x"></td>'))).toEqual({ status: 'ok', starts: {} });
   });
 
   it('anything that is not a schedule page is an error, never closed', () => {
     expect(parseMatchi('<html><body>Please log in</body></html>')).toEqual({ status: 'error', reason: 'not a schedule page' });
-    expect(parseMatchi('<div class="schedule"><p>Maintenance</p></div>')).toEqual({ status: 'error', reason: 'no schedule table' });
+    expect(parseMatchi('<div class="schedule"><p>Maintenance</p></div>')).toEqual({ status: 'error', reason: 'no court cells recognised' });
     expect(parseMatchi(undefined).status).toBe('error');
   });
 });
@@ -122,6 +153,38 @@ describe('parsePulse (the saved live reply)', () => {
   });
 });
 
+describe('readPulse: only an HTTP 400 tries the next body format (F5)', () => {
+  const dates = londonDates(NOW);
+  const stub = (answer) => {
+    const calls = [];
+    const f = vi.fn(async (url, init) => { calls.push(JSON.parse(init.body)); return answer(calls.length, JSON.parse(init.body)); });
+    return { f, calls };
+  };
+  it('a 503 makes exactly one call and keeps the real reason', async () => {
+    const { f } = stub(() => new Response('down', { status: 503 }));
+    expect(await readPulse(f, 'club', dates, NOW, 'orpc')).toEqual({ status: 'error', reason: 'HTTP 503' });
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+  it('a 429, a timeout and an unknown shape each stop at one call', async () => {
+    let s = stub(() => new Response('slow', { status: 429 }));
+    expect((await readPulse(s.f, 'club', dates, NOW)).reason).toBe('HTTP 429');
+    expect(s.f).toHaveBeenCalledTimes(1);
+    s = stub(() => { throw new DOMException('signal timed out', 'TimeoutError'); });
+    expect((await readPulse(s.f, 'club', dates, NOW)).reason).toBe('timed out');
+    expect(s.f).toHaveBeenCalledTimes(1);
+    s = stub(() => new Response('{"json":{"availableSlots":7}}', { status: 200 }));
+    expect((await readPulse(s.f, 'club', dates, NOW)).reason).toBe('unexpected shape');
+    expect(s.f).toHaveBeenCalledTimes(1);
+  });
+  it('a 400 (body format refused) moves on, and the format that worked is reported', async () => {
+    const { f, calls } = stub((n, body) => (body.json ? new Response(JSON.stringify(PULSE), { status: 200 }) : new Response('{"json":{"code":"BAD_REQUEST"}}', { status: 400 })));
+    const r = await readPulse(f, 'club', dates, NOW, 'plain');
+    expect(r.status).toBe('ok');
+    expect(r.format).toBe('orpc');
+    expect(calls.map((c) => (c.json ? 'orpc' : 'plain'))).toEqual(['plain', 'orpc']);
+  });
+});
+
 describe('London time without Intl', () => {
   it('matches Intl Europe/London for every half hour of 2025 to 2027', () => {
     const dtf = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -145,7 +208,7 @@ describe('London time without Intl', () => {
 });
 
 describe('input checks', () => {
-  it('names: trimmed, spaces collapsed, 2 to 30 letters, spaces, hyphens, apostrophes', () => {
+  it('names: trimmed, spaces collapsed, 2 to 30 characters, letters, spaces, hyphens, apostrophes', () => {
     expect(cleanName('  Ann   Marie ')).toEqual({ name: 'Ann Marie' });
     expect(cleanName("Siobhán O'Neil-Smith")).toEqual({ name: "Siobhán O'Neil-Smith" });
     expect(cleanName('A').error).toBeTruthy();
@@ -153,13 +216,34 @@ describe('input checks', () => {
     expect(cleanName('<b>Bob</b>').error).toBeTruthy();
     expect(cleanName('Bob2').error).toBeTruthy();
   });
+  it('F15/F16/S9: Latin letters only, at least two of them; a curly apostrophe is stored straight', () => {
+    expect(cleanName('Zoë Ørsted')).toEqual({ name: 'Zoë Ørsted' });
+    expect(cleanName('Test O’Neil')).toEqual({ name: "Test O'Neil" });
+    expect(cleanName('Zoë')).toEqual({ name: 'Zoë' });                 // a decomposed ë is stored composed
+    for (const bad of ['Аnn', '李雷', 'Ann😀', '--', "' -", 'A-', 'Ann×Bob', 'Ann_B', 'Ann.B']) {
+      expect(cleanName(bad).error, bad).toBeTruthy();
+    }
+  });
   it('slots: only the next 7 days, hours 07 to 21', () => {
     const dates = londonDates(NOW);
     expect(cleanSlots(['2026-10-28|07', '2026-11-02|21', '2026-10-28|07'], dates)).toEqual({ slots: ['2026-10-28|07', '2026-11-02|21'] });
-    for (const bad of ['2026-10-26|10', '2026-11-03|10', '2026-10-28|06', '2026-10-28|22', '2026-10-28 07', '2026-10-28|7']) {
+    for (const bad of ['2026-11-03|10', '2026-10-28|06', '2026-10-28|22', '2026-10-28 07', '2026-10-28|7']) {
       expect(cleanSlots([bad], dates).error, bad).toBeTruthy();
     }
     expect(cleanSlots('2026-10-28|07', dates).error).toBeTruthy();
+  });
+  it('F11: a past-dated slot is dropped, not a reason to refuse the list (a page open over midnight)', () => {
+    const dates = londonDates(NOW);
+    expect(cleanSlots(['2026-10-26|20', '2026-10-26|21', '2026-10-27|20'], dates)).toEqual({ slots: ['2026-10-27|20'] });
+    expect(cleanSlots(['2026-10-26|23'], dates).error).toBeTruthy();            // still not an hour we offer
+  });
+  it('F17: callerKey copies property-manager: IPv4 inside IPv6 is counted as itself', () => {
+    expect(callerKey('::ffff:1.2.3.4')).toBe('1.2.3.4');
+    expect(callerKey('::ffff:1.2.3.4')).not.toBe(callerKey('::ffff:5.6.7.8'));
+    expect(callerKey('2001:db8:1:2:aaaa::1')).toBe(callerKey('2001:db8:1:2:bbbb::9'));
+    expect(callerKey('2001:db8:1:3::1')).not.toBe(callerKey('2001:db8:1:2::1'));
+    expect(callerKey('1.2.3.4')).toBe('1.2.3.4');
+    expect(callerKey('')).toBe('unknown');
   });
 });
 
@@ -174,6 +258,7 @@ function mapRepo() {
   const out = (p) => ({ id: p.id, name: p.name, venues: p.venues.split(',').filter(Boolean) });
   return {
     rows: { alerts: () => [...alerts.values()], people: () => [...people.values()], votes: () => [...votes.values()] },
+    putAlert: (row) => alerts.set(row.slot, { names: '', venues: '', relay_reply: null, ...row }),
     repo: {
       async listPeople() { return [...people.values()].sort((a, b) => a.name.localeCompare(b.name)).map(out); },
       async getPerson(id) { return people.has(id) ? out(people.get(id)) : null; },
@@ -193,8 +278,9 @@ function mapRepo() {
       async setBooked(slot, person_id, venue, now) { booked.set(slot, { slot, person_id, venue, created_at: now }); },
       async clearBooked(slot) { booked.delete(slot); },
       async alertSlots(from) { return [...alerts.keys()].filter((s) => s >= from); },
-      async claimAlert(slot, names, venues, now) {
-        if (alerts.has(slot)) return false;
+      async claimAlert(slot, names, venues, now, reclaimBefore) {
+        const row = alerts.get(slot);
+        if (row && !(row.relay_reply === null && row.sent_at < reclaimBefore)) return false;
         alerts.set(slot, { slot, sent_at: now, names, venues, relay_reply: null });
         return true;
       },
@@ -215,7 +301,7 @@ function mapRepo() {
   };
 }
 
-// A D1 look-alike over node:sqlite, so makeRepo's own SQL (upserts, json_each, INSERT OR IGNORE)
+// A D1 look-alike over node:sqlite, so makeRepo's own SQL (upserts, json_each, ON CONFLICT ... WHERE)
 // runs for real. createRequire keeps Vite away from the node:sqlite import.
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 const SCHEMA = readFileSync(resolve(ROOT, 'workers/padel/schema.sql'), 'utf8');
@@ -242,24 +328,19 @@ function sqlRepo() {
       people: () => db.prepare('SELECT * FROM people').all().map((r) => ({ ...r })),
       votes: () => db.prepare('SELECT * FROM votes').all().map((r) => ({ ...r })),
     },
+    putAlert: (row) => db.prepare('INSERT INTO alerts (slot, sent_at, names, venues, relay_reply) VALUES (?, ?, ?, ?, ?)').run(row.slot, row.sent_at, row.names || '', row.venues || '', row.relay_reply ?? null),
     repo: makeRepo(d1),
   };
 }
 
-// The venues, stubbed: Matchi answers with the saved pages, Pulse with the saved reply.
-function venueFetch(calls, { pulse = 'ok', matchiFor = null } = {}) {
+// The Worker must never fetch Matchi any more; Pulse answers with the saved reply.
+function pulseFetch(calls, { pulse = 'ok' } = {}) {
   return vi.fn(async (url, init = {}) => {
     const u = new URL(url);
     calls.push({ host: u.hostname, url: String(url), init });
-    if (u.hostname === 'www.matchi.se') {
-      if (matchiFor) return matchiFor(u);
-      const id = u.searchParams.get('facilityId');
-      const date = u.searchParams.get('date');
-      if (date === '2026-11-02') return new Response(CLOSED, { status: 200 });
-      return new Response(id === '2619' ? ST_IVES : PDL, { status: 200 });
-    }
+    if (u.hostname === 'www.matchi.se') throw new Error('the Worker fetched Matchi');
     if (u.hostname.endsWith('cloudfunctions.net')) {
-      if (pulse === 'down') return new Response('{"error":"boom"}', { status: 500 });
+      if (pulse === 'down') return new Response('{"error":"boom"}', { status: 503 });
       if (pulse === 'odd') return new Response('{"json":{"availableSlots":{"2026-10-28T19:00:00.000Z":7}}}', { status: 200 });
       const body = JSON.parse(init.body);
       if (!body.json) return new Response('{"json":{"code":"BAD_REQUEST"}}', { status: 400 });
@@ -275,33 +356,42 @@ function harness(make) {
   let relayReply = () => new Response(RELAY_OK, { status: 200 });
   const waits = [];
   const calls = [];
+  const limited = { n: 0, max: Infinity, keys: [] };
   const env = {
     GROUP_KEY: KEY,
+    ROBOT_KEY: ROBOT,
     RELAY_KEY: 'relay-key-test',
     PAGE_URL: 'https://padel.kevinbrittain.workers.dev/',
     RELAY: { fetch: vi.fn(async (req) => { relayCalls.push({ url: req.url, key: req.headers.get('X-Relay-Key'), body: await req.json() }); return relayReply(); }) },
-    ASSETS: { fetch: async () => new Response('<!doctype html><title>Padel this week</title>', { status: 200, headers: { 'Content-Type': 'text/html' } }) },
+    WRITE_LIMIT: { limit: async ({ key }) => { limited.keys.push(key); limited.n++; return { success: limited.n <= limited.max }; } },
   };
   const ctx = { waitUntil: (p) => waits.push(p) };
   let now = NOW;
-  let fetchImpl = venueFetch(calls);
-  const call = async (path, body, { key = KEY, method } = {}) => {
+  let fetchImpl = pulseFetch(calls);
+  const drain = async () => { while (waits.length) await Promise.all(waits.splice(0)); };
+  const call = async (path, body, { key = KEY, robot, method, raw, drain: doDrain = true, ip } = {}) => {
     const headers = { 'Content-Type': 'application/json' };
     if (key) headers['X-Group-Key'] = key;
-    const req = new Request(`https://padel.kevinbrittain.workers.dev${path}`, { method: method || (body ? 'POST' : 'GET'), headers, body: body ? JSON.stringify(body) : undefined });
+    if (robot) headers['X-Robot-Key'] = robot;
+    if (ip) headers['CF-Connecting-IP'] = ip;
+    const payload = raw !== undefined ? raw : (body ? JSON.stringify(body) : undefined);
+    const req = new Request(`https://padel.kevinbrittain.workers.dev${path}`, { method: method || (payload !== undefined ? 'POST' : 'GET'), headers, body: payload });
     const res = await handleRequest(req, env, ctx, h.repo, { now: () => now, fetch: fetchImpl });
+    if (doDrain) await drain();
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch { json = null; }
     return { status: res.status, json, text, headers: res.headers };
   };
   return {
-    ...h, env, ctx, waits, calls, relayCalls, call,
+    ...h, env, ctx, waits, calls, relayCalls, call, drain, limited,
     setNow: (ms) => { now = ms; },
     setRelay: (fn) => { relayReply = fn; },
     setFetch: (f) => { fetchImpl = f; },
-    async seedAvailability(venues, fetchedAt = NOW) {
-      await h.repo.setCache('availability', JSON.stringify({ fetchedAt: new Date(fetchedAt).toISOString(), pulseFetchedAt: new Date(fetchedAt).toISOString(), pulseFormat: 'orpc', venues }), new Date(fetchedAt).toISOString());
+    // The two cache rows the Worker reads: the Mac's Matchi read and the Worker's Pulse read.
+    async seedAvailability(venues, matchiAt = NOW, pulseAt = matchiAt) {
+      await h.repo.setCache('matchi', JSON.stringify({ readAt: iso(matchiAt), goodAt: { si: iso(matchiAt), pdl: iso(matchiAt) }, venues: { si: venues.si || {}, pdl: venues.pdl || {} } }), iso(matchiAt));
+      await h.repo.setCache('pulse', JSON.stringify({ fetchedAt: iso(pulseAt), goodAt: iso(pulseAt), format: 'orpc', days: venues.pp || {} }), iso(pulseAt));
     },
     async addPeople(names) {
       const ids = [];
@@ -319,6 +409,15 @@ const EVENING = {
   pp: { '2026-10-28': { status: 'closed' } },
 };
 const NAMES = ['Test Ann', 'Test Bob', 'Test Cat', 'Test Dan', 'Test Eve'];
+const strip = (day) => (day.status === 'ok' ? { status: 'ok', starts: Object.fromEntries(Object.entries(day.starts).map(([t, s]) => [t, { courts: s.courts, min: s.min }])) } : day);
+// What the Mac posts: the saved pages for every date, St Ives closed on the last day.
+function macBody(readAtMs = NOW) {
+  const dates = londonDates(NOW);
+  const si = {};
+  const pdl = {};
+  dates.forEach((d, i) => { si[d] = i === 6 ? { status: 'closed' } : strip(parseMatchi(ST_IVES)); pdl[d] = strip(parseMatchi(PDL)); });
+  return { readAt: iso(readAtMs), venues: { si, pdl } };
+}
 
 describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('alerts and routes (%s)', (_label, make) => {
   let t;
@@ -326,8 +425,9 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     t = harness(make);
     await t.seedAvailability(EVENING);
   });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  it('no DM at 3, one DM at 4, none again at 5', async () => {
+  it('no DM at 3, one DM at 4, none again at 5; the DM gives each venue its own count and names', async () => {
     const ids = await t.addPeople(NAMES);
     for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
     let s = (await t.call('/api/state')).json;
@@ -335,24 +435,128 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.ready).toEqual([]);
     expect(s.nearly.map((n) => [n.slot, n.count])).toEqual([[SLOT, 3]]);
 
-    s = (await t.call('/api/vote', { person_id: ids[3], slots: [SLOT] })).json;
+    // Test Eve cannot do St Ives and Test Dan only St Ives: PDL has 4 (Ann, Bob, Cat, Eve), St Ives 4
+    // (Ann, Bob, Cat, Dan) once Dan ticks. Never "5 in": people are not added up across venues.
+    await t.call('/api/person', { id: ids[4], venues: ['pdl', 'pp'] });
+    await t.call('/api/person', { id: ids[3], venues: ['si'] });
+    await t.call('/api/vote', { person_id: ids[4], slots: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
-    expect(s.ready.map((r) => [r.slot, r.count])).toEqual([[SLOT, 4]]);
     const dm = t.relayCalls[0];
     expect(dm.url).toBe('https://apple-inbound/slack-relay');
     expect(dm.key).toBe('relay-key-test');
     expect(dm.body.recipients).toEqual(['kevin@runpreneur.org.uk']);
-    expect(dm.body.text).toBe('Padel: 4 in for Wed 28 Oct 19:00: Test Ann, Test Bob, Test Cat, Test Dan. Courts free: '
-      + 'St Ives 19:00, 19:30 (60 min) <https://www.matchi.se/book/schedule?facilityId=2619&date=2026-10-28&sport=5|book>; '
-      + 'PDL 19:30 (90 min) <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5|book>. '
-      + 'Whoever books: tap Booked on the page https://padel.kevinbrittain.workers.dev/');
+    expect(dm.body.text).toBe('Padel: Wed 28 Oct 19:00. PDL: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), '
+      + 'book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. Courts checked 09:45. '
+      + 'Whoever books taps Booked on the page https://padel.kevinbrittain.workers.dev/');
     expect(dm.body.text).not.toContain(KEY);
     const rows = t.rows.alerts();
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].relay_reply).ok).toBe(true);
 
-    await t.call('/api/vote', { person_id: ids[4], slots: [SLOT] });
+    s = (await t.call('/api/vote', { person_id: ids[3], slots: [SLOT] })).json;
     expect(t.relayCalls).toHaveLength(1);
+    expect(s.ready[0].venues.map((v) => [v.code, v.count, v.names])).toEqual([
+      ['si', 4, ['Test Ann', 'Test Bob', 'Test Cat', 'Test Dan']], ['pdl', 4, ['Test Ann', 'Test Bob', 'Test Cat', 'Test Eve']],
+    ]);
+    expect(alertText(s.ready[0], venueConfig(), 'https://p/')).toBe('Padel: Wed 28 Oct 19:00. '
+      + 'St Ives: 4 in (Test Ann, Test Bob, Test Cat, Test Dan), starts 19:00, 19:30 (60 min), book <https://www.matchi.se/book/schedule?facilityId=2619&date=2026-10-28&sport=5>. '
+      + 'PDL: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. '
+      + 'Courts checked 09:45. Whoever books taps Booked on the page https://p/');
+  });
+
+  it('F1: St Ives data 2 days old plus 4 ticks sends nothing, and the page says "couldn\'t check"', async () => {
+    await t.seedAvailability(EVENING, NOW - 2 * 24 * 60 * MIN, NOW);
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    const s = (await t.call('/api/state')).json;
+    expect(t.relayCalls).toHaveLength(0);
+    expect(t.rows.alerts()).toHaveLength(0);
+    expect(s.ready).toEqual([]);
+    expect(s.nearly).toEqual([]);
+    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: true });
+    expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'not checked recently', hours: {} });
+    expect(s.availability.checkedAt.si).toBe(iso(NOW - 2 * 24 * 60 * MIN));
+  });
+
+  it('freshness edges: Matchi counts for 45 minutes, Pulse for 20', async () => {
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    await t.seedAvailability(EVENING, NOW - 44 * MIN, NOW - 19 * MIN);
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-29|08'] });
+    let s = (await t.call('/api/state')).json;
+    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: true });
+    await t.seedAvailability(EVENING, NOW - 46 * MIN, NOW - 21 * MIN);
+    s = (await t.call('/api/state', undefined, { drain: false })).json;
+    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false });
+    expect(s.ready).toEqual([]);
+    expect(s.nearly).toEqual([]);
+  });
+
+  it('F6: a claimed row with no relay reply can be claimed again after 2 minutes, never before', async () => {
+    const r = t.repo;
+    t.putAlert({ slot: '2026-10-28|08', sent_at: iso(NOW - 3 * MIN), relay_reply: null });
+    t.putAlert({ slot: '2026-10-28|09', sent_at: iso(NOW - 1 * MIN), relay_reply: null });
+    t.putAlert({ slot: '2026-10-28|10', sent_at: iso(NOW - 60 * MIN), relay_reply: '{"ok":true}' });
+    const before = iso(NOW - 2 * MIN);
+    expect(await r.claimAlert('2026-10-28|08', 'a', 'si', iso(NOW), before)).toBe(true);
+    expect(await r.claimAlert('2026-10-28|08', 'a', 'si', iso(NOW), before)).toBe(false);   // just claimed
+    expect(await r.claimAlert('2026-10-28|09', 'a', 'si', iso(NOW), before)).toBe(false);
+    expect(await r.claimAlert('2026-10-28|10', 'a', 'si', iso(NOW), before)).toBe(false);
+    expect(await r.claimAlert('2026-10-28|11', 'a', 'si', iso(NOW), before)).toBe(true);
+  });
+
+  it('F9: relay 200 then saving its reply throws: one DM, and no second one on the next save', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    t.repo.saveRelayReply = vi.fn(async () => { throw new Error('D1 busy'); });
+    const ids = await t.addPeople(NAMES);
+    for (const id of ids.slice(0, 4)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.rows.alerts()).toHaveLength(1);                // the row stays: the DM went
+    await t.call('/api/vote', { person_id: ids[4], slots: [SLOT] });
+    await t.call('/api/state');
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.repo.saveRelayReply).toHaveBeenCalledTimes(2);  // tried once more, then logged
+    expect(err).toHaveBeenCalledWith('padel: DM sent, reply still not saved', SLOT, expect.stringContaining('D1 busy'));
+  });
+
+  it('a failed DM leaves no alert row, logs, and the next save retries', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    t.setRelay(() => new Response('{"ok":false,"sent":[{"ok":false,"error":"channel_not_found"}]}', { status: 502 }));
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.rows.alerts()).toHaveLength(0);
+    expect(err).toHaveBeenCalledWith('padel: alert DM failed, will retry', SLOT, expect.stringContaining('relay HTTP 502'));
+    t.setRelay(() => new Response(RELAY_OK, { status: 200 }));
+    await t.call('/api/vote', { person_id: ids[0], slots: [SLOT] });
+    expect(t.relayCalls).toHaveLength(2);
+    expect(t.rows.alerts()).toHaveLength(1);
+  });
+
+  it('F20: the vote answers before the DM; a relay that hangs is cut off at 8 s and the row released', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
+    let release;
+    t.env.RELAY.fetch = vi.fn(() => new Promise((r) => { release = r; }));
+    const res = await t.call('/api/vote', { person_id: ids[3], slots: [SLOT] }, { drain: false });
+    expect(res.status).toBe(200);
+    expect(res.json.ready.map((r) => r.slot)).toEqual([SLOT]);   // the state computed before the check
+    expect(t.waits).toHaveLength(1);                              // the DM runs in waitUntil
+    expect(t.env.RELAY.fetch).toHaveBeenCalledTimes(1);
+    release(new Response(RELAY_OK, { status: 200 }));
+    await t.drain();
+    expect(t.rows.alerts()[0].relay_reply).toBe(RELAY_OK);
+
+    // A relay that never answers.
+    vi.useFakeTimers();
+    t.env.RELAY.fetch = vi.fn(() => new Promise(() => {}));
+    const state = (await t.call('/api/state', undefined, { drain: false })).json;
+    state.ready = [{ ...state.ready[0], slot: '2026-10-29|19' }];
+    const p = checkAlerts(state, t.env, t.repo, NOW);
+    await vi.advanceTimersByTimeAsync(8001);
+    expect(await p).toEqual([]);
+    expect(t.rows.alerts().map((r) => r.slot)).toEqual([SLOT]);
+    expect(err).toHaveBeenCalledWith('padel: alert DM failed, will retry', '2026-10-29|19', expect.stringContaining('timed out'));
   });
 
   it('no DM when the only free venue is one the 4th person cannot do', async () => {
@@ -380,21 +584,6 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.relayCalls).toHaveLength(1);
   });
 
-  it('a failed DM leaves no alert row, logs, and the next save retries', async () => {
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    t.setRelay(() => new Response('{"ok":false,"sent":[{"ok":false,"error":"channel_not_found"}]}', { status: 502 }));
-    const ids = await t.addPeople(NAMES.slice(0, 4));
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
-    expect(t.relayCalls).toHaveLength(1);
-    expect(t.rows.alerts()).toHaveLength(0);
-    expect(err).toHaveBeenCalledWith('padel: alert DM failed, will retry', SLOT, expect.stringContaining('relay HTTP 502'));
-    t.setRelay(() => new Response(RELAY_OK, { status: 200 }));
-    await t.call('/api/vote', { person_id: ids[0], slots: [SLOT] });
-    expect(t.relayCalls).toHaveLength(2);
-    expect(t.rows.alerts()).toHaveLength(1);
-    err.mockRestore();
-  });
-
   it('two saves at once send one DM, and both saves persist', async () => {
     const ids = await t.addPeople(NAMES);
     for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, slots: [SLOT] });
@@ -416,143 +605,232 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.votes).toEqual({ '2026-10-28|08': [id] });
   });
 
-  it('the key gate: 401 without it, 401 with a wrong one, health needs none and shows no people', async () => {
+  it('the key gate: 401 without it or with a wrong one; health needs none and says only ok and version', async () => {
     await t.addPeople(['Test Ann']);
-    for (const path of ['/api/state']) {
+    for (const path of ['/api/state', '/api/ping']) {
       const none = await t.call(path, undefined, { key: '' });
       expect(none.status).toBe(401);
       expect(none.json).toEqual({ error: 'This link needs the group code. Ask Kevin.' });
       expect((await t.call(path, undefined, { key: 'feedc0de1234567890abcdee' })).status).toBe(401);
+      expect((await t.call(path, undefined, { key: '', robot: ROBOT })).status).toBe(401);   // the robot key is not the group key
     }
     for (const path of ['/api/vote', '/api/person', '/api/booked', '/api/refresh']) {
       expect((await t.call(path, { name: 'Test Bob' }, { key: '' })).status, path).toBe(401);
     }
     const health = await t.call('/api/health', undefined, { key: '' });
     expect(health.status).toBe(200);
-    expect(health.json.ok).toBe(true);
-    expect(health.text).not.toContain('Test Ann');
+    expect(health.json).toEqual({ ok: true, version: VERSION });
     expect(health.headers.get('X-Robots-Tag')).toContain('noindex');
   });
 
-  it('no GROUP_KEY set means every route is shut', async () => {
+  it('/api/ping answers { ok } with the group key and reads no venue', async () => {
+    await t.seedAvailability(EVENING, NOW - 60 * MIN);
+    const r = await t.call('/api/ping', undefined, { drain: false });
+    expect(r).toMatchObject({ status: 200, json: { ok: true } });
+    expect(t.waits).toHaveLength(0);
+    expect(t.calls).toHaveLength(0);
+  });
+
+  it('S1: every /api request is rate limited per caller BEFORE the key check, GETs included', async () => {
+    t.limited.max = 2;
+    expect((await t.call('/api/health', undefined, { key: '', ip: '::ffff:1.2.3.4' })).status).toBe(200);
+    expect((await t.call('/api/state', undefined, { key: '', ip: '::ffff:1.2.3.4' })).status).toBe(401);
+    expect((await t.call('/api/state', undefined, { key: '', ip: '::ffff:1.2.3.4' })).status).toBe(429);
+    expect((await t.call('/api/courts', undefined, { key: '', robot: ROBOT })).status).toBe(429);
+    expect(t.limited.keys.slice(0, 3)).toEqual(['1.2.3.4', '1.2.3.4', '1.2.3.4']);
+  });
+
+  it('no GROUP_KEY set means every group route is shut; no ROBOT_KEY means /api/courts is shut', async () => {
     delete t.env.GROUP_KEY;
     expect((await t.call('/api/state')).status).toBe(401);
+    delete t.env.ROBOT_KEY;
+    expect((await t.call('/api/courts', undefined, { robot: ROBOT })).status).toBe(401);
+    expect((await t.call('/api/courts', undefined, { robot: '' })).status).toBe(401);
   });
 
   it('slot validation refuses a slot outside the window or the hours', async () => {
     const [id] = await t.addPeople(['Test Ann']);
-    for (const slot of ['2026-11-03|10', '2026-10-26|10', '2026-10-28|06', '2026-10-28|22', 'garbage']) {
+    for (const slot of ['2026-11-03|10', '2026-10-28|06', '2026-10-28|22', 'garbage']) {
       expect((await t.call('/api/vote', { person_id: id, slots: [slot] })).status, slot).toBe(400);
     }
     expect((await t.call('/api/vote', { person_id: 999, slots: [SLOT] })).status).toBe(404);
     expect((await t.call('/api/booked', { slot: '2026-11-09|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: '2026-10-26|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'xx', booked: true })).status).toBe(400);
     expect(t.rows.votes()).toEqual([]);
   });
 
-  it('names: created once, case-insensitive, and bad ones refused', async () => {
+  it('F11: a save from a page left open over midnight drops yesterday and keeps today', async () => {
+    const [id] = await t.addPeople(['Test Ann']);
+    const r = await t.call('/api/vote', { person_id: id, slots: ['2026-10-26|20', '2026-10-27|20'] });
+    expect(r.status).toBe(200);
+    expect(r.json.votes).toEqual({ '2026-10-27|20': [id] });
+  });
+
+  it('names: created once, case and accents folded, and bad ones refused', async () => {
     const a = (await t.call('/api/person', { name: '  test   ann ' })).json;
     const b = (await t.call('/api/person', { name: 'TEST ANN' })).json;
     expect(a.id).toBe(b.id);
     expect(a).toEqual({ id: a.id, name: 'test ann', venues: ['si', 'pdl', 'pp'] });
+    const z = (await t.call('/api/person', { name: 'Test Zoë' })).json;
+    expect((await t.call('/api/person', { name: 'TEST ZOË' })).json.id).toBe(z.id);
+    expect((await t.call('/api/person', { name: 'test zoe' })).json.id).toBe(z.id);
+    expect((await t.call('/api/person', { name: 'Test O’Neil' })).json.name).toBe("Test O'Neil");
+    expect((await t.call('/api/person', { name: "TEST O'NEIL" })).json.name).toBe("Test O'Neil");
     expect((await t.call('/api/person', { name: '<script>' })).status).toBe(400);
+    expect((await t.call('/api/person', { name: 'Тest Ann' })).status).toBe(400);   // a Cyrillic T
     expect((await t.call('/api/person', { id: a.id, venues: ['si', 'nope'] })).status).toBe(400);
-    expect(t.rows.people()).toHaveLength(1);
+    expect(t.rows.people()).toHaveLength(3);
   });
 
-  it('every response carries noindex; the page gets the security headers', async () => {
+  it('S8: the body limit counts bytes, not characters', async () => {
+    const r = await t.call('/api/person', undefined, { raw: JSON.stringify({ name: '€'.repeat(6000) }) });   // 6,000 characters, 18,000 bytes
+    expect(r.status).toBe(413);
+  });
+
+  it('the page is not this Worker\'s: any non-/api path is a 404 with noindex', async () => {
     const page = await t.call('/');
-    expect(page.status).toBe(200);
+    expect(page.status).toBe(404);
     expect(page.headers.get('X-Robots-Tag')).toContain('noindex');
-    expect(page.headers.get('Content-Security-Policy')).toContain("connect-src 'self'");
     expect((await t.call('/api/state')).headers.get('X-Robots-Tag')).toContain('noindex');
-    expect((await t.call('/api/state', undefined, { key: '' })).headers.get('X-Robots-Tag')).toContain('noindex');
   });
 
-  it('a stale read kicks ONE background refresh, which reads all three venues and alerts', async () => {
-    await t.seedAvailability(EVENING, NOW - 20 * 60 * 1000);
+  it('a stale Pulse read kicks ONE background read of Pulse only (never Matchi), then alerts', async () => {
+    await t.seedAvailability({ si: EVENING.si, pdl: EVENING.pdl }, NOW, NOW - 20 * MIN);
     const ids = await t.addPeople(NAMES.slice(0, 4));
-    // 07:00 on Wed 28 Oct is free at St Ives in the saved page.
-    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|07'] });
-    expect(t.relayCalls).toHaveLength(0);                 // the seeded evening data has nothing at 07:00
-    const first = (await t.call('/api/state')).json;
+    for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|21'] }, { drain: false });
+    await t.drain();
+    expect(t.relayCalls).toHaveLength(0);                 // nothing free at 21:00 yet, Pulse is not fresh
+    const first = (await t.call('/api/state', undefined, { drain: false })).json;
     expect(first.availability.stale).toBe(true);
     expect(t.waits).toHaveLength(1);
-    expect((await t.call('/api/state')).json.availability.stale).toBe(true);
+    expect((await t.call('/api/state', undefined, { drain: false })).json.availability.stale).toBe(true);
     expect(t.waits).toHaveLength(1);                      // the 90-second guard holds the second kick
-    await Promise.all(t.waits);
+    await t.drain();
 
-    expect(t.calls.filter((c) => c.host === 'www.matchi.se')).toHaveLength(14);
+    expect(t.calls.filter((c) => c.host === 'www.matchi.se')).toHaveLength(0);
     const pulse = t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'));
     expect(pulse).toHaveLength(1);                        // oRPC first: one call
-    const sent = JSON.parse(pulse[0].init.body);
-    expect(sent).toEqual({ json: { clubId: 'VEqVgpQmiJLiEC1Lm4z3', startDateTime: '2026-10-27T00:00:00.000Z', endDateTime: '2026-11-02T23:59:59.999Z' } });
+    expect(JSON.parse(pulse[0].init.body)).toEqual({ json: { clubId: 'VEqVgpQmiJLiEC1Lm4z3', startDateTime: '2026-10-27T00:00:00.000Z', endDateTime: '2026-11-02T23:59:59.999Z' } });
     expect(pulse[0].init.headers.Origin).toBe('https://pulsepadel.co.uk');
-    for (const c of t.calls) expect(c.init.headers['User-Agent']).toMatch(/Mozilla/);
 
     const s = (await t.call('/api/state')).json;
     expect(s.availability.stale).toBe(false);
-    expect(s.availability.venues.si['2026-10-28'].hours['07']).toEqual({ free: true, min: 60, starts: ['07:00', '07:30'], mins: [60, 60] });
-    expect(s.availability.venues.si['2026-11-02']).toEqual({ status: 'closed', hours: {} });
     expect(s.availability.venues.pp['2026-10-28'].hours['21'].free).toBe(true);
-    expect(t.relayCalls).toHaveLength(1);                 // the refresh found the court and sent the DM
-    expect(t.relayCalls[0].body.text).toContain('Padel: 4 in for Wed 28 Oct 07:00');
+    expect(s.availability.venues.si['2026-10-28'].hours['19'].free).toBe(true);   // the Mac's days are kept
+    expect(t.relayCalls).toHaveLength(1);                 // the read found the court and sent the DM
+    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Pulse: 4 in');
 
-    // Forced again within 90 seconds: refused. After 90 seconds: Matchi again, Pulse not (15-minute rule).
-    t.setNow(NOW + 30 * 1000);
+    // Forced within 15 minutes: Pulse is not called again.
+    t.setNow(NOW + 2 * MIN);
     expect((await t.call('/api/refresh', {})).json.refreshed).toBe(false);
-    t.setNow(NOW + 120 * 1000);
+    t.setNow(NOW + 16 * MIN);
     expect((await t.call('/api/refresh', {})).json.refreshed).toBe(true);
-    expect(t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'))).toHaveLength(1);
-    expect(t.calls.filter((c) => c.host === 'www.matchi.se')).toHaveLength(28);
-    t.setNow(NOW + 16 * 60 * 1000);
-    await t.call('/api/refresh', {});
     expect(t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'))).toHaveLength(2);
   });
 
-  it('a venue that fails reads "couldn\'t check" for its dates and the others stay fresh', async () => {
-    const calls = [];
-    t.setFetch(venueFetch(calls, { pulse: 'down' }));
-    t.setNow(NOW + 16 * 60 * 1000);                       // past the seeded read's 15-minute Pulse rule
+  it('Pulse failing reads "couldn\'t check" for its dates and keeps its last good read time', async () => {
+    t.setFetch(pulseFetch(t.calls, { pulse: 'down' }));
+    t.setNow(NOW + 16 * MIN);
     expect((await t.call('/api/refresh', {})).json.refreshed).toBe(true);
     let s = (await t.call('/api/state')).json;
-    for (const d of s.days) expect(s.availability.venues.pp[d]).toEqual({ status: 'error', reason: 'HTTP 500', hours: {} });
-    expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
-    // A reply in a shape we do not know is an error too, never guessed slots.
-    t.setFetch(venueFetch([], { pulse: 'odd' }));
-    t.setNow(NOW + 32 * 60 * 1000);
+    for (const d of s.days) expect(s.availability.venues.pp[d]).toEqual({ status: 'error', reason: 'HTTP 503', hours: {} });
+    expect(t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'))).toHaveLength(1);   // F5: one call on a 503
+    expect(s.availability.checkedAt.pp).toBe(iso(NOW));
+    t.setFetch(pulseFetch([], { pulse: 'odd' }));
+    t.setNow(NOW + 32 * MIN);
     await t.call('/api/refresh', {});
     s = (await t.call('/api/state')).json;
     expect(s.availability.venues.pp['2026-10-28']).toEqual({ status: 'error', reason: 'unexpected shape', hours: {} });
-    // Matchi timing out is an error for those dates only.
-    t.setFetch(venueFetch([], { matchiFor: () => { throw new DOMException('signal timed out', 'TimeoutError'); } }));
-    t.setNow(NOW + 48 * 60 * 1000);
-    await t.call('/api/refresh', {});
-    s = (await t.call('/api/state')).json;
-    expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'timed out', hours: {} });
-    expect(s.availability.venues.pp['2026-10-28'].status).toBe('ok');
   });
 
-  it('Matchi refusing us (429, as it does from Cloudflare) costs one request per venue, not seven', async () => {
-    const calls = [];
-    t.setFetch(venueFetch(calls, { matchiFor: () => new Response('<html><title>429 Too Many Requests</title></html>', { status: 429 }) }));
-    t.setNow(NOW + 16 * 60 * 1000);
-    await t.call('/api/refresh', {});
-    expect(calls.filter((c) => c.host === 'www.matchi.se')).toHaveLength(2);
-    const s = (await t.call('/api/state')).json;
-    for (const d of s.days) {
-      expect(s.availability.venues.si[d]).toEqual({ status: 'error', reason: 'HTTP 429', hours: {} });
-      expect(s.availability.venues.pdl[d].status).toBe('error');
-    }
-    expect(s.availability.venues.pp['2026-10-28'].status).toBe('ok');
-  });
-
-  it('old votes, bookings and alerts are pruned on refresh', async () => {
+  it('old votes, bookings and alerts are pruned on a Pulse read', async () => {
     const [id] = await t.addPeople(['Test Ann']);
     await t.call('/api/vote', { person_id: id, slots: ['2026-10-27|20'] });
     t.setNow(Date.parse('2026-10-28T09:00:00Z'));
     await t.call('/api/refresh', {});
     expect(t.rows.votes()).toEqual([]);
+  });
+
+  describe('POST /api/courts (the Mac\'s Matchi read)', () => {
+    it('needs the robot key: none, the group key, or a wrong one is 401', async () => {
+      for (const robot of ['', KEY, `${ROBOT}x`]) expect((await t.call('/api/courts', macBody(), { robot })).status, robot).toBe(401);
+    });
+
+    it('stores the saved pages, reads Pulse once (it is due), alerts, and answers with both read times', async () => {
+      await t.seedAvailability({}, NOW - 60 * MIN);
+      const ids = await t.addPeople(NAMES.slice(0, 4));
+      for (const id of ids) await t.call('/api/vote', { person_id: id, slots: ['2026-10-28|07'] }, { drain: false });
+      await t.drain();
+      t.relayCalls.length = 0;
+      t.calls.length = 0;
+      const r = await t.call('/api/courts', macBody(NOW - 30 * 1000), { key: '', robot: ROBOT });
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: true, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW), alerted: ['2026-10-28|07'] });
+      expect(t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'))).toHaveLength(1);
+      expect(t.relayCalls).toHaveLength(1);
+      expect(t.relayCalls[0].body.text).toMatch(/^Padel: Wed 28 Oct 07:00\. St Ives: 4 in .* Pulse: 4 in .* Courts checked: St Ives 09:44, Pulse 09:45\./);
+      const s = (await t.call('/api/state')).json;
+      expect(s.availability.venues.si['2026-10-28'].hours['07']).toEqual({ free: true, min: 60, starts: ['07:00', '07:30'], mins: [60, 60] });
+      expect(s.availability.venues.si['2026-11-02']).toEqual({ status: 'closed', hours: {} });
+      expect(s.availability.venues.pdl['2026-10-28'].hours['09'].free).toBe(true);
+      expect(s.availability.checkedAt).toEqual({ si: iso(NOW - 30 * 1000), pdl: iso(NOW - 30 * 1000), pp: iso(NOW) });
+
+      const g = await t.call('/api/courts', undefined, { key: '', robot: ROBOT });
+      expect(g.json).toEqual({
+        ok: true, version: VERSION, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW),
+        venueStatus: { si: { ok: 6, closed: 1 }, pdl: { ok: 7 }, pp: { ok: 7 } },
+      });
+    });
+
+    it('does not call Pulse when its last read is under 15 minutes old', async () => {
+      t.setNow(NOW + 5 * MIN);
+      expect((await t.call('/api/courts', macBody(NOW + 5 * MIN), { robot: ROBOT })).status).toBe(200);
+      expect(t.calls).toHaveLength(0);
+    });
+
+    it('refuses a read older (or newer) than 10 minutes: the Mac may have slept mid-run', async () => {
+      expect((await t.call('/api/courts', macBody(NOW - 11 * MIN), { robot: ROBOT })).json).toEqual({ error: 'readAt is not within 10 minutes of now' });
+      expect((await t.call('/api/courts', macBody(NOW + 11 * MIN), { robot: ROBOT })).status).toBe(400);
+      expect((await t.call('/api/courts', { ...macBody(), readAt: 'yesterday' }, { robot: ROBOT })).status).toBe(400);
+    });
+
+    it('refuses a read older than the one stored (409)', async () => {
+      expect((await t.call('/api/courts', macBody(NOW), { robot: ROBOT })).status).toBe(200);
+      expect((await t.call('/api/courts', macBody(NOW - MIN), { robot: ROBOT })).status).toBe(409);
+    });
+
+    it('validates strictly: venues, statuses, start times, whole numbers', async () => {
+      const day = (d) => ({ readAt: iso(NOW), venues: { si: { '2026-10-28': d } } });
+      const bad = [
+        { readAt: iso(NOW), venues: { pp: { '2026-10-28': { status: 'closed' } } } },
+        { readAt: iso(NOW), venues: { si: [] } },
+        { readAt: iso(NOW), venues: [] },
+        day({ status: 'open' }),
+        day({ status: 'ok' }),
+        day({ status: 'ok', starts: { '7:00': { courts: 1, min: 60 } } }),
+        day({ status: 'ok', starts: { '24:00': { courts: 1, min: 60 } } }),
+        day({ status: 'ok', starts: { '19:00': { courts: 0, min: 60 } } }),
+        day({ status: 'ok', starts: { '19:00': { courts: 1, min: 1.5 } } }),
+        day({ status: 'ok', starts: { '19:00': { courts: '1', min: 60 } } }),
+        day('ok'),
+        { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'closed' }, '2026-10-26': { status: 'closed' } } } },   // nothing inside the window
+      ];
+      for (const b of bad) expect((await t.call('/api/courts', b, { robot: ROBOT })).status, JSON.stringify(b)).toBe(400);
+      // Dates outside the window are ignored without refusing the rest; an error day keeps its reason.
+      const ok = await t.call('/api/courts', { readAt: iso(NOW), venues: { si: { '2026-11-03': { status: 'nonsense' }, '2026-10-28': { status: 'error', reason: 'HTTP 500' } } } }, { robot: ROBOT });
+      expect(ok.status).toBe(200);
+      const s = (await t.call('/api/state')).json;
+      expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'HTTP 500', hours: {} });
+      expect(s.availability.venues.pdl['2026-10-28'].status).toBe('ok');    // pdl not posted: kept
+    });
+
+    it('takes a body up to 64 KB, refuses one over it', async () => {
+      const filler = { readAt: iso(NOW), venues: { si: { '2026-10-28': { status: 'closed' }, '2030-01-01': { status: 'error', reason: 'x'.repeat(30000) } } } };
+      expect((await t.call('/api/courts', filler, { robot: ROBOT })).status).toBe(200);
+      filler.venues.si['2030-01-01'].reason = 'x'.repeat(70000);
+      expect((await t.call('/api/courts', filler, { robot: ROBOT })).status).toBe(413);
+    });
   });
 });
 
@@ -560,23 +838,61 @@ describe('pure state rules', () => {
   const dates = londonDates(NOW);
   const people = [1, 2, 3, 4].map((id) => ({ id, name: `P${id}`, venues: ['si', 'pdl', 'pp'] }));
   const votes = people.map((p) => ({ person_id: p.id, slot: SLOT }));
+  const fresh = (venues) => assembleAvailability(
+    { readAt: iso(NOW), goodAt: { si: iso(NOW), pdl: iso(NOW) }, venues: { si: venues.si || {}, pdl: venues.pdl || {} } },
+    { fetchedAt: iso(NOW), goodAt: iso(NOW), days: venues.pp || {} },
+  );
   it('an hour needs a start of 90 minutes or less', () => {
-    const availability = { fetchedAt: 'x', venues: { si: { '2026-10-28': { status: 'ok', starts: { '19:00': { courts: 1, min: 120 } } } } } };
-    const s = computeState({ people, votes, booked: [], availability, dates, nowMs: NOW });
+    const s = computeState({ people, votes, booked: [], availability: fresh({ si: { '2026-10-28': { status: 'ok', starts: { '19:00': { courts: 1, min: 120 } } } } }), dates, nowMs: NOW });
     expect(s.availability.venues.si['2026-10-28'].hours).toEqual({});
     expect(s.ready).toEqual([]);
   });
   it('closed and error never count as free', () => {
-    const availability = { fetchedAt: 'x', venues: { si: { '2026-10-28': { status: 'closed' } }, pdl: { '2026-10-28': { status: 'error', reason: 'HTTP 500' } } } };
-    const s = computeState({ people, votes, booked: [], availability, dates, nowMs: NOW });
+    const s = computeState({ people, votes, booked: [], availability: fresh({ si: { '2026-10-28': { status: 'closed' } }, pdl: { '2026-10-28': { status: 'error', reason: 'HTTP 500' } } }), dates, nowMs: NOW });
     expect(s.ready).toEqual([]);
     expect(s.availability.venues.pp['2026-10-28'].status).toBe('pending');
   });
+  it('a venue never read counts for nothing', () => {
+    const s = computeState({ people, votes, booked: [], availability: null, dates, nowMs: NOW });
+    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false });
+    expect(s.ready).toEqual([]);
+  });
   it('decideAlerts skips slots already alerted', () => {
-    const s = computeState({ people, votes, booked: [], availability: { fetchedAt: 'x', venues: EVENING }, dates, nowMs: NOW });
+    const s = computeState({ people, votes, booked: [], availability: fresh(EVENING), dates, nowMs: NOW });
     expect(decideAlerts(s, new Set()).map((r) => r.slot)).toEqual([SLOT]);
     expect(decideAlerts(s, new Set([SLOT]))).toEqual([]);
     expect(alertText(s.ready[0], venueConfig(), 'https://padel.kevinbrittain.workers.dev/').length).toBeLessThan(4000);
+  });
+  it('the DM groups venues checked at the same minute', () => {
+    const v = (code, checkedAt) => ({ code, count: 4, names: ['A1', 'B1', 'C1', 'D1'], starts: ['19:00'], mins: [60], min: 60, book: 'u', checkedAt });
+    const r = { label: 'Wed 28 Oct 19:00', venues: [v('si', '2026-10-28T18:45:10Z'), v('pdl', '2026-10-28T18:45:10Z'), v('pp', '2026-10-28T18:50:00Z')] };
+    expect(alertText(r, venueConfig(), 'p')).toContain('Courts checked: St Ives and PDL 18:45, Pulse 18:50. Whoever');
+  });
+});
+
+describe('the page and its headers (workers/padel/public)', () => {
+  const page = readFileSync(resolve(ROOT, 'workers/padel/public/index.html'), 'utf8');
+  const headers = readFileSync(resolve(ROOT, 'workers/padel/public/_headers'), 'utf8');
+  it('S7: the CSP allows the one inline script by its sha256 hash, and the hash matches the page', () => {
+    const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+    expect(scripts).toHaveLength(1);
+    expect(page).not.toMatch(/<script[^>]+src=/);
+    const hash = createHash('sha256').update(scripts[0][1], 'utf8').digest('base64');
+    const csp = headers.match(/Content-Security-Policy: (.*)/)[1];
+    expect(csp).toContain(`script-src 'sha256-${hash}'`);
+    expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
+    expect(csp).toContain("connect-src 'self'");
+  });
+  it('S4: the page headers live in _headers, for every path', () => {
+    expect(headers).toMatch(/^\/\*$/m);
+    for (const h of ['X-Robots-Tag: noindex, nofollow', 'X-Content-Type-Options: nosniff', 'Referrer-Policy: no-referrer', 'X-Frame-Options: DENY', 'Cache-Control: no-cache']) {
+      expect(headers).toContain(`  ${h}`);
+    }
+  });
+  it('F25: light only, no dark theme (design-system rule 3), and the code in the link is 16+ hex characters', () => {
+    expect(page).not.toMatch(/prefers-color-scheme/);
+    expect(page).toContain('content="light"');
+    expect(page).toContain('k=([0-9a-fA-F]{16,64})');
   });
 });
 

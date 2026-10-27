@@ -172,6 +172,10 @@ CATALOGUE = {
     # so a replace means Kevin re-shares the link in the WhatsApp group.
     "padel_group_key": {"service": "padel Worker", "kind": "shared", "test": "padel",
                         "purpose": "the code in the padel group page's link (#k=...), checked by the padel Worker"},
+    # The Mac job's key for the padel Worker's /api/courts (27 Oct 2026): scripts/padel-courts.mjs posts
+    # St Ives and PDL's free courts with it. A replace needs only the Worker secret; nobody else holds it.
+    "padel_robot_key": {"service": "padel Worker", "kind": "shared", "test": "padel-robot",
+                        "purpose": "the Mac job's key for the padel Worker's /api/courts (scripts/padel-courts.mjs)"},
     "property_manager_passcode_kevin": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Kevin's passcode for Roy's page"},
     "property_manager_passcode_roy": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Roy's passcode for his page"},
 }
@@ -201,6 +205,7 @@ COPY_OF_AT = {
     ("agent-runner", "PROXY_TOKEN"): "proxy_service_token2",              # its wrangler toml and anthropic-proxy.js
     ("padel", "GROUP_KEY"): "padel_group_key",                            # the padel page's link code
     ("padel", "RELAY_KEY"): "slack_relay_key",                            # its X-Relay-Key to apple-inbound's /slack-relay
+    ("padel", "ROBOT_KEY"): "padel_robot_key",                            # the Mac job's X-Robot-Key for /api/courts
 }
 # A Worker-only secret that is a key to an OUTSIDE service: any valid key from that service works, so
 # one paste may go to every Worker holding one. Any other Worker-only secret is a key we made that
@@ -619,15 +624,23 @@ def t_gdrive(v, row):
 
 
 def t_padel(v, row):
-    """A GET of the padel page's state with the code: 200 means the Worker holds this same code."""
-    s, _, b = _http("https://padel.kevinbrittain.workers.dev/api/state", {"X-Group-Key": v})
+    """A GET of /api/ping with the code: 200 means the Worker holds this same code. Not /api/state,
+    which would kick a venue read on every key check (review of PR #828)."""
+    s, _, b = _http("https://padel.kevinbrittain.workers.dev/api/ping", {"X-Group-Key": v})
+    return _ok(s, b)
+
+
+def t_padel_robot(v, row):
+    """A GET of /api/courts with the Mac job's key: 200 means the Worker holds this same key."""
+    s, _, b = _http("https://padel.kevinbrittain.workers.dev/api/courts", {"X-Robot-Key": v})
     return _ok(s, b)
 
 
 EXPIRY_TESTS = ("github", "cloudflare")    # these read the key's own end date, so an "ok" without one clears it
 TESTS = {"airtable": t_airtable, "github": t_github, "cloudflare": t_cloudflare, "gemini": t_gemini,
          "homeassistant": t_homeassistant, "stripe": t_stripe, "ticketmaster": t_ticketmaster, "pingen": t_pingen,
-         "youtube": t_youtube, "gdrive": t_gdrive, "padel": t_padel}
+         "youtube": t_youtube, "gdrive": t_gdrive, "padel": t_padel,
+         "padel-robot": t_padel_robot}
 
 
 def test_value(row, value):
