@@ -470,7 +470,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(dm.url).toBe('https://apple-inbound/slack-relay');
     expect(dm.key).toBe('relay-key-test');
     expect(dm.body.recipients).toEqual(['kevin@runpreneur.org.uk']);
-    expect(dm.body.text).toBe('Padel: Wed 28 Oct 19:00. PDL: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), '
+    expect(dm.body.text).toBe('Padel: Wed 28 Oct 19:00. Cambridge: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), '
       + 'book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. Courts checked 09:45. '
       + 'Whoever books taps Booked on the page https://padel.kevinbrittain.workers.dev/');
     const rows = t.rows.alerts();
@@ -484,7 +484,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     ]);
     expect(alertText(s.ready[0], venueConfig(), 'https://p/')).toBe('Padel: Wed 28 Oct 19:00. '
       + 'St Ives: 4 in (Test Ann, Test Bob, Test Cat, Test Dan), starts 19:00, 19:30 (60 min), book <https://www.matchi.se/book/schedule?facilityId=2619&date=2026-10-28&sport=5>. '
-      + 'PDL: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. '
+      + 'Cambridge: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. '
       + 'Courts checked 09:45. Whoever books taps Booked on the page https://p/');
   });
 
@@ -687,7 +687,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     await t.call('/api/vote', { person_id: ids[0], add: ['2026-10-29|20'] });
     vi.useRealTimers();
     expect(t.relayCalls).toHaveLength(1);
-    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Pulse: 4 in');
+    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Huntingdon: 4 in');
   });
 
   it('F20 and item 2: the vote answers before the DM; a relay that hangs is cut off at 20 s and the row made final', async () => {
@@ -955,7 +955,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.availability.venues.pp['2026-10-28'].hours['21'].free).toBe(true);
     expect(s.availability.venues.si['2026-10-28'].hours['19'].free).toBe(true);   // the Mac's days are kept
     expect(t.relayCalls).toHaveLength(1);                 // the read found the court and sent the DM
-    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Pulse: 4 in');
+    expect(t.relayCalls[0].body.text).toContain('Padel: Wed 28 Oct 21:00. Huntingdon: 4 in');
 
     // Forced within 15 minutes: Pulse is not called again.
     t.setNow(NOW + 2 * MIN);
@@ -1010,7 +1010,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       await t.drain();
       expect(t.calls.filter((c) => c.host.endsWith('cloudfunctions.net'))).toHaveLength(1);
       expect(t.relayCalls).toHaveLength(1);
-      expect(t.relayCalls[0].body.text).toMatch(/^Padel: Wed 28 Oct 07:00\. St Ives: 4 in .* Pulse: 4 in .* Courts checked: St Ives 09:44, Pulse 09:45\./);
+      expect(t.relayCalls[0].body.text).toMatch(/^Padel: Wed 28 Oct 07:00\. St Ives: 4 in .* Huntingdon: 4 in .* Courts checked: St Ives 09:44, Huntingdon 09:45\./);
       const s = (await t.call('/api/state')).json;
       expect(s.availability.venues.si['2026-10-28'].hours['07']).toEqual({ free: true, min: 60, starts: ['07:00', '07:30'], mins: [60, 60] });
       // St Ives day 10 (5 Nov) is beyond its booking window: "not open yet", never counted.
@@ -1122,7 +1122,7 @@ describe('pure state rules', () => {
   it('the DM groups venues checked at the same minute', () => {
     const v = (code, checkedAt) => ({ code, count: 4, names: ['A1', 'B1', 'C1', 'D1'], starts: ['19:00'], mins: [60], min: 60, book: 'u', checkedAt });
     const r = { label: 'Wed 28 Oct 19:00', venues: [v('si', '2026-10-28T18:45:10Z'), v('pdl', '2026-10-28T18:45:10Z'), v('pp', '2026-10-28T18:50:00Z')] };
-    expect(alertText(r, venueConfig(), 'p')).toContain('Courts checked: St Ives and PDL 18:45, Pulse 18:50. Whoever');
+    expect(alertText(r, venueConfig(), 'p')).toContain('Courts checked: St Ives and Cambridge 18:45, Huntingdon 18:50. Whoever');
   });
 });
 

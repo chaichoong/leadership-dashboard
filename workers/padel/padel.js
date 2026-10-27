@@ -47,7 +47,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-27.14';
+export const VERSION = '2026-10-27.15';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -89,8 +89,8 @@ const RELAY_URL = 'https://apple-inbound/slack-relay';
 export function venueConfig(env = {}) {
   return {
     si: { code: 'si', label: env.SI_LABEL || 'St Ives Golf Club', short: env.SI_SHORT || 'St Ives', matchiId: env.SI_MATCHI_ID || '2619' },
-    pdl: { code: 'pdl', label: env.PDL_LABEL || 'PDL Padel United Cambridge', short: env.PDL_SHORT || 'PDL', matchiId: env.PDL_MATCHI_ID || '3122' },
-    pp: { code: 'pp', label: env.PP_LABEL || 'Pulse Padel Huntingdon', short: env.PP_SHORT || 'Pulse', clubId: env.PP_CLUB_ID || 'VEqVgpQmiJLiEC1Lm4z3' },
+    pdl: { code: 'pdl', label: env.PDL_LABEL || 'PDL Padel United Cambridge', short: env.PDL_SHORT || 'Cambridge', matchiId: env.PDL_MATCHI_ID || '3122' },
+    pp: { code: 'pp', label: env.PP_LABEL || 'Pulse Padel Huntingdon', short: env.PP_SHORT || 'Huntingdon', clubId: env.PP_CLUB_ID || 'VEqVgpQmiJLiEC1Lm4z3' },
   };
 }
 export const matchiUrl = (id, date) => `https://www.matchi.se/book/schedule?facilityId=${id}&date=${date}&sport=5`;
