@@ -286,16 +286,15 @@
         document.documentElement.style.scrollPaddingTop = pin ? `${Math.ceil(bar.getBoundingClientRect().height) + 12}px` : '';
     }
     // Where a section's heading lands: just below the row, which is pinned by the time it gets there.
+    function aimFor(y) { const b = jumpBar(); return Math.max(0, Math.round(y - (b ? b.offsetHeight : 0) - 12)); }
     function scrollToY(y) {
-        const b = jumpBar();
-        const gap = (b ? b.offsetHeight : 0) + 12;
-        window.scrollTo({ top: Math.max(0, Math.round(y - gap)), behavior: 'smooth' });
+        window.scrollTo({ top: aimFor(y), behavior: 'smooth' });
         watchSettle();
     }
     // A jump made before the page has its final shape (the approvals still loading, Wealth not yet drawn)
     // is aimed again once it has, unless Kevin has scrolled or typed since. It lapses after 20 seconds.
-    let pendingJump = null;       // { key, at, settled: scrollY once the aimed scroll stopped, or null while it runs }
-    let layoutMovedAt = 0;        // the frame changed height or Wealth drew: a scroll right after is the browser keeping his place
+    let pendingJump = null;       // { key, at, settled: scrollY once the aimed scroll stopped, or null while it runs, to: where a page section's jump sent the page }
+    let layoutMovedAt = 0;        // the page changed height: a scroll right after is the browser keeping his place
     let settleTimer = 0;
     function watchSettle() {
         const pj = pendingJump;
@@ -308,7 +307,16 @@
             still = y === last ? still + 1 : 0;
             last = y;
             if (pendingJump !== pj) { clearInterval(settleTimer); return; }
-            if (still >= 2 || ++ticks > 40) { clearInterval(settleTimer); pj.settled = y; }
+            if (still >= 2 || ++ticks > 40) {
+                clearInterval(settleTimer);
+                // A page section's jump that stopped away from where it sent the page was stopped by him (a scroll
+                // bar drag sends nothing the listeners can tell from the aimed scroll): it is never aimed again.
+                // One stopped at the bottom of the page short of its mark was stopped by the page shrinking.
+                const atBottom = Math.abs(y - maxScroll()) <= 3 && pj.to > y;
+                if (pj.to != null && !atBottom && Math.abs(y - pj.to) > 3 && Math.abs(y - markFor(pj.key)) > 3) { pendingJump = null; return; }
+                pj.settled = y;
+                checkLanding();   // the page may have moved under it while it scrolled
+            }
         }, 100);
     }
     function redoJump() {
@@ -317,22 +325,58 @@
         if (!homeOpen() || Date.now() - pj.at > 20000) { pendingJump = null; return; }
         jumpTo(pj.key, true);
     }
+    // Content drawn after a page section's jump has landed (the dashboard, its AI Team cards, the frame, the
+    // cash flow voids) moves the section, and Safari keeps no scroll anchor, so the jump is aimed again while
+    // Kevin is still where it left him (review, 27 Oct 2026). Sections inside the frame are placed by the frame.
+    let pageHeight = 0;
+    function pageGrew() {
+        const h = document.body.scrollHeight;
+        if (h === pageHeight) return;
+        pageHeight = h;
+        layoutMovedAt = Date.now();   // a scroll the browser makes to keep his place is not him moving on
+        checkLanding();
+    }
+    function checkLanding() {
+        const pj = pendingJump;
+        if (!pj || pj.to == null || pj.settled == null) return;   // still scrolling: checked once it stops
+        const y = window.scrollY, mark = markFor(pj.key);
+        if (mark == null) return;
+        if (Math.abs(y - mark) <= 3) { pj.settled = y; return; }        // in place: the browser may have kept it there
+        const pulledUp = pj.settled > maxScroll() && Math.abs(y - maxScroll()) <= 3;   // the page shrank under him
+        if (Math.abs(y - pj.settled) > 3 && !pulledUp) { pendingJump = null; return; }   // he has moved on
+        redoJump();
+    }
+    // The heading a page section's jump lands on; null for the sections inside the frame.
+    function pageSection(key) {
+        if (key === 'forecast') return document.getElementById('homeForecastHeading');
+        return PAGE_FOLDS.includes(key) ? document.querySelector(`[data-home-fold="${key}"]`) : null;
+    }
+    // Where that jump puts the page now: the heading just below the row, or as far down as the page goes.
+    function markFor(key) {
+        const el = pageSection(key);
+        if (!el) return null;
+        return Math.min(aimFor(el.getBoundingClientRect().top + window.pageYOffset), maxScroll());
+    }
+    // How far down the page goes. On an iPhone with its toolbars hidden the screen is taller than clientHeight.
+    function maxScroll() {
+        const root = document.documentElement;
+        return Math.max(0, root.scrollHeight - Math.max(root.clientHeight, window.innerHeight));
+    }
     // focus: the jump was started from the keyboard, so the keyboard carries on from the section. A mouse
     // jump leaves focus alone, and a re-aim never moves it (he may be typing somewhere by then).
     function jumpTo(key, again, focus) {
         if (!again) pendingJump = { key, at: Date.now(), settled: null };
         const moveFocus = !again && !!focus;
-        if (PAGE_FOLDS.includes(key)) {
-            if (folded(key)) setFold(key, false, true);
-            const b = document.querySelector(`[data-home-fold="${key}"]`);
-            if (b) { scrollToY(b.getBoundingClientRect().top + window.pageYOffset); if (moveFocus) b.focus({ preventScroll: true }); }
-            return;
-        }
         // The cash flow forecast (Kevin, 27 Oct 2026) sits inside the dashboard, so a folded dashboard opens first.
-        if (key === 'forecast') {
-            if (folded('dashboard')) setFold('dashboard', false, true);
-            const h = document.getElementById('homeForecastHeading');
-            if (h) { scrollToY(h.getBoundingClientRect().top + window.pageYOffset); if (moveFocus) h.focus({ preventScroll: true }); }
+        const fold = key === 'forecast' ? 'dashboard' : key;
+        if (PAGE_FOLDS.includes(fold)) {
+            if (folded(fold)) setFold(fold, false, true);
+            const el = pageSection(key);
+            if (el) {
+                if (pendingJump) pendingJump.to = markFor(key);
+                scrollToY(el.getBoundingClientRect().top + window.pageYOffset);
+                if (moveFocus) el.focus({ preventScroll: true });
+            }
             return;
         }
         // Sign-ins, approvals and the brief live in the frame: it opens the section and says where it starts.
@@ -380,7 +424,7 @@
         window.addEventListener('scroll', () => { syncPin(); queueBand(); }, { passive: true });
         window.addEventListener('resize', () => { syncPin(); queueBand(); });
         // Layout above the frame can move without a scroll (the sync bar's drawer opening, the dashboard drawing).
-        if (typeof ResizeObserver === 'function') new ResizeObserver(() => { syncPin(); queueBand(); }).observe(document.body);
+        if (typeof ResizeObserver === 'function') new ResizeObserver(() => { syncPin(); queueBand(); pageGrew(); }).observe(document.body);
         document.addEventListener('visibilitychange', () => keepFresh());   // never pass the event in as "force"
         setInterval(() => { if (Date.now() - state.rereadAt > KEEP_FRESH_MS) keepFresh(true); }, 30 * 1000);
         setInterval(maybeCfv, 5 * 1000);   // new dashboard data redraws the cash flow voids within five seconds
