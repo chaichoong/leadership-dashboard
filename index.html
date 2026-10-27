@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=23">
-    <link rel="stylesheet" href="css/home.css?v=7"><!-- Home tab (29 Sep 2026) -->
+    <link rel="stylesheet" href="css/home.css?v=8"><!-- Home tab (29 Sep 2026) -->
 </head>
 <body>
     <!-- Auth Screen -->
@@ -223,6 +223,7 @@
                     <button type="button" class="home-jump-btn" data-home-jump="approvals">Approvals</button>
                     <button type="button" class="home-jump-btn" data-home-jump="brief">CEO brief</button>
                     <button type="button" class="home-jump-btn" data-home-jump="dashboard">Dashboard</button>
+                    <button type="button" class="home-jump-btn" data-home-jump="forecast">Cash flow forecast</button><!-- Kevin, 27 Oct 2026: it sits far down the dashboard -->
                     <button type="button" class="home-jump-btn" data-home-jump="cfv">Cash flow voids</button>
                     <button type="button" class="home-jump-btn" data-home-jump="wealth">Wealth</button>
                 </nav>
@@ -302,7 +303,7 @@
 
         <!-- Section 5: 31-Day Cash Flow Forecast -->
         <div class="section">
-            <h2 class="section-title">31-Day Cash Flow Forecast</h2>
+            <h2 class="section-title" id="homeForecastHeading" tabindex="-1">31-Day Cash Flow Forecast</h2><!-- Home's Cash flow forecast jump lands here -->
             <div style="background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:var(--space-4);font-size:var(--fs-sm);color:var(--text-primary);line-height:1.55">
                 <strong>Use this to plan the month.</strong> It shows what your bank balance does over the next 31 days, with every rent payment and bill on its real date. The Withdrawal Advisor further down counts rent still to arrive, so its figure runs higher than the Money Confidence tab, which trusts only the cash you hold today. For a spend-it-now decision, use <strong>Money Confidence</strong>. For whether your net worth is growing, use the <strong>Wealth</strong> tab.
             </div>
@@ -989,6 +990,6 @@
     <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=20"></script>
     <script defer src="js/quick-task.js?v=4"></script>
-    <script defer src="js/home.js?v=7"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
+    <script defer src="js/home.js?v=8"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
 </body>
 </html>

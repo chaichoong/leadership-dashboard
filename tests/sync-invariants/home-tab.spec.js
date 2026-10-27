@@ -487,15 +487,15 @@ test.describe('Home: one scroll of the real pages', () => {
     const inFrame = { signins: '#zoneSignins', approvals: '#zoneApprovals', brief: '#zoneCeoBrief' }[k];
     const top = inFrame ? f.getBoundingClientRect().top + d.querySelector(`${inFrame} > .zone-header`).getBoundingClientRect().top
       : (k === 'dashboard' ? document.querySelector('#tab-home .home-dash-divider')
-        : document.getElementById(k === 'cfv' ? 'homeCfvDivider' : 'homeWealthDivider')).getBoundingClientRect().top;
+        : document.getElementById({ forecast: 'homeForecastHeading', cfv: 'homeCfvDivider' }[k] || 'homeWealthDivider')).getBoundingClientRect().top;
     return { top: Math.round(top), barBottom: Math.round(document.getElementById('homeJump').getBoundingClientRect().bottom) };
   }, key);
 
   test('the jump row replaces the three page links, and each button lands its section just below the row', async ({ page }) => {
     await tallHome(page);
     await expect(page.locator('[data-home-tab]')).toHaveCount(0);
-    await expect(page.locator('#homeJump button')).toHaveText(['Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Cash flow voids', 'Wealth']);
-    for (const key of ['wealth', 'brief', 'cfv', 'dashboard', 'signins', 'approvals', 'cfv', 'wealth']) {
+    await expect(page.locator('#homeJump button')).toHaveText(['Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Cash flow forecast', 'Cash flow voids', 'Wealth']);
+    for (const key of ['wealth', 'brief', 'forecast', 'cfv', 'dashboard', 'signins', 'approvals', 'forecast', 'cfv', 'wealth']) {
       await page.locator(`[data-home-jump="${key}"]`).click();
       await settled(page);
       const at = await headingTop(page, key);
@@ -581,6 +581,25 @@ test.describe('Home: one scroll of the real pages', () => {
     const at = await headingTop(page, 'brief');
     expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
     expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+  });
+
+  // Kevin, 27 Oct 2026: the cash flow forecast sits far down the dashboard, so it has its own button.
+  // It lives inside the dashboard, so a folded dashboard opens first, and a keyboard jump lands on it.
+  test('the Cash flow forecast button opens a folded dashboard and lands the forecast under the row', async ({ page }) => {
+    await tallHome(page, { dashboard: true });
+    expect(await shown(page, 'tab-overview')).toBe(false);
+    await page.locator('[data-home-jump="forecast"]').click();
+    expect(await shown(page, 'tab-overview')).toBe(true);
+    await settled(page);
+    const at = await headingTop(page, 'forecast');
+    expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
+    expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('od_home_folded')).dashboard)).toBe(false);
+    await page.locator('[data-home-jump="forecast"]').focus();
+    await page.keyboard.press('Enter');
+    await settled(page);
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe('homeForecastHeading');
+    expect(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'the green ring the fold buttons use').toBe('solid');
   });
 
   test('a jump to a folded section opens it first', async ({ page }) => {

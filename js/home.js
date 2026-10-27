@@ -328,6 +328,13 @@
             if (b) { scrollToY(b.getBoundingClientRect().top + window.pageYOffset); if (moveFocus) b.focus({ preventScroll: true }); }
             return;
         }
+        // The cash flow forecast (Kevin, 27 Oct 2026) sits inside the dashboard, so a folded dashboard opens first.
+        if (key === 'forecast') {
+            if (folded('dashboard')) setFold('dashboard', false, true);
+            const h = document.getElementById('homeForecastHeading');
+            if (h) { scrollToY(h.getBoundingClientRect().top + window.pageYOffset); if (moveFocus) h.focus({ preventScroll: true }); }
+            return;
+        }
         // Sign-ins, approvals and the brief live in the frame: it opens the section and says where it starts.
         // Until it has loaded, the jump goes to the top of the frame.
         if (state.agents.phase === 'ready') { tellFrame({ type: 'homeJump', zone: key, focus: moveFocus }); return; }
