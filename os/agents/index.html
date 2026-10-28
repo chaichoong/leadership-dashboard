@@ -1203,7 +1203,10 @@ async function postTaskComment(taskId, text){
 // Later today (Kevin, 28 Oct 2026: "it just moves it to the next milestone in
 // that day, and it just keeps my approvals gate under control") is the same
 // idea to the hour: {Back At} holds a moment, NOW() is read at query time, so
-// the card returns at 9am, 1pm or 5pm with nothing to bring it back. A blank
+// the card returns at 9am, 1pm or 5pm with nothing to bring it back. Airtable's
+// NOW() in a filter runs up to about five minutes behind and moves in steps
+// (measured 28 Oct 2026: 2 to 5 minutes, then 10 seconds), so a card due at 1pm
+// is back by about 1:05pm, never early. A blank
 // Back At hides nothing: back-tested on the live base on 28 Oct 2026, the
 // queue read 18 with and without the clause, 0 with a moment in 2099 in its
 // place and 18 with 06:00 that morning.
