@@ -348,6 +348,7 @@
     }
     // The heading a page section's jump lands on; null for the sections inside the frame.
     function pageSection(key) {
+        if (key === 'wear') return document.getElementById('homeWear');   // What to wear (Kevin, 28 Oct 2026)
         if (key === 'forecast') return document.getElementById('homeForecastHeading');
         return PAGE_FOLDS.includes(key) ? document.querySelector(`[data-home-fold="${key}"]`) : null;
     }
@@ -369,7 +370,7 @@
         const moveFocus = !again && !!focus;
         // The cash flow forecast (Kevin, 27 Oct 2026) sits inside the dashboard, so a folded dashboard opens first.
         const fold = key === 'forecast' ? 'dashboard' : key;
-        if (PAGE_FOLDS.includes(fold)) {
+        if (PAGE_FOLDS.includes(fold) || key === 'wear') {
             if (folded(fold)) setFold(fold, false, true);
             const el = pageSection(key);
             if (el) {

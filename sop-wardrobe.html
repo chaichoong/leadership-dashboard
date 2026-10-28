@@ -29,7 +29,7 @@ code { background: var(--bg-subtle); padding: .1rem .35rem; border-radius: var(-
 <header class="header"><div class="header-inner">
   <a href="index.html#wardrobe">&larr; Back to Wardrobe</a>
   <h1>Wardrobe</h1>
-  <p>The "What to wear today" card on My Dashboard, and the Wardrobe page. Version 1.0, 27 October 2026.</p>
+  <p>The "What to wear today" card on My Dashboard, and the Wardrobe page. Version 1.1, 28 October 2026.</p>
 </div></header>
 <main class="container">
   <section class="section">
@@ -69,7 +69,23 @@ code { background: var(--bg-subtle); padding: .1rem .35rem; border-radius: var(-
         <li><b>Outfits</b> table: one row per outfit, with its option, season and linked clothes.</li>
         <li>Weather: Open-Meteo, free and with no key. It uses your location when the browser allows it, otherwise central Cambridge. Press "Use my location" on the card to switch.</li>
       </ul>
-      <p>To add a piece, add a Wardrobe row. To add an outfit, add an Outfits row, link its clothes and give it an <b>Order</b> number (lower comes first when two outfits are equally due; a row without one goes last). To retire a piece, set its Status to Clear out with an Action.</p>
+      <p>To add an outfit, add an Outfits row, link its clothes and give it an <b>Order</b> number (lower comes first when two outfits are equally due; a row without one goes last).</p>
+    </div>
+  </section>
+  <section class="section">
+    <h2>Changing your clothes on the Wardrobe page</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th>You want to</th><th>Press</th><th>What it saves</th></tr></thead>
+        <tbody>
+          <tr><td>Add something new</td><td><b>Add a piece</b> on Current clothes</td><td>A new Wardrobe row, Status Own. Pick <b>Replaces</b> if it takes an old piece's place: it joins every outfit the old piece was in, takes over its weather job (for example the rain jacket), and the old piece moves to Get rid of.</td></tr>
+          <tr><td>Say a delivery came</td><td><b>Arrived</b> on a piece marked New</td><td>Status Bought to Own</td></tr>
+          <tr><td>Get rid of something</td><td><b>Remove</b>, then choose Sell, Donate, Recycle or Site drawer</td><td>Status Clear out, with the action and reason. Nothing is deleted. Outfits that use it stop being offered until it is replaced.</td></tr>
+          <tr><td>Record a purchase</td><td><b>Bought it</b> on Recommended additions</td><td>Status Need to Bought</td></tr>
+          <tr><td>Undo a removal</td><td><b>Keep it</b> on Get rid of</td><td>Status back to Own</td></tr>
+        </tbody>
+      </table>
+      <p>A piece added without Replaces is listed but sits in no outfit yet, so the card does not offer it until an outfit uses it. If a save fails, the page undoes any part already saved and says so.</p>
     </div>
   </section>
   <section class="section">

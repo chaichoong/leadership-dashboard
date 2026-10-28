@@ -35,6 +35,36 @@ const outfits = () => [
   outfit('recO4', 'Stripe weekend', 'Out casual', ['recNeed', 'recJeans', 'recBoots']),
 ];
 
+// A wardrobe and outfits store that keeps writes, so a page that reads again after an edit sees it.
+// fail: (method, table) => true to answer that write with a 500.
+async function liveTables(page, fail = () => false) {
+  const db = { [T_WR]: wardrobe(), [T_OF]: outfits() };
+  const writes = [];
+  let n = 0;
+  await page.route(/api\.airtable\.com\/v0\/[^/]+\/(tblxcSDis9Tl1dFge|tblqGdFI6VUH1wUdq)/, async (route) => {
+    const req = route.request(), method = req.method();
+    const table = req.url().includes(T_WR) ? T_WR : T_OF;
+    const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (method === 'GET') return json({ records: db[table] });
+    const body = method === 'DELETE' ? null : req.postDataJSON();
+    writes.push({ method, table, body, url: req.url() });
+    if (fail(method, table)) return route.fulfill({ status: 500, body: '{}' });
+    if (method === 'POST') {
+      const made = body.records.map(r => ({ id: 'recNew' + (++n), fields: Object.fromEntries(Object.entries(r.fields).filter(([, v]) => v != null)) }));
+      db[table].push(...made);
+      return json({ records: made });
+    }
+    if (method === 'DELETE') {
+      const ids = new URL(req.url()).searchParams.getAll('records[]');
+      db[table] = db[table].filter(r => !ids.includes(r.id));
+      return json({ records: ids.map(id => ({ id, deleted: true })) });
+    }
+    body.records.forEach(u => { const r = db[table].find(x => x.id === u.id); if (r) Object.assign(r.fields, u.fields); });
+    return json({ records: body.records });
+  });
+  return { db, writes };
+}
+
 async function open(page, hash, opts = {}) {
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -45,6 +75,7 @@ async function open(page, hash, opts = {}) {
   }, MOCK_PAT);
   await setupMockAirtable(page, { ...makeFixtures(), wardrobe: wardrobe(), outfits: outfits(), ...(opts.fixtures || {}) });
   if (opts.weatherDown) await page.route('**/api.open-meteo.com/**', r => r.fulfill({ status: 503, body: 'down' }));
+  if (opts.live) opts.store = await liveTables(page, opts.fail);
   await page.goto('/' + (hash ? '#' + hash : ''));
   return errors;
 }
@@ -55,8 +86,9 @@ test.describe('What to wear today', () => {
     const errors = await open(page, 'home');
     const card = page.locator('#homeWear');
     await expect(card.locator('.wear-opt')).toHaveCount(3, { timeout: 20000 });
+    // The jump row sits above the card (Kevin, 28 Oct 2026).
     const top = await page.evaluate(() => [document.getElementById('homeWear'), document.getElementById('homeJumpSlot')].map(e => e.getBoundingClientRect().top));
-    expect(top[0]).toBeLessThan(top[1]);
+    expect(top[1]).toBeLessThan(top[0]);
     const longDate = await page.evaluate(() => new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' }));
     await expect(card.locator('.wear-date')).toContainText(longDate);
     await expect(card.locator('.wear-temp')).toContainText('11°C');
@@ -178,5 +210,94 @@ test.describe('Wardrobe page', () => {
     await expect(page.locator('#wardrobePage .wr-stat').first()).toBeVisible({ timeout: 20000 });
     await page.locator('[data-sync-bar="wardrobe"] .sync-bar-health').click();
     await expect(page.locator('[data-sync-bar="wardrobe"]')).toContainText('point at missing clothes: Broken');
+  });
+});
+
+test.describe('Jump row', () => {
+  test('sits above the card, and What to wear brings the card back from further down', async ({ page }) => {
+    await open(page, 'home');
+    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(3, { timeout: 20000 });
+    await expect(page.locator('#homeJump .home-jump-btn').first()).toHaveText('What to wear');
+    await page.evaluate(() => window.scrollTo(0, 2500));
+    await expect.poll(() => page.evaluate(() => document.getElementById('homeWear').getBoundingClientRect().bottom < 0)).toBe(true);
+    await page.locator('[data-home-jump="wear"]').click();
+    await expect.poll(() => page.evaluate(() => { const r = document.getElementById('homeWear').getBoundingClientRect(); return r.top >= 0 && r.top < 200; })).toBe(true);
+  });
+});
+
+test.describe('Editing the wardrobe', () => {
+  test('add a piece in place of an old one: it joins its outfits, today\'s picks use it, the old one goes', async ({ page }) => {
+    const opts = { live: true };
+    const errors = await open(page, 'wardrobe', opts);
+    const pg = page.locator('#wardrobePage');
+    await pg.locator('[data-wr-add]').click({ timeout: 20000 });
+    await expect(pg.locator('[data-wr-addform] input[name="name"]')).toBeFocused();
+    await pg.locator('input[name="name"]').fill('Test indigo jeans');
+    await pg.locator('select[name="type"]').selectOption('Trousers');
+    await pg.locator('input[name="colour"]').fill('indigo');
+    await pg.locator('input[name="usedFor"][value="Work"]').check();
+    await pg.locator('select[name="replaces"]').selectOption('recJeans');
+    await pg.locator('[data-wr-addform] button[type="submit"]').click();
+    await expect(page.locator('#appToast')).toContainText('stands in for Test navy jeans');
+    const post = opts.store.writes.find(w => w.method === 'POST');
+    expect(post.body.records[0].fields).toMatchObject({ [WR.name]: 'Test indigo jeans', [WR.type]: 'Trousers', [WR.status]: 'Own', [WR.usedFor]: ['Work'] });
+    const o1 = opts.store.db[T_OF].find(o => o.id === 'recO1');
+    expect(o1.fields[OF.items]).toEqual(['recTee', 'recKnit', 'recNew1', 'recBoots']);
+    expect(opts.store.db[T_WR].find(r => r.id === 'recJeans').fields[WR.status]).toBe('Clear out');
+    await expect(pg.locator('#wrPanel-own')).toContainText('Test indigo jeans');
+    await expect(pg.locator('#wrPanel-own')).not.toContainText('Test navy jeans');
+    await page.evaluate(() => switchTab('home'));
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out casual' })).toContainText('Test indigo jeans', { timeout: 20000 });
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('remove a piece: it moves to Get rid of, its outfit stops being offered, Keep it brings it back', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'wardrobe', opts);
+    const pg = page.locator('#wardrobePage');
+    await pg.locator('[data-wr-remove="recRoll"]').click({ timeout: 20000 });
+    await pg.locator('[data-wr-removeform] select[name="action"]').selectOption('Sell');
+    await pg.locator('[data-wr-removeform] input[name="reason"]').fill('Bobbled');
+    await pg.locator('[data-wr-removeform] button[type="submit"]').click();
+    await expect(page.locator('#appToast')).toContainText('Moved Test black turtleneck to Get rid of');
+    expect(opts.store.db[T_WR].find(r => r.id === 'recRoll').fields).toMatchObject({ [WR.status]: 'Clear out', [WR.action]: 'Sell', [WR.reason]: 'Bobbled' });
+    await pg.locator('[data-wr-view="out"]').click();
+    await expect(pg.locator('#wrPanel-out tr', { hasText: 'Test black turtleneck' })).toContainText('Sell');
+    await page.evaluate(() => switchTab('home'));
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out smart casual' })).toContainText('No outfit ready', { timeout: 20000 });
+    await page.evaluate(() => switchTab('wardrobe'));
+    await pg.locator('[data-wr-keep="recRoll"]').click();
+    await expect(page.locator('#appToast')).toContainText('Kept Test black turtleneck');
+    expect(opts.store.db[T_WR].find(r => r.id === 'recRoll').fields[WR.status]).toBe('Own');
+  });
+
+  test('Arrived turns a new piece into an owned one; Bought it moves an addition into your clothes', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'wardrobe', opts);
+    const pg = page.locator('#wardrobePage');
+    const coat = pg.locator('#wrPanel-own tr', { hasText: 'Test grey coat' });
+    await expect(coat.locator('.wr-pill-new')).toBeVisible({ timeout: 20000 });
+    await coat.locator('[data-wr-arrived]').click();
+    await expect(page.locator('#appToast')).toContainText('arrived');
+    await expect(coat.locator('.wr-pill-new')).toHaveCount(0);
+    await pg.locator('[data-wr-view="add"]').click();
+    await pg.locator('[data-wr-bought="recNeed"]').click();
+    await expect(page.locator('#appToast')).toContainText('Test stripe top moved to your clothes');
+    expect(opts.store.db[T_WR].find(r => r.id === 'recNeed').fields[WR.status]).toBe('Bought');
+  });
+
+  test('a failed outfit update deletes the piece just added, so nothing half-saves', async ({ page }) => {
+    const opts = { live: true, fail: (method, table) => method === 'PATCH' && table === T_OF };
+    await open(page, 'wardrobe', opts);
+    const pg = page.locator('#wardrobePage');
+    await pg.locator('[data-wr-add]').click({ timeout: 20000 });
+    await pg.locator('input[name="name"]').fill('Test indigo jeans');
+    await pg.locator('select[name="replaces"]').selectOption('recJeans');
+    await pg.locator('[data-wr-addform] button[type="submit"]').click();
+    await expect(page.locator('#appToast')).toContainText('nothing changed');
+    expect(opts.store.writes.map(w => w.method)).toEqual(['POST', 'PATCH', 'DELETE']);
+    expect(opts.store.db[T_WR].some(r => r.fields[WR.name] === 'Test indigo jeans')).toBe(false);
+    expect(opts.store.db[T_WR].find(r => r.id === 'recJeans').fields[WR.status]).toBe('Own');
+    await expect(pg.locator('[data-wr-addform]')).toBeVisible();   // the form stays, so he can try again
   });
 });

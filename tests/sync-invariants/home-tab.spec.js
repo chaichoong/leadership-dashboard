@@ -494,7 +494,7 @@ test.describe('Home: one scroll of the real pages', () => {
   test('the jump row replaces the three page links, and each button lands its section just below the row', async ({ page }) => {
     await tallHome(page);
     await expect(page.locator('[data-home-tab]')).toHaveCount(0);
-    await expect(page.locator('#homeJump button')).toHaveText(['Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Cash flow forecast', 'Cash flow voids', 'Wealth']);
+    await expect(page.locator('#homeJump button')).toHaveText(['What to wear', 'Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Cash flow forecast', 'Cash flow voids', 'Wealth']);
     for (const key of ['wealth', 'brief', 'forecast', 'cfv', 'dashboard', 'signins', 'approvals', 'forecast', 'cfv', 'wealth']) {
       await page.locator(`[data-home-jump="${key}"]`).click();
       await settled(page);

@@ -58,5 +58,28 @@
 .wr-pill-warn { background: var(--warning-bg); color: var(--warning); }
 .wr-pill-danger { background: var(--danger-bg); color: var(--danger); }
 .wr-pill-muted { background: var(--accent-gold-soft); color: var(--text-secondary); }
+/* Editing the list (Kevin, 28 Oct 2026): add, arrived, remove, bought, keep. */
+.wear-card:focus:not(:focus-visible) { outline: none; }   /* the What to wear jump focuses the card */
+.wr-bar { display: flex; justify-content: flex-end; margin-bottom: var(--space-3); }
+.wr-acts { white-space: nowrap; text-align: right; }
+.wr-act { margin-left: var(--space-2); padding: 4px 10px; font-size: var(--fs-xs); }
+.wr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.wr-form { background: var(--bg-surface); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); }
+.wr-form h2 { margin: 0; font-size: var(--fs-lg); color: var(--text-primary); }
+.wr-form label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary); min-width: 0; }
+.wr-form input:not([type="checkbox"]):not([type="color"]), .wr-form select { font: inherit; font-weight: var(--fw-regular); color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 7px 10px; min-width: 0; }
+.wr-form input[type="color"] { width: 56px; height: 36px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-surface); }
+.wr-form input:focus-visible, .wr-form select:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.wr-form small { font-weight: var(--fw-regular); color: var(--text-muted); }
+.wr-grid { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: var(--space-3); }
+.wr-uses { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.wr-uses legend { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary); margin-bottom: var(--space-1); }
+.wr-uses label { flex-direction: row; align-items: center; font-weight: var(--fw-regular); color: var(--text-primary); }
+.wr-formbtns { display: flex; gap: var(--space-2); }
+.wr-formrow td { background: var(--bg-surface-2); }
+.wr-form-inline { margin: 0; flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+.wr-form-inline .wr-wide { flex: 1 1 200px; }
+.wr-form-inline .wear-note { flex-basis: 100%; }
+@media (max-width: 700px) { .wr-grid { grid-template-columns: 1fr; } .wr-acts { white-space: normal; } }
 @media (max-width: 700px) { .wr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media print { .wear-btn, .wear-src, .wr-tabs { display: none; } }
+@media print { .wear-btn, .wear-src, .wr-tabs, .wr-form, .wr-bar { display: none; } }

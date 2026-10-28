@@ -5,6 +5,9 @@
 //      Out casual, Out smart casual), each with a Wearing button that stamps today's date on the outfit
 //      and its clothes so tomorrow rotates to something else.
 //   2. The Wardrobe page (#tab-wardrobe): current clothes, recommended additions, and the clear-out.
+//      Since 28 Oct 2026 (Kevin) it also edits the list: add a piece (optionally in place of an old one,
+//      which hands it that piece's outfits), mark a new piece arrived, remove a piece (to Get rid of, never
+//      deleted), mark an addition bought, or keep a piece after all. The picks read the same list.
 // The rules live in js/wardrobe-pick.js (pinned by tests/wardrobe-pick.test.js). The clothes live only
 // in Airtable (TABLES.wardrobe, TABLES.outfits): this repo is public. Weather comes from Open-Meteo
 // (free, no key) at the browser's location when it has permission, else WEATHER_FALLBACK.
@@ -13,7 +16,7 @@
     'use strict';
     const TAB = 'wardrobe';
     const WEATHER_MAX_AGE_MS = 30 * 60 * 1000;
-    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, saving: false, view: 'own' };
+    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, saving: false, view: 'own', form: null };   // form: null, 'add' or the id of the piece being removed
     const UNKNOWN_WX = { feelsNow: null, actualNow: null, feelsMin: null, feelsMax: null, rainChance: null, code: null };
 
     const signedIn = () => typeof PAT === 'string' && PAT.length > 0;
@@ -182,6 +185,85 @@
         }
     }
 
+    async function sendJson(method, url, body) {
+        let resp;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            resp = await fetch(url, { method, headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+            if (resp.status !== 429) break;
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+        if (!resp.ok) throw new Error(method + ' failed: ' + resp.status);
+        return resp.json();
+    }
+    const tableUrl = (table) => `https://api.airtable.com/v0/${BASE_ID}/${table}`;
+
+    // ── Editing the list (Kevin, 28 Oct 2026) ──
+    // Every edit is one or more writes with an undo for each, the same pattern as Wearing; then the list is
+    // read again from Airtable, so the page and today's picks show what Airtable holds, never a local guess.
+    async function runEdit(steps, okMsg) {
+        if (state.saving) return false;
+        state.saving = true;
+        renderWardrobePage();
+        const done = [];
+        let ok = true;
+        try {
+            for (const st of steps) { st.result = await st.doIt(done); done.push(st); }
+        } catch (err) {
+            ok = false;
+            console.error('[wardrobe] Could not save the wardrobe change:', err);
+            let undone = true;
+            for (const st of done.reverse()) {
+                try { await st.undo(); } catch (e) { undone = false; console.error('[wardrobe] Could not undo a part-saved change:', e); }
+            }
+            showToast(undone ? 'That did not save, so nothing changed. Try again in a moment.'
+                : 'Only part of that saved. Press Refresh on the Wardrobe page to see what Airtable holds.', { type: 'error', duration: 8000 });
+        }
+        if (ok) { state.form = null; showToast(okMsg, { type: 'success' }); }
+        await loadData(true);
+        state.saving = false;
+        renderWardrobePage();
+        renderHomeCard();
+        return ok;
+    }
+
+    function setStatus(id, fields, okMsg) {
+        const it = state.data && state.data.items[id];
+        if (!it) return;
+        const before = { [WR.status]: it.status || null, [WR.action]: it.action || null, [WR.reason]: it.reason || null };
+        const after = Object.assign({}, before, fields);
+        return runEdit([{ doIt: () => patchRecords(TABLES.wardrobe, [{ id, fields: after }]), undo: () => patchRecords(TABLES.wardrobe, [{ id, fields: before }]) }], okMsg);
+    }
+
+    // Add a piece. With "Replaces", the new piece takes the old one's place in every outfit it was in, and the
+    // old one moves to Get rid of: that is how a new piece reaches today's picks.
+    function addPiece(f) {
+        const old = f.replaces ? state.data.items[f.replaces] : null;
+        const stamp = fmtDay(today());
+        const steps = [{
+            doIt: () => sendJson('POST', tableUrl(TABLES.wardrobe), { typecast: true, records: [{ fields: {
+                [WR.name]: f.name, [WR.type]: f.type || null, [WR.colour]: f.colour, [WR.swatch]: f.swatch,
+                [WR.usedFor]: f.usedFor, [WR.status]: 'Own', [WR.layerRole]: old && old.layerRole ? old.layerRole : null,
+                [WR.notes]: 'Added on the Wardrobe page on ' + stamp + (old ? ', in place of ' + old.name : '') + '.' } }] })
+                .then(r => r.records[0].id),
+            undo() { return this.result ? sendJson('DELETE', tableUrl(TABLES.wardrobe) + '?records[]=' + encodeURIComponent(this.result)) : null; },
+        }];
+        if (old) {
+            const outfits = state.data.outfits.filter(o => o.itemIds.includes(old.id));
+            if (outfits.length) {
+                steps.push({
+                    doIt: (done) => patchRecords(TABLES.outfits, outfits.map(o => ({ id: o.id, fields: { [OF.items]: o.itemIds.map(x => (x === old.id ? done[0].result : x)) } }))),
+                    undo: () => patchRecords(TABLES.outfits, outfits.map(o => ({ id: o.id, fields: { [OF.items]: o.itemIds } }))),
+                });
+            }
+            const before = { [WR.status]: old.status || null, [WR.reason]: old.reason || null, [WR.layerRole]: old.layerRole || null };
+            steps.push({
+                doIt: () => patchRecords(TABLES.wardrobe, [{ id: old.id, fields: { [WR.status]: 'Clear out', [WR.reason]: 'Replaced by ' + f.name + ' on ' + stamp, [WR.layerRole]: null } }]),
+                undo: () => patchRecords(TABLES.wardrobe, [{ id: old.id, fields: before }]),
+            });
+        }
+        return runEdit(steps, old ? `Added ${f.name}. It now stands in for ${old.name} in your outfits.` : `Added ${f.name} to your clothes.`);
+    }
+
     // Wearing: two writes, each with its undo. The clothes are stamped first, then the outfit takes today
     // and keeps its old date in Previous worn. An outfit worn today stays on the card all day, so there is
     // no same-day switch to undo. A failure undoes the writes already made, and the message says plainly
@@ -244,6 +326,40 @@
         return isNaN(d) ? 'Not yet' : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });   // DD/MM/YYYY, the app's standard
     }
 
+    const TYPES = ['Tee', 'Shirt', 'Knit', 'Trousers', 'Shorts', 'Jacket', 'Coat', 'Shoes', 'Lounge', 'Accessory'];
+    const USES = ['Home', 'Work', 'Day out', 'Evening', 'Site visits'];
+    const ACTIONS = ['Sell', 'Donate', 'Recycle', 'Site drawer'];
+
+    function addForm(own) {
+        const dis = state.saving ? ' disabled' : '';
+        return `<form class="wr-form" data-wr-addform aria-labelledby="wrAddTitle">
+            <h2 id="wrAddTitle">Add a piece</h2>
+            <div class="wr-grid">
+                <label>Name <input name="name" required maxlength="80" placeholder="e.g. Zara navy chinos" autocomplete="off"></label>
+                <label>Type <select name="type"><option value="">Choose…</option>${TYPES.map(t => `<option>${t}</option>`).join('')}</select></label>
+                <label>Colour <input name="colour" maxlength="40" placeholder="e.g. navy" autocomplete="off"></label>
+                <label>Swatch <input type="color" name="swatch" value="#808080"></label>
+            </div>
+            <fieldset class="wr-uses"><legend>Used for</legend>${USES.map(u => `<label><input type="checkbox" name="usedFor" value="${u}"> ${u}</label>`).join('')}</fieldset>
+            <label class="wr-wide">Replaces (optional)
+                <select name="replaces"><option value="">Nothing, it is extra</option>${own.map(i => `<option value="${esc(i.id)}">${esc(i.name)}${i.type ? ' (' + esc(i.type) + ')' : ''}</option>`).join('')}</select>
+                <small>It takes that piece's place in every outfit, so today's picks use it, and the old piece moves to Get rid of.</small>
+            </label>
+            <div class="wr-formbtns"><button type="submit" class="wear-btn wear-btn-primary"${dis}>${state.saving ? 'Saving…' : 'Save piece'}</button><button type="button" class="wear-btn" data-wr-cancel${dis}>Cancel</button></div>
+        </form>`;
+    }
+
+    function removeForm(i) {
+        const dis = state.saving ? ' disabled' : '';
+        const n = state.data.outfits.filter(o => o.itemIds.includes(i.id)).length;
+        return `<tr class="wr-formrow"><td colspan="6"><form class="wr-form wr-form-inline" data-wr-removeform="${esc(i.id)}" aria-label="Remove ${esc(i.name)}">
+            <label>What happens to it <select name="action">${ACTIONS.map(a => `<option>${a}</option>`).join('')}</select></label>
+            <label class="wr-wide">Why (optional) <input name="reason" maxlength="120" placeholder="e.g. worn out" autocomplete="off"></label>
+            ${n ? `<p class="wear-note">It is in ${n} outfit${n === 1 ? '' : 's'}. Those stop being offered until it is replaced.</p>` : ''}
+            <div class="wr-formbtns"><button type="submit" class="wear-btn wear-btn-primary"${dis}>${state.saving ? 'Saving…' : 'Move to Get rid of'}</button><button type="button" class="wear-btn" data-wr-cancel${dis}>Cancel</button></div>
+        </form></td></tr>`;
+    }
+
     function renderWardrobePage() {
         const el = document.getElementById('wardrobePage');
         if (!el) return;
@@ -254,6 +370,8 @@
         const rows = wardrobeRows();
         const owned = (i) => i && (i.status === 'Own' || i.status === 'Bought');
         const ready = state.data.outfits.filter(o => o.itemIds.length && o.itemIds.every(id => owned(state.data.items[id]))).length;
+        const dis = state.saving ? ' disabled' : '';
+        const btn = (attr, id, label) => `<button type="button" class="wear-btn wr-act" ${attr}="${esc(id)}"${dis}>${label}</button>`;
         const ACTION = { Sell: 'wr-pill-warn', Donate: 'wr-pill-danger', Recycle: 'wr-pill-danger', 'Site drawer': 'wr-pill-muted' };
         const tab = (key, label, n) => `<button type="button" role="tab" id="wrTab-${key}" aria-controls="wrPanel-${key}" aria-selected="${state.view === key}" tabindex="${state.view === key ? 0 : -1}" data-wr-view="${key}">${label} <span class="wr-count">${n}</span></button>`;
         const table = (key, head, body, empty) => `<div class="wr-tablewrap" role="tabpanel" id="wrPanel-${key}" aria-labelledby="wrTab-${key}"${state.view === key ? '' : ' hidden'}>
@@ -265,15 +383,20 @@
                 <div class="wr-stat"><b>${rows.add.length}</b><span>To buy</span></div>
                 <div class="wr-stat"><b>${rows.out.length}</b><span>To clear out</span></div>
             </div>
+            ${state.view === 'own' ? (state.form === 'add' ? addForm(rows.own) : `<div class="wr-bar"><button type="button" class="wear-btn wear-btn-primary" data-wr-add${dis}>Add a piece</button></div>`) : ''}
             <div class="wr-tabs" role="tablist" aria-label="Wardrobe lists">${tab('own', 'Current clothes', rows.own.length)}${tab('add', 'Recommended additions', rows.add.length)}${tab('out', 'Get rid of', rows.out.length)}</div>
-            ${table('own', ['Piece', 'Type', 'Colour', 'Used for', 'Last worn'], rows.own.map(i => `<tr>
+            ${table('own', ['Piece', 'Type', 'Colour', 'Used for', 'Last worn', '<span class="wr-sr">Actions</span>'], rows.own.map(i => `<tr>
                 <td class="wr-name">${esc(i.name)}${i.status === 'Bought' ? ' <span class="wr-pill wr-pill-new">New</span>' : ''}</td><td>${esc(i.type)}</td>
                 <td><i class="wear-sw" style="background:${swatch(i.swatch)}" aria-hidden="true"></i> ${esc(i.colour)}</td>
-                <td>${(i.usedFor || []).map(u => `<span class="wr-pill">${esc(u)}</span>`).join(' ')}</td><td>${esc(fmtDay(i.lastWorn))}</td></tr>`).join(''), 'Nothing marked as owned yet.')}
-            ${table('add', ['Piece', 'Why', 'Completes', 'Buy in', 'Cap'], rows.add.map(i => `<tr>
-                <td class="wr-name">${esc(i.name)}</td><td>${esc(i.reason)}</td><td>${i.completes} outfit${i.completes === 1 ? '' : 's'}</td><td>${esc(i.buyIn || 'Any time')}</td><td>${esc(i.cap)}</td></tr>`).join(''), 'Nothing to buy. Your wardrobe covers every outfit.')}
-            ${table('out', ['Piece', 'Reason', 'Action'], rows.out.map(i => `<tr>
-                <td class="wr-name">${esc(i.name)}</td><td>${esc(i.reason)}</td><td><span class="wr-pill ${ACTION[i.action] || ''}">${esc(i.action || 'Decide')}</span></td></tr>`).join(''), 'Nothing left to clear out.')}`;
+                <td>${(i.usedFor || []).map(u => `<span class="wr-pill">${esc(u)}</span>`).join(' ')}</td><td>${esc(fmtDay(i.lastWorn))}</td>
+                <td class="wr-acts">${i.status === 'Bought' ? btn('data-wr-arrived', i.id, 'Arrived') : ''}${btn('data-wr-remove', i.id, 'Remove')}</td></tr>
+                ${state.form === i.id ? removeForm(i) : ''}`).join(''), 'Nothing marked as owned yet.')}
+            ${table('add', ['Piece', 'Why', 'Completes', 'Buy in', 'Cap', '<span class="wr-sr">Actions</span>'], rows.add.map(i => `<tr>
+                <td class="wr-name">${esc(i.name)}</td><td>${esc(i.reason)}</td><td>${i.completes} outfit${i.completes === 1 ? '' : 's'}</td><td>${esc(i.buyIn || 'Any time')}</td><td>${esc(i.cap)}</td>
+                <td class="wr-acts">${btn('data-wr-bought', i.id, 'Bought it')}</td></tr>`).join(''), 'Nothing to buy. Your wardrobe covers every outfit.')}
+            ${table('out', ['Piece', 'Reason', 'Action', '<span class="wr-sr">Actions</span>'], rows.out.map(i => `<tr>
+                <td class="wr-name">${esc(i.name)}</td><td>${esc(i.reason)}</td><td><span class="wr-pill ${ACTION[i.action] || ''}">${esc(i.action || 'Decide')}</span></td>
+                <td class="wr-acts">${btn('data-wr-keep', i.id, 'Keep it')}</td></tr>`).join(''), 'Nothing left to clear out.')}`;
     }
 
     // ── Health bar (Wardrobe page) ──
@@ -325,9 +448,37 @@
                     () => showToast('Location is off for this site, so the card stays on Cambridge weather.', { type: 'info' }));
                 return;
             }
+            const pick = (attr) => { const b = e.target.closest('[' + attr + ']'); return b && !b.disabled ? b.getAttribute(attr) : null; };
+            let id;
+            if (e.target.closest('[data-wr-add]')) { state.form = 'add'; renderWardrobePage(); focusIn('[data-wr-addform] input[name="name"]'); return; }
+            if (e.target.closest('[data-wr-cancel]')) { closeForm(); return; }
+            if ((id = pick('data-wr-remove'))) { state.form = id; renderWardrobePage(); focusIn('[data-wr-removeform] select'); return; }
+            if ((id = pick('data-wr-arrived'))) { setStatus(id, { [WR.status]: 'Own' }, `Marked ${state.data.items[id].name} as arrived.`); return; }
+            if ((id = pick('data-wr-bought'))) { setStatus(id, { [WR.status]: 'Bought' }, `${state.data.items[id].name} moved to your clothes as new.`); return; }
+            if ((id = pick('data-wr-keep'))) { setStatus(id, { [WR.status]: 'Own', [WR.action]: null, [WR.reason]: null }, `Kept ${state.data.items[id].name}. It is back in your clothes.`); return; }
             const v = e.target.closest('[data-wr-view]');
-            if (v) { state.view = v.getAttribute('data-wr-view'); renderWardrobePage(); const t = document.getElementById('wrTab-' + state.view); if (t) t.focus(); }
+            if (v) { state.form = null; state.view = v.getAttribute('data-wr-view'); renderWardrobePage(); const t = document.getElementById('wrTab-' + state.view); if (t) t.focus(); }
         });
+        document.addEventListener('submit', (e) => {
+            const add = e.target.closest('[data-wr-addform]');
+            const rm = e.target.closest('[data-wr-removeform]');
+            if (!add && !rm) return;
+            e.preventDefault();
+            if (state.saving) return;
+            const fd = new FormData(e.target);
+            const val = (k) => String(fd.get(k) || '').trim();
+            if (add) {
+                const name = val('name');
+                if (!name) { focusIn('[data-wr-addform] input[name="name"]'); return; }
+                addPiece({ name, type: val('type'), colour: val('colour'), swatch: val('swatch'), usedFor: fd.getAll('usedFor'), replaces: val('replaces') });
+            } else {
+                const id = rm.getAttribute('data-wr-removeform');
+                setStatus(id, { [WR.status]: 'Clear out', [WR.action]: val('action') || null, [WR.reason]: val('reason') || 'Removed on ' + fmtDay(today()) },
+                    `Moved ${state.data.items[id].name} to Get rid of. Press Keep it there to undo.`);
+            }
+        });
+        // Escape closes an open form.
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.form && !state.saving && e.target.closest && e.target.closest('.wr-form')) closeForm(); });
         // Arrow keys move between the Wardrobe tabs (roving tabindex).
         document.addEventListener('keydown', (e) => {
             const t = e.target.closest && e.target.closest('[data-wr-view]');
@@ -336,7 +487,7 @@
             const keys = ['own', 'add', 'out'];
             const i = keys.indexOf(t.getAttribute('data-wr-view'));
             const next = e.key === 'Home' ? 0 : e.key === 'End' ? keys.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length;
-            state.view = keys[next]; renderWardrobePage();
+            state.view = keys[next]; state.form = null; renderWardrobePage();
             const b = document.getElementById('wrTab-' + state.view); if (b) b.focus();
         });
         const watch = (id, onOpen) => {
@@ -358,6 +509,13 @@
         const newDay = () => signedIn() && state.data && state.wxDay !== today();
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && newDay()) refresh(true); });
         setInterval(() => { if (document.visibilityState === 'visible' && newDay()) refresh(true); }, 5 * 60 * 1000);
+    }
+
+    function focusIn(sel) { const f = document.querySelector('#wardrobePage ' + sel); if (f) f.focus(); }
+    function closeForm() {
+        const back = typeof state.form === 'string' && state.form !== 'add' ? state.form : null;
+        state.form = null; renderWardrobePage();
+        focusIn(back ? `[data-wr-remove="${back}"]` : '[data-wr-add]');
     }
 
     function init() { registerChecks(); wire(); }
