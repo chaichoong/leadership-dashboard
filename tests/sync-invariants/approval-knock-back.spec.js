@@ -74,6 +74,9 @@ test.describe('knocking an approval back', () => {
     await expect(page.locator('.apv-more')).toHaveCount(0);
   });
 
+  test.describe('in London', () => {
+  // The expected date is fixed, so the machine's own time zone must be too (review, 28 Oct 2026).
+  test.use({ timezoneId: 'Europe/London' });
   test('after 5pm Tomorrow comes first, and one click brings it back the next day', async ({ page }) => {
     // Kevin, 8 Oct 2026: a one-day knock-back meant typing the date and
     // pressing Go every time. From 28 Oct 2026 Later today sits in front of it
@@ -91,6 +94,7 @@ test.describe('knocking an approval back', () => {
     await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(1);
     expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe('2026-10-29');
     await expect(card.locator('[data-apv-state="saved"]')).toContainText('Knocked back to');
+  });
   });
 
   test('one click knocks it back in place, and Undo puts it straight back', async ({ page }) => {
@@ -554,6 +558,65 @@ test.describe('Later today', () => {
     await page.locator('.apv-later button', { hasText: 'Bring back now' }).click();
     await expect.poll(() => PATCHED(patches, 'recLater1').length).toBe(1);
     // The day it last came back stays as it is: it already shows, and it starts the waiting clock.
+    expect(PATCHED(patches, 'recLater1')[0].fields).toEqual({ [TF.backAt]: null });
+  });
+
+  test('an open tab brings the card back at its time, with no reload', async ({ page }) => {
+    // Review, 28 Oct 2026: nothing re-read an open tab, so at 1pm the card stayed listed as
+    // "back at 1pm" and the queue stayed one short until he reloaded.
+    await page.clock.setFixedTime(new Date('2026-10-28T12:59:00Z'));
+    const fx = withLaterToday();
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    await expect(page.locator('.apv-later summary')).toContainText('1 knocked back');
+    // 1pm passes, and Airtable's NOW() moves the card from the knocked-back read to the queue.
+    const [card] = fx.deferred.splice(0, 1);
+    fx.approvals.push(card);
+    await page.clock.setFixedTime(new Date('2026-10-28T13:00:40Z'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.locator('[data-apv-card="recLater1"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.apv-card')).toHaveCount(before + 1);
+    await expect(page.locator('.apv-later')).toHaveCount(0);
+  });
+
+  test('Try again after a failed save works the slot out again', async ({ page }) => {
+    // Review, 28 Oct 2026: the retry carried the old slot, so a 12:58 failure retried at 13:10
+    // wrote 1pm, a time already gone, and the card never left the queue.
+    await page.clock.setFixedTime(new Date('2026-10-28T12:58:00Z'));
+    const patches = await mockAgentsPage(page);
+    let failNext = true;
+    await page.route('**/api.airtable.com/**', (route) => {
+      if (route.request().method() === 'PATCH' && failNext) {
+        failNext = false;
+        return route.fulfill({ status: 422, contentType: 'application/json', body: '{"error":{"type":"INVALID_REQUEST"}}' });
+      }
+      return route.fallback();
+    });
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('.apv-defer-btn', { hasText: 'Later today' }).click();
+    await expect(card.locator('[data-apv-retry]')).toBeVisible();
+    await page.clock.setFixedTime(new Date('2026-10-28T13:10:00Z'));
+    await card.locator('[data-apv-retry]').click();
+    await expect.poll(() => PATCHED(patches, taskId).length).toBe(1);
+    expect(PATCHED(patches, taskId)[0].fields[TF.backAt]).toBe('2026-10-28T17:00:00.000Z');
+  });
+
+  test('a Mac clock ahead of Airtable still shows the time, and Bring back now still clears it', async ({ page }) => {
+    // Review, 28 Oct 2026: Airtable still hides the card at 13:02 by this Mac's clock. The row read
+    // blank, and Bring back now wrote only the day, so the card stayed hidden.
+    await page.clock.setFixedTime(new Date('2026-10-28T13:02:00Z'));
+    const patches = await mockAgentsPage(page, withLaterToday());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await page.locator('.apv-later summary').click();
+    await expect(page.locator('.apv-later-row').first()).toContainText('back at 1pm');
+    await page.locator('.apv-later button', { hasText: 'Bring back now' }).click();
+    await expect.poll(() => PATCHED(patches, 'recLater1').length).toBe(1);
     expect(PATCHED(patches, 'recLater1')[0].fields).toEqual({ [TF.backAt]: null });
   });
 
