@@ -219,7 +219,12 @@ test.describe('Home: one scroll of the real pages', () => {
     await open(page, 'home');
     await expect(page.locator('#homeWealthWait')).toBeVisible();
     expect(await page.evaluate(() => window.__wealthDrawnAt), 'drawn before the approvals').toBe(0);
-    await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 30000 });
+    // He stays on Wealth while the approvals arrive and push it down (the wear card's hourly strip, 28 Oct 2026,
+    // makes the space above taller than this window), so keep its heading on screen as he would.
+    await expect.poll(async () => {
+      await page.evaluate(() => document.getElementById('homeWealthDivider').scrollIntoView({ block: 'center' }));
+      return page.evaluate(() => window.__wealthDrawnAt > 0);
+    }, { timeout: 30000, intervals: [500] }).toBe(true);
     await expect(page.locator('#homeWealthWait')).toBeHidden();
   });
 
