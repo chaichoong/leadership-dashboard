@@ -377,6 +377,43 @@ INVARIANTS = [
         "fields": ["Task Name", "Due Date", "Hard Deadline"],
     },
     {
+        # THE STAMPED DATE IS THE DUE DATE (28 Oct 2026, finding
+        # 20261024-phase-3-1067). The invariant above only asks whether Hard
+        # Deadline is TICKED. Four tasks created on 23 Oct 2026 had it ticked,
+        # carried the letter's date on the stamped marker line, and still held
+        # the creation day in Due Date, because the duplicate gate's
+        # "two hard dates keep the earlier" kept a model-judged creation day
+        # over a code-parsed 27 Oct and 4 Nov. Hard Deadline plus a creation
+        # day makes a task overdue the next morning, so the chase is dated
+        # wrong AND hard-deadline-passed-still-open fills with dates that were
+        # never deadlines (it read 15 on 24 Oct with these four inside it).
+        # The marker is written by create-agent-task.py's apply_letter_deadline
+        # and by nothing else, so its date is the letter's own.
+        #
+        # A formula, over real descriptions, so no fixture test can see it.
+        "name": "stamped-letter-deadline-is-the-due-date",
+        "table": TASKS,
+        "incident": "23 Oct 2026 — four open tasks stamped 2026-10-27 and 2026-11-04 from the letter and held Due Date 2026-10-23, the day they were created",
+        "asserts": "open task carrying a DEADLINE FROM THE LETTER line => its Due Date is that date",
+        "violation": (
+            "AND(FIND('DEADLINE FROM THE LETTER: 20', {Description}) > 0, "
+            "{Status} != 'Completed', {Status} != 'Cancelled', "
+            "OR({Due Date} = BLANK(), "
+            "MID({Description}, FIND('DEADLINE FROM THE LETTER: ', {Description}) + 26, 10) "
+            "!= DATETIME_FORMAT({Due Date}, 'YYYY-MM-DD')))"
+        ),
+        "control": (
+            "AND(FIND('DEADLINE FROM THE LETTER: 20', {Description}) > 0, "
+            "{Status} != 'Completed', {Status} != 'Cancelled')"
+        ),
+        "control_means": "open tasks carrying the stamped letter deadline (the only population this bug can corrupt)",
+        # Small and recent, so an empty day must read WAITING, not BROKEN,
+        # while a renamed field still fails loudly.
+        "field_probe": ("OR(LEN({Description} & '') >= 0, LEN({Status} & '') >= 0, "
+                        "LEN({Due Date} & '') >= 0)"),
+        "fields": ["Task Name", "Status", "Due Date", "Hard Deadline"],
+    },
+    {
         # `Completion Date` is a dateTime and `Due Date` is a plain date, which
         # Airtable reads as midnight. So the original formula
         # (`{Completion Date} <= {Due Date}`) scored EVERY task finished on its

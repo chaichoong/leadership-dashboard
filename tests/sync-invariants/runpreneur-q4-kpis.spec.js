@@ -87,9 +87,10 @@ test.describe('the Runpreneur money KPI saves only money a cause confirmed', () 
         const saves = await loadDashboard(page, 'fail');
         await expect.poll(() => (saves.recControl || []).length, { timeout: 30000,
             message: 'control: the plain KPI was never saved, so the compute pass did not run' }).toBeGreaterThan(0);
-        await page.waitForTimeout(1000);
+        // Same race as the partners case below: the badge is the end-of-compute signal, so it
+        // is awaited BEFORE the absence is asserted, not after a fixed sleep.
+        await expect(page.locator('.strat-kpi-row[data-project-id="recMoney"]')).toContainText('Compute failed', { timeout: 30000 });
         expect(saves.recMoney || [], 'a money figure was saved after the record failed to load').toEqual([]);
-        await expect(page.locator('.strat-kpi-row[data-project-id="recMoney"]')).toContainText('Compute failed');
     });
 });
 
@@ -109,9 +110,15 @@ test.describe('the Runpreneur partners KPI counts only a written yes', () => {
 
     test('a failed read of the partners list saves nothing for partners, and the money KPI still saves', async ({ page }) => {
         const saves = await loadDashboard(page, MONEY, 'fail');
+        // Wait on the OBSERVABLE END of the partners compute, never on a fixed delay. Until
+        // 28 Oct 2026 this slept 1000 ms and then asserted an absence, which is a race at 1 or
+        // 2 Playwright workers: the sleep was long enough alone (2.1 s) and not under parallel
+        // load, so the gate on PR #822 went red on a spec the branch never touched
+        // (finding 20261023-queue-fixer-1055). The badge proves the compute RAN and threw, so
+        // the empty-saves assertion below means "refused", not "not finished yet".
+        await expect(page.locator('.strat-kpi-row[data-project-id="recPartners"]')).toContainText('Compute failed', { timeout: 30000 });
         await expect.poll(() => (saves.recMoney || []).length, { timeout: 30000,
             message: 'control: the money KPI was never saved, so the compute pass did not run' }).toBeGreaterThan(0);
-        await page.waitForTimeout(1000);
         expect(saves.recPartners || [], 'a partners figure was saved after the list failed to load').toEqual([]);
         expect(saves.recMoney[0][PF.kpiCurrent]).toBe(1000);
     });
