@@ -1472,7 +1472,7 @@
                 // opens holds 56 is not a rounding difference — it is the
                 // front page disagreeing with the page it links to, about the
                 // one number this card exists to report.
-                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`AND({Status}='Approval', NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
+                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`AND({Status}='Approval', NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(IS_AFTER({Back At}, NOW())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
                 // LEN(field&'') rather than != '' — a blank Airtable field is not
                 // reliably unequal to an empty string, and that trap has emptied
                 // a whole query in this base before.

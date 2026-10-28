@@ -45,6 +45,9 @@ const dashboard = read('js/dashboard.js');
 // The field the whole feature turns on. Created on the live base 28 Aug 2026.
 const DEFERRED_FIELD_ID = 'fldJ9IHS1yxwYzYSN';
 const DEFERRED_FIELD_NAME = 'Deferred Until';
+// Later today (28 Oct 2026): a date and time, created on the live base that day.
+const BACK_AT_FIELD_ID = 'fldneMJ082y1ij6zz';
+const BACK_AT_FIELD_NAME = 'Back At';
 
 // Pull a real function out of a source file and evaluate it, rather than
 // pasting a copy that drifts. Same approach as tests/recon-vendor-key.test.js.
@@ -156,8 +159,12 @@ describe('the queue formula', () => {
     // lane is the queue's population before that split.
     const answeredOut = ", NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0))";
     expect(m[1]).toContain(answeredOut);
-    expect(def[1]).toBe(m[1].replace(answeredOut, '').replace(`NOT(IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY()))`,
-                                     `IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY())`));
+    // Since 28 Oct 2026 the queue hides on either clause (a day, or Later today's
+    // moment), so the lane holds a card when EITHER says hide: NOT(a), NOT(b)
+    // against OR(a, b). A lane keyed on the day alone would lose every Later today card.
+    expect(def[1]).toBe(m[1].replace(answeredOut, '').replace(
+      `NOT(IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY())), NOT(IS_AFTER({${BACK_AT_FIELD_NAME}}, NOW()))`,
+      `OR(IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY()), IS_AFTER({${BACK_AT_FIELD_NAME}}, NOW()))`));
   });
 
   it('the answered read is the other half of the not-deferred population, so an answered card is never in neither', () => {
@@ -484,5 +491,93 @@ describe('the surfaces that COUNT the queue honour the date too', () => {
     for (const [name, src] of [['huddle', huddle], ['dashboard', dashboard]]) {
       expect(src, `${name}`).toContain(DEFERRED_FIELD_NAME);
     }
+  });
+});
+
+// ─── LATER TODAY (28 Oct 2026) ───────────────────────────────────────
+//
+// Kevin: "Maybe we split things into morning, afternoon, and evening: 9 am,
+// 1 pm, 5 pm ... when I select 'Later today,' it just moves it to the next
+// milestone in that day, and it just keeps my approvals gate under control."
+//
+// The real functions, pulled out of the page. London's clock, because the
+// slots are the inbox robot's 09:00, 13:00 and 17:00 runs.
+const APV_LATER_SLOTS = agentsPage.match(/const APV_LATER_SLOTS = (\[[^\]]+\]);/);
+const later = new Function(
+  `const APV_LATER_SLOTS = ${APV_LATER_SLOTS && APV_LATER_SLOTS[1]};
+   ${extract(agentsPage, 'apvLondonParts', 'os/agents/index.html')}
+   ${extract(agentsPage, 'apvLondonMs', 'os/agents/index.html')}
+   ${extract(agentsPage, 'apvClockLabel', 'os/agents/index.html')}
+   ${extract(agentsPage, 'apvLondonStamp', 'os/agents/index.html')}
+   ${extract(agentsPage, 'apvIsMoment', 'os/agents/index.html')}
+   ${extract(agentsPage, 'apvLaterToday', 'os/agents/index.html')}
+   return { apvLaterToday, apvClockLabel, apvLondonStamp, apvIsMoment };`)();
+const slotAt = utc => later.apvLaterToday(new Date(utc));
+
+describe('Later today: the next of 9am, 1pm and 5pm', () => {
+  it('the slots are the three he named', () => {
+    expect(APV_LATER_SLOTS && APV_LATER_SLOTS[1]).toBe('[9, 13, 17]');
+  });
+
+  it('in winter (London on UTC) each boundary goes to the next slot', () => {
+    expect(slotAt('2026-10-28T00:10:00Z')).toEqual({ iso: '2026-10-28T09:00:00.000Z', label: '9am' });
+    expect(slotAt('2026-10-28T08:59:00Z')).toEqual({ iso: '2026-10-28T09:00:00.000Z', label: '9am' });
+    // AT a slot is past it: pressing Later today at 9:00 must not mean "now".
+    expect(slotAt('2026-10-28T09:00:00Z')).toEqual({ iso: '2026-10-28T13:00:00.000Z', label: '1pm' });
+    expect(slotAt('2026-10-28T12:59:00Z')).toEqual({ iso: '2026-10-28T13:00:00.000Z', label: '1pm' });
+    expect(slotAt('2026-10-28T13:00:00Z')).toEqual({ iso: '2026-10-28T17:00:00.000Z', label: '5pm' });
+    expect(slotAt('2026-10-28T16:59:00Z')).toEqual({ iso: '2026-10-28T17:00:00.000Z', label: '5pm' });
+  });
+
+  it('from 5pm there is no later today', () => {
+    expect(slotAt('2026-10-28T17:00:00Z')).toBeNull();
+    expect(slotAt('2026-10-28T23:30:00Z')).toBeNull();
+  });
+
+  it('in summer the slots are London time, an hour ahead of UTC', () => {
+    expect(slotAt('2026-07-01T07:30:00Z')).toEqual({ iso: '2026-07-01T08:00:00.000Z', label: '9am' });   // 08:30 BST
+    expect(slotAt('2026-07-01T15:59:00Z')).toEqual({ iso: '2026-07-01T16:00:00.000Z', label: '5pm' });   // 16:59 BST
+    expect(slotAt('2026-07-01T16:30:00Z')).toBeNull();                                                    // 17:30 BST
+    // 23:30 UTC is 00:30 BST the NEXT day: the slot is that day's 9am, not tonight's.
+    expect(slotAt('2026-07-01T23:30:00Z')).toEqual({ iso: '2026-07-02T08:00:00.000Z', label: '9am' });
+  });
+
+  it('on the night the clocks go back, 9am is 9am GMT', () => {
+    expect(slotAt('2026-10-25T00:30:00Z')).toEqual({ iso: '2026-10-25T09:00:00.000Z', label: '9am' });   // 01:30 BST
+  });
+
+  it('a moment is told apart from a day, so each lands in its own field', () => {
+    expect(later.apvIsMoment('2026-10-28T13:00:00.000Z')).toBe(true);
+    expect(later.apvIsMoment('2026-10-29')).toBe(false);
+    expect(later.apvIsMoment('')).toBe(false);
+  });
+
+  it('the stamp and label read on London\'s clock', () => {
+    expect(later.apvLondonStamp('2026-07-01T12:00:00.000Z')).toBe('2026-07-01 13:00');
+    expect(later.apvClockLabel('2026-07-01T12:00:00.000Z')).toBe('1pm');
+    expect(later.apvClockLabel('2026-10-28T12:30:00.000Z')).toBe('12:30pm');
+  });
+
+  it('his reason is read back from a Later today stamp too', () => {
+    expect(apvDeferReasonFrom('[2026-10-28 10:15] Knocked back to 2026-10-28 13:00: waiting on Roy')).toBe('waiting on Roy');
+    expect(apvDeferReasonFrom('[2026-10-28 10:15] Knocked back to 2026-10-28 13:00')).toBe('');
+  });
+});
+
+describe('every count of the queue hides a Later today card', () => {
+  const CLAUSE = `NOT(IS_AFTER({${BACK_AT_FIELD_NAME}}, NOW()))`;
+  it('the page, the sidebar badge and the front-page card all carry the clause', () => {
+    // The approvals band above every prompt (~/.claude/mods/approvals-band) carries it too; it is outside
+    // this repo, so it was compared with APV_QUEUE_FORMULA by hand on 28 Oct 2026.
+    expect(agentsPage.match(/const APV_QUEUE_FORMULA = "([^"]+)"/)[1]).toContain(CLAUSE);
+    expect(agentsPage.match(/const APV_ANSWERED_FORMULA = "([^"]+)"/)[1]).toContain(CLAUSE);
+    expect(shared.match(/const AGENTS_BADGE_FORMULA = "([^"]+)"/)[1]).toContain(CLAUSE);
+    expect(dashboard).toContain(`NOT(IS_AFTER({Deferred Until}, TODAY())), ${CLAUSE}`);
+  });
+
+  it('the field is named once, by the same id, in config and on the page', () => {
+    expect(config).toMatch(/backAt:\s*'fldneMJ082y1ij6zz'/);
+    expect(agentsPage).toMatch(/backAt:\s*'fldneMJ082y1ij6zz'/);
+    expect(BACK_AT_FIELD_ID).toBe('fldneMJ082y1ij6zz');
   });
 });
