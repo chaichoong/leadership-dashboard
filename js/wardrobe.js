@@ -16,6 +16,8 @@
     'use strict';
     const TAB = 'wardrobe';
     const WEATHER_MAX_AGE_MS = 30 * 60 * 1000;
+    const HOUR_FROM = 6;            // the hourly strip runs 06:00 to 23:00 (Kevin, 28 Oct 2026)
+    const WINDY_MPH = 15;           // the wind chip turns amber from here (was 25 km/h)
     const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, saving: false, view: 'own', form: null };   // form: null, 'add' or the id of the piece being removed
     const UNKNOWN_WX = { feelsNow: null, actualNow: null, feelsMin: null, feelsMax: null, rainChance: null, code: null };
 
@@ -86,17 +88,23 @@
             const c = await coords();
             const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + encodeURIComponent(c.lat.toFixed(3)) + '&longitude=' + encodeURIComponent(c.lon.toFixed(3))
                 + '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m'
-                + '&daily=apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,weather_code&timezone=auto&forecast_days=1';
+                + '&daily=apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,weather_code'
+                + '&hourly=apparent_temperature,precipitation,wind_speed_10m&wind_speed_unit=mph&timezone=auto&forecast_days=1';
             const resp = await fetch(url);
             if (!resp.ok) throw new Error('weather ' + resp.status);
             const d = await resp.json();
             const cur = d.current || {}, day = d.daily || {};
             const n = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+            // Hour by hour, 6am to midnight (Kevin, 28 Oct 2026). The times are the place's own clock (timezone=auto).
+            const hr = d.hourly || {};
+            const hours = (hr.time || []).map((t, i) => ({ hour: Number((/T(\d\d)/.exec(t) || [])[1]), feels: n((hr.apparent_temperature || [])[i]),
+                rainMm: n((hr.precipitation || [])[i]), wind: n((hr.wind_speed_10m || [])[i]) }))
+                .filter(h => h.hour >= HOUR_FROM && h.hour <= 23);
             const wx = {
                 feelsNow: n(cur.apparent_temperature), actualNow: n(cur.temperature_2m), wind: n(cur.wind_speed_10m),
                 feelsMin: n((day.apparent_temperature_min || [])[0]), feelsMax: n((day.apparent_temperature_max || [])[0]),
                 rainChance: n((day.precipitation_probability_max || [])[0]), code: n((day.weather_code || [])[0]) ?? n(cur.weather_code),
-                place: c.place, mine: c.mine,
+                place: c.place, mine: c.mine, hours,
             };
             if (wx.feelsNow == null || wx.feelsMin == null || wx.feelsMax == null) throw new Error('weather reply missing temperatures');
             state.wx = wx; state.wxError = null; state.wxAt = Date.now(); state.wxDay = today();
@@ -131,6 +139,21 @@
         </article>`;
     }
 
+    // One column per hour: feels-like °C, rain in mm, wind in mph. Hours gone are faded, this hour is marked.
+    function hourStrip(hours) {
+        if (!hours || !hours.length) return '';
+        const now = new Date().getHours();
+        const fmt1 = (v) => (v == null ? '–' : (Math.round(v * 10) / 10).toFixed(1));
+        const cell = (h, body, extra) => `<td class="${h.hour < now ? 'wear-past' : h.hour === now ? 'wear-now' : ''}${extra || ''}">${body}</td>`;
+        return `<div class="wear-hours" role="region" aria-label="Today hour by hour" tabindex="0"><table>
+            <thead><tr><th scope="row">Time</th>${hours.map(h => `<th scope="col" class="${h.hour < now ? 'wear-past' : h.hour === now ? 'wear-now' : ''}"${h.hour === now ? ' aria-current="time"' : ''}>${String(h.hour).padStart(2, '0')}:00</th>`).join('')}</tr></thead>
+            <tbody>
+                <tr><th scope="row">Feels like</th>${hours.map(h => cell(h, h.feels == null ? '–' : Math.round(h.feels) + '°')).join('')}</tr>
+                <tr><th scope="row">Rain (mm)</th>${hours.map(h => cell(h, fmt1(h.rainMm), h.rainMm > 0 ? ' wear-wet' : '')).join('')}</tr>
+                <tr><th scope="row">Wind (mph)</th>${hours.map(h => cell(h, h.wind == null ? '–' : Math.round(h.wind), h.wind >= WINDY_MPH ? ' wear-windy' : '')).join('')}</tr>
+            </tbody></table></div>`;
+    }
+
     function currentPicks() {
         const wx = state.wx || UNKNOWN_WX;   // no weather: no layers, never a guess
         return P().pickOutfits(state.data.outfits, state.data.items, wx, new Date());
@@ -153,9 +176,9 @@
                     <span class="wear-chip">${esc(P().describeCode(wx.code))}</span>
                     <span class="wear-chip">Feels ${Math.round(wx.feelsMin)}° to ${Math.round(wx.feelsMax)}° today</span>
                     ${wx.rainChance != null ? `<span class="wear-chip${wx.rainChance >= P().RULES.RAIN_PCT ? ' wear-chip-rain' : ''}">Rain ${Math.round(wx.rainChance)}%</span>` : ''}
-                    ${wx.wind != null ? `<span class="wear-chip${wx.wind >= 25 ? ' wear-chip-wind' : ''}">Wind ${Math.round(wx.wind)} km/h</span>` : ''}
+                    ${wx.wind != null ? `<span class="wear-chip${wx.wind >= WINDY_MPH ? ' wear-chip-wind' : ''}">Wind ${Math.round(wx.wind)} mph</span>` : ''}
                 </div></div>` : ''}
-        </div>`;
+        </div>${wx ? hourStrip(wx.hours) : ''}`;
         if (state.dataError) {
             el.innerHTML = head + `<p class="wear-error">${esc(state.dataError)} Press Refresh in the Wardrobe page's bar to try again.</p>`;
             return;

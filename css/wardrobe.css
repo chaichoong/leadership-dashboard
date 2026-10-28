@@ -36,6 +36,17 @@
 .wear-link { font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semibold); background: none; border: 0; padding: 0; color: var(--text-link); cursor: pointer; text-decoration: underline; }
 .wear-muted { color: var(--text-muted); margin: var(--space-3) 0 0; }
 .wear-error { color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); margin: var(--space-3) 0 0; }
+/* Today hour by hour (Kevin, 28 Oct 2026): scrolls sideways inside the card on a narrow screen. */
+.wear-hours { margin-top: var(--space-4); overflow-x: auto; border: 1px solid var(--border-default); border-radius: var(--radius-md); }
+.wear-hours:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.wear-hours table { border-collapse: collapse; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; width: 100%; }
+.wear-hours th, .wear-hours td { padding: 4px 6px; text-align: center; white-space: nowrap; border-top: 1px solid var(--border-subtle); color: var(--text-primary); }
+.wear-hours thead th { border-top: 0; color: var(--text-secondary); font-weight: var(--fw-semibold); }
+.wear-hours th[scope="row"] { position: sticky; left: 0; background: var(--bg-surface); text-align: left; color: var(--text-secondary); font-weight: var(--fw-semibold); padding-left: var(--space-3); }
+.wear-hours .wear-past { color: var(--text-muted); opacity: .6; }
+.wear-hours .wear-now { background: var(--accent-soft); font-weight: var(--fw-bold); }
+.wear-hours .wear-wet { color: var(--info); font-weight: var(--fw-semibold); }
+.wear-hours .wear-windy { color: var(--warning); font-weight: var(--fw-semibold); }
 @media (max-width: 900px) { .wear-opts { grid-template-columns: 1fr; } .wear-opt-best { order: -1; } }   /* on a phone the recommended option comes first */
 
 /* ── Wardrobe page ── */
