@@ -218,7 +218,18 @@ describe("the CEO brief stops counting what Kevin parked", () => {
 });
 
 describe('isKnockedBack — the Tasks drawer predicate', () => {
-  const t = (status, deferredUntil) => ({ status, deferredUntil });
+  const t = (status, deferredUntil, backAt) => ({ status, deferredUntil, backAt });
+
+  // Later today (28 Oct 2026): the Tasks page counts ("needs you", "waiting") hide it until its time too.
+  it('hides a task knocked back to later today, and shows it once the time has passed', () => {
+    const inAnHour = new Date(Date.now() + 3600000).toISOString();
+    const anHourAgo = new Date(Date.now() - 3600000).toISOString();
+    expect(isKnockedBack(t('Approval', '', inAnHour))).toBe(true);
+    expect(isKnockedBack(t('Approval', '', anHourAgo))).toBe(false);
+    // An old day knock-back that has passed does not hide a card that Later today still hides.
+    expect(isKnockedBack(t('Approval', apvDatePlus(-3), inAnHour))).toBe(true);
+    expect(isKnockedBack(t('Today', '', inAnHour))).toBe(false);
+  });
 
   it('hides a task knocked back to the future', () => {
     expect(isKnockedBack(t('Approval', apvDatePlus(7)))).toBe(true);
@@ -573,6 +584,8 @@ describe('every count of the queue hides a Later today card', () => {
     expect(agentsPage.match(/const APV_ANSWERED_FORMULA = "([^"]+)"/)[1]).toContain(CLAUSE);
     expect(shared.match(/const AGENTS_BADGE_FORMULA = "([^"]+)"/)[1]).toContain(CLAUSE);
     expect(dashboard).toContain(`NOT(IS_AFTER({Deferred Until}, TODAY())), ${CLAUSE}`);
+    // The Tasks page counts in the browser (isKnockedBack, driven above) and must fetch the field to do it.
+    expect(tasksPage).toMatch(/backAt:'fldneMJ082y1ij6zz'/);
   });
 
   it('the field is named once, by the same id, in config and on the page', () => {
