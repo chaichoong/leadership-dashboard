@@ -301,3 +301,38 @@ test.describe('Editing the wardrobe', () => {
     await expect(pg.locator('[data-wr-addform]')).toBeVisible();   // the form stays, so he can try again
   });
 });
+
+test.describe('Today hour by hour', () => {
+  test('the card shows 06:00 to 23:00 with feels-like °C, rain in mm and wind in mph, and never km/h', async ({ page }) => {
+    const errors = await open(page, 'home');
+    const strip = page.locator('#homeWear .wear-hours');
+    await expect(strip.locator('thead th[scope="col"]')).toHaveCount(18, { timeout: 20000 });
+    await expect(strip.locator('thead th[scope="col"]').first()).toHaveText('06:00');
+    await expect(strip.locator('thead th[scope="col"]').last()).toHaveText('23:00');
+    const row = (label) => strip.locator('tbody tr', { hasText: label }).locator('td');
+    // Fixture: hour h feels 5 + h/4, rain 0.4 mm at 08:00 and 1.2 mm at 17:00, wind 10 + h/2 mph.
+    await expect(row('Feels like').first()).toHaveText('7°');        // 06:00: 6.5 rounds to 7
+    await expect(row('Feels like').last()).toHaveText('11°');        // 23:00: 10.75
+    await expect(row('Rain (mm)').nth(2)).toHaveText('0.4');         // 08:00
+    await expect(row('Rain (mm)').nth(11)).toHaveText('1.2');        // 17:00
+    await expect(row('Rain (mm)').nth(11)).toHaveClass(/wear-wet/);
+    await expect(row('Rain (mm)').nth(0)).toHaveText('0.0');
+    await expect(row('Wind (mph)').first()).toHaveText('13');         // 06:00
+    await expect(row('Wind (mph)').last()).toHaveText('22');          // 23:00: 21.5
+    await expect(page.locator('#homeWear .wear-chips')).toContainText('Wind 17 mph');
+    await expect(page.locator('#homeWear')).not.toContainText('km/h');
+    const now = new Date().getHours();
+    if (now >= 6) await expect(strip.locator('thead th[aria-current="time"]')).toHaveText(String(now).padStart(2, '0') + ':00');
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('on a phone the strip scrolls inside the card, never the page', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await open(page, 'home');
+    await expect(page.locator('#homeWear .wear-hours')).toBeVisible({ timeout: 20000 });
+    const w = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, view: document.documentElement.clientWidth,
+      strip: document.querySelector('#homeWear .wear-hours').scrollWidth > document.querySelector('#homeWear .wear-hours').clientWidth }));
+    expect(w.page).toBeLessThanOrEqual(w.view);
+    expect(w.strip).toBe(true);
+  });
+});

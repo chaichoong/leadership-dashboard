@@ -353,8 +353,15 @@ async function stubExternalHosts(page) {
   });
 }
 const WEATHER_FIXTURE = {
-  current: { temperature_2m: 14.5, apparent_temperature: 10.5, weather_code: 1, wind_speed_10m: 26.6 },
+  current: { temperature_2m: 14.5, apparent_temperature: 10.5, weather_code: 1, wind_speed_10m: 16.5 },
   daily: { apparent_temperature_max: [13.0], apparent_temperature_min: [5.3], precipitation_probability_max: [80], weather_code: [53] },
+  // Wind in mph (the card asks for wind_speed_unit=mph). Hour h: feels 5 + h/4, rain 0.4 mm at 08:00 and 1.2 mm at 17:00 only, wind 10 + h/2.
+  hourly: {
+    time: Array.from({ length: 24 }, (_, h) => `2026-01-15T${String(h).padStart(2, '0')}:00`),
+    apparent_temperature: Array.from({ length: 24 }, (_, h) => 5 + h / 4),
+    precipitation: Array.from({ length: 24 }, (_, h) => (h === 8 ? 0.4 : h === 17 ? 1.2 : 0)),
+    wind_speed_10m: Array.from({ length: 24 }, (_, h) => 10 + h / 2),
+  },
 };
 
 /**
