@@ -50,10 +50,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // voteDelayMs: a number, or a function of the request number (0, 1, ...).
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
+  // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
+  // Ann's tick makes four (the Worker's ALERT_AT) and the day turns ready.
+  const extras = readyAt ? [{ id: 3, name: 'Test Cat', venues: ['si', 'pdl', 'pp'], savedAt: null }, { id: 4, name: 'Test Dan', venues: ['si', 'pdl', 'pp'], savedAt: null }] : [];
   const store = { votes: new Map(), headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  if (readyAt) {
+    const slot = `${londonDates(Date.now())[1]}|${readyAt}`;
+    for (const pid of [2, 3, 4]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
+  }
   store.removePerson = () => { store.gone = true; };
   // The hours a person has ticked on the server (votes are keyed by person and hour).
   store.ticks = (pid = 1) => [...store.votes.values()].filter((v) => v.person_id === pid).map((v) => v.slot).sort();
@@ -68,7 +75,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       { readAt: at, goodAt: { si: at, pdl: at }, venues: { si, pdl: {} } },
       { fetchedAt: at, goodAt: at, days: {} },
     );
-    return computeState({ people: store.gone ? [other] : [person, other], votes: [...store.votes.values()], booked: [], availability, dates: londonDates(now), nowMs: now });
+    return computeState({ people: store.gone ? [other, ...extras] : [person, other, ...extras], votes: [...store.votes.values()], booked: [], availability, dates: londonDates(now), nowMs: now });
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -491,6 +498,21 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await page.locator(`[data-slot="${tomorrow}|19"]`).click();
     await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('1 in');
     await expect(page.locator(`[data-day="${tomorrow}"]`)).toHaveAttribute('aria-label', /up to 1 on one hour$/);
+  });
+
+  test('four people on an hour with a court free: the day reads "4 in ✓" in green and the Ready panel shows', async ({ page }) => {
+    await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, readyAt: '19' });
+    const tomorrow = await openAsTestAnn(page);
+    const day = page.locator(`[data-day="${tomorrow}"]`);
+    await expect(day.locator('small')).toHaveText('3 in');
+    await expect(day).not.toHaveClass(/has-ready/);
+    await expect(page.locator('#ready')).toBeHidden();
+    await page.locator(`[data-slot="${tomorrow}|19"]`).click();
+    await expect(day.locator('small')).toHaveText('4 in ✓');
+    await expect(day).toHaveClass(/has-ready/);
+    await expect(day).toHaveAttribute('aria-label', /up to 4 on one hour, ready to book$/);
+    await expect(page.locator('#ready')).toContainText('Ready to book');
+    await expect(page.locator('#ready')).toContainText('St Ives');
   });
 
   test.describe('no code (Kevin, 27 Oct 2026)', () => {
