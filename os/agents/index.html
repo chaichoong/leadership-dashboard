@@ -667,6 +667,10 @@ const TF = {
     // js/config.js for why this is a date on the task rather than a queue
     // somewhere else.
     deferredUntil:    'fldJ9IHS1yxwYzYSN',
+    // Later today (28 Oct 2026): the moment a same-day knock-back ends. A date
+    // and time, because Deferred Until is a day and about fifteen scripts read
+    // it as one. See APV_LATER_SLOTS.
+    backAt:           'fldneMJ082y1ij6zz',
     // The learning loop's idempotency stamp (26 Aug 2026): set once the lesson
     // is in the agent's file. The 15-Minute Dashboard counts it, never writes it.
     lessonWrittenAt:  'fldFfzXOME9Rh8SyM',
@@ -1136,7 +1140,7 @@ async function apvRunReread(){
     let failed = false;
     try {
         await apvSilentRefresh();
-        const deferredSig = () => allDeferred.map(t => `${t.id}:${t.until}:${t.why || ''}`).join('|');
+        const deferredSig = () => allDeferred.map(t => `${t.id}:${t.until}:${t.backAt}:${t.why || ''}`).join('|');
         const beforeDeferred = deferredSig();
         await loadDeferred();
         if(deferredSig() !== beforeDeferred) apvRefreshDeferredLane();   // a rebuild could swallow a click on "Bring back now"
@@ -1196,21 +1200,29 @@ async function postTaskComment(taskId, text){
 // the case that matters — get that wrong and the whole queue vanishes.
 // Guarded by tests/approval-defer.test.js.
 //
+// Later today (Kevin, 28 Oct 2026: "it just moves it to the next milestone in
+// that day, and it just keeps my approvals gate under control") is the same
+// idea to the hour: {Back At} holds a moment, NOW() is read at query time, so
+// the card returns at 9am, 1pm or 5pm with nothing to bring it back. A blank
+// Back At hides nothing: back-tested on the live base on 28 Oct 2026, the
+// queue read 18 with and without the clause, 0 with a moment in 2099 in its
+// place and 18 with 06:00 that morning.
+//
 // The queue formula is written out in FULL, as one literal, and js/shared.js
 // holds a byte-identical copy for the sidebar badge. That duplication is
 // deliberate: tests/agent-register-surfaces.test.js reads the string out of
 // both files and fails if they differ, so the badge can never count a queue
 // the page does not show. Composing it from parts would slip past that test.
-const APV_QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))";
+const APV_QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(IS_AFTER({Back At}, NOW())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))";
 // The cards the queue formula leaves out because he has answered them (Kevin, 9 Oct 2026): a Your step
 // card carrying his KEVIN STEP DONE or CANT line, waiting for the half-hourly sweep. Read on their own
 // for the Undo bar and the one line that says they are going back.
-const APV_ANSWERED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0))";
-const APV_DEFERRED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, IS_AFTER({Deferred Until}, TODAY()))";
+const APV_ANSWERED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(IS_AFTER({Back At}, NOW())), AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0))";
+const APV_DEFERRED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, OR(IS_AFTER({Deferred Until}, TODAY()), IS_AFTER({Back At}, NOW())))";
 const APV_QUEUE_FIELDS = () => [
     TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
     TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
-    TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
+    TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil, TF.backAt,
     TF.feedbackHistory, TF.inboundSender, TF.plainSummary,
     // Your step (7 Oct 2026): an approved card back in his lane, and the proof he gave.
     TF.approvalOutcome, TF.approvalFeedback,
@@ -1280,6 +1292,7 @@ async function loadApprovals(){
             // reason raiserLinked is carried: a formula that quietly stops
             // excluding must fail loudly, not widen the queue in silence.
             deferredUntil: String(gf(r,TF.deferredUntil)||'').slice(0,10),
+            backAt: String(gf(r,TF.backAt)||''),
             submittedAt: apvWaitingSince(
                 gf(r,TF.slackBaseline)
                     || apvArrivedFromNotes(gf(r,TF.notes), String(gf(r,TF.agentOutput)||'').trimStart().startsWith(APV_STEP_MARK),
@@ -1400,14 +1413,25 @@ async function loadDeferred(){
             const ap = gf(r,TF.approver);
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
         });
-        allDeferred = mine.map(r=>({
-            id: r.id,
-            name: gf(r,TF.name)||'(Untitled)',
-            raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
-            until: String(gf(r,TF.deferredUntil)||'').slice(0,10),
-            tier1: isTier1Output(gf(r,TF.agentOutput)||''),
-            why: apvDeferReasonFrom(gf(r,TF.feedbackHistory)),
-        })).sort((a,b)=>String(a.until).localeCompare(String(b.until)));
+        // The formula's TODAY() is UTC's date.
+        const utcToday = new Date().toISOString().slice(0,10);
+        allDeferred = mine.map(r=>{
+            // The formula decides why a card is here, not this Mac's clock: a card not hidden by a
+            // future day is hidden by its Back At, so its time is shown even if the Mac runs ahead
+            // of Airtable. A Back At left on a card hidden by a day is history (review, 28 Oct 2026).
+            const until = String(gf(r,TF.deferredUntil)||'').slice(0,10);
+            const rawBackAt = String(gf(r,TF.backAt)||'');
+            return {
+                id: r.id,
+                name: gf(r,TF.name)||'(Untitled)',
+                raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
+                until,
+                backAt: until > utcToday ? '' : rawBackAt,
+                hasBackAt: !!rawBackAt,
+                tier1: isTier1Output(gf(r,TF.agentOutput)||''),
+                why: apvDeferReasonFrom(gf(r,TF.feedbackHistory)),
+            };
+        }).sort(apvReturnOrder);
         _deferredState = 'ready';
     } catch(e){
         if(e.message==='auth') throw e;
@@ -1425,7 +1449,7 @@ const APV_DEFER_TAG = 'Knocked back to ';
 function apvDeferReasonFrom(history){
     const lines = String(history||'').split('\n');
     for(let i = lines.length - 1; i >= 0; i--){
-        const m = lines[i].match(/\]\s*Knocked back to \d{4}-\d{2}-\d{2}(?::\s*(.+))?$/);
+        const m = lines[i].match(/\]\s*Knocked back to \d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?(?::\s*(.+))?$/);
         if(m) return (m[1]||'').trim();
     }
     return '';
@@ -1737,13 +1761,14 @@ function apvDeferredLaneHtml(){
     }
     if(!allDeferred.length) return '';
     const next = allDeferred[0];
-    const due = allDeferred.filter(t=>{ const d = apvDaysUntil(t.until); return d !== null && d <= 1; }).length;
+    const due = allDeferred.filter(t=>{ const d = apvDaysUntil(t.until); return t.backAt || (d !== null && d <= 1); }).length;
     return `<details class="apv-later" data-apv-later>
         <summary>&#128340; ${allDeferred.length} knocked back &mdash; ${due ? `${due} back within a day` : `next back ${esc(apvDeferDateLabel(next.until))}`}</summary>
         <div class="apv-later-list">
             ${allDeferred.map(t=>{
                 const d = apvDaysUntil(t.until);
-                const when = d === null ? esc(t.until)
+                const when = t.backAt ? `back at ${esc(apvClockLabel(t.backAt))}`
+                    : d === null ? esc(t.until)
                     : d <= 0 ? 'back today'
                     : d === 1 ? 'back tomorrow'
                     : `back ${esc(apvDeferDateLabel(t.until))}`;
@@ -2067,6 +2092,7 @@ function apvBulkBarHtml(shown){
         <div class="${panel('defer')}" id="apvBulkPanel-defer">
             <div class="apv-defer" role="group" aria-label="Knock these back to a date">
                 <span class="apv-defer-label">Not yet &mdash; bring all <span data-apv-bulk-n>${n}</span> back in&hellip;</span>
+                ${apvLaterTodayBtn('agBulkLaterToday()', 'data-apv-bulk-btn')}
                 ${APV_DEFER_OPTIONS.map(o=>`<button class="apv-defer-btn" data-apv-bulk-btn
                      onclick="agBulkDefer(${o.days})"
                      title="Returns on ${esc(apvDeferDateLabel(apvDatePlus(o.days)))}">${esc(o.label)}</button>`).join('')}
@@ -2229,6 +2255,13 @@ window.agBulkReject = agBulkReject;
 function agBulkDefer(days){ apvBulkDeferTo(apvDatePlus(days)); }
 window.agBulkDefer = agBulkDefer;
 
+function agBulkLaterToday(){
+    const slot = apvLaterToday();
+    if(!slot){ toast(APV_LATER_GONE); return; }
+    apvBulkDeferTo(slot.iso);
+}
+window.agBulkLaterToday = agBulkLaterToday;
+
 function agBulkDeferOnDate(){
     const el = document.getElementById('apvBulkDeferDate');
     const until = (el && el.value || '').trim();
@@ -2273,7 +2306,7 @@ async function apvBulkDeferTo(until){
     _apvSelected.clear();
     _apvFocusId = landing;
     await refreshApprovalZone(true);
-    const parts = [`Knocked back ${done} to ${apvDeferDateLabel(until)}.`];
+    const parts = [`Knocked back ${done} to ${apvDeferWhenLabel(until)}.`];
     if(elsewhere) parts.push(`${elsewhere} already decided elsewhere.`);
     if(failed) parts.push(`${failed} could not be knocked back and are still in the queue.`);
     toast(parts.join(' '));
@@ -2294,7 +2327,12 @@ function apvQueueSignature(){
 }
 function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInWait(t)); }
 // An answered card waits for the sweep: re-read on the same clock, so its line goes when it does.
-function apvWatchingQueue(){ return apvWatchingSignIns() || allAnswered.length > 0; }
+// So does a Later today card whose time has passed (review, 28 Oct 2026): nothing else re-reads an
+// open tab, so at 1pm the card would stay listed as "back at 1pm" until he reloaded.
+function apvWatchingQueue(){
+    return apvWatchingSignIns() || allAnswered.length > 0
+        || allDeferred.some(t => t.backAt && Date.parse(t.backAt) <= Date.now());
+}
 // A Your step card is approved work waiting on Kevin's own step: a SIGN-IN NEEDED line inside the
 // agent's approved work below its step is history, never a sign-in wait (review, 7 Oct 2026).
 function apvSignInWait(t){ return apvYourStep(t) ? null : apvSignInNeeded(t.agentOutput); }
@@ -3308,6 +3346,7 @@ function apvReasonChips(taskId){
 function apvDeferRow(taskId){
     return `<div class="apv-defer" role="group" aria-label="Knock this back to a date">
         <span class="apv-defer-label" title="It leaves every approval surface until the date, then comes back on its own with the agent&apos;s work untouched.">Not yet &mdash; bring it back in&hellip;</span>
+        ${apvLaterTodayBtn(`agLaterToday('${taskId}')`, 'data-apv-btn')}
         ${APV_DEFER_OPTIONS.map(o=>`<button class="apv-defer-btn" data-apv-btn
              onclick="agDefer('${taskId}',${o.days})"
              title="Returns on ${esc(apvDeferDateLabel(apvDatePlus(o.days)))}">${esc(o.label)}</button>`).join('')}
@@ -4320,6 +4359,66 @@ function apvDaysUntil(iso){
     return Math.round((t - now) / 86400000);
 }
 
+// LATER TODAY (Kevin, 28 Oct 2026): "Maybe we split things into morning,
+// afternoon, and evening ... when I select 'Later today,' it just moves it to
+// the next milestone in that day." The slots are the inbox robot's 09:00, 13:00
+// and 17:00 runs, on London's clock as the robots keep it. After 5pm there is
+// no later today, so the button goes and Tomorrow comes first again. The return
+// is a moment in {Back At}, read against NOW() by every count, so nothing has
+// to bring the card back: the same design as a knock-back to a day.
+const APV_LATER_SLOTS = [9, 13, 17];
+const APV_LATER_GONE = 'It is past 5pm, so there is no later today. Tomorrow brings it back in the morning.';
+
+function apvLondonParts(at){
+    const p = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at).forEach(x => { p[x.type] = +x.value; });
+    return p;
+}
+
+// The next slot after `now` as { iso, label }, or null once the last has gone.
+function apvLaterToday(now){
+    const p = apvLondonParts(now instanceof Date ? now : new Date());
+    const hh = APV_LATER_SLOTS.find(h => h * 60 > p.hour * 60 + p.minute);
+    if(hh === undefined) return null;
+    const iso = new Date(apvLondonMs(p.year, p.month, p.day, hh, 0)).toISOString();
+    return { iso, label: apvClockLabel(iso) };
+}
+
+// "9am", "1pm", "5pm" on London's clock.
+function apvClockLabel(iso){
+    const t = Date.parse(iso);
+    if(isNaN(t)) return String(iso||'');
+    const p = apvLondonParts(new Date(t));
+    return (p.hour % 12 || 12) + (p.minute ? ':' + String(p.minute).padStart(2,'0') : '') + (p.hour < 12 ? 'am' : 'pm');
+}
+
+// "2026-10-28 13:00", London: the Feedback History stamp and the task comment.
+function apvLondonStamp(iso){
+    const p = apvLondonParts(new Date(Date.parse(iso)));
+    const two = n => String(n).padStart(2,'0');
+    return p.year+'-'+two(p.month)+'-'+two(p.day)+' '+two(p.hour)+':'+two(p.minute);
+}
+
+// A knock-back is a day ("2026-10-29") or, for Later today, a moment (an ISO time).
+function apvIsMoment(until){ return /T\d{2}:\d{2}/.test(String(until||'')); }
+function apvDeferWhenLabel(until){
+    return apvIsMoment(until) ? apvClockLabel(until) + ' today' : apvDeferDateLabel(until);
+}
+// Soonest back first. A moment sorts by its own date, so today's sit above tomorrow's.
+function apvReturnOrder(a, b){
+    return String(a.backAt || a.until).localeCompare(String(b.backAt || b.until));
+}
+
+// The button, or nothing after the last slot. The slot is worked out again on
+// the click, so a card drawn at 12:50 and pressed at 13:05 goes to 5pm and says so.
+function apvLaterTodayBtn(onclick, attr){
+    const slot = apvLaterToday();
+    if(!slot) return '';
+    return `<button class="apv-defer-btn" ${attr} onclick="${onclick}"
+         title="Leaves every approval count until ${esc(slot.label)} today, then comes back on its own">Later today (${esc(slot.label)})</button>`;
+}
+
 // ONE CLICK (Kevin, 23 Sep 2026): "when I want to knock it back, I don't
 // want to have to click a checkbox and then a Knock Back button". The date IS
 // the knock-back, the way a reason chip is the no. The "Knock this back?"
@@ -4329,6 +4428,13 @@ function agDefer(taskId, days){
     apvDeferNow(taskId, apvDatePlus(days));
 }
 window.agDefer = agDefer;
+
+function agLaterToday(taskId){
+    const slot = apvLaterToday();
+    if(!slot){ toast(APV_LATER_GONE); return; }
+    apvDeferNow(taskId, slot.iso);
+}
+window.agLaterToday = agLaterToday;
 
 // A date typed into the card's own picker. Rejects today and the past: a
 // "defer" that changes nothing would look like it worked and leave the item
@@ -4354,8 +4460,11 @@ async function apvDeferWrite(taskId, until, why){
     const live = await atFetchOne(TASKS_TBL, taskId);
     if(selName(gf(live,TF.status)) !== 'Approval') return false;
     const nowIso = new Date().toISOString();
+    const later = apvIsMoment(until);
     const payload = {};
-    payload[TF.deferredUntil] = until;
+    // Later today writes the moment and leaves the day alone, so the fifteen
+    // scripts that read Deferred Until as a day never see a time in it.
+    payload[later ? TF.backAt : TF.deferredUntil] = until;
     // The Slack fields are deliberately NOT touched here. The worker's
     // reconcile phase picks the deferral up within the minute, replies in
     // the existing thread with the return date, and clears the timestamp
@@ -4366,13 +4475,14 @@ async function apvDeferWrite(taskId, until, why){
     // The note to his future self. Tagged so the deferred lane can read it
     // back; appended, never overwritten, so a second knock-back keeps the
     // first reason.
-    const stamp = '['+nowIso.replace('T',' ').slice(0,16)+'] '+APV_DEFER_TAG+until+(why?': '+why:'');
+    const stamp = '['+nowIso.replace('T',' ').slice(0,16)+'] '+APV_DEFER_TAG+(later ? apvLondonStamp(until) : until)+(why?': '+why:'');
     const prior = String(gf(live,TF.feedbackHistory) || '');
     payload[TF.feedbackHistory] = (prior.replace(/\s+$/,'') + '\n\n' + stamp).trim();
     await atUpdate(TASKS_TBL, taskId, payload);
     await postTaskComment(taskId,
-        'Knocked back by Kevin until ' + until + '.' + (why ? ' Waiting on: ' + why : '')
-        + ' Not approved, not rejected — it returns to the approval queue on that date.');
+        'Knocked back by Kevin until ' + (later ? apvClockLabel(until) + ' today (' + apvLondonStamp(until) + ')' : until) + '.'
+        + (why ? ' Waiting on: ' + why : '')
+        + ' Not approved, not rejected — it returns to the approval queue ' + (later ? 'at that time.' : 'on that date.'));
     return true;
 }
 
@@ -4403,12 +4513,14 @@ async function apvDeferNow(taskId, until){
         }
         allApprovals = allApprovals.filter(x=>x.id!==taskId);
         delete _apvDrafts[taskId];
+        const later = apvIsMoment(until);
         allDeferred = allDeferred.filter(x=>x.id!==taskId).concat([{
-            id: taskId, name: t.name, raiserId: t.raiserId, until, tier1: t.tier1, why,
-        }]).sort((a,b)=>String(a.until).localeCompare(String(b.until)));
+            id: taskId, name: t.name, raiserId: t.raiserId, until: later ? '' : until, backAt: later ? until : '', hasBackAt: later,
+            tier1: t.tier1, why,
+        }]).sort(apvReturnOrder);
         apvRefreshDeferredLane();
-        apvShowSaved(taskId, t, `Knocked back to ${apvDeferDateLabel(until)}. It comes back on its own that day.`,
-            { [TF.deferredUntil]: null }, 'defer');
+        apvShowSaved(taskId, t, `Knocked back to ${apvDeferWhenLabel(until)}. It comes back on its own ${later ? 'then' : 'that day'}.`,
+            { [later ? TF.backAt : TF.deferredUntil]: null }, 'defer');
         apvSyncCountsInPlace(taskId);
         postApprovalBadge();
         loadChecksAndRender();
@@ -4417,8 +4529,10 @@ async function apvDeferNow(taskId, until){
         if(e.message==='auth'){ btns.forEach(b=>{ b.disabled = false; }); return; }
         console.error('defer failed', e);
         if(card) card.classList.remove('apv-saving');
+        // Later today works its slot out again on the retry: a 12:58 failure retried at 13:10 is 5pm, not a 1pm already gone.
+        const retry = apvIsMoment(until) ? `agLaterToday('${taskId}')` : `apvDeferNow('${taskId}','${esc(until)}')`;
         apvStateStrip(taskId, 'failed', 'Not knocked back. ' + (e && e.message || e),
-            `<button class="apv-undo" type="button" data-apv-retry onclick="apvDeferNow('${taskId}','${esc(until)}')">Try again</button>`);
+            `<button class="apv-undo" type="button" data-apv-retry onclick="${retry}">Try again</button>`);
         btns.forEach(b=>{ b.disabled = false; });
     }
 }
@@ -4457,8 +4571,13 @@ async function agUndefer(taskId){
     const t = allDeferred.find(x=>x.id===taskId);
     if(!t) return;
     try {
-        await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: apvBackTodayIso() });
-        await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of ' + t.until + '.');
+        // Later today clears its moment and leaves the day alone; a day knock-back ends today, as above.
+        const fields = {};
+        if(t.hasBackAt) fields[TF.backAt] = null;
+        if(!t.backAt || t.until > apvBackTodayIso()) fields[TF.deferredUntil] = apvBackTodayIso();
+        await atUpdate(TASKS_TBL, taskId, fields);
+        await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of '
+            + (t.backAt ? apvLondonStamp(t.backAt) : t.until) + '.');
         _apvFocusId = '';
         await refreshApprovalZone(true);
         toast('Back in your queue.');
@@ -8149,7 +8268,9 @@ function registerAgentsSyncBar(){
                     // apvDatePlus(0): the formula's TODAY() is UTC, which is
                     // ahead of the local date west of UTC in the evening.
                     const today = apvDatePlus(0);
-                    const leaked = allApprovals.filter(t=>t.deferredUntil && t.deferredUntil > today).length;
+                    // A minute's grace on Later today: the formula's NOW() is Airtable's clock, not this Mac's.
+                    const leaked = allApprovals.filter(t=>(t.deferredUntil && t.deferredUntil > today)
+                        || Date.parse(t.backAt) > Date.now() + 60000).length;
                     if(leaked) return { status:'fail', detail:`${leaked} task(s) you knocked back are back in the queue early — the date filter broke` };
                     return { status:'pass', detail: allDeferred.length
                         ? `${allDeferred.length} knocked back, all still parked`

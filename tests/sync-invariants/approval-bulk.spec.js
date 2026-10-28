@@ -471,7 +471,12 @@ test.describe('the view moves on to the next card', () => {
     await expectCardAtTop(page, next);
   });
 
-  test('the bulk knock back offers Tomorrow first, and it dates every ticked card the next day', async ({ page }) => {
+  test.describe('in London', () => {
+  // The expected date is fixed, so the machine's own time zone must be too (review, 28 Oct 2026).
+  test.use({ timezoneId: 'Europe/London' });
+  test('after 5pm the bulk knock back offers Tomorrow first, and it dates every ticked card the next day', async ({ page }) => {
+    // Later today sits in front of Tomorrow until 5pm (28 Oct 2026): approval-knock-back.spec.js.
+    await page.clock.setFixedTime(new Date('2026-10-28T17:30:00Z'));
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -482,7 +487,8 @@ test.describe('the view moves on to the next card', () => {
     await presets.first().click();
     await expect.poll(() => patches.length).toBe(2);
     expect(patches.map((p) => p.id).sort()).toEqual([...ids].sort());
-    for (const p of patches) expect(p.fields[TF.deferredUntil]).toBe(isoPlus(1));
+    for (const p of patches) expect(p.fields[TF.deferredUntil]).toBe('2026-10-29');
+  });
   });
 
   test('a bulk knock back lands on the card after the lowest ticked one', async ({ page }) => {

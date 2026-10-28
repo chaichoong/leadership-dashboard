@@ -143,7 +143,7 @@ test.describe('AI Agents queue: an old tab saves nothing', () => {
     for (const i of [0, 1]) await page.locator('.apv-card').nth(i).locator('[data-apv-pick]').check();
     const reloaded = page.waitForEvent('load', { timeout: 15000 });
     await page.locator('[data-apv-bulk-open="defer"]').click();
-    await page.locator('#apvBulkPanel-defer .apv-defer > .apv-defer-btn').first().click();
+    await page.locator('#apvBulkPanel-defer .apv-defer > .apv-defer-btn', { hasText: 'Tomorrow' }).click();
     await expect(page.locator('#toast')).toContainText('updated after you opened it, so nothing was saved');
     live.bytes = bytes('os/agents/index.html');
     await reloaded;

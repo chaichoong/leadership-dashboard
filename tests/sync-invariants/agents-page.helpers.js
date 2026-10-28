@@ -49,6 +49,7 @@ const TF = {
   slackBaseline: 'fldxsqj9JSRBGNyT9',
   feedbackHistory: 'fldOzsq68lhfprKJu',
   deferredUntil: 'fldJ9IHS1yxwYzYSN',
+  backAt: 'fldneMJ082y1ij6zz',
   verdictReason: 'fldF9Bs4N5mttQvtl',
   lessonWrittenAt: 'fldFfzXOME9Rh8SyM',
   plainSummary: 'fld3PrM8AJcnWHemG',
@@ -214,7 +215,8 @@ const TASK_QUERY_MARKERS = [
   // Level A carry-outs (7 Sep 2026): the dispatcher's Notes marker. First,
   // because its formula shares nothing with the others.
   { marker: 'HANDLED WITHOUT YOU', key: 'handled' },
-  { marker: ', IS_AFTER({Deferred Until}', key: 'deferred' },
+  // Since 28 Oct 2026 the knocked-back read is OR(day, Later today); the queue's reads say NOT(IS_AFTER(.
+  { marker: ', OR(IS_AFTER({Deferred Until}', key: 'deferred' },
   { marker: 'Sent For Approval By', key: 'approvals' },
   { marker: 'Approval Outcome', key: 'taskHistory' },
 ];

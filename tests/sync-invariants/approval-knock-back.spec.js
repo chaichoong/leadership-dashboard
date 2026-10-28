@@ -74,9 +74,14 @@ test.describe('knocking an approval back', () => {
     await expect(page.locator('.apv-more')).toHaveCount(0);
   });
 
-  test('Tomorrow comes first, and one click brings it back the next day', async ({ page }) => {
+  test.describe('in London', () => {
+  // The expected date is fixed, so the machine's own time zone must be too (review, 28 Oct 2026).
+  test.use({ timezoneId: 'Europe/London' });
+  test('after 5pm Tomorrow comes first, and one click brings it back the next day', async ({ page }) => {
     // Kevin, 8 Oct 2026: a one-day knock-back meant typing the date and
-    // pressing Go every time.
+    // pressing Go every time. From 28 Oct 2026 Later today sits in front of it
+    // until 5pm, so the clock is fixed after the last slot.
+    await page.clock.setFixedTime(new Date('2026-10-28T17:30:00Z'));
     const patches = await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -84,10 +89,12 @@ test.describe('knocking an approval back', () => {
     const taskId = await card.getAttribute('data-apv-card');
     const presets = card.locator('.apv-defer > .apv-defer-btn');
     await expect(presets).toHaveText(['Tomorrow', '3 days', 'A week', '2 weeks', 'A month']);
+    await expect(page.locator('.apv-defer-btn', { hasText: 'Later today' })).toHaveCount(0);
     await presets.first().click();
     await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(1);
-    expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe(isoPlus(1));
+    expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe('2026-10-29');
     await expect(card.locator('[data-apv-state="saved"]')).toContainText('Knocked back to');
+  });
   });
 
   test('one click knocks it back in place, and Undo puts it straight back', async ({ page }) => {
@@ -186,7 +193,7 @@ test.describe('knocking an approval back', () => {
     // Registered after the mock, so it wins: only the knocked-back read fails.
     await page.route('**/api.airtable.com/**', (route) => {
       const decoded = decodeURIComponent(route.request().url().replace(/\+/g, ' '));
-      if (route.request().method() === 'GET' && decoded.includes(', IS_AFTER({Deferred Until}')) {
+      if (route.request().method() === 'GET' && decoded.includes(', OR(IS_AFTER({Deferred Until}')) {
         return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"SERVER_ERROR"}' });
       }
       return route.fallback();
@@ -409,5 +416,223 @@ test.describe('Tomorrow from London either side of midnight', () => {
   });
   test('00:30 BST on 9 Oct writes 10 Oct', async ({ page }) => {
     expect(await tomorrowFrom(page, '2026-10-08T23:30:00Z')).toBe('2026-10-10');
+  });
+});
+
+// LATER TODAY (Kevin, 28 Oct 2026): "when I select 'Later today,' it just moves
+// it to the next milestone in that day, and it just keeps my approvals gate
+// under control." 9am, 1pm or 5pm on London's clock, held in Back At (a date and
+// time), so the card comes back to the hour with nothing to bring it back.
+test.describe('Later today', () => {
+  test.use({ timezoneId: 'Europe/London' });
+  const PATCHED = (patches, id) => patches.filter((p) => p.id === id);
+
+  test('at 10:15 it comes first, and one click hides the card until 1pm and writes only Back At', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-28T10:15:00Z'));
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    const presets = card.locator('.apv-defer > .apv-defer-btn');
+    await expect(presets).toHaveText(['Later today (1pm)', 'Tomorrow', '3 days', 'A week', '2 weeks', 'A month']);
+    await card.locator('#apvNote-' + taskId).fill('waiting on Roy');
+    await presets.first().click();
+    await expect.poll(() => PATCHED(patches, taskId).length).toBe(1);
+    const patch = PATCHED(patches, taskId)[0];
+    // The moment and his note. No day, no verdict, no status: nothing is decided.
+    expect(Object.keys(patch.fields).sort()).toEqual([TF.backAt, TF.feedbackHistory].sort());
+    expect(patch.fields[TF.backAt]).toBe('2026-10-28T13:00:00.000Z');
+    expect(patch.fields[TF.feedbackHistory]).toMatch(/\] Knocked back to 2026-10-28 13:00: waiting on Roy$/);
+    await expect(card.locator('[data-apv-state="saved"]')).toContainText('Knocked back to 1pm today');
+    await expect(page.locator('#approvalsTabBadge')).toHaveText(String(before - 1));
+    await expect(page.locator('.apv-later summary')).toContainText('1 knocked back');
+    await expect(page.locator('.apv-later summary')).toContainText('1 back within a day');
+    await page.locator('.apv-later summary').click();
+    await expect(page.locator('.apv-later-row').first()).toContainText('back at 1pm');
+    await expect(page.locator('.apv-later-row').first()).toContainText('Waiting on: waiting on Roy');
+    // Undo clears the moment and nothing else.
+    await card.locator('[data-apv-undo]').click();
+    await expect.poll(() => PATCHED(patches, taskId).length).toBe(2);
+    expect(PATCHED(patches, taskId)[1].fields).toEqual({ [TF.backAt]: null });
+    await expect(page.locator('.apv-card')).toHaveCount(before);
+  });
+
+  test('before 9am it is 9am, and from 1pm it is 5pm', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-28T07:40:00Z'));
+    await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await expect(page.locator('.apv-card').first().locator('.apv-defer > .apv-defer-btn').first()).toHaveText('Later today (9am)');
+    await page.clock.setFixedTime(new Date('2026-10-28T13:00:00Z'));
+    await page.reload();
+    await openApprovals(page);
+    await expect(page.locator('.apv-card').first().locator('.apv-defer > .apv-defer-btn').first()).toHaveText('Later today (5pm)');
+  });
+
+  test('in summer 1pm is London time, an hour before 1pm UTC', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-07-01T09:30:00Z'));   // 10:30 BST
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    const { patch } = await knockBack(page, patches, 'Later today');
+    expect(patch.fields[TF.backAt]).toBe('2026-07-01T12:00:00.000Z');
+  });
+
+  test('a card drawn before 1pm and pressed after it goes to 5pm and says so', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-28T12:58:00Z'));
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    await expect(card.locator('.apv-defer-btn', { hasText: 'Later today' })).toHaveText('Later today (1pm)');
+    await page.clock.setFixedTime(new Date('2026-10-28T13:05:00Z'));
+    await card.locator('.apv-defer-btn', { hasText: 'Later today' }).click();
+    await expect.poll(() => PATCHED(patches, taskId).length).toBe(1);
+    expect(PATCHED(patches, taskId)[0].fields[TF.backAt]).toBe('2026-10-28T17:00:00.000Z');
+    await expect(card.locator('[data-apv-state="saved"]')).toContainText('Knocked back to 5pm today');
+  });
+
+  test('a card drawn before 5pm and pressed after it writes nothing and says why', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-28T16:58:00Z'));
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    await page.clock.setFixedTime(new Date('2026-10-28T17:01:00Z'));
+    await card.locator('.apv-defer-btn', { hasText: 'Later today' }).click();
+    await expect(page.locator('#toast')).toContainText('no later today');
+    expect(patches).toHaveLength(0);
+  });
+
+  test('the bulk bar offers it too, and dates every ticked card to the slot', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-28T10:15:00Z'));
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const ids = [];
+    for (const i of [0, 1]) {
+      const c = page.locator('.apv-card').nth(i);
+      ids.push(await c.getAttribute('data-apv-card'));
+      await c.locator('[data-apv-pick]').check();
+    }
+    await page.locator('[data-apv-bulk-open="defer"]').click();
+    const presets = page.locator('#apvBulkPanel-defer .apv-defer > .apv-defer-btn');
+    await expect(presets.first()).toHaveText('Later today (1pm)');
+    await presets.first().click();
+    await expect.poll(() => patches.length).toBe(2);
+    expect(patches.map((p) => p.id).sort()).toEqual([...ids].sort());
+    for (const p of patches) {
+      expect(p.fields[TF.backAt]).toBe('2026-10-28T13:00:00.000Z');
+      expect(p.fields[TF.deferredUntil]).toBeUndefined();
+    }
+    await expect(page.locator('#toast')).toContainText('Knocked back 2 to 1pm today');
+  });
+
+  function withLaterToday() {
+    const f = defaultFixtures();
+    const now = '2026-10-28T10:15:00.000Z';
+    f.deferred = [
+      { id: 'recLater1', createdTime: now, fields: {
+        [TF.name]: 'Reply to the insurer about the renewal',
+        [TF.status]: 'Approval',
+        [TF.agentOutput]: 'Draft: reply ready.',
+        [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A],
+        // An old day knock-back that has passed, as a card that came back once already carries.
+        [TF.deferredUntil]: '2026-10-20',
+        [TF.backAt]: '2026-10-28T13:00:00.000Z', [TF.lmt]: now,
+      } },
+    ];
+    return f;
+  }
+
+  test('a card knocked back to later today is listed with its time, and Bring back now clears only Back At', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-28T10:15:00Z'));
+    const patches = await mockAgentsPage(page, withLaterToday());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await expect(page.locator('.apv-later summary')).toContainText('1 back within a day');
+    await page.locator('.apv-later summary').click();
+    await expect(page.locator('.apv-later-row').first()).toContainText('back at 1pm');
+    await page.locator('.apv-later button', { hasText: 'Bring back now' }).click();
+    await expect.poll(() => PATCHED(patches, 'recLater1').length).toBe(1);
+    // The day it last came back stays as it is: it already shows, and it starts the waiting clock.
+    expect(PATCHED(patches, 'recLater1')[0].fields).toEqual({ [TF.backAt]: null });
+  });
+
+  test('an open tab brings the card back at its time, with no reload', async ({ page }) => {
+    // Review, 28 Oct 2026: nothing re-read an open tab, so at 1pm the card stayed listed as
+    // "back at 1pm" and the queue stayed one short until he reloaded.
+    await page.clock.setFixedTime(new Date('2026-10-28T12:59:00Z'));
+    const fx = withLaterToday();
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    await expect(page.locator('.apv-later summary')).toContainText('1 knocked back');
+    // 1pm passes, and Airtable's NOW() moves the card from the knocked-back read to the queue.
+    const [card] = fx.deferred.splice(0, 1);
+    fx.approvals.push(card);
+    await page.clock.setFixedTime(new Date('2026-10-28T13:00:40Z'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.locator('[data-apv-card="recLater1"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.apv-card')).toHaveCount(before + 1);
+    await expect(page.locator('.apv-later')).toHaveCount(0);
+  });
+
+  test('Try again after a failed save works the slot out again', async ({ page }) => {
+    // Review, 28 Oct 2026: the retry carried the old slot, so a 12:58 failure retried at 13:10
+    // wrote 1pm, a time already gone, and the card never left the queue.
+    await page.clock.setFixedTime(new Date('2026-10-28T12:58:00Z'));
+    const patches = await mockAgentsPage(page);
+    let failNext = true;
+    await page.route('**/api.airtable.com/**', (route) => {
+      if (route.request().method() === 'PATCH' && failNext) {
+        failNext = false;
+        return route.fulfill({ status: 422, contentType: 'application/json', body: '{"error":{"type":"INVALID_REQUEST"}}' });
+      }
+      return route.fallback();
+    });
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('.apv-defer-btn', { hasText: 'Later today' }).click();
+    await expect(card.locator('[data-apv-retry]')).toBeVisible();
+    await page.clock.setFixedTime(new Date('2026-10-28T13:10:00Z'));
+    await card.locator('[data-apv-retry]').click();
+    await expect.poll(() => PATCHED(patches, taskId).length).toBe(1);
+    expect(PATCHED(patches, taskId)[0].fields[TF.backAt]).toBe('2026-10-28T17:00:00.000Z');
+  });
+
+  test('a Mac clock ahead of Airtable still shows the time, and Bring back now still clears it', async ({ page }) => {
+    // Review, 28 Oct 2026: Airtable still hides the card at 13:02 by this Mac's clock. The row read
+    // blank, and Bring back now wrote only the day, so the card stayed hidden.
+    await page.clock.setFixedTime(new Date('2026-10-28T13:02:00Z'));
+    const patches = await mockAgentsPage(page, withLaterToday());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await page.locator('.apv-later summary').click();
+    await expect(page.locator('.apv-later-row').first()).toContainText('back at 1pm');
+    await page.locator('.apv-later button', { hasText: 'Bring back now' }).click();
+    await expect.poll(() => PATCHED(patches, 'recLater1').length).toBe(1);
+    expect(PATCHED(patches, 'recLater1')[0].fields).toEqual({ [TF.backAt]: null });
+  });
+
+  test('a queue card whose Back At is still ahead fails the knocked-back check', async ({ page }) => {
+    // The clause lives in an Airtable formula; one that stops excluding returns MORE rows, not an error.
+    await page.clock.setFixedTime(new Date('2026-10-28T10:15:00Z'));
+    const fx = defaultFixtures();
+    fx.approvals[0].fields[TF.backAt] = '2026-10-28T13:00:00.000Z';
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await page.click('[data-sync-bar="agents"] .sync-bar-health');
+    const verdict = () => page.evaluate(() => {
+      const item = [...document.querySelectorAll('.sync-check-item')].find(el => el.textContent.includes('Knocked-back items stay out'));
+      return item ? [...item.classList].find(c => ['pass', 'warn', 'fail', 'pending'].includes(c)) + ' | ' + item.textContent.replace(/\s+/g, ' ') : 'missing';
+    });
+    await expect.poll(verdict).toMatch(/^fail \| .*back in the queue early/);
   });
 });

@@ -338,6 +338,9 @@
         // everywhere at once. A cron that has to remember is a cron that can
         // forget (see feedback_a_running_job_is_not_a_working_job).
         deferredUntil:   'fldJ9IHS1yxwYzYSN', // date — hidden from every approval surface until then
+        // Later today (28 Oct 2026): the same, to the hour (9am, 1pm or 5pm). A separate
+        // field because ~15 scripts read Deferred Until as a day.
+        backAt:          'fldneMJ082y1ij6zz', // dateTime — hidden from every approval count until then
         // ── AI share of work (9 Aug 2026) ──
         completionDate:  'fldFOi1SwEKuJRmdN', // dateTime — when the task was actually completed
         // ── Property lane (8 Sep 2026) — previously only in os/tasks/index.html ──
