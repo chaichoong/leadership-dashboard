@@ -18,7 +18,7 @@ import worker from '../workers/padel/worker.js';
 import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
-  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING,
+  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -513,6 +513,61 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false });
     expect(s.ready).toEqual([]);
     expect(s.nearly).toEqual([]);
+  });
+
+  // The Mac sleeps from 23:00 to 06:30 London. Without this rule the page read "couldn't check"
+  // on St Ives and Cambridge every night from 23:30 (Kevin, 27 Oct 2026: "Do it now").
+  it('overnight: the evening\'s last Matchi read (22:30 London or later) counts until 06:45, never past nine hours', () => {
+    const at = (s) => Date.parse(s);
+    expect(matchiFresh('2026-10-27T14:00:00Z', at('2026-10-27T14:44:00Z'))).toBe(true);     // by day: 45 minutes
+    expect(matchiFresh('2026-10-27T14:00:00Z', at('2026-10-27T14:46:00Z'))).toBe(false);
+    expect(matchiFresh('2026-10-27T22:45:00Z', at('2026-10-27T23:40:00Z'))).toBe(true);     // the 22:45 read, late evening
+    expect(matchiFresh('2026-10-27T22:45:00Z', at('2026-10-28T05:30:00Z'))).toBe(true);     // small hours
+    expect(matchiFresh('2026-10-27T22:45:00Z', at('2026-10-28T06:44:00Z'))).toBe(true);     // until 06:45
+    expect(matchiFresh('2026-10-27T22:45:00Z', at('2026-10-28T06:45:00Z'))).toBe(false);    // the morning run is due by now
+    expect(matchiFresh('2026-10-27T22:15:00Z', at('2026-10-27T23:30:00Z'))).toBe(false);    // not one of the evening's last reads
+    expect(matchiFresh('2026-10-27T22:30:00Z', at('2026-10-28T06:00:00Z'))).toBe(true);     // 22:30 is the first late slot
+    expect(matchiFresh('2026-07-01T21:45:00Z', at('2026-07-02T01:00:00Z'))).toBe(true);     // BST: 22:45 read, 02:00 now
+    expect(matchiFresh('2026-07-01T21:15:00Z', at('2026-07-02T01:00:00Z'))).toBe(false);    // BST: a 22:15 read does not
+    expect(matchiFresh('2026-07-01T21:45:00Z', at('2026-07-02T05:50:00Z'))).toBe(false);    // BST: 06:50 London, past the morning run
+    expect(matchiFresh('', at('2026-10-27T23:40:00Z'))).toBe(false);
+    expect(matchiFresh('2026-10-27T22:45:00Z', at('2026-10-28T08:00:00Z'))).toBe(false);    // the Mac slept in: loud, not covered
+    expect(matchiFresh('2026-10-25T22:45:00Z', at('2026-10-27T23:40:00Z'))).toBe(false);    // two nights old: the nine-hour cap alone stops it
+  });
+
+  it('after midnight the window\'s new last day, which the evening read never covered, reads "couldn\'t check", not "checking"', async () => {
+    await t.seedAvailability(EVENING, Date.parse('2026-10-27T22:45:00Z'), Date.parse('2026-10-27T22:42:00Z'));
+    t.setNow(Date.parse('2026-10-28T00:30:00Z'));
+    const s = (await t.call('/api/state')).json;
+    expect(s.days[0]).toBe('2026-10-28');
+    expect(s.days[13]).toBe('2026-11-10');
+    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: false });
+    expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
+    expect(s.availability.venues.si['2026-11-10']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
+    expect(s.availability.venues.pdl['2026-11-10']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
+  });
+
+  it('a state read at 23:40 shows St Ives and Cambridge from the 22:45 read, and a DM can still fire on them', async () => {
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    await t.seedAvailability(EVENING, Date.parse('2026-10-27T22:45:00Z'), Date.parse('2026-10-27T22:42:00Z'));
+    t.setNow(Date.parse('2026-10-27T23:40:00Z'));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|19'] });
+    const s = (await t.call('/api/state')).json;
+    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: false });
+    expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
+    expect(s.availability.venues.pp['2026-10-28']).toEqual({ status: 'error', reason: 'not checked recently', hours: {} });
+    expect(s.ready.map((r) => r.slot)).toEqual(['2026-10-28|19']);
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.relayCalls[0].body.text).toMatch(/St Ives: 4 in .* Cambridge: 4 in .* Courts checked 22:45\./);
+  });
+
+  it('a DM sent at 02:00 on the evening\'s read says "Courts checked 22:45 yesterday", never a bare time', async () => {
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    await t.seedAvailability(EVENING, Date.parse('2026-10-27T22:45:00Z'), Date.parse('2026-10-27T22:42:00Z'));
+    t.setNow(Date.parse('2026-10-28T02:00:00Z'));
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|19'] });
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.relayCalls[0].body.text).toMatch(/Courts checked 22:45 yesterday\. Whoever books/);
   });
 
   it('item 1 (6th pass): a claim is final; the row carries a claimed marker from the start', async () => {
@@ -1078,7 +1133,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       const s = (await t.call('/api/state')).json;
       expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'HTTP 500', hours: {} });
       expect(s.availability.venues.pdl['2026-10-28']).toEqual({ status: 'closed', hours: {} });
-      expect(s.availability.venues.pdl['2026-10-29']).toEqual({ status: 'pending', hours: {} });   // not posted: never the old day
+      expect(s.availability.venues.pdl['2026-10-29']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });   // not posted: never the old day, and not "checking" either
     });
 
     it('takes a body up to 64 KB, refuses one over it', async () => {
@@ -1106,7 +1161,7 @@ describe('pure state rules', () => {
   it('closed and error never count as free', () => {
     const s = computeState({ people, votes, booked: [], availability: fresh({ si: { '2026-10-28': { status: 'closed' } }, pdl: { '2026-10-28': { status: 'error', reason: 'HTTP 500' } } }), dates, nowMs: NOW });
     expect(s.ready).toEqual([]);
-    expect(s.availability.venues.pp['2026-10-28'].status).toBe('pending');
+    expect(s.availability.venues.pp['2026-10-28']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });   // read, but no day for this date
   });
   it('a venue never read counts for nothing', () => {
     const s = computeState({ people, votes, booked: [], availability: null, dates, nowMs: NOW });
