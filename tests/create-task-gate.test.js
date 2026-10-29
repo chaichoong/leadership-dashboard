@@ -679,3 +679,129 @@ describe('a fold never lands on a card Kevin has already decided', () => {
     expect(fn).toContain('F["approvedAt"]');
   });
 });
+
+// ─── TWO SUBJECT SLOTS ARE NOT A SUBJECT ─────────────────────────────────
+//
+// Six findings, one mechanism: 20260925-agent-dispatch-623,
+// 20261002-inbound-email-triage-711, 20261007-inbound-email-triage-783,
+// 20261017-inbound-email-triage-963, 20261019-inbound-email-triage-1000 and
+// 20261026-inbound-triage-1091. The KEY pass folded on its two subject slots
+// with none of the strictness the verdict pass has carried since 25 Sep, so
+// every `COMPLIANCE: file certificate - <type> - <property>` name reduced to
+// `compliance|certificate file` and ANY two filing tasks folded into each
+// other. Listed in .claude/rules/agent-task-pipeline.md as known and NOT
+// fixed: "the key pass folds two different matters from one counterparty on
+// its two subject slots".
+//
+// Three guards, one per way the pairs fail: the key match must clear the word
+// pass's own PROPORTION (`fold_on_a_shared_key_only`); the qualifier segments
+// after the first " - " must agree with each other when both names have them
+// (`fold_on_a_different_qualifier`); and two names that each carry a
+// reference and share none are different matters
+// (`fold_on_a_different_reference`).
+//
+// Measured read-only against the live board, 29 Oct 2026, 332 open tasks: 79
+// folds under origin/main, 31 under this change, 48 newly refused and ZERO
+// newly folded. Every pair sampled was two different matters (two months of
+// one project, two repairs at one building, two insurance policies, episode
+// after episode of the Content Engine folding into one card). Back-tested by
+// removing each guard from decide() in turn: the first case of each `it`
+// below flips to "update".
+//
+// Names are invented or already in this repo's test corpus (public repo); the
+// shapes are the findings'.
+describe('two subject slots are not a subject', () => {
+  const F = runPy('mod.F');
+  const row = (id, name, status = 'Today', created = '2026-10-01T00:00:00.000Z') => ({
+    id, createdTime: created, fields: { [F.name]: name, [F.status]: { name: status } },
+  });
+  const one = (incoming, existing, status = 'Today') => runPy('mod.decide(arg[0], arg[1])',
+    [{ [F.name]: incoming }, [row('recX', existing, status)]]);
+
+  it('finding 963: two filing tasks for different properties key alike and no longer fold', () => {
+    const v = one('COMPLIANCE: file certificate - gas safety record x4 - Roc Immo portfolio',
+      'COMPLIANCE: file certificate - fire alarm and emergency lighting - Duckworth Building');
+    expect(runPy('mod.dupe_task_key(arg)', 'COMPLIANCE: file certificate - gas safety record x4 - Roc Immo portfolio'))
+      .toBe('compliance|certificate file');          // the key really is that generic
+    expect(v.action).toBe('create');
+    expect(v.note).toContain('too little else to be one matter');
+  });
+
+  it('finding 1000: a type and a property the other name does not carry refuse the fold', () => {
+    expect(one('COMPLIANCE: file certificate - insurance schedules x6 - TNT Management portfolio',
+      'COMPLIANCE: file certificate - fire alarm and emergency lighting - Duckworth Building').action)
+      .toBe('create');
+  });
+
+  it('finding 783: ONE house, TWO documents — the qualifier says which matter it is', () => {
+    const v = one('COMPLIANCE: file certificate - PAT certificate - 22 Newton Street',
+      'COMPLIANCE: file certificate - gas safety record - 22 Newton Street');
+    expect(v.action).toBe('create');
+    expect(v.note).toContain('what the matter IS');
+    // ... and the guard compares qualifier to qualifier, never against the
+    // whole other name: both of these carry `certificate` in their subject.
+    expect(runPy('mod.fold_on_a_different_qualifier(arg[0], arg[1])',
+      ['COMPLIANCE: file certificate - PAT certificate - 22 Newton Street',
+        'COMPLIANCE: file certificate - gas safety record - 22 Newton Street'])).toBe(true);
+  });
+
+  it('finding 623: two policies, two insurers, two references — never one matter', () => {
+    const a = 'INSURANCE: Replacement Property Owners cover via TopCashback before 3 Oct 2026 - 30 Burnbank Gardens (PIB 931520229)';
+    const b = 'INSURANCE: Replacement Property Owners cover via TopCashback before 15 Oct 2026 - TNT Management portfolio (Swinton 178710769)';
+    expect(one(a, b, 'Approval').action).toBe('create');
+    expect(runPy('mod.fold_on_a_different_reference(arg[0], arg[1])', [a, b])).toBe(true);
+    // One side carrying a reference the other does not decides NOTHING: a
+    // chaser often names one the first task never had.
+    expect(runPy('mod.fold_on_a_different_reference(arg[0], arg[1])',
+      ['INBOUND: chase Vectis Water on account 44556677', 'INBOUND: Vectis Water final demand'])).toBe(false);
+  });
+
+  it('finding 1091: one name says WHERE and the other says none, so it must say nothing else new', () => {
+    expect(one('COMPLIANCE: landlord insurance renewal quote needed',
+      'COMPLIANCE: landlord insurance renewal - 6 Chedburgh Place').action).toBe('create');
+    // The control this rule has to keep: a name that adds NOTHING the other
+    // does not carry is the same matter and still folds.
+    expect(one('Provision of a valid EICR',
+      'COMPLIANCE: Provision of a valid EICR - 18 Siddows Avenue Clitheroe').action).toBe('update');
+  });
+
+  it('finding 711: a second request from one sender does not land under the first', () => {
+    expect(one('INBOUND: Roy asks about a benefit top-up and refund for a tenant',
+      'INBOUND: Roy asks for bins to be ordered at 5 Dalham Place', 'Approval').action).toBe('create');
+  });
+
+  it('THE COST, and the catches that must survive: a real duplicate still folds', () => {
+    // Kevin's ruling, 14 Oct 2026: a duplicate he can merge beats an approved
+    // card quietly rewritten. But the key pass must keep what it exists for.
+    expect(one('COMPLIANCE: file certificate - gas safety record - 5 Dalham Place',
+      'COMPLIANCE: file certificate - gas safety record - 5 Dalham Place').action).toBe('update');
+    expect(one('COMPLIANCE: file certificate - gas safety record - 5 Dalham Place',
+      'COMPLIANCE: file certificate - gas safety record for 5 Dalham Place').action).toBe('update');
+    expect(one('COMPLIANCE: file certificate - EPC - 5 Dalham Place',
+      'COMPLIANCE: file certificate - EPC - 5 Dalham Place').action).toBe('update');
+    // A short name whose whole subject agrees: the count would refuse this
+    // pair (`invoice` is a reference label, leaving one telling word), which
+    // is why the key pass asks for the PROPORTION and not the count.
+    expect(one('Chase Acme invoice #10', 'Chase Acme invoice #9').action).toBe('update');
+    // One SMS thread is one matter however differently the two names put it:
+    // a shared strong id is identity and the qualifier guard stays silent.
+    expect(one('INBOUND: SMS from tenant - mobile no 07398 536055',
+      'INBOUND: text from mobile no 07398 536055 - boiler leak').action).toBe('update');
+    // Extra detail on ONE name is not a different matter.
+    expect(one('INBOUND: SMS reply from 07398 536055',
+      'INBOUND: SMS from 07398 536055 - unknown content').action).toBe('update');
+  });
+
+  it('the mirrors are untouched, so the Duplicates lane still SHOWS Kevin every pair', () => {
+    // Fold-only and Python-only, like the three guards before it: the page
+    // that groups these pairs is protected, and grouping shows while folding
+    // destroys. If dupe_verdict or dupe_task_key had moved, the drift test in
+    // agents-dupe-task-key.test.js would fail — this asserts the verdict
+    // still MATCHES the pairs the fold now refuses.
+    const page = readFileSync(resolve(ROOT, 'os/agents/index.html'), 'utf8');
+    expect(page).not.toContain('foldOnADifferentQualifier');
+    expect(runPy('mod.dupe_verdict(arg[0], arg[1], "fold")',
+      ['COMPLIANCE: file certificate - PAT certificate - 22 Newton Street',
+        'COMPLIANCE: file certificate - gas safety record - 22 Newton Street']).match).toBe(true);
+  });
+});
