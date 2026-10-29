@@ -50,6 +50,14 @@
 .wear-hours .wear-windy { color: var(--warning); font-weight: var(--fw-semibold); }
 .wear-hours .wear-sunset { display: block; font-size: 10px; font-weight: var(--fw-semibold); color: var(--accent-gold); white-space: nowrap; }
 /* I'm wearing something else (Kevin, 29 Oct 2026) */
+/* Tonight's wash (Kevin, 29 Oct 2026) */
+.wear-wash { margin-top: var(--space-4); border-top: 1px solid var(--border-default); padding-top: var(--space-3); }
+.wear-wash h3 { margin: 0 0 var(--space-2); font-size: var(--fs-md); color: var(--text-primary); }
+.wear-washcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }
+.wear-wash h4 { margin: 0 0 var(--space-1); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+.wear-wash ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
+.wear-wash li { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--fs-sm); }
+.wear-wash small { color: var(--text-muted); }
 .wear-otherbar { margin: var(--space-3) 0 0; }
 .wear-logged { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); background: var(--success-bg); border: 1px solid var(--success-border); border-radius: var(--radius-md); color: var(--text-primary); }
 .wear-otherform { margin-top: var(--space-3); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }

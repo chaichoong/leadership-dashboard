@@ -419,6 +419,26 @@ test.describe('Wearing something else, and the wash', () => {
     expect(w.page).toBeLessThanOrEqual(w.view);
   });
 
+  test('tonight\'s wash: before anything is logged it says how to fill it', async ({ page }) => {
+    await open(page, 'home');
+    await expect(page.locator('#homeWear .wear-wash')).toContainText("tonight's wash list appears here", { timeout: 20000 });
+  });
+
+  test('tonight\'s wash lists what reached its limit and what to hang back up, never jackets or shoes', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    await page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('[data-wear-option]').click({ timeout: 20000 });
+    const wash = page.locator('#homeWear .wear-wash');
+    const into = wash.locator('.wear-washcols > div', { has: page.locator('h4', { hasText: 'Into the wash tonight' }) });
+    const hang = wash.locator('.wear-washcols > div', { has: page.locator('h4', { hasText: 'Hang back up' }) });
+    await expect(into.locator('li')).toHaveText([/Test white tee.*back in your picks/]);      // a tee: 1 of 1
+    await expect(hang.locator('li')).toHaveText([/Test navy jeans.*1 of 5 wears/, /Test navy jumper.*1 of 3 wears/]);
+    for (const name of ['Test tan boots', 'Test quilted jacket', 'Test olive beanie']) await expect(wash).not.toContainText(name);
+    // The back-in-your-picks day is 2 days on.
+    const d = new Date(localTodayISO() + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 2);
+    await expect(into).toContainText(d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }));
+  });
+
   test('2 days after it went in the wash, a piece is offered again with no press', async ({ page }) => {
     const today = localTodayISO();
     const wr = (since) => wardrobe().map(r => (r.id === 'recTee' ? { ...r, fields: { ...r.fields, [WR.wears]: 1, [WR.inWashSince]: since } } : r));
