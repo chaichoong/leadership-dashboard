@@ -546,7 +546,7 @@
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && newDay()) refresh(true); });
         setInterval(() => { if (document.visibilityState === 'visible' && newDay()) refresh(true); }, 5 * 60 * 1000);
         // Home open: the green column follows the clock, and each new hour (or 15 minutes) reads the weather again
-        // so "Feels like now" is this hour's (Kevin, 29 Oct 2026). Never redrawn under a press or a focused button.
+        // so "Feels like now" is this hour's (Kevin, 29 Oct 2026). Focus and the strip scroll survive the redraw.
         const followTheHour = () => {
             const home = document.getElementById('tab-home');
             if (!signedIn() || document.visibilityState !== 'visible' || !home || !home.classList.contains('active') || !state.wx || newDay()) return;
