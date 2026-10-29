@@ -395,6 +395,66 @@ print(json.dumps({"started": STARTED, "first": json.loads(b1.getvalue()), "secon
     expect(r.second.busy).toBe(true);
   });
 
+  // A PID IS NOT AN IDENTITY (29 Oct 2026, finding 20261029-phase-2-1121). queued.pid held a
+  // number macOS had recycled onto /usr/libexec/trustd, so os.kill(pid, 0) succeeded, the poll
+  // read "busy" and merge-approved started nothing for ten days — with an approved MERGE card
+  // waiting. The holder is now proven by the start time the OS records for that pid.
+  it('a recycled pid never reads as a live holder: the poll starts a run, and the file it writes carries the identity', () => {
+    const dir = tmpd();
+    const r = drive(`
+import time
+STARTED = []
+class P:
+    def __init__(self, args, **k): STARTED.append(args); self.pid = os.getpid()
+ma.subprocess.Popen = P
+ma.merge_card.read_tasks = lambda *a, **k: [{"id": "ctl", "fields": {}}]
+ma.merge_card.list_cards = lambda read=None: [C()]
+pidfile = os.path.join(ma.STATE_DIR, ma.QUEUED_PID)
+os.makedirs(ma.STATE_DIR, exist_ok=True)
+
+# The incident, verbatim: a bare pid held by a DIFFERENT live process, ten days old.
+alive = ma._POPEN(["sleep", "60"])
+open(pidfile, "w").write(str(alive.pid))
+ten_days = time.time() - 10 * 24 * 3600
+os.utime(pidfile, (ten_days, ten_days))
+recycled = ma.queued_alive()
+# What the OLD code answered on exactly that file: some process holds the number.
+try:
+    os.kill(alive.pid, 0); old_code = alive.pid
+except OSError:
+    old_code = None
+
+b = io.StringIO()
+with contextlib.redirect_stdout(b):
+    ma.cmd_detach(argparse.Namespace())
+wrote = open(pidfile).read().strip()
+# ... and the file the detach wrote verifies, so the NEXT poll does not start a second run.
+still = ma.queued_alive()
+b2 = io.StringIO()
+with contextlib.redirect_stdout(b2):
+    ma.cmd_detach(argparse.Namespace())
+
+# An identity that does not match the live process is debris whatever its age.
+open(pidfile, "w").write("%s Mon Oct 19 00:30:00 2026" % alive.pid)
+mismatched = ma.queued_alive()
+alive.kill(); alive.wait()
+gone = ma.queued_alive()
+print(json.dumps({"recycled": recycled, "oldCode": old_code, "started": len(STARTED),
+                  "first": json.loads(b.getvalue()), "second": json.loads(b2.getvalue()),
+                  "wrote": wrote, "still": still, "mismatched": mismatched, "gone": gone,
+                  "me": os.getpid()}))`, dir);
+    expect(r.oldCode).toBeGreaterThan(0);          // the old check passed on the very same file
+    expect(r.recycled).toBeNull();                 // the new one does not
+    expect(r.started).toBe(1);                     // so the poll actually starts the run
+    expect(r.first.queued).toBe(r.me);
+    expect(r.wrote.split(/\s+/)[0]).toBe(String(r.me));
+    expect(r.wrote.split(/\s+/).length).toBeGreaterThan(1);   // the identity is recorded with it
+    expect(r.still).toBe(r.me);                    // a holder it can verify is respected
+    expect(r.second.busy).toBe(true);              // so no second run is started
+    expect(r.mismatched).toBeNull();
+    expect(r.gone).toBeNull();
+  });
+
   it('a note that fails to write never strands the card: it goes back first, and a send-back that failed is retried', () => {
     const r = drive(`
 def bad_annotate(task, note): raise RuntimeError("Airtable 503")

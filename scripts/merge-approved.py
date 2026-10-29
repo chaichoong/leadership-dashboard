@@ -510,15 +510,89 @@ def cmd_run(args):
         run_lock.release()
 
 
-def queued_alive():
-    """The pid of a queued or running merge-approved job, or None."""
+# ─── A PID IS NOT AN IDENTITY ────────────────────────────────────────
+#
+# 29 Oct 2026, finding 20261029-phase-2-1121. `queued.pid` held 60933, written
+# at 00:30 on 19 Oct when that run was queued behind the night render. The run
+# died. macOS then recycled the number onto /usr/libexec/trustd, which is alive
+# and always will be, so `os.kill(pid, 0)` succeeded, `queued_alive()` reported
+# a live holder, and `cmd_detach` printed {"busy": true} and started NOTHING on
+# every half-hourly poll for ten days. merge-approved merged nothing in that
+# time and said so to nobody: Kevin approved the MERGE card for PR #845 at
+# 09:33 on 28 Oct and it never reached a gate. The whole protected-path drain
+# ran through a number the OS had given away.
+#
+# `os.kill(pid, 0)` answers "does some process hold this number", which is not
+# the question. The question is "is MY process still running", and the answer
+# needs something the OS cannot hand to a stranger: the start time it records
+# for that pid. A recycled pid carries a different one by construction, because
+# the new process started after the old one exited.
+#
+# WHICH WAY TO FAIL. A holder this code cannot verify reads as NOT HOLDING, so
+# a poll starts a run rather than skipping one. That is the safe direction here
+# and it is not the only guard: `run.lock` and the `job-queue.py` lease are
+# what actually stop two merges overlapping, and `cmd_detach` probes the lock
+# in the same breath. The pid file only decides whether to bother starting.
+# A file with no identity recorded in it (every file the old code wrote, and
+# any write where `ps` would not answer) is respected for one queue lease and
+# treated as debris after that, so neither direction can jam for ever.
+# The real Popen, held from import time. `_proc_started` asks the OS a question
+# and must not travel through the same seam a caller or a test replaces to
+# launch (or to pretend to launch) a queued run.
+_POPEN = subprocess.Popen
+
+
+def _proc_started(pid):
+    """What the OS says about WHEN process `pid` started, or None when there is
+    no such process or it will not say. Compared as the opaque string `ps`
+    prints, never parsed: it is an identity token, not a date."""
     try:
-        with open(os.path.join(STATE_DIR, QUEUED_PID)) as fh:
-            pid = int(fh.read().strip())
-        os.kill(pid, 0)
-        return pid
-    except (OSError, ValueError):
+        proc = _POPEN(["ps", "-p", str(int(pid)), "-o", "lstart="],
+                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        out, _ = proc.communicate(timeout=20)
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
+    started = (out or b"").decode("utf-8", "replace").strip()
+    return started or None
+
+
+def queued_alive():
+    """The pid of a queued or running merge-approved job, or None.
+
+    Proven by the process's own start time, never by the bare number: see the
+    note above. Returns None for a pid the OS has recycled onto something else.
+    """
+    path = os.path.join(STATE_DIR, QUEUED_PID)
+    try:
+        with open(path) as fh:
+            recorded = fh.read().strip()
+    except OSError:
+        return None
+    parts = recorded.split(None, 1)
+    if not parts:
+        return None
+    try:
+        pid = int(parts[0])
+    except ValueError:
+        return None
+    started = parts[1].strip() if len(parts) > 1 else ""
+    if not started:
+        # No identity to check it against. Trust it for one lease, then treat
+        # it as debris: this is the shape the file had for ten days.
+        try:
+            age_min = (time.time() - os.path.getmtime(path)) / 60.0
+        except OSError:
+            return None
+        if age_min > QUEUE_LEASE_MIN:
+            return None
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return None
+        return pid
+    if _proc_started(pid) != started:
+        return None
+    return pid
 
 
 def cmd_detach(args):
@@ -558,7 +632,9 @@ def cmd_detach(args):
                          cwd=REPO, stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
     tmp = os.path.join(STATE_DIR, QUEUED_PID + ".tmp")
     with open(tmp, "w") as fh:
-        fh.write(str(p.pid))
+        # The pid AND the identity it will be checked against (see the note on
+        # queued_alive): a bare number is what a recycled pid walked through.
+        fh.write("%s %s" % (p.pid, _proc_started(p.pid) or ""))
     os.replace(tmp, os.path.join(STATE_DIR, QUEUED_PID))
     print(json.dumps({"cards": len(cards), "todo": todo, "queued": p.pid}))
     return 0
