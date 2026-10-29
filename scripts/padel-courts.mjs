@@ -241,8 +241,16 @@ export async function run({
   if (isQuiet(endMs)) { log('quiet hours'); return 0; }
   const seconds = Math.round((endMs - startMs) / 1000);
   // readAt is when the read STARTED: the oldest page in it.
-  const post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
+  let post = await postCourts(fetchImpl, buildPayload(raw, startMs), robotKey);
+  // A Worker older than the University venue refuses it: send St Ives and PDL alone, so a reader
+  // that goes live before its Worker never costs them an update (review of PR #854).
+  const uniRefused = post.status === 400 && /unknown venue: cu/.test(String(post.body?.error || ''));
+  if (uniRefused) {
+    const { cu, ...matchiOnly } = raw;
+    post = await postCourts(fetchImpl, buildPayload(matchiOnly, startMs), robotKey);
+  }
   const problems = readProblems(raw, dates);
+  if (uniRefused && post.status === 200) problems.push('the Worker does not know the University yet (deploy workers/padel); St Ives and PDL were sent without it');
   const tooOld = post.status === 400 && /within 10 minutes/.test(String(post.body?.error || ''));
   if (tooOld) problems.unshift('the read took too long for the Worker (did the Mac sleep?)');
   else if (post.status !== 200) problems.push(`the Worker answered ${post.status || 'nothing'} (${String(post.body?.error || 'no reason').slice(0, 120)})`);
