@@ -57,7 +57,11 @@ describe('parseMatchi', () => {
   it('worked example 1: St Ives Court 1 at 07:00 is free, can start, 60 min', () => {
     const r = parseMatchi(ST_IVES);
     expect(r.status).toBe('ok');
-    expect(r.starts['07:00']).toEqual({ courts: 2, min: 60, names: ['Court 1', 'Court 2'] });
+    // The best court from 07:00 is open for three hours or more: the longest booking shown is the cap
+    // (Court 1's own run ends at 09:30; the length is the best court's, the legend says so).
+    expect(r.starts['07:00']).toEqual({ courts: 2, min: 60, max: 180, names: ['Court 1', 'Court 2'] });
+    // 16:30 on Court 1: the 16:30 cell plus the 17:00 cannot-start cell, then booked: 60 minutes at most.
+    expect(r.starts['16:30']).toEqual({ courts: 1, min: 60, max: 60, names: ['Court 1'] });
     // Every one of the 31 free cells can start and sits on a doubles court.
     expect(Object.values(r.starts).reduce((n, s) => n + s.courts, 0)).toBe(31);
     // 17:00 to 21:00 are booked or cannot start on both courts.
@@ -67,14 +71,14 @@ describe('parseMatchi', () => {
   it('worked example 2: PDL 09:00 counts three doubles courts, never the Singles Court', () => {
     const r = parseMatchi(PDL);
     expect(r.status).toBe('ok');
-    expect(r.starts['09:00']).toEqual({ courts: 3, min: 60, names: ['Court 1', 'Court 2', 'Court 3'] });
+    expect(r.starts['09:00']).toEqual({ courts: 3, min: 60, max: 180, names: ['Court 1', 'Court 2', 'Court 3'] });
     // Court 1's 09:00 start is the 90-minute one; the hour still reads free with min <= 90.
     expect(PDL).toMatch(/data-slot-min-duration="90"\s+data-slot-can-start="true"\s+title="Available<br>Court 1<br> 09:00 - 10:30"/);
-    expect(hoursFromStarts(r.starts)['09']).toEqual({ free: true, min: 60, starts: ['09:00', '09:30'], mins: [60, 60] });
-    // Court 1 10:30 is booked ("slot red"): the 10:30 start is Court 3's alone.
-    expect(r.starts['10:30'].names).toEqual(['Court 3']);
+    expect(hoursFromStarts(r.starts)['09']).toEqual({ free: true, min: 60, max: 180, courts: 3, starts: ['09:00', '09:30'], mins: [60, 60], maxs: [180, 180], courtsBy: [3, 3] });
+    // Court 1 10:30 is booked ("slot red"): the 10:30 start is Court 3's alone, open until 13:00 (150 min).
+    expect(r.starts['10:30']).toEqual({ courts: 1, min: 60, max: 150, names: ['Court 3'] });
     // The Singles Court's free 09:00 and 12:00 are ignored.
-    expect(r.starts['12:00']).toEqual({ courts: 2, min: 60, names: ['Court 2', 'Court 3'] });
+    expect(r.starts['12:00']).toEqual({ courts: 2, min: 60, max: 60, names: ['Court 2', 'Court 3'] });
     expect(Object.values(r.starts).some((s) => s.names.some((n) => /single/i.test(n)))).toBe(false);
     // 25 free cells minus 2 singles = 23 starts; the 12 cannot-start cells add none.
     expect(Object.values(r.starts).reduce((n, s) => n + s.courts, 0)).toBe(23);
@@ -89,12 +93,39 @@ describe('parseMatchi', () => {
         Court 2<br>
         18:30 - 20:00" data-slot-can-start="true" data-slot-min-duration="90" class="slot free"></td>
       <td class="slot free" data-slot-can-start="false" data-slot-min-duration="60" title="Available<br>Court 1<br> 19:00 - 20:00"></td>`);
-    expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '18:30': { courts: 1, min: 90, names: ['Court 2'] } } });
+    expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '18:30': { courts: 1, min: 90, max: 90, names: ['Court 2'] } } });
   });
 
   it('F3: class="free slot" still parses as free (class order carries no meaning)', () => {
     const html = table('<td class="free slot" data-slot-can-start="true" data-slot-min-duration="60" title="Available<br>Court 1<br>19:00 - 20:00"></td>');
-    expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '19:00': { courts: 1, min: 60, names: ['Court 1'] } } });
+    expect(parseMatchi(html)).toEqual({ status: 'ok', starts: { '19:00': { courts: 1, min: 60, max: 60, names: ['Court 1'] } } });
+  });
+
+  it('the longest booking from a start is the open run on that court: free and cannot-start cells count, a booked cell ends it', () => {
+    const cell = (cls, court, t, extra = '') => `<td class="slot ${cls}" ${extra} title="Available<br>${court}<br>${t} - 20:00"></td>`;
+    const start = (court, t) => cell('free', court, t, 'data-slot-can-start="true" data-slot-min-duration="60"');
+    // Court 1: 19:00 free, 19:30 free, 20:00 cannot start, 20:30 booked -> 90 minutes from 19:00.
+    // Court 2: 19:00 free, 19:30 booked -> 60 minutes (the minimum booking, longer than the single open cell).
+    const html = `<div class="schedule"><table><tr>${start('Court 1', '19:00')}${start('Court 1', '19:30')}<td class="slot can-not-start"></td><td class="slot red"></td></tr>`
+      + `<tr>${start('Court 2', '19:00')}<td class="slot red"></td></tr></table></div>`;
+    const r = parseMatchi(html);
+    expect(r.starts['19:00']).toEqual({ courts: 2, min: 60, max: 90, names: ['Court 1', 'Court 2'] });
+    expect(r.starts['19:30']).toEqual({ courts: 1, min: 60, max: 60, names: ['Court 1'] });
+    // Eight open cells in a row: the cap, never more.
+    const long = `<div class="schedule"><table><tr>${start('Court 1', '07:00')}${'<td class="slot free"></td>'.repeat(8)}</tr></table></div>`;
+    expect(parseMatchi(long).starts['07:00'].max).toBe(180);
+    // A row never leaks into the next: Court 2's open cells do not lengthen Court 1's run.
+    const rows = `<div class="schedule"><table><tr>${start('Court 1', '19:00')}<td class="slot red"></td></tr><tr><td class="slot free"></td><td class="slot free"></td></tr></table></div>`;
+    expect(parseMatchi(rows).starts['19:00'].max).toBe(60);
+    // An upper-case <TR> still starts a row (no leak across courts).
+    expect(parseMatchi(rows.replace('<tr><td class="slot free">', '<TR><td class="slot free">')).starts['19:00'].max).toBe(60);
+    // A "<tr" inside an attribute, a comment or a script never splits a court's row.
+    const split = (junk) => `<div class="schedule"><table><tr>${start('Court 1', '19:00')}${junk}<td class="slot free"></td><td class="slot free"></td><td class="slot red"></td></tr></table></div>`;
+    expect(parseMatchi(split('<td class="slot can-not-start" title="x<tr>y"></td>')).starts['19:00'].max).toBe(120);
+    expect(parseMatchi(split('<span title="<tr>"></span>')).starts['19:00'].max).toBe(90);
+    expect(parseMatchi(split('<style>.a<tr{}</style>')).starts['19:00'].max).toBe(90);
+    expect(parseMatchi(split('<!-- <tr> -->')).starts['19:00'].max).toBe(90);
+    expect(parseMatchi(split('<script>var s = "<tr>";</script>')).starts['19:00'].max).toBe(90);
   });
 
   it('F3 and item 3: a court cell of a kind the parser does not know is an error, never "no court free"', () => {
@@ -147,8 +178,9 @@ describe('parsePulse (the saved live reply)', () => {
     expect(Object.keys(r.byDate['2026-10-28']).sort()).toEqual([
       '07:00', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '15:30', '16:30', '17:00', '21:30',
     ]);
-    expect(r.byDate['2026-10-28']['07:00']).toEqual({ courts: 3, min: 60 });
-    expect(r.byDate['2026-10-28']['21:30']).toEqual({ courts: 2, min: 90 });
+    // Each court lists the lengths it sells from that start: 60 to 120 at 07:00, 90 only at 21:30.
+    expect(r.byDate['2026-10-28']['07:00']).toEqual({ courts: 3, min: 60, max: 120 });
+    expect(r.byDate['2026-10-28']['21:30']).toEqual({ courts: 2, min: 90, max: 90 });
   });
 
   it('drops starts earlier than now, as the widget does', () => {
@@ -299,7 +331,10 @@ function mapRepo() {
         if (people.has(pid)) people.get(pid).votes_at = now;
       },
       async listBooked(from) { return [...booked.values()].filter((b) => b.slot >= from); },
-      async setBooked(slot, person_id, venue, now) { booked.set(slot, { slot, person_id, venue, created_at: now }); },
+      async setBooked(slot, person_id, venue, now, d = {}) {
+        const was = booked.get(slot) || {};
+        booked.set(slot, { slot, person_id, venue, created_at: now, start: d.start ?? was.start ?? null, minutes: d.minutes ?? was.minutes ?? null, courts: d.courts ?? was.courts ?? 1 });
+      },
       async clearBooked(slot) { booked.delete(slot); },
       async alertSlots(from) { return [...alerts.keys()].filter((s) => s >= from); },
       async claimAlert(slot, names, venues, now) {
@@ -483,7 +518,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       ['si', 4, ['Test Ann', 'Test Bob', 'Test Cat', 'Test Dan']], ['pdl', 4, ['Test Ann', 'Test Bob', 'Test Cat', 'Test Eve']],
     ]);
     expect(alertText(s.ready[0], venueConfig(), 'https://p/')).toBe('Padel: Wed 28 Oct 19:00. '
-      + 'St Ives: 4 in (Test Ann, Test Bob, Test Cat, Test Dan), starts 19:00, 19:30 (60 min), book <https://www.matchi.se/book/schedule?facilityId=2619&date=2026-10-28&sport=5>. '
+      + 'St Ives: 4 in (Test Ann, Test Bob, Test Cat, Test Dan), starts 19:00 (60 min), 19:30 (60 min, 2 courts), book <https://www.matchi.se/book/schedule?facilityId=2619&date=2026-10-28&sport=5>. '
       + 'Cambridge: 4 in (Test Ann, Test Bob, Test Cat, Test Eve), starts 19:30 (90 min), book <https://www.matchi.se/book/schedule?facilityId=3122&date=2026-10-28&sport=5>. '
       + 'Courts checked 09:45. Whoever books taps Booked on the page https://p/');
   });
@@ -820,11 +855,39 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const s = (await t.call('/api/state')).json;
     expect(t.relayCalls).toHaveLength(0);
     expect(s.ready).toEqual([]);
-    expect(s.booked[SLOT]).toEqual({ person_id: ids[0], venue: 'si' });
+    expect(s.booked[SLOT]).toEqual({ person_id: ids[0], venue: 'si', start: null, minutes: null, courts: 1 });
     // Undo the booking: the slot is ready again and the next save sends its one DM.
     await t.call('/api/booked', { slot: SLOT, booked: false });
     await t.call('/api/vote', { person_id: ids[0], add: [SLOT] });
     expect(t.relayCalls).toHaveLength(1);
+  });
+
+  it('one booking a day: a booking at 19:30 drops the other ready hours that day and their DMs (Kevin, 29 Oct 2026)', async () => {
+    await t.seedAvailability({
+      si: {
+        '2026-10-28': { status: 'ok', starts: { '18:00': { courts: 2, min: 60, max: 120 }, '19:00': { courts: 1, min: 60 }, '20:30': { courts: 3, min: 60, max: 90 }, '21:00': { courts: 1, min: 60 } } },
+        '2026-10-29': { status: 'ok', starts: { '18:00': { courts: 3, min: 60, max: 120 } } },
+      },
+      pdl: {}, pp: {},
+    });
+    const ids = await t.addPeople(NAMES.slice(0, 4));
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: ids[0], venue: 'si', booked: true, start: '19:30', minutes: 90 })).status).toBe(200);
+    for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|18', SLOT, '2026-10-28|20', '2026-10-29|18'] });
+    for (const id of ids.slice(0, 3)) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|21'] });   // three in: a "nearly" hour
+    const s = (await t.call('/api/state')).json;
+    expect(s.booked[SLOT]).toEqual({ person_id: ids[0], venue: 'si', start: '19:30', minutes: 90, courts: 1 });
+    // The 28th has a booking: its three hours with four in are not ready and its 21:00 with three is not nearly; the 29th is ready.
+    expect(s.ready.map((r) => r.slot)).toEqual(['2026-10-29|18']);
+    expect(s.nearly).toEqual([]);
+    expect(t.relayCalls).toHaveLength(1);
+    expect(t.relayCalls[0].body.text).toContain('Padel: Thu 29 Oct 18:00. St Ives: 4 in (Test Ann, Test Bob, Test Cat, Test Dan), starts 18:00 (60 to 120 min, 3 courts), book <');
+    // Undo the booking: the 28th's three hours are ready again and each gets its one DM.
+    await t.call('/api/booked', { slot: SLOT, booked: false });
+    await t.call('/api/vote', { person_id: ids[0], add: [SLOT] });
+    const back = (await t.call('/api/state')).json;
+    expect(back.ready.map((r) => r.slot)).toEqual(['2026-10-28|18', SLOT, '2026-10-28|20', '2026-10-29|18']);
+    expect(back.nearly.map((r) => r.slot)).toEqual(['2026-10-28|21']);
+    expect(t.relayCalls).toHaveLength(4);
   });
 
   it('two saves at once send one DM, and both saves persist', async () => {
@@ -948,6 +1011,15 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect((await t.call('/api/booked', { slot: '2026-11-12|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: '2026-10-26|10', person_id: id, venue: 'si', booked: true })).status).toBe(400);
     expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'xx', booked: true })).status).toBe(400);
+    // Booking details: the start sits inside the hour, minutes in fives up to 180, courts 1 or 2.
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, start: '18:30' })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, start: '19:15' })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, minutes: 61 })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, minutes: 240 })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, courts: 3 })).status).toBe(400);
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, start: '19:30', minutes: 90 })).json.booked[SLOT]).toEqual({ person_id: id, venue: 'si', start: '19:30', minutes: 90, courts: 1 });
+    // "Booked 2nd court" sends courts alone: the start and length stay.
+    expect((await t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'si', booked: true, courts: 2 })).json.booked[SLOT]).toEqual({ person_id: id, venue: 'si', start: '19:30', minutes: 90, courts: 2 });
     expect(t.rows.votes()).toEqual([]);
   });
 
@@ -1067,7 +1139,8 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect(t.relayCalls).toHaveLength(1);
       expect(t.relayCalls[0].body.text).toMatch(/^Padel: Wed 28 Oct 07:00\. St Ives: 4 in .* Huntingdon: 4 in .* Courts checked: St Ives 09:44, Huntingdon 09:45\./);
       const s = (await t.call('/api/state')).json;
-      expect(s.availability.venues.si['2026-10-28'].hours['07']).toEqual({ free: true, min: 60, starts: ['07:00', '07:30'], mins: [60, 60] });
+      // The saved body carries no max (strip), so the longest booking falls back to the shortest.
+      expect(s.availability.venues.si['2026-10-28'].hours['07']).toEqual({ free: true, min: 60, max: 60, courts: 2, starts: ['07:00', '07:30'], mins: [60, 60], maxs: [60, 60], courtsBy: [2, 2] });
       // St Ives day 10 (5 Nov) is beyond its booking window: "not open yet", never counted.
       expect(s.availability.venues.si['2026-11-05']).toEqual({ status: 'closed', hours: {} });
       expect(s.availability.venues.pdl['2026-11-09'].status).toBe('ok');
@@ -1167,6 +1240,39 @@ describe('pure state rules', () => {
     const s = computeState({ people, votes, booked: [], availability: null, dates, nowMs: NOW });
     expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false });
     expect(s.ready).toEqual([]);
+  });
+  it('a booked hour offers a second court only with 8 in at that venue and another court free at the booked start (Kevin, 29 Oct 2026)', () => {
+    const eight = [1, 2, 3, 4, 5, 6, 7, 8].map((id) => ({ id, name: `P${id}`, venues: ['si', 'pdl', 'pp'] }));
+    const v8 = eight.map((p) => ({ person_id: p.id, slot: SLOT }));
+    const at = (starts) => fresh({ si: { '2026-10-28': { status: 'ok', starts } } });
+    const before = iso(NOW + MIN);                            // marked after the read: the read still shows our court
+    const after = iso(NOW - 10 * MIN);                        // marked before the read: the read no longer shows it
+    const booking = (created_at, extra = {}) => [{ slot: SLOT, person_id: 1, venue: 'si', start: '19:00', minutes: 90, courts: 1, created_at, ...extra }];
+    const second = (opts) => computeState({ people: eight, votes: v8, availability: at({ '19:00': { courts: 1, min: 60, max: 120 } }), dates, nowMs: NOW, ...opts }).booked[SLOT].second;
+    const book = 'https://www.matchi.se/book/schedule?facilityId=2619&date=2026-10-28&sport=5';
+    // Read after the mark with one court free at 19:00 for 120 min: it is another court, so it is offered (the review's St Ives case).
+    expect(second({ booked: booking(after) })).toEqual({ count: 8, names: eight.map((p) => p.name), start: '19:00', book });
+    // A read from before the mark may still show our own court: nothing is offered until the next read, whatever it shows.
+    expect(second({ booked: booking(before) })).toBeUndefined();
+    expect(second({ booked: booking(before), availability: at({ '19:00': { courts: 2, min: 60, max: 120 } }) })).toBeUndefined();
+    expect(second({ booked: booking(undefined) })).toBeUndefined();
+    // The booked start and length decide: a court free only at 19:30, or only for 60 minutes, offers nothing.
+    expect(second({ booked: booking(after), availability: at({ '19:30': { courts: 2, min: 60, max: 120 } }) })).toBeUndefined();
+    expect(second({ booked: booking(after), availability: at({ '19:00': { courts: 2, min: 60, max: 60 } }) })).toBeUndefined();
+    // Seven in, or eight with one who cannot get to St Ives: none. Two courts already booked: none.
+    expect(second({ booked: booking(after), votes: v8.slice(0, 7) })).toBeUndefined();
+    expect(second({ booked: booking(after), people: [...eight.slice(0, 7), { id: 8, name: 'P8', venues: ['pdl'] }] })).toBeUndefined();
+    expect(second({ booked: booking(after, { courts: 2 }) })).toBeUndefined();
+    expect(computeState({ people: eight, votes: v8, booked: booking(after), availability: at({ '19:00': { courts: 1, min: 60, max: 120 } }), dates, nowMs: NOW }).ready).toEqual([]);
+  });
+  it('decideAlerts sends nothing for a ready hour on a booked day, whatever the state handed to it', () => {
+    const state = { ready: [{ slot: '2026-10-28|18', date: '2026-10-28' }, { slot: '2026-10-29|18', date: '2026-10-29' }], booked: { '2026-10-28|20': { venue: 'si' } } };
+    expect(decideAlerts(state, []).map((r) => r.slot)).toEqual(['2026-10-29|18']);
+  });
+  it('the DM names the lengths and court counts per start', () => {
+    const s = computeState({ people, votes, booked: [], availability: fresh({ pdl: { '2026-10-28': { status: 'ok', starts: { '19:00': { courts: 3, min: 60, max: 120 }, '19:30': { courts: 1, min: 60, max: 60 } } } } }), dates, nowMs: NOW });
+    expect(alertText(s.ready[0], venueConfig(), 'p')).toContain('Cambridge: 4 in (P1, P2, P3, P4), starts 19:00 (60 to 120 min, 3 courts), 19:30 (60 min), book <');
+    expect(s.ready[0].venues[0]).toMatchObject({ courts: 3, max: 120, maxs: [120, 60], courtsBy: [3, 1] });
   });
   it('decideAlerts skips slots already alerted', () => {
     const s = computeState({ people, votes, booked: [], availability: fresh(EVENING), dates, nowMs: NOW });

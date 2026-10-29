@@ -50,16 +50,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // voteDelayMs: a number, or a function of the request number (0, 1, ...).
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
   // Ann's tick makes four (the Worker's ALERT_AT) and the day turns ready.
-  const extras = readyAt ? [{ id: 3, name: 'Test Cat', venues: ['si', 'pdl', 'pp'], savedAt: null }, { id: 4, name: 'Test Dan', venues: ['si', 'pdl', 'pp'], savedAt: null }] : [];
-  const store = { votes: new Map(), headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  // crowdAt 'HH': six more people, and all eight (Ann too) on tomorrow at that hour: a second court's crowd.
+  const PEOPLE = ['Test Cat', 'Test Dan', 'Test Eve', 'Test Fay', 'Test Gus', 'Test Hal'].map((name, i) => ({ id: i + 3, name, venues: ['si', 'pdl', 'pp'], savedAt: null }));
+  const extras = crowdAt ? PEOPLE : readyAt ? PEOPLE.slice(0, 2) : [];
+  const store = { votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   if (readyAt) {
     const slot = `${londonDates(Date.now())[1]}|${readyAt}`;
     for (const pid of [2, 3, 4]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
+  }
+  if (crowdAt) {
+    const slot = `${londonDates(Date.now())[1]}|${crowdAt}`;
+    for (const pid of [1, 2, 3, 4, 5, 6, 7, 8]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
   }
   store.removePerson = () => { store.gone = true; };
   // The hours a person has ticked on the server (votes are keyed by person and hour).
@@ -75,7 +81,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       { readAt: at, goodAt: { si: at, pdl: at }, venues: { si, pdl: {} } },
       { fetchedAt: at, goodAt: at, days: {} },
     );
-    return computeState({ people: store.gone ? [other, ...extras] : [person, other, ...extras], votes: [...store.votes.values()], booked: [], availability, dates: londonDates(now), nowMs: now });
+    return computeState({ people: store.gone ? [other, ...extras] : [person, other, ...extras], votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now });
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -85,6 +91,14 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     store.headers.push(req.headers());
     if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, state()); }
     if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false });
+    if (path === '/api/booked') {                                        // the Worker's rule: a detail left out keeps its stored value
+      const body = req.postDataJSON();
+      store.bookedBodies.push(body);
+      const was = store.booked.find((b) => b.slot === body.slot) || {};
+      store.booked = store.booked.filter((b) => b.slot !== body.slot);
+      if (body.booked === true) store.booked.push({ slot: body.slot, person_id: body.person_id, venue: body.venue, start: body.start ?? was.start ?? null, minutes: body.minutes ?? was.minutes ?? null, courts: body.courts ?? was.courts ?? 1 });
+      return reply(route, 200, state());
+    }
     if (path === '/api/vote') {
       const body = req.postDataJSON();
       const i = store.bodies.length;
@@ -493,7 +507,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     const chips = page.locator(`[data-slot="${tomorrow}|19"]`).locator('xpath=..').locator('.chip');
     await expect(chips.locator('[aria-hidden]')).toHaveText(['St Ives ✓', /^Cambridge /, /^Huntingdon /]);
     await expect(chips.first()).toHaveClass(/free/);
-    await expect(chips.first().locator('.sr')).toHaveText('St Ives: court free at 19:00, shortest booking 60 min.');
+    await expect(chips.first().locator('.sr')).toHaveText('St Ives: a court free at 19:00 (60 min).');
     await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('');
     await page.locator(`[data-slot="${tomorrow}|19"]`).click();
     await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('1 in');
@@ -513,6 +527,87 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await expect(day).toHaveAttribute('aria-label', /up to 4 on one hour, ready to book$/);
     await expect(page.locator('#ready')).toContainText('Ready to book');
     await expect(page.locator('#ready')).toContainText('St Ives');
+  });
+
+  test('a booked day: one Booked line with its details, no Ready entry, "Booked ✓" on the day; a half-hour start names itself on the chip (Kevin, 29 Oct 2026)', async ({ page }) => {
+    const tomorrow = londonDates(Date.now())[1];
+    await mockPadel(page, { siClosedFrom: 7, siFree: { '19:30': { courts: 2, min: 60, max: 90 } }, readyAt: '19', booked: [{ slot: `${tomorrow}|19`, person_id: 2, venue: 'si', start: '19:30', minutes: 90, courts: 1 }] });
+    await openAsTestAnn(page);
+    const day = page.locator(`[data-day="${tomorrow}"]`);
+    await expect(day.locator('small')).toHaveText('Booked ✓');
+    await expect(day).toHaveClass(/has-booked/);
+    await page.locator(`[data-slot="${tomorrow}|19"]`).click();      // four in now, but the day is booked: never ready
+    await expect(day.locator('small')).toHaveText('Booked ✓');
+    await expect(page.locator('#ready')).toBeHidden();
+    const row = page.locator('#row-19');
+    await expect(row.locator('.booked-line')).toContainText('Booked by Test Bob: St Ives 19:30, 90 min');
+    await expect(row.locator('.chip').first().locator('[aria-hidden]')).toHaveText('St Ives ✓2 19:30');
+    await expect(row.locator('.chip').first().locator('.sr')).toHaveText('St Ives: 2 courts free at 19:30 (60 to 90 min).');
+    await expect(row.locator('[data-mark]')).toHaveCount(0);
+  });
+
+  test('the Booked picker: "Booked?" on an hour sends where, from when and for how long; Undo brings the hour back', async ({ page }) => {
+    const store = await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60, max: 120 }, '19:30': { courts: 1, min: 60, max: 90 } } });
+    const tomorrow = await openAsTestAnn(page);
+    const row = page.locator('#row-19');
+    await row.locator('[data-mark]').click();
+    await expect(row.locator('[data-book-form] select[name="venue"]')).toHaveValue('si');
+    await expect(row.locator('[data-book-form] select[name="start"]')).toHaveValue('19:00');
+    await expect(row.locator('[data-book-form] select[name="minutes"]')).toHaveValue('60');
+    await expect(row.locator('[data-book-form] select[name="minutes"] option[value="120"]')).toHaveText('120 min (free)');
+    await row.locator('[data-book-form] select[name="start"]').selectOption('19:30');
+    await expect(row.locator('[data-book-form] select[name="minutes"] option[value="120"]')).toHaveText('120 min');   // 90 at most from 19:30
+    await row.locator('[data-book-form] select[name="minutes"]').selectOption('90');
+    await row.locator('[data-book-form] button[type="submit"]').click();
+    await expect(row.locator('.booked-line')).toContainText('Booked by Test Ann: St Ives 19:30, 90 min');
+    expect(store.bookedBodies).toEqual([{ slot: `${tomorrow}|19`, person_id: 1, venue: 'si', start: '19:30', minutes: 90, booked: true }]);
+    await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('Booked ✓');
+    await row.locator('[data-unbook]').click();
+    await expect(row.locator('.booked-line')).toHaveCount(0);
+    await expect(row.locator('[data-mark]')).toHaveCount(1);
+    await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('');
+  });
+
+  test('the Ready line\'s Booked button opens the picker in view, filled from that line', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 700 });
+    await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60, max: 90 } }, readyAt: '19' });
+    const tomorrow = await openAsTestAnn(page);
+    await page.locator(`[data-slot="${tomorrow}|19"]`).click();
+    await expect(page.locator('#ready')).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('#ready [data-book-slot]').click();
+    const form = page.locator('#row-19 [data-book-form]');
+    await expect(form).toBeInViewport();
+    await expect(form.locator('select[name="venue"]')).toHaveValue('si');
+    await expect(form.locator('select[name="start"]')).toHaveValue('19:00');
+    await expect(form.locator('select[name="minutes"]')).toHaveValue('60');
+  });
+
+  test('eight in and another court free: "Booked 2nd court" keeps the first booker and records two courts', async ({ page }) => {
+    const tomorrow = londonDates(Date.now())[1];
+    // Marked a minute ago; every mock read is "now", so the read is after the mark and its free court is another one.
+    const markedAt = new Date(Date.now() - 60000).toISOString();
+    const store = await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60, max: 120 } }, crowdAt: '19', booked: [{ slot: `${tomorrow}|19`, person_id: 2, venue: 'si', start: '19:00', minutes: 60, courts: 1, created_at: markedAt }] });
+    await openAsTestAnn(page);
+    const row = page.locator('#row-19');
+    await expect(row.locator('.second')).toContainText('Second court? 8 can play, and another court is free at St Ives 19:00 for 60 min.');
+    await row.locator('[data-book-second]').click();
+    await expect(row.locator('.booked-line')).toContainText('Booked by Test Bob: St Ives 19:00, 60 min, 2 courts');
+    await expect(row.locator('.second')).toHaveCount(0);
+    expect(store.bookedBodies).toEqual([{ slot: `${tomorrow}|19`, person_id: 2, venue: 'si', courts: 2, booked: true }]);
+  });
+
+  test('an open picker closes when someone else books that hour first, and never overwrites them', async ({ page }) => {
+    const store = await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } } });
+    const tomorrow = await openAsTestAnn(page);
+    const row = page.locator('#row-19');
+    await row.locator('[data-mark]').click();
+    await expect(row.locator('[data-book-form]')).toBeVisible();
+    store.booked.push({ slot: `${tomorrow}|19`, person_id: 2, venue: 'pdl', start: '19:30', minutes: 90, courts: 1 });
+    await page.locator('#check-now').click();
+    await expect(row.locator('.booked-line')).toContainText('Booked by Test Bob: Cambridge 19:30, 90 min');
+    await expect(row.locator('[data-book-form]')).toHaveCount(0);
+    expect(store.bookedBodies).toEqual([]);
   });
 
   test.describe('no code (Kevin, 27 Oct 2026)', () => {
