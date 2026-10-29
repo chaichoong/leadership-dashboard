@@ -194,7 +194,7 @@ export function parseMatchi(html) {
     const end = name === '!--' ? open + 3 : tagEnd(html, open);
     if (end === -1) break;
     WALK_RE.lastIndex = end;
-    if (SKIP_END[name]) {
+    if (Object.hasOwn(SKIP_END, name)) {
       const endRe = SKIP_END[name];
       endRe.lastIndex = end;
       const e = endRe.exec(html);

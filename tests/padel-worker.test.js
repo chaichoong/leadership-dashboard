@@ -124,6 +124,7 @@ describe('parseMatchi', () => {
     expect(parseMatchi(split('<td class="slot can-not-start" title="x<tr>y"></td>')).starts['19:00'].max).toBe(120);
     expect(parseMatchi(split('<span title="<tr>"></span>')).starts['19:00'].max).toBe(90);
     expect(parseMatchi(split('<style>.a<tr{}</style>')).starts['19:00'].max).toBe(90);
+    expect(parseMatchi(split('<constructor></constructor>')).starts['19:00'].max).toBe(90);   // a tag named like an object property
     expect(parseMatchi(split('<!-- <tr> -->')).starts['19:00'].max).toBe(90);
     expect(parseMatchi(split('<script>var s = "<tr>";</script>')).starts['19:00'].max).toBe(90);
   });
