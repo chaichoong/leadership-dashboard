@@ -14,6 +14,7 @@
 .wear-chip { font-size: var(--fs-xs); font-weight: var(--fw-semibold); border-radius: var(--radius-full); padding: 3px 10px; background: var(--bg-subtle); color: var(--text-secondary); }
 .wear-chip-rain { background: var(--info-bg); color: var(--info); }
 .wear-chip-wind { background: var(--warning-bg); color: var(--warning); }
+.wear-chip-sun { background: var(--accent-gold-soft); color: var(--text-primary); }
 .wear-why { margin: var(--space-4) 0 0; padding: var(--space-3); border-left: 3px solid var(--accent); background: var(--bg-surface-2); border-radius: 0 var(--radius-md) var(--radius-md) 0; color: var(--text-secondary); max-width: 75ch; }
 .wear-opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
 .wear-opt { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); background: var(--bg-surface); min-width: 0; }
