@@ -202,6 +202,26 @@
         </form>`;
     }
 
+    // Tonight's wash (Kevin, 29 Oct 2026): from what was logged today, what goes in the wash and what goes
+    // back on the hanger, so nothing is over-worn and the clothes keep rotating. Uncounted pieces (jackets,
+    // coats, shoes) are left off: they never need a nightly decision.
+    function washTonight() {
+        const date = today();
+        const worn = Object.values(state.data.items).filter(it => it.lastWorn === date && P().washLimit(it) > 0)
+            .sort((a, b) => a.name.localeCompare(b.name));
+        const head = '<h3 id="wearWashTitle">Tonight\'s wash</h3>';
+        if (!worn.length) {
+            return `<section class="wear-wash" aria-labelledby="wearWashTitle">${head}<p class="wear-note">Press Wearing this, or tick what you have on under I'm wearing something else, and tonight's wash list appears here.</p></section>`;
+        }
+        const wash = worn.filter(it => P().inWash(it, date));
+        const keep = worn.filter(it => !P().inWash(it, date));
+        const list = (items, line) => `<ul>${items.map(it => `<li><i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i><span class="wear-name">${esc(it.name)} <small>${esc(line(it))}</small></span></li>`).join('')}</ul>`;
+        return `<section class="wear-wash" aria-labelledby="wearWashTitle">${head}<div class="wear-washcols">
+            ${wash.length ? `<div><h4>Into the wash tonight</h4>${list(wash, it => 'back in your picks ' + fmtDay(P().cleanOn(it)))}</div>` : ''}
+            ${keep.length ? `<div><h4>Hang back up</h4>${list(keep, it => `${P().wearsNow(it, date)} of ${P().washLimit(it)} wears`)}</div>` : ''}
+        </div></section>`;
+    }
+
     function renderHomeCard() {
         const el = document.getElementById('homeWear');
         if (!el) return;
@@ -238,6 +258,7 @@
         el.innerHTML = head + stale + why
             + `<div class="wear-opts">${picks.map(p => optionCard(p, best)).join('')}</div>`
             + otherBlock(picks, best)
+            + washTonight()
             + `<p class="wear-src">Weather from Open-Meteo for ${esc(place)}. ${locate}<button type="button" class="wear-link" data-wear-open>Open your wardrobe</button></p>`;
     }
 
