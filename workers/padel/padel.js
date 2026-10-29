@@ -15,7 +15,9 @@
 //   POST /api/person  { name }              -> { id, name, venues }   creates the name if absent
 //   POST /api/person  { id, venues:[...] }  -> { id, name, venues }   venue preferences
 //   POST /api/vote    { person_id, add, remove } -> state            applies that person's tick changes
-//   POST /api/booked  { slot, person_id, venue, booked } -> state
+//   POST /api/booked  { slot, person_id, venue, booked, start?, minutes?, courts? } -> state
+//        A booking carries its start ("19:30"), length in minutes and courts (1, or 2 when the group
+//        booked a second court); a day with a booking shows no other ready hour (Kevin, 29 Oct 2026).
 //   POST /api/refresh                       -> state + { refreshed }  "Check now" (Pulse only)
 // The page itself is a static asset in ./public, served without this Worker (wrangler.toml
 // run_worker_first = ["/api/*"]); its headers live in public/_headers.
@@ -48,7 +50,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-27.16';
+export const VERSION = '2026-10-29.1';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp'];
 const MATCHI_VENUES = ['si', 'pdl'];
@@ -56,6 +58,8 @@ export const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);          // 7.
 const HH = new Set(HOURS.map((h) => String(h).padStart(2, '0')));
 export const DAYS = 14;                          // the window: today and the 13 days after (Kevin, 27 Oct 2026)
 export const MAX_MIN = 90;                       // an hour counts as free only for a start of 90 min or less
+export const RUN_CAP_MIN = 180;                  // the longest booking shown from a start (Kevin, 29 Oct 2026: show longer options)
+export const SECOND_COURT_AT = 8;                // a booked hour with this many in and a second court free offers it
 export const MATCHI_FRESH_MS = 45 * 60 * 1000;   // St Ives and PDL count for 45 minutes after the Mac's read
 export const PULSE_FRESH_MS = 20 * 60 * 1000;    // Pulse counts for 20 minutes after its read
 export const PULSE_EVERY_MS = 15 * 60 * 1000;    // Pulse is called at most once per 15 minutes
@@ -150,7 +154,9 @@ const londonHHMM = (iso) => { const p = londonParts(Date.parse(iso)); return `${
 // 60 or 90. Attribute order is not fixed and titles can hold newlines, so each cell's tag is read
 // whole, quote-aware, and classes count in any order ("free slot" is "slot free"). A free, bookable
 // cell this parser cannot read makes the whole day an error: a court it failed to see must never
-// read as "no court".
+// read as "no court". Each <tr> is one court with its cells in time order, so the longest booking
+// from a start is that cell plus every open cell after it on the same row (free or can-not-start:
+// both are unbooked), capped at RUN_CAP_MIN. Kevin, 29 Oct 2026: show where a longer booking fits.
 function tagEnd(s, from) {
   let q = '';
   for (let j = from; j < s.length; j++) {
@@ -171,18 +177,33 @@ const unent = (s) => s.replace(/&nbsp;/g, ' ').replace(/&#39;|&apos;/g, "'").rep
 const TITLE_RE = /Available\s*<br\s*\/?>\s*([\s\S]*?)\s*<br\s*\/?>\s*(\d{1,2}):(\d{2})\s*-\s*\d{1,2}:\d{2}/i;
 const CELL_KINDS = ['free', 'red', 'can-not-start', 'not-available'];
 
+// One walk over every tag, each read to its quote-aware end, so a "<tr" inside any attribute is
+// never a row. A comment, script or style is skipped whole; a <tr> starts a court row; a <td> is a cell.
+const WALK_RE = /<(!--|[a-zA-Z][\w-]*)/g;
+const SKIP_END = { '!--': /-->/g, script: /<\/script\s*>/gi, style: /<\/style\s*>/gi };
 export function parseMatchi(html) {
   if (typeof html !== 'string' || !/class="schedule[\s"]/.test(html)) return { status: 'error', reason: 'not a schedule page' };
-  const starts = {};
+  const rows = [];
+  let row = null;
   let cells = 0;
-  let i = 0;
-  while ((i = html.indexOf('<td', i)) !== -1) {           // every cell, whatever order its classes are in
-    const open = i;
-    i += 3;
-    if (!/[\s>]/.test(html[open + 3] || '')) continue;       // <tdx...> is not a cell
-    const end = tagEnd(html, open);
+  WALK_RE.lastIndex = 0;
+  let w;
+  while ((w = WALK_RE.exec(html))) {
+    const open = w.index;
+    const name = w[1].toLowerCase();
+    const end = name === '!--' ? open + 3 : tagEnd(html, open);
     if (end === -1) break;
-    i = end;
+    WALK_RE.lastIndex = end;
+    if (Object.hasOwn(SKIP_END, name)) {
+      const endRe = SKIP_END[name];
+      endRe.lastIndex = end;
+      const e = endRe.exec(html);
+      if (!e) break;
+      WALK_RE.lastIndex = e.index + e[0].length;
+      continue;
+    }
+    if (name === 'tr') { row = []; rows.push(row); continue; }
+    if (name !== 'td') continue;
     const at = tagAttrs(html.slice(open + 3, end));
     const cls = String(at.class || '').split(/\s+/);
     if (!cls.includes('slot')) continue;
@@ -190,17 +211,32 @@ export function parseMatchi(html) {
     // never "no court free" (checked 27 Oct 2026: only these four kinds exist on either venue).
     if (!CELL_KINDS.some((k) => cls.includes(k))) return { status: 'error', reason: 'unknown court cell' };
     cells++;
-    if (!cls.includes('free') || at['data-slot-can-start'] !== 'true') continue;
-    const m = TITLE_RE.exec(at.title || '');
-    if (!m) return { status: 'error', reason: 'a free court cell could not be read' };
-    const min = Number(at['data-slot-min-duration']);
-    if (!Number.isInteger(min) || min <= 0) return { status: 'error', reason: 'a free court cell has no minimum booking' };
-    const court = unent(m[1]).replace(/\s+/g, ' ').trim();
-    if (/single/i.test(court)) continue;                  // two players only: never a doubles court
-    const t = `${m[2].padStart(2, '0')}:${m[3]}`;
-    const s = starts[t] || (starts[t] = { courts: 0, min, names: [] });
-    if (!s.names.includes(court)) { s.names.push(court); s.courts++; }
-    s.min = Math.min(s.min, min);
+    const cell = { open: cls.includes('free') || cls.includes('can-not-start'), minutes: Number(at['data-slot-duration']) || 30 };
+    if (cls.includes('free') && at['data-slot-can-start'] === 'true') {
+      const m = TITLE_RE.exec(at.title || '');
+      if (!m) return { status: 'error', reason: 'a free court cell could not be read' };
+      const min = Number(at['data-slot-min-duration']);
+      if (!Number.isInteger(min) || min <= 0) return { status: 'error', reason: 'a free court cell has no minimum booking' };
+      cell.court = unent(m[1]).replace(/\s+/g, ' ').trim();
+      cell.start = `${m[2].padStart(2, '0')}:${m[3]}`;
+      cell.min = min;
+    }
+    if (!row) { row = []; rows.push(row); }
+    row.push(cell);
+  }
+  const starts = {};
+  for (const r of rows) {
+    for (let c = 0; c < r.length; c++) {
+      const cell = r[c];
+      if (!cell.start || /single/i.test(cell.court)) continue;   // two players only: never a doubles court
+      let run = 0;
+      for (let k = c; k < r.length && r[k].open && run < RUN_CAP_MIN; k++) run += r[k].minutes;
+      const max = Math.max(cell.min, Math.min(run, RUN_CAP_MIN));
+      const s = starts[cell.start] || (starts[cell.start] = { courts: 0, min: cell.min, max, names: [] });
+      if (!s.names.includes(cell.court)) { s.names.push(cell.court); s.courts++; }
+      s.min = Math.min(s.min, cell.min);
+      s.max = Math.max(s.max, max);
+    }
   }
   if (cells === 0) {
     // St Ives beyond its 7-day window (checked 27 Oct 2026 on 5 Nov) sends no table at all, only
@@ -217,22 +253,24 @@ export function parseMatchi(html) {
 // live on 27 Oct 2026 (tests/fixtures/padel/pulse-search.json): each court is { courtId, name
 // "Court 1", size "DoubleRegular", allowedPlayerCounts [4], durations [{ minutes: 60 }, { minutes:
 // 90 }, ...], ... }. A start is bookable on a doubles court; its shortest booking is the smallest
-// durations[].minutes (60 when a court gives none). Any other shape is an error: never guess slots.
+// durations[].minutes (60 when a court gives none) and its longest the largest. Any other shape is
+// an error: never guess slots.
 const isDoubles = (c) => !/single/i.test(String(c.name || '')) && !/single/i.test(String(c.size || ''))
   && (!Array.isArray(c.allowedPlayerCounts) || c.allowedPlayerCounts.includes(4));
 export function pulseValueCourts(v) {
   if (!Array.isArray(v) || v.some((c) => !c || typeof c !== 'object' || Array.isArray(c))) return undefined;
   const courts = v.filter(isDoubles);
   if (!courts.length) return null;
-  const mins = courts.map((c) => {
-    if (c.durations === undefined) return 60;
-    if (!Array.isArray(c.durations)) return NaN;
+  const lens = courts.map((c) => {
+    if (c.durations === undefined) return [60, 60];
+    if (!Array.isArray(c.durations)) return [NaN, NaN];
     const m = c.durations.map((d) => Number(d && d.minutes)).filter((n) => n > 0);
-    return m.length ? Math.min(...m) : NaN;
+    return m.length ? [Math.min(...m), Math.min(Math.max(...m), RUN_CAP_MIN)] : [NaN, NaN];
   });
+  const mins = lens.map((l) => l[0]);
   if (mins.some((m) => Number.isNaN(m))) return undefined;
   const ok = mins.filter((m) => m <= MAX_MIN);
-  return { courts: ok.length || courts.length, min: Math.min(...mins) };
+  return { courts: ok.length || courts.length, min: Math.min(...mins), max: Math.max(...lens.map((l) => l[1])) };
 }
 export function parsePulse(json, nowMs) {
   const slots = json && typeof json === 'object' ? (json.availableSlots ?? json.result?.availableSlots) : undefined;
@@ -247,12 +285,14 @@ export function parsePulse(json, nowMs) {
     const p = londonParts(ms);
     const t = `${p.hh}:${p.mm}`;
     const day = byDate[p.date] || (byDate[p.date] = {});
-    day[t] = { courts: got.courts, min: got.min };
+    day[t] = { courts: got.courts, min: got.min, max: got.max };
   }
   return { status: 'ok', byDate };
 }
 
 // ── From raw starts to the page's hour rows ──
+// An hour row lists its starts with, for each, the shortest and longest booking (max falls back to
+// min for a read that carried none) and how many courts are free; courts and max are the hour's best.
 export function hoursFromStarts(starts) {
   const hours = {};
   for (const t of Object.keys(starts || {}).sort()) {
@@ -260,10 +300,15 @@ export function hoursFromStarts(starts) {
     if (!(s && s.min <= MAX_MIN && s.courts > 0)) continue;
     const hh = t.slice(0, 2);
     if (!HH.has(hh)) continue;
-    const h = hours[hh] || (hours[hh] = { free: true, min: s.min, starts: [], mins: [] });
+    const max = s.max > s.min ? s.max : s.min;
+    const h = hours[hh] || (hours[hh] = { free: true, min: s.min, max, courts: 0, starts: [], mins: [], maxs: [], courtsBy: [] });
     h.starts.push(t);
     h.mins.push(s.min);
+    h.maxs.push(max);
+    h.courtsBy.push(s.courts);
     h.min = Math.min(h.min, s.min);
+    h.max = Math.max(h.max, max);
+    h.courts = Math.max(h.courts, s.courts);
   }
   return hours;
 }
@@ -324,10 +369,17 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     if (!m || !inWindow.has(m[1]) || !byId.has(v.person_id)) continue;
     (voteMap[v.slot] || (voteMap[v.slot] = [])).push(v.person_id);
   }
+  // One booking a day (Kevin, 29 Oct 2026): a day with a booked hour shows no other ready or nearly
+  // hour and sends no further DM, so the list never fills with options nobody will book.
   const bookedMap = {};
+  const bookedDays = new Set();
+  const bookedAt = {};
   for (const b of booked) {
     const m = SLOT_RE.exec(b.slot);
-    if (m && inWindow.has(m[1])) bookedMap[b.slot] = { person_id: b.person_id ?? null, venue: b.venue ?? null };
+    if (!m || !inWindow.has(m[1])) continue;
+    bookedMap[b.slot] = { person_id: b.person_id ?? null, venue: b.venue ?? null, start: b.start || null, minutes: b.minutes || null, courts: b.courts || 1 };
+    bookedAt[b.slot] = Date.parse(b.created_at || '');
+    bookedDays.add(m[1]);
   }
   const a = availability || {};
   const fetchedAt = { si: a.matchiFetchedAt || null, pdl: a.matchiFetchedAt || null, pp: a.pulseFetchedAt || null };
@@ -355,8 +407,8 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
   const ready = [];
   const nearly = [];
   for (const slot of Object.keys(voteMap).sort()) {
-    if (bookedMap[slot]) continue;
     const [, date, hh] = SLOT_RE.exec(slot);
+    if (bookedDays.has(date)) continue;
     const voters = voteMap[slot].map((id) => byId.get(id));
     const counts = [];
     for (const code of VENUES) {
@@ -377,7 +429,8 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
         slot, date, hh, label, count: best, names, person_ids: ids,
         venues: q.map((c) => ({
           code: c.code, count: c.count, names: c.people.map((p) => p.name), starts: c.hour.starts, mins: c.hour.mins,
-          min: c.hour.min, book: bookUrl(cfg, c.code, date), checkedAt: fetchedAt[c.code],
+          maxs: c.hour.maxs, courtsBy: c.hour.courtsBy, courts: c.hour.courts, min: c.hour.min, max: c.hour.max,
+          book: bookUrl(cfg, c.code, date), checkedAt: fetchedAt[c.code],
         })),
       });
     } else if (best === ALERT_AT - 1) {
@@ -386,6 +439,24 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
       for (const c of q) for (const p of c.people) if (!names.includes(p.name)) names.push(p.name);
       nearly.push({ slot, date, hh, label, count: best, names, venues: q.map((c) => ({ code: c.code, starts: c.hour.starts })) });
     }
+  }
+  // A booked hour with SECOND_COURT_AT or more in at its venue offers the second court when another
+  // court is free at the booked start for the booked length (Kevin, 29 Oct 2026: "if 8 people can
+  // play"). Never a DM. Only a read taken after the booking was marked counts: it no longer shows
+  // the group's own court, so any court it shows free is another one. Before that read (15 minutes
+  // at most) the Ready line's court count is the guide.
+  for (const [slot, b] of Object.entries(bookedMap)) {
+    if (!b.venue || b.courts >= 2 || !VENUES.includes(b.venue)) continue;
+    if (!(Date.parse(fetchedAt[b.venue] || '') > bookedAt[slot])) continue;
+    const [, date, hh] = SLOT_RE.exec(slot);
+    const h = venuesOut[b.venue][date];
+    const hour = fresh[b.venue] && h.status === 'ok' ? h.hours[hh] : null;
+    if (!hour) continue;
+    const at = b.start ? hour.starts.indexOf(b.start) : 0;
+    if (at === -1 || (b.minutes && hour.maxs[at] < b.minutes)) continue;
+    const in_ = (voteMap[slot] || []).map((id) => byId.get(id)).filter((p) => p.venues.includes(b.venue));
+    if (in_.length < SECOND_COURT_AT) continue;
+    b.second = { count: in_.length, names: in_.map((p) => p.name), start: hour.starts[at], book: bookUrl(cfg, b.venue, date) };
   }
   const venueInfo = {};
   for (const code of VENUES) {
@@ -400,12 +471,18 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
 // The ready slots that still need their one DM.
 export function decideAlerts(state, alreadyAlerted) {
   const done = alreadyAlerted instanceof Set ? alreadyAlerted : new Set(alreadyAlerted || []);
-  return state.ready.filter((r) => !done.has(r.slot) && !state.booked[r.slot]);
+  const bookedDays = new Set(Object.keys(state.booked).map((s) => s.split('|')[0]));
+  return state.ready.filter((r) => !done.has(r.slot) && !state.booked[r.slot] && !bookedDays.has(r.date));
 }
 
-function startsText(v) {
-  const same = v.mins.every((m) => m === v.mins[0]);
-  return same ? `${v.starts.join(', ')} (${v.mins[0]} min)` : v.starts.map((t, i) => `${t} (${v.mins[i]} min)`).join(', ');
+// "19:00, 19:30 (60 to 90 min, 3 courts)", or one bracket per start when they differ.
+export const lengthText = (min, max) => (max > min ? `${min} to ${max} min` : `${min} min`);
+export function startsText(v) {
+  const maxs = v.maxs || v.mins;
+  const courtsBy = v.courtsBy || v.starts.map(() => 1);
+  const part = (i) => lengthText(v.mins[i], maxs[i]) + (courtsBy[i] > 1 ? `, ${courtsBy[i]} courts` : '');
+  const same = v.starts.every((_, i) => part(i) === part(0));
+  return same ? `${v.starts.join(', ')} (${part(0)})` : v.starts.map((t, i) => `${t} (${part(i)})`).join(', ');
 }
 const slackSafe = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // With nowMs, a read from another London day says so ("22:45 yesterday"): a DM sent at 02:00 on
@@ -477,12 +554,13 @@ export function makeRepo(db) {
       ]);
     },
     async listBooked(fromDate) {
-      const r = await db.prepare('SELECT slot, person_id, venue FROM booked WHERE slot >= ?').bind(fromDate).all();
+      const r = await db.prepare('SELECT slot, person_id, venue, start, minutes, courts, created_at FROM booked WHERE slot >= ?').bind(fromDate).all();
       return r.results || [];
     },
-    async setBooked(slot, personId, venue, nowIso) {
-      await db.prepare('INSERT INTO booked (slot, person_id, venue, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, created_at = excluded.created_at')
-        .bind(slot, personId, venue, nowIso).run();
+    // A detail left out (an older page, or "Booked 2nd court" sending only courts) keeps its stored value.
+    async setBooked(slot, personId, venue, nowIso, details = {}) {
+      await db.prepare('INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 1), ?7) ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at')
+        .bind(slot, personId, venue, details.start ?? null, details.minutes ?? null, details.courts ?? null, nowIso).run();
     },
     async clearBooked(slot) {
       await db.prepare('DELETE FROM booked WHERE slot = ?').bind(slot).run();
@@ -628,7 +706,8 @@ function cleanDay(day) {
     const s = day.starts[t];
     if (!START_RE.test(t)) return { error: `not a start time: ${t.slice(0, 10)}` };
     if (!isObj(s) || !posInt(s.courts, 50) || !posInt(s.min, 600)) return { error: `courts and min must be positive whole numbers (${t})` };
-    starts[t] = { courts: s.courts, min: s.min };
+    if (s.max !== undefined && !(posInt(s.max, 600) && s.max >= s.min)) return { error: `max must be a whole number of minutes, min or more (${t})` };
+    starts[t] = s.max === undefined ? { courts: s.courts, min: s.min } : { courts: s.courts, min: s.min, max: s.max };
   }
   return { day: { status: 'ok', starts } };
 }
@@ -786,6 +865,25 @@ export function cleanSlots(raw, dates) {
     out.add(m[0]);
   }
   return { slots: [...out].sort() };
+}
+// A booking's details: start on the hour or half hour inside its slot, a length in whole minutes
+// (up to RUN_CAP_MIN), one court or two. Each is optional: an older page sends none.
+export function cleanBooking(body, slot) {
+  const hh = slot.slice(-2);
+  const out = {};
+  if (body.start !== undefined) {
+    if (typeof body.start !== 'string' || !/^\d\d:(00|30)$/.test(body.start) || body.start.slice(0, 2) !== hh) return { error: `start must be ${hh}:00 or ${hh}:30` };
+    out.start = body.start;
+  }
+  if (body.minutes !== undefined) {
+    if (!posInt(body.minutes, RUN_CAP_MIN) || body.minutes % 5 !== 0) return { error: `minutes must be a multiple of 5, up to ${RUN_CAP_MIN}` };
+    out.minutes = body.minutes;
+  }
+  if (body.courts !== undefined) {
+    if (body.courts !== 1 && body.courts !== 2) return { error: 'courts must be 1 or 2' };
+    out.courts = body.courts;
+  }
+  return out;
 }
 
 async function loadState(env, repo, nowMs) {
@@ -972,7 +1070,9 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
         const id = intId(body.person_id);
         if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
         if (!VENUES.includes(body.venue)) return fail('Unknown venue', 400);
-        await repo.setBooked(slot, id, body.venue, nowIso);
+        const details = cleanBooking(body, slot);
+        if (details.error) return fail(details.error, 400);
+        await repo.setBooked(slot, id, body.venue, nowIso, details);
       } else {
         return fail('booked must be true or false', 400);
       }

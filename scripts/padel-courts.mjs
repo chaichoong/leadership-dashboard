@@ -92,11 +92,11 @@ export async function readDay(fetchImpl, id, date) {
   }
 }
 
-// What the Worker stores: no court names, just counts and the shortest booking.
+// What the Worker stores: no court names, just counts and the shortest and longest booking.
 export function toPayloadDay(day) {
   if (day.status !== 'ok') return day.status === 'closed' ? { status: 'closed' } : { status: 'error', reason: day.reason || 'unknown' };
   const starts = {};
-  for (const [t, s] of Object.entries(day.starts)) starts[t] = { courts: s.courts, min: s.min };
+  for (const [t, s] of Object.entries(day.starts)) starts[t] = { courts: s.courts, min: s.min, max: s.max };
   return { status: 'ok', starts };
 }
 
@@ -227,7 +227,7 @@ export function selftest(log = (line) => process.stdout.write(`${line}\n`)) {
   const page = '<div class="schedule"><table><tr><td class="slot free" data-slot-can-start="true" data-slot-min-duration="60" title="Available<br>Court 1<br>19:00 - 20:00"></td></tr></table></div>';
   const day = parseMatchi(page);
   check('a free cell parses', day.status === 'ok' && day.starts['19:00'].courts === 1);
-  check('the payload drops court names', JSON.stringify(toPayloadDay(day)) === '{"status":"ok","starts":{"19:00":{"courts":1,"min":60}}}');
+  check('the payload drops court names', JSON.stringify(toPayloadDay(day)) === '{"status":"ok","starts":{"19:00":{"courts":1,"min":60,"max":60}}}');
   const dates = londonDates(Date.parse('2026-10-28T09:00:00Z'));
   const raw = { si: Object.fromEntries(dates.map((d) => [d, { status: 'error', reason: 'HTTP 429' }])), pdl: Object.fromEntries(dates.map((d) => [d, { status: 'error', reason: 'HTTP 429' }])) };
   check('all errors fail', readProblems(raw, dates).some((p) => p.startsWith('every Matchi page errored')));

@@ -7,7 +7,8 @@
 -- that is there is skipped, columns and all). A change to the LIVE database goes through a
 -- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
 -- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
--- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql.
+-- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql,
+-- 0003-booked-details.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
@@ -29,12 +30,16 @@ CREATE TABLE IF NOT EXISTS votes (
   PRIMARY KEY (person_id, slot)
 );
 
--- A slot somebody has booked a court for: no more alerts, and the page shows who and where.
+-- A slot somebody has booked a court for: no more alerts that day, and the page shows who, where,
+-- from when ("19:30"), for how long (minutes) and on how many courts (sql-changes/0003, 29 Oct 2026).
 CREATE TABLE IF NOT EXISTS booked (
   slot TEXT PRIMARY KEY,
   person_id INTEGER,
   venue TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  start TEXT,
+  minutes INTEGER,
+  courts INTEGER NOT NULL DEFAULT 1
 );
 
 -- One row per slot that has had its Slack DM. The row is inserted BEFORE the DM goes, with

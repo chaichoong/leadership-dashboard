@@ -142,6 +142,13 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .chip.striped { background: repeating-linear-gradient(45deg, var(--stripe-a) 0 5px, var(--stripe-b) 5px 10px); color: var(--text-secondary); }
 .initials { color: var(--text-secondary); font-size: var(--fs-sm); overflow-wrap: anywhere; text-align: right; }
 .booked-line { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--success); font-weight: var(--fw-semibold); }
+.second { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.mark { background: none; border: 0; min-height: var(--tap); padding: 0 var(--space-2); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: var(--fw-medium); text-decoration: underline; }
+.book-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); background: var(--bg-surface-2); }
+.book-form label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--text-secondary); font-weight: var(--fw-medium); }
+.book-form select { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); color: var(--text-primary); }
+.day.has-booked small { color: var(--free); }
+.day[aria-pressed="true"].has-booked small { color: var(--mine-on); }
 .toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .toggle { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); }
 .toggle[aria-pressed="true"] { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); text-decoration: line-through; }
@@ -203,11 +210,13 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     </div>
     <ul class="legend" aria-label="What the venue chips mean">
       <li><span class="chip free" aria-hidden="true">St Ives &#10003;</span> a court is free (at the last check)</li>
+      <li><span class="chip free" aria-hidden="true">St Ives &#10003;3</span> three courts free; "60 to 120 min" is the longest booking on the best of them</li>
+      <li><span class="chip free" aria-hidden="true">St Ives &#10003; 19:30</span> free from the half hour, not from the hour</li>
       <li><span class="chip busy" aria-hidden="true">St Ives &#10007;</span> no court free</li>
       <li><span class="chip striped" aria-hidden="true">St Ives soon</span> not open for booking yet</li>
       <li><span class="chip striped" aria-hidden="true">St Ives ?</span> couldn't check</li>
     </ul>
-    <p class="note">St Ives = St Ives Golf Club. Cambridge = PDL Padel United. Huntingdon = Pulse Padel at the garden centre. St Ives and Cambridge are checked every 15 minutes from 06:30 to 23:00, Huntingdon every 15 to 30 minutes; a court can go between checks, so the booking site has the last word.</p>
+    <p class="note">St Ives = St Ives Golf Club. Cambridge = PDL Padel United. Huntingdon = Pulse Padel at the garden centre. St Ives and Cambridge are checked every 15 minutes from 06:30 to 23:00, Huntingdon every 15 to 30 minutes; a court can go between checks, so the booking site has the last word. Once an hour on a day is marked Booked, that day's other hours drop out of Ready to book.</p>
   </footer>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -266,6 +275,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let saveTry = 0;                            // failed saves in a row
   let backoffUntil = 0;
   let busy = false;
+  let bookForm = null;                        // { slot, venue, start, minutes } while the Booked picker is open
   let staleStart = 0;
   let staleIdx = 0;
   let staleTimer = null;
@@ -354,8 +364,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const el = document.activeElement;
     if (!el || el === document.body || !el.dataset) return null;
     if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
-    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook']) {
-      if (el.dataset[k]) return '[data-' + k + '="' + CSS.escape(el.dataset[k]) + '"]';
+    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField']) {
+      if (el.dataset[k]) return '[data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()) + '="' + CSS.escape(el.dataset[k]) + '"]';
     }
     return el.id ? '#' + CSS.escape(el.id) : null;
   }
@@ -383,6 +393,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function apply(s) {
     S = s;
     if (me && !S.people.some((p) => p.id === me)) { me = null; store.del('padel.person'); dropChanges(); }
+    if (bookForm && (S.booked[bookForm.slot] || !S.days.includes(bookForm.slot.split('|')[0]))) bookForm = null;   // booked meanwhile, or gone
     showTruth();
     // After 22:00 there is nothing left to tick today, so the page opens on tomorrow.
     if (!day || !S.days.includes(day)) day = londonHour() >= 22 && S.days.length > 1 ? S.days[1] : S.days[0];
@@ -427,9 +438,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     renderUnsaved();
   }
 
+  const lenText = (min, max) => (max > min ? min + ' to ' + max + ' min' : min + ' min');
+  // "19:00, 19:30 (60 to 90 min, 3 courts)", or one bracket per start when they differ (the DM reads the same).
   function startsLabel(v) {
-    const same = v.mins.every((m) => m === v.mins[0]);
-    return same ? v.starts.join(', ') + ' (' + v.mins[0] + ' min)' : v.starts.map((t, i) => t + ' (' + v.mins[i] + ' min)').join(', ');
+    const maxs = v.maxs || v.mins;
+    const courtsBy = v.courtsBy || v.starts.map(() => 1);
+    const part = (i) => lenText(v.mins[i], maxs[i]) + (courtsBy[i] > 1 ? ', ' + courtsBy[i] + ' courts' : '');
+    const same = v.starts.every((_, i) => part(i) === part(0));
+    return same ? v.starts.join(', ') + ' (' + part(0) + ')' : v.starts.map((t, i) => t + ' (' + part(i) + ')').join(', ');
   }
   function renderReady() {
     const box = $('ready');
@@ -440,7 +456,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         <div class="venue-line">
           <span><strong>${esc(S.venueInfo[v.code].short)}</strong>: ${esc(v.count)} in (${esc(v.names.join(', '))}), starts ${esc(startsLabel(v))}</span>
           <a class="btn small primary" href="${esc(v.book)}" target="_blank" rel="noopener noreferrer">Book</a>
-          <button type="button" class="btn small" data-book-slot="${esc(r.slot)}" data-book-venue="${esc(v.code)}"${busy ? ' disabled' : ''}>Booked</button>
+          <button type="button" class="btn small" data-book-slot="${esc(r.slot)}" data-book-venue="${esc(v.code)}" data-book-start="${esc(v.starts[0])}" data-book-min="${esc(v.mins[0])}"${busy ? ' disabled' : ''}>Booked</button>
         </div>`).join('');
       return `<div class="item"><p><strong>${esc(r.label)}</strong></p>${lines}</div>`;
     }).join('');
@@ -457,17 +473,20 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
 
   // Under each day: the most people on any one hour that day (the group's interest, you included),
-  // green with a tick when that day has an hour ready to book. This is the home view (Kevin, 27 Oct 2026).
+  // green with a tick when that day has an hour ready to book, "Booked ✓" once an hour that day is
+  // booked. This is the home view (Kevin, 27 Oct 2026).
   function renderDays() {
     const readyDays = new Set(S.ready.map((r) => r.slot.split('|')[0]));
+    const bookedDays = new Set(Object.keys(S.booked).map((s) => s.split('|')[0]));
     $('days').innerHTML = S.days.map((d) => {
       let best = 0;
       const minH = d === S.today ? londonHour() : -1;         // today counts only the hours still to come, like the grid
       for (const h of S.hours) if (h >= minH) best = Math.max(best, voters(d + '|' + pad(h)).length);
       const ready = readyDays.has(d);
-      const note = best ? best + ' in' + (ready ? ' ✓' : '') : '';
-      const said = best ? ', up to ' + best + ' on one hour' + (ready ? ', ready to book' : '') : '';
-      return `<button type="button" class="day${ready ? ' has-ready' : ''}" data-day="${esc(d)}" aria-pressed="${d === day}" aria-label="${esc(dayLong(d))}${esc(said)}">${esc(dayShort(d))}<small>${esc(note)}</small></button>`;
+      const bookedDay = bookedDays.has(d);
+      const note = bookedDay ? 'Booked ✓' : best ? best + ' in' + (ready ? ' ✓' : '') : '';
+      const said = bookedDay ? ', booked' : best ? ', up to ' + best + ' on one hour' + (ready ? ', ready to book' : '') : '';
+      return `<button type="button" class="day${ready ? ' has-ready' : ''}${bookedDay ? ' has-booked' : ''}" data-day="${esc(d)}" aria-pressed="${d === day}" aria-label="${esc(dayLong(d))}${esc(said)}">${esc(dayShort(d))}<small>${esc(note)}</small></button>`;
     }).join('');
   }
 
@@ -484,9 +503,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (v.status === 'ok') {
       const h = v.hours[hh];
       if (h && h.free) {
+        // "✓3" = three courts free; a time after the tick = free from the half hour only (Kevin, 29 Oct 2026:
+        // a 19:00 row whose court starts at 19:30 must say so).
         cls = 'chip free';
-        shown = name + ' ✓';
-        said = name + ': court free at ' + h.starts.join(', ') + ', shortest booking ' + h.min + ' min';
+        const half = !h.starts.some((t) => t.slice(3) === '00');
+        shown = name + ' ✓' + (h.courts > 1 ? h.courts : '') + (half ? ' ' + h.starts[0] : '');
+        said = name + ': ' + (h.courts > 1 ? h.courts + ' courts' : 'a court') + ' free at ' + h.starts.map((t, i) => t + ' (' + lenText(h.mins[i], (h.maxs || h.mins)[i]) + ')').join(', ');
       } else {
         cls = 'chip busy';
         shown = name + ' ✗';
@@ -528,18 +550,70 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const cls = ['row', on ? 'mine' : '', readySlots.has(slot) ? 'is-ready' : ''].join(' ').trim();
       const say = on ? 'I can play' : 'Tap if you can play';
       const label = `${hh}:00, ${on ? 'you can play' : 'tap if you can play'}, ${ids.length} in`;
-      const booked = b ? `<p class="booked-line"><span>&#10003; Booked by ${esc((person(b.person_id) || {}).name || 'someone')} at ${esc((S.venueInfo[b.venue] || {}).short || b.venue || '?')}</span>
-        <button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button></p>` : '';
+      const mark = b ? '' : `<button type="button" class="mark" data-mark="${esc(slot)}"${busy ? ' disabled' : ''}>Booked?</button>`;
+      const form = !b && bookForm && bookForm.slot === slot ? bookFormHtml(slot) : '';
       return `<li class="${esc(cls)}" id="row-${esc(hh)}">
         <button type="button" class="tap" data-slot="${esc(slot)}" aria-pressed="${on}" aria-label="${esc(label)}">
           <span class="time">${hh}:00</span><span class="say">${say}</span><span class="count" aria-hidden="true">${ids.length}</span>
         </button>
         <div class="meta">
           <div class="chips">${CODES.map((c) => chip(c, day, hh)).join('')}</div>
-          <span class="initials" title="${esc(names.join(', '))}">${esc(names.map(initials).join(' '))}</span>
-        </div>${booked}
+          <span class="initials" title="${esc(names.join(', '))}">${esc(names.map(initials).join(' '))}</span>${mark}
+        </div>${b ? bookedLine(slot, b) : ''}${form}
       </li>`;
     }).join('');
+  }
+
+  // "✓ Booked by Kevin: Cambridge 19:30, 90 min", with Undo; and the second court when 8 or more can play.
+  function bookedLine(slot, b) {
+    const who = (person(b.person_id) || {}).name || 'someone';
+    const where = (S.venueInfo[b.venue] || {}).short || b.venue || '?';
+    const when = [b.start, b.minutes ? b.minutes + ' min' : ''].filter(Boolean).join(', ');
+    const courts = b.courts > 1 ? ', ' + b.courts + ' courts' : '';
+    let html = `<p class="booked-line"><span>&#10003; Booked by ${esc(who)}: ${esc(where)}${when ? ' ' + esc(when) : ''}${esc(courts)}</span>
+        <button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button></p>`;
+    if (b.second) {
+      html += `<p class="second"><span><strong>Second court?</strong> ${esc(b.second.count)} can play, and another court is free at ${esc(where)} ${esc(b.second.start)}${b.minutes ? ' for ' + esc(b.minutes) + ' min' : ''}.</span>
+        <a class="btn small primary" href="${esc(b.second.book)}" target="_blank" rel="noopener noreferrer">Book</a>
+        <button type="button" class="btn small" data-book-second="${esc(slot)}"${busy ? ' disabled' : ''}>Booked 2nd court</button></p>`;
+    }
+    return html;
+  }
+
+  // The Booked picker: where, from when (on the hour or the half hour) and for how long. The venue's
+  // free starts and the lengths that fit them are marked "(free)"; anything else can still be chosen.
+  const LENGTHS = [60, 90, 120, 150, 180];
+  // The venue's hour row when a court is free in it, else null.
+  const freeHour = (code, d, hh) => { const v = S.availability.venues[code][d]; return v.status === 'ok' && v.hours[hh] && v.hours[hh].free ? v.hours[hh] : null; };
+  function bookFormHtml(slot) {
+    const [d, hh] = slot.split('|');
+    const f = bookForm;
+    const venues = CODES.map((c) => `<option value="${c}"${c === f.venue ? ' selected' : ''}>${esc(S.venueInfo[c].short)}${freeHour(c, d, hh) ? ' (free)' : ''}</option>`).join('');
+    const h = freeHour(f.venue, d, hh);
+    const i = h ? h.starts.indexOf(f.start) : -1;
+    const starts = [hh + ':00', hh + ':30'].map((t) => `<option value="${t}"${t === f.start ? ' selected' : ''}>${t}${h && h.starts.includes(t) ? ' (free)' : ''}</option>`).join('');
+    const lens = LENGTHS.map((m) => {
+      const fits = i >= 0 && m >= h.mins[i] && m <= (h.maxs || h.mins)[i];
+      return `<option value="${m}"${m === f.minutes ? ' selected' : ''}>${m} min${fits ? ' (free)' : ''}</option>`;
+    }).join('');
+    return `<form class="book-form" data-book-form="${esc(slot)}" aria-label="Mark this hour as booked">
+        <label>Where <select name="venue" data-book-field="venue">${venues}</select></label>
+        <label>From <select name="start" data-book-field="start">${starts}</select></label>
+        <label>For <select name="minutes" data-book-field="minutes">${lens}</select></label>
+        <button type="submit" class="btn small primary"${busy ? ' disabled' : ''}>Save</button>
+        <button type="button" class="btn small" data-book-cancel="${esc(slot)}">Cancel</button>
+      </form>`;
+  }
+  function openBookForm(slot, venue, start, minutes) {
+    const [d, hh] = slot.split('|');
+    if (!venue) venue = CODES.find((c) => freeHour(c, d, hh)) || CODES[0];
+    const h = freeHour(venue, d, hh);
+    if (!start) start = h ? h.starts[0] : hh + ':00';
+    if (!minutes) { const i = h ? h.starts.indexOf(start) : -1; minutes = i >= 0 ? h.mins[i] : 60; }
+    bookForm = { slot, venue, start, minutes: Number(minutes) };
+    gotoSlot(slot);                             // draws the picker in its row and scrolls the row into view
+    const sel = document.querySelector('[data-book-form="' + CSS.escape(slot) + '"] select');
+    if (sel) sel.focus({ preventScroll: true });
   }
 
   function renderToggles() {
@@ -601,7 +675,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function setBusy(on) {
     busy = on;
-    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-venue],#check-now,#add-btn')) b.disabled = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-venue],#check-now,#add-btn')) b.disabled = on;
   }
 
   // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is
@@ -779,9 +853,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!t || t.disabled) return;
     if (t.dataset.person) pickPerson(Number(t.dataset.person));
     else if (t.dataset.slot) toggle(t.dataset.slot);
-    else if (t.dataset.day) { day = t.dataset.day; keepFocus(() => { renderDays(); renderGrid(); }); }
+    else if (t.dataset.day) { day = t.dataset.day; bookForm = null; keepFocus(() => { renderDays(); renderGrid(); }); }
     else if (t.dataset.venue) toggleVenue(t.dataset.venue);
-    else if (t.dataset.bookSlot) postAndApply('/api/booked', { slot: t.dataset.bookSlot, person_id: me, venue: t.dataset.bookVenue, booked: true }, 'Marked as booked. Thanks.');
+    else if (t.dataset.bookSlot) openBookForm(t.dataset.bookSlot, t.dataset.bookVenue, t.dataset.bookStart, t.dataset.bookMin);
+    else if (t.dataset.mark) openBookForm(t.dataset.mark);
+    else if (t.dataset.bookCancel) { bookForm = null; keepFocus(renderGrid); }
+    else if (t.dataset.bookSecond) { const b = S.booked[t.dataset.bookSecond]; if (b) postAndApply('/api/booked', { slot: t.dataset.bookSecond, person_id: person(b.person_id) ? b.person_id : me, venue: b.venue, courts: 2, booked: true }, 'Second court marked as booked.'); }
     else if (t.dataset.unbook) postAndApply('/api/booked', { slot: t.dataset.unbook, booked: false }, 'Booking mark removed.');
     else if (t.dataset.goto) gotoSlot(t.dataset.goto);
     else if (t.id === 'switch') switchPerson();
@@ -790,6 +867,21 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (t.id === 'retry') { $('retry').hidden = true; $('loading-text').textContent = 'Loading...'; load(); }
   });
   $('add-form').addEventListener('submit', addName);
+  // The Booked picker: Save sends the booking with its details; a change of venue or start redraws the "(free)" hints.
+  document.addEventListener('submit', (ev) => {
+    const form = ev.target.closest('[data-book-form]');
+    if (!form) return;
+    ev.preventDefault();
+    const fd = new FormData(form);
+    // The picker stays open until the reply shows the hour booked (apply() closes it), so a failed save keeps the choices.
+    postAndApply('/api/booked', { slot: form.dataset.bookForm, person_id: me, venue: String(fd.get('venue')), start: String(fd.get('start')), minutes: Number(fd.get('minutes')), booked: true }, 'Marked as booked. Thanks.');
+  });
+  document.addEventListener('change', (ev) => {
+    const f = ev.target.closest('[data-book-field]');
+    if (!f || !bookForm) return;
+    bookForm[f.dataset.bookField] = f.dataset.bookField === 'minutes' ? Number(f.value) : f.value;
+    if (f.dataset.bookField !== 'minutes') keepFocus(renderGrid);
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { sendNow(); return; }
     if (!S) return;

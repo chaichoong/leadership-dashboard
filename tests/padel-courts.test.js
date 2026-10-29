@@ -112,7 +112,7 @@ describe('a normal run', () => {
     expect(headers['X-Robot-Key']).toBe(ROBOT);
     expect(body.readAt).toBe('2026-10-28T09:00:00.000Z');      // when the read started
     expect(Object.keys(body.venues)).toEqual(['si', 'pdl']);
-    expect(body.venues.si[DATES[0]].starts['07:00']).toEqual({ courts: 2, min: 60 });
+    expect(body.venues.si[DATES[0]].starts['07:00']).toEqual({ courts: 2, min: 60, max: 180 });
     expect(body.venues.si[DATES[6]].status).toBe('ok');
     expect(body.venues.si[DATES[9]]).toEqual({ status: 'closed' });   // St Ives day 10: not open yet, and the run still exits 0
     expect(Object.keys(body.venues.pdl)).toHaveLength(14);
