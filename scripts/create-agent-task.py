@@ -1407,18 +1407,220 @@ def fold_on_weak_words_only(name_a, name_b, shared):
         return False
     if not all(DUPE_SHARED_WORD_RE.match(i) for i in ids):
         return True
+    return below_the_word_bar(name_a, name_b)
+
+
+def _subject_noise(name_a, name_b, places_a, places_b):
+    """Every token in either name that says WHERE, WHEN or WHICH REFERENCE,
+    and so can never count as the subject."""
+    return (places_a | places_b | DUPE_WEAK_WORDS | DUPE_REFERENCE_LABELS
+            | _postcode_tokens(name_a) | _postcode_tokens(name_b)
+            | _reference_prefixes(name_a) | _reference_prefixes(name_b))
+
+
+def below_the_word_bar(name_a, name_b, require_count=True):
+    """True when the two names do not agree on enough SUBJECT to be one matter.
+
+    The word pass's own bar, lifted out whole so every fold guard applies the
+    SAME one and none of them can drift to a softer version: DUPE_MIN_SHARED
+    telling words AND DUPE_MIN_RATIO of the shorter name, counted after the
+    places, the function words, the reference labels, the postcodes and the
+    reference prefixes come out.
+
+    `require_count=False` drops the count and keeps the PROPORTION, for a
+    caller that has already proved the count another way. The key pass is the
+    one such caller: a shared key means the two most distinctive words of each
+    name are the same words, so "Chase Acme invoice #9" and "#10" agree on
+    everything they say and must still fold, while the count alone would read
+    `acme` as one telling word and refuse them.
+    """
     _, _, words_a, places_a = dupe_signals(name_a)
     _, _, words_b, places_b = dupe_signals(name_b)
     if not words_a or not words_b:
         return True
     agreed = words_a & words_b
-    noise = (places_a | places_b | DUPE_WEAK_WORDS | DUPE_REFERENCE_LABELS
-             | _postcode_tokens(name_a) | _postcode_tokens(name_b)
-             | _reference_prefixes(name_a) | _reference_prefixes(name_b))
+    noise = _subject_noise(name_a, name_b, places_a, places_b)
     # A single letter is never a subject either ("a/c 01406" leaves a and c).
     telling = [w for w in agreed if w not in noise and len(w) > 1]
     ratio = len(agreed) / min(len(words_a), len(words_b))
-    return len(telling) < DUPE_MIN_SHARED or ratio < DUPE_MIN_RATIO
+    if require_count and len(telling) < DUPE_MIN_SHARED:
+        return True
+    return ratio < DUPE_MIN_RATIO
+
+
+# ─── TWO SUBJECT SLOTS ARE NOT A SUBJECT ─────────────────────────────
+#
+# Six findings, one mechanism (20260925-agent-dispatch-623,
+# 20261002-inbound-email-triage-711, 20261007-inbound-email-triage-783,
+# 20261017-inbound-email-triage-963, 20261019-inbound-email-triage-1000,
+# 20261026-inbound-triage-1091). The KEY pass folded on its two subject slots
+# with none of the strictness the verdict pass has carried since 25 Sep: every
+# `COMPLIANCE: file certificate - <type> - <property>` name reduces to
+# `compliance|certificate file`, so ANY two filing tasks folded into each
+# other — a PAT certificate into a gas safety record at one house, four gas
+# certificates for four properties into one property's filing task, insurance
+# schedules for a portfolio into another building's fire alarm task. Two
+# replacement-insurance tasks for two properties with two insurers merged on
+# `insurance|property replacement`, appending one brief to the other's card
+# at Kevin's gate. A landlord-insurance email naming no property went into
+# another property's open insurance task on `compliance|insurance landlord`.
+# And an inbound request from the head of property about a benefit top-up
+# folded into his open, APPROVED request about ordering bins elsewhere, on
+# `inbound|asks roy`.
+#
+# This is the gap `.claude/rules/agent-task-pipeline.md` lists as known and
+# NOT fixed: "the key pass folds two different matters from one counterparty
+# on its two subject slots". Two slots cannot carry a subject when the lane
+# prefix and a fixed naming pattern eat both of them.
+#
+# TWO GUARDS, because the pairs fail in two different ways:
+#
+#   * `fold_on_a_shared_key_only` — the key match must also clear the word
+#     pass's OWN bar on the full names (`below_the_word_bar`), never a softer
+#     one. That is what refuses the filing tasks for different properties and
+#     the "asks roy" pair: they agree on `certificate` + `file`, or on the
+#     sender's name, and on nothing else.
+#   * `fold_on_a_different_qualifier` — a name's segments after the first
+#     " - " say WHICH matter it is: the certificate type, the policy, the
+#     property. Read structurally, never from a list, because no list can
+#     hold the type of a document nobody has filed yet. When one name's
+#     qualifier words appear nowhere in the other name, the matters differ,
+#     however well the rest of the words agree. That is what refuses the PAT
+#     certificate against the gas safety record at ONE house (same property,
+#     different document) and the two insurance policies (`pib` appears
+#     nowhere in the Swinton name). When a qualifier says nothing but a
+#     place, the places must agree, which is what refuses the insurance
+#     email naming no property.
+#
+# Fold-only and Python-only, like `fold_on_address_only`,
+# `fold_on_a_number_only` and `fold_on_weak_words_only`, and for the same
+# reason: GROUPING SHOWS AND FOLDING DESTROYS. `dupe_verdict` and
+# `dupe_task_key` stay byte-identical to their mirrors in the protected
+# os/agents/index.html, so the page still groups every pair in the Duplicates
+# lane and Kevin sees them together.
+#
+# The cost, which is Kevin's own ruling and the cheap direction: a chaser that
+# repeats nothing of the task it chases, and two filing tasks whose names
+# agree on nothing but the pattern, now make two cards. A duplicate he can
+# merge beats an approved card quietly rewritten.
+DUPE_SEGMENT_RE = re.compile(r"\s+[-\u2012-\u2015\u2212]\s+")
+
+
+def _strip_lane_prefix(name):
+    """`name` with any leading "COMPLIANCE:" / "INBOUND:" prefix removed, the
+    same way dupe_signals and dupe_task_key remove it."""
+    raw = re.sub(DUPE_SPACES, " ", str(name or ""))
+    raw = re.sub(r"[\u2012-\u2015\u2212]", "-", raw)
+    m = re.match(r"^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*", raw)
+    return raw[m.end():] if m else raw
+
+
+def _telling_words(name):
+    """Every word in `name` that could BE the subject: no places, no function
+    words, no reference labels, no postcode halves, no reference prefixes."""
+    _, _, words, places = dupe_signals(name)
+    noise = _subject_noise(name, name, places, places)
+    return {w for w in words if w not in noise and len(w) > 1}
+
+
+def _qualifier_signals(name):
+    """(telling, places): the words in `name`'s qualifier segments — everything
+    after the FIRST " - " — split into what could be the subject and what only
+    says where. ("", "") shaped as two empty sets when the name has no
+    qualifier segment at all."""
+    segments = DUPE_SEGMENT_RE.split(_strip_lane_prefix(name))
+    if len(segments) < 2:
+        return set(), set()
+    text = " - ".join(seg for seg in segments[1:] if seg.strip())
+    if not text.strip():
+        return set(), set()
+    _, _, words, places = dupe_signals(text)
+    noise = _subject_noise(text, text, places, places)
+    return ({w for w in words if w not in noise and len(w) > 1}, set(places))
+
+
+def fold_on_a_shared_key_only(name_a, name_b):
+    """True when the key's two subject slots are the only thing these two names
+    agree on, so the fold must not go ahead.
+
+    The key is a fast bucket, not a verdict: it keeps the first two surviving
+    words of a name, so a lane prefix plus a fixed naming pattern can fill it
+    before anything about the matter has been compared.
+
+    What the key cannot see is PROPORTION — how much of the shorter name it
+    left out. `COMPLIANCE: file certificate - gas safety record x4 - <four
+    properties>` and `COMPLIANCE: file certificate - fire alarm - <a
+    building>` agree on two words out of eight. The count is met by the key
+    itself, so only the proportion is asked for here.
+    """
+    return below_the_word_bar(name_a, name_b, require_count=False)
+
+
+def fold_on_a_different_reference(name_a, name_b):
+    """True when the two names each carry a reference and share none of them.
+
+    A policy, account or case reference IS the identity of the matter it names
+    (finding 20260925-agent-dispatch-623: two replacement-insurance tasks, two
+    properties, two insurers, two policy numbers, folded into one on
+    `insurance|property replacement`, which appended one brief to the other's
+    card at Kevin's gate). One side carrying a reference the other does not
+    decides nothing — a chaser often names one the first task never had — so
+    this asks for a reference on BOTH sides before it refuses anything.
+    """
+    _, strong_a, _, _ = dupe_signals(name_a)
+    _, strong_b, _, _ = dupe_signals(name_b)
+    return bool(strong_a) and bool(strong_b) and not (strong_a & strong_b)
+
+
+def fold_on_a_different_qualifier(name_a, name_b):
+    """True when the names' qualifier segments say they are different matters.
+
+    Silent when neither name is segmented, so a plain one-line task name is
+    judged exactly as before.
+    """
+    # A REFERENCE OR A PHONE THREAD IS IDENTITY, NOT A QUALIFIER, the same
+    # exemption fold_on_address_only has carried since 25 Sep: one SMS thread
+    # is one matter however differently the two names describe it.
+    _, strong_a, _, _ = dupe_signals(name_a)
+    _, strong_b, _, _ = dupe_signals(name_b)
+    if strong_a & strong_b:
+        return False
+    qa, pa = _qualifier_signals(name_a)
+    qb, pb = _qualifier_signals(name_b)
+    if qa and qb:
+        # BOTH names say which matter they are, so they have to say the same
+        # thing. Compared qualifier to qualifier, never against the whole
+        # other name: "file certificate - PAT certificate - 22 Newton Street"
+        # and "file certificate - gas safety record - 22 Newton Street" both
+        # carry `certificate` in their subject, and reading that as agreement
+        # is how one document folded into another at the same house.
+        return not (qa & qb)
+    if qa or qb:
+        # Only one side qualifies the matter. Extra detail on one name
+        # ("- final demand", "- unknown content") is not a different matter,
+        # so this guard says nothing and the word bar decides.
+        return False
+    if pa and pb:
+        # Nothing but a place qualifies either name, so the place is all there
+        # is to tell them apart and it has to be the same place.
+        return not (pa & pb)
+    if not (pa or pb):
+        return False
+    # ONE NAME SAYS WHERE AND THE OTHER DOES NOT. A landlord-insurance email
+    # naming no property went into another property's open insurance task on
+    # exactly this shape (finding 20261026-inbound-triage-1091), and the gate
+    # cannot tell "no property" from "the same property, not repeated". So it
+    # asks for more: everything the shorter name says must also be said by the
+    # longer one. "Provision of a valid EICR" folds into "COMPLIANCE:
+    # Provision of a valid EICR - <a house>" because it adds nothing the other
+    # does not carry; "landlord insurance renewal QUOTE NEEDED" does not fold
+    # into "landlord insurance renewal - <another house>" because it does.
+    _, _, words_a, _ = dupe_signals(name_a)
+    _, _, words_b, _ = dupe_signals(name_b)
+    if not (words_a and words_b):
+        return True
+    short, long_ = sorted((words_a, words_b), key=len)
+    return not short <= long_
 
 
 # ─── A DIFFERENT TENANT OR A DIFFERENT HOUSE IS A DIFFERENT MATTER ───
@@ -1801,6 +2003,24 @@ def decide(incoming_fields, open_rows):
                 not_folded.append("%s: same subject key, but the names agree on "
                                   "nothing but the address" % row["id"])
                 continue
+            # TWO SUBJECT SLOTS ARE NOT A SUBJECT (29 Oct 2026, six findings).
+            # The key is a fast bucket: a lane prefix and a fixed naming
+            # pattern can fill both its slots before anything about the matter
+            # has been compared, so a key match now clears the word pass's own
+            # bar and its qualifier segments too.
+            if fold_on_a_shared_key_only(incoming_name, other):
+                not_folded.append("%s: same subject key, but the names agree on "
+                                  "too little else to be one matter" % row["id"])
+                continue
+            if fold_on_a_different_qualifier(incoming_name, other):
+                not_folded.append("%s: same subject key, but the names differ on "
+                                  "what the matter IS (the part after the dash)"
+                                  % row["id"])
+                continue
+            if fold_on_a_different_reference(incoming_name, other):
+                not_folded.append("%s: same subject key, but the two names carry "
+                                  "different references" % row["id"])
+                continue
             decided = fold_into_a_decided_card(f)
             if decided:
                 not_folded.append("%s: same subject key, but %s" % (row["id"], decided))
@@ -1827,6 +2047,17 @@ def decide(incoming_fields, open_rows):
             if fold_on_weak_words_only(incoming_name, other, verdict["shared"]):
                 not_folded.append("%s: the names agree on nothing but function "
                                   "words, not on the subject" % row["id"])
+                continue
+            # A QUALIFIER SEGMENT SAYS WHICH MATTER IT IS (29 Oct 2026): a PAT
+            # certificate and a gas safety record at ONE house agree on every
+            # word but the document.
+            if fold_on_a_different_qualifier(incoming_name, other):
+                not_folded.append("%s: the names differ on what the matter IS "
+                                  "(the part after the dash)" % row["id"])
+                continue
+            if fold_on_a_different_reference(incoming_name, other):
+                not_folded.append("%s: the two names carry different references"
+                                  % row["id"])
                 continue
             decided = fold_into_a_decided_card(f)
             if decided:
