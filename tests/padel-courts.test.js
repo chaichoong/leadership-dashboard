@@ -22,12 +22,13 @@ const DATES = londonDates(START);
 const ROBOT = 'robot-key-for-tests';
 const WORKER_OK = { ok: true, matchiFetchedAt: '2026-10-28T09:00:00.000Z', pulseFetchedAt: '2026-10-28T08:50:00.000Z', alerted: 'checking', ready: 0 };
 
-// The University's feed for the whole window: the real 3 Nov row copied onto every date, the 8th date
-// on before its booking window (non-members book 7 days ahead), as the live feed reads.
+// The University's feed for the whole window: the real 3 Nov row copied onto every date, the 9th date
+// on before its booking window (non-members book 7 days ahead: today and 7 more open, "ok 8" live).
+// Its slots' online cut-off (bookableUntil) is 30 minutes before each start, as in the real feed.
 const uniRow = GLADSTONE.find((r) => r.locations[0].slots[0].startTime.startsWith('2026-11-03'));
 const uniReply = () => DATES.map((d, i) => {
   const row = JSON.parse(JSON.stringify(uniRow).replaceAll('2026-11-03', d));
-  if (i >= 7) for (const l of row.locations) for (const x of l.slots) { x.isBeforeTimetableSlotBookablePeriod = true; x.status = 'Unavailable'; }
+  if (i >= 8) for (const l of row.locations) for (const x of l.slots) { x.isBeforeTimetableSlotBookablePeriod = true; x.status = 'Unavailable'; }
   return row;
 });
 const uniOk = (url) => (url.pathname.endsWith('/anonymous')
@@ -50,7 +51,7 @@ function stubs({ page, uni = uniOk, post = () => new Response(JSON.stringify(WOR
       return page(u.searchParams.get('facilityId'), u.searchParams.get('date'));
     }
     if (u.hostname === 'cambridgesport.gladstonego.cloud') {
-      uniCalls.push({ path: u.pathname, headers: init.headers });
+      uniCalls.push({ path: u.pathname, url: u, headers: init.headers });
       return uni(u);
     }
     if (String(url) === ENDPOINT) {
@@ -125,6 +126,10 @@ describe('a normal run', () => {
     expect(s.uniCalls.map((c) => c.path)).toEqual(['/api/samlauthentication/anonymous', '/api/availability/V2/sessions']);
     expect(s.uniCalls.every((c) => c.headers['X-Use-Sso'] === '1')).toBe(true);
     expect(s.uniCalls[1].headers.Cookie).toBe('Jwt=test-session');
+    // One read for the whole window: London midnight of the first day to the end of the last.
+    expect(s.uniCalls[1].url.searchParams.get('activityIds')).toBe('USCAPADWO02');
+    expect(s.uniCalls[1].url.searchParams.get('dateFrom')).toBe(`${DATES[0]}T00:00:00.000Z`);
+    expect(s.uniCalls[1].url.searchParams.get('dateTo')).toBe(`${DATES[13]}T23:59:59.999Z`);
     expect(s.pages[0].headers['User-Agent']).toMatch(/^Mozilla\/5\.0/);
     expect(s.pages[0].headers.Accept).toBe('text/html');
     expect(s.pages[0].signal).toBeInstanceOf(AbortSignal);
@@ -135,8 +140,11 @@ describe('a normal run', () => {
     expect(headers['X-Robot-Key']).toBe(ROBOT);
     expect(body.readAt).toBe('2026-10-28T09:00:00.000Z');      // when the read started
     expect(Object.keys(body.venues)).toEqual(['si', 'pdl', 'cu']);
-    expect(body.venues.cu[DATES[0]].starts['07:00']).toEqual({ courts: 2, min: 60, max: 180 });
-    expect(body.venues.cu[DATES[7]]).toEqual({ status: 'closed' });   // beyond a non-member's 7 days
+    // Read at 09:00: today's 07:00 is past its online cut-off; tomorrow's opens with both courts for three hours.
+    expect(body.venues.cu[DATES[0]].starts['07:00']).toBeUndefined();
+    expect(body.venues.cu[DATES[1]].starts['07:00']).toEqual({ courts: 2, min: 60, max: 180 });
+    expect(body.venues.cu[DATES[7]].status).toBe('ok');
+    expect(body.venues.cu[DATES[8]]).toEqual({ status: 'closed' });   // beyond a non-member's 7 days
     expect(body.venues.si[DATES[0]].starts['07:00']).toEqual({ courts: 2, min: 60, max: 180 });
     expect(body.venues.si[DATES[6]].status).toBe('ok');
     expect(body.venues.si[DATES[9]]).toEqual({ status: 'closed' });   // St Ives day 10: not open yet, and the run still exits 0
@@ -145,8 +153,8 @@ describe('a normal run', () => {
     // The Worker's own validator takes it as it is.
     expect(cleanCourts(body, START + 20 * 1000).error).toBeUndefined();
 
-    expect(s.lines).toEqual(['padel-courts: St Ives ok 7, closed 7; PDL ok 14; Cambridge Uni ok 7, closed 7; posted 200 in 20 s; Pulse read 08:50']);
-    expect(s.records).toEqual([{ ts: '2026-10-28T09:00:20.000Z', ok: true, posted: true, http: 200, seconds: 20, counts: { si: { ok: 7, closed: 7, error: 0 }, pdl: { ok: 14, closed: 0, error: 0 }, cu: { ok: 7, closed: 7, error: 0 } }, problems: 0 }]);
+    expect(s.lines).toEqual(['padel-courts: St Ives ok 7, closed 7; PDL ok 14; Cambridge Uni ok 8, closed 6; posted 200 in 20 s; Pulse read 08:50']);
+    expect(s.records).toEqual([{ ts: '2026-10-28T09:00:20.000Z', ok: true, posted: true, http: 200, seconds: 20, counts: { si: { ok: 7, closed: 7, error: 0 }, pdl: { ok: 14, closed: 0, error: 0 }, cu: { ok: 8, closed: 6, error: 0 } }, problems: 0 }]);
   });
 
   it('the University feed refusing us fails the run loudly, but St Ives and PDL still post', async () => {
@@ -168,6 +176,37 @@ describe('a normal run', () => {
     const t = stubs({ page: livePage, uni: (u) => (u.pathname.endsWith('/anonymous') ? uniOk(u) : new Response(JSON.stringify(uniReply().filter((_, i) => i !== 3)), { status: 200 })) });
     expect(await t.go()).toBe(0);
     expect(t.posts[0].body.venues.cu[DATES[3]]).toEqual({ status: 'error', reason: 'day not in the reply' });
+  });
+
+  it('a Worker that does not know the University yet: St Ives and PDL are sent again without it, and the run says why (review of PR #854)', async () => {
+    let n = 0;
+    const s = stubs({ page: livePage, post: () => (n++ === 0 ? new Response(JSON.stringify({ error: 'unknown venue: cu' }), { status: 400 }) : new Response(JSON.stringify(WORKER_OK), { status: 200 })) });
+    expect(await s.go()).toBe(1);
+    expect(s.posts.map((p) => Object.keys(p.body.venues))).toEqual([['si', 'pdl', 'cu'], ['si', 'pdl']]);
+    expect(s.lines[0]).toMatch(/^FAILED: the Worker does not know the University yet \(deploy workers\/padel\); St Ives and PDL were sent without it\./);
+  });
+
+  it('every Matchi page errored and the University refused: both are named', async () => {
+    const s = stubs({ page: () => new Response('', { status: 500 }), uni: () => new Response('', { status: 401 }) });
+    expect(await s.go()).toBe(1);
+    expect(s.lines[0]).toMatch(/every Matchi page errored \(HTTP 500\)/);
+    expect(s.lines[0]).toMatch(/Cambridge Uni errored on every day that should be open \(HTTP 401\)/);
+  });
+
+  it('a University closure (today and tomorrow missing from a good reply) reads "couldn\'t check" without failing the run', async () => {
+    const s = stubs({ page: livePage, uni: (u) => (u.pathname.endsWith('/anonymous') ? uniOk(u) : new Response(JSON.stringify(uniReply().slice(2)), { status: 200 })) });
+    expect(await s.go()).toBe(0);
+    expect(s.posts[0].body.venues.cu[DATES[0]]).toEqual({ status: 'error', reason: 'day not in the reply' });
+    // A reply with no days at all is a broken feed: that still fails.
+    const t = stubs({ page: livePage, uni: (u) => (u.pathname.endsWith('/anonymous') ? uniOk(u) : new Response('[]', { status: 200 })) });
+    expect(await t.go()).toBe(1);
+  });
+
+  it('readUni: a connection dropped while the reply is read is a network fault, not a broken page', async () => {
+    const fetchImpl = async (url) => (String(url).includes('/anonymous')
+      ? new Response('', { status: 200, headers: { 'set-cookie': 'Jwt=x; path=/' } })
+      : { status: 200, text: async () => { throw new TypeError('terminated'); } });
+    expect((await readUni(fetchImpl, DATES.slice(0, 1)))[DATES[0]]).toEqual({ status: 'error', reason: 'could not reach the site' });
   });
 
   it('readUni never throws: a dropped connection is every day "could not reach the site"', async () => {
@@ -285,7 +324,7 @@ describe('fails loudly', () => {
   it('a read the Worker refuses as over 10 minutes old fails ONCE, loudly: "did the Mac sleep?"', async () => {
     const s = stubs({ page: livePage, post: () => new Response('{"error":"readAt is not within 10 minutes of now"}', { status: 400 }), postClock: START + 11 * 60 * 1000 });
     expect(await s.go()).toBe(1);
-    expect(s.lines[0]).toMatch(/^FAILED: the read took too long for the Worker \(did the Mac sleep\?\)\. St Ives ok 7, closed 7; PDL ok 14; Cambridge Uni ok 7, closed 7$/);
+    expect(s.lines[0]).toMatch(/^FAILED: the read took too long for the Worker \(did the Mac sleep\?\)\. St Ives ok 7, closed 7; PDL ok 14; Cambridge Uni ok 8, closed 6$/);
     expect(s.records[0]).toMatchObject({ ok: false, posted: false, http: 400 });
     // Any other refusal keeps its own words.
     const t = stubs({ page: livePage, post: () => new Response('{"error":"A newer read is already stored"}', { status: 409 }) });

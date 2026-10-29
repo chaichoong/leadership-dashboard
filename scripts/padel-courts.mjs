@@ -107,7 +107,7 @@ export async function readDay(fetchImpl, id, date) {
 export const UNI_HEADERS = Object.freeze({ ...MATCHI_HEADERS, Accept: 'application/json, text/plain, */*', 'X-Use-Sso': '1' });
 export const uniUrl = (dates) => `${UNI_HOST}/api/availability/V2/sessions?webBookableOnly=true&siteIds=CBU&activityIds=${UNI_ACTIVITY}`
   + `&dateFrom=${new Date(londonMidnightMs(dates[0])).toISOString()}&dateTo=${new Date(londonMidnightMs(addDays(dates[dates.length - 1], 1)) - 1).toISOString()}`;
-export async function readUni(fetchImpl, dates) {
+export async function readUni(fetchImpl, dates, nowMs = Date.now()) {
   const fail = (reason) => Object.fromEntries(dates.map((d) => [d, { status: 'error', reason }]));
   try {
     const a = await fetchImpl(`${UNI_HOST}/api/samlauthentication/anonymous`, { headers: { ...UNI_HEADERS }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
@@ -115,9 +115,10 @@ export async function readUni(fetchImpl, dates) {
     const cookie = (typeof a.headers.getSetCookie === 'function' ? a.headers.getSetCookie() : []).map((c) => c.split(';')[0]).join('; ');
     const r = await fetchImpl(uniUrl(dates), { headers: { ...UNI_HEADERS, Cookie: cookie }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
     if (r.status !== 200) return fail(`HTTP ${r.status}`);
+    const text = await r.text();                 // a drop here is a network fault (the outer catch)
     let json;
-    try { json = await r.json(); } catch { return fail('unexpected shape'); }
-    return parseGladstone(json, dates);
+    try { json = JSON.parse(text); } catch { return fail('unexpected shape'); }
+    return parseGladstone(json, dates, nowMs);
   } catch (e) {
     return fail(e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'timed out' : 'could not reach the site');
   }
@@ -153,10 +154,10 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
   }
   // The University: the same one more try after 2 s when the whole read was lost to the network.
   await sleep(GAP_MS);
-  let uni = await readUni(fetchImpl, dates);
+  let uni = await readUni(fetchImpl, dates, nowMs);
   if (Object.values(uni).every((d) => d.status === 'error' && isRetryable(d.reason))) {
     await sleep(RETRY_MS);
-    uni = await readUni(fetchImpl, dates);
+    uni = await readUni(fetchImpl, dates, nowMs);
   }
   raw.cu = uni;
   return { dates, raw };
@@ -197,7 +198,10 @@ export function readProblems(raw, dates) {
       open.push(d);
       if (d.status === 'closed') problems.push(`${v.name} ${date} has no court cells`);
     });
-    if ((!everyPage || !v.id) && open.length && open.every((d) => d.status === 'error')) problems.push(`${v.name} errored on every day that should be open (${reasonsOf(open)})`);
+    // A good University reply with today and tomorrow missing is a closure (no slots those days),
+    // not a broken feed: it reads "couldn't check" and the run is not failed for it.
+    const closure = !v.id && open.every((d) => d.reason === 'day not in the reply') && Object.values(raw[v.code] || {}).some((d) => d.status !== 'error');
+    if ((!everyPage || !v.id) && !closure && open.length && open.every((d) => d.status === 'error')) problems.push(`${v.name} errored on every day that should be open (${reasonsOf(open)})`);
   }
   return problems;
 }

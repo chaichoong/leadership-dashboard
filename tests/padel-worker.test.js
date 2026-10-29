@@ -175,7 +175,7 @@ describe('parseMatchi', () => {
 describe('parseGladstone (the University feed, read live on 29 Oct 2026)', () => {
   const DATES = ['2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07'];
   it('matches the University calendar for Tue 3 Nov, hour by hour (read in the browser the same day)', () => {
-    const r = parseGladstone(GLADSTONE, DATES);
+    const r = parseGladstone(GLADSTONE, DATES, Date.parse('2026-10-29T12:00:00Z'));
     // The portal's calendar for 3 Nov offered "Book now" at: 07 (both courts), 08 (both), 09 (Court 2),
     // 11 (Court 2), 14 (Court 1), 15 (Court 1), 17 (Court 2), 21 (Court 1).
     expect(r['2026-11-03']).toEqual({ status: 'ok', starts: {
@@ -196,15 +196,31 @@ describe('parseGladstone (the University feed, read live on 29 Oct 2026)', () =>
     expect(parseGladstone(broken, ['2026-11-03'])['2026-11-03']).toEqual({ status: 'error', reason: 'unexpected shape' });
   });
   it('a court named singles never counts, and a taken slot ends the longest booking', () => {
-    const slot = (start, status, inCentre = 1) => ({ startTime: start, endTime: start, status, availability: { inCentre }, isBeforeTimetableSlotBookablePeriod: false });
+    const slot = (start, status, inCentre = 1) => ({ startTime: start, endTime: start.replace(':00:00Z', ':59:59Z'), status, availability: { inCentre }, isBeforeTimetableSlotBookablePeriod: false });
     const reply = [{ id: 'USCAPADWO02', locations: [
       { locationNameToDisplay: 'Padel Tennis Court 1', slots: [slot('2026-11-03T19:00:00Z', 'Available'), slot('2026-11-03T20:00:00Z', 'Unavailable', 0)] },
       { locationNameToDisplay: 'Singles Court', slots: [slot('2026-11-03T19:00:00Z', 'Available'), slot('2026-11-03T20:00:00Z', 'Available')] },
     ] }];
     expect(parseGladstone(reply, ['2026-11-03'])['2026-11-03']).toEqual({ status: 'ok', starts: { '19:00': { courts: 1, min: 60, max: 60 } } });
   });
+  it('the longest booking needs slots that follow on exactly; a start listed twice is one court; a slot past its online cut-off is not free (review of PR #854)', () => {
+    const slot = (start, mins = 60, extra = {}) => ({ startTime: start, endTime: new Date(Date.parse(start) + mins * 60000 - 1000).toISOString(), status: 'Available', availability: { inCentre: 1 }, isBeforeTimetableSlotBookablePeriod: false, ...extra });
+    const day = (slots, nowMs) => parseGladstone([{ id: 'USCAPADWO02', locations: [{ locationNameToDisplay: 'Padel Tennis Court 1', slots }] }], ['2026-11-03'], nowMs)['2026-11-03'];
+    // Out of order, a gap at 20:00, and 19:00 listed twice: 18:00 runs 120 minutes, 21:00 stands alone, one court each.
+    expect(day([slot('2026-11-03T21:00:00Z'), slot('2026-11-03T19:00:00Z'), slot('2026-11-03T18:00:00Z'), slot('2026-11-03T19:00:00Z')])).toEqual({ status: 'ok', starts: {
+      '18:00': { courts: 1, min: 60, max: 120 }, '19:00': { courts: 1, min: 60, max: 60 }, '21:00': { courts: 1, min: 60, max: 60 },
+    } });
+    // Five hours in a row: the cap, 180.
+    expect(day(['07', '08', '09', '10', '11'].map((h) => slot(`2026-11-03T${h}:00:00Z`)))['starts']['07:00'].max).toBe(180);
+    // Half-hour slots: three in a row is 90 minutes, not 180.
+    expect(day([slot('2026-11-03T19:00:00Z', 30), slot('2026-11-03T19:30:00Z', 30), slot('2026-11-03T20:00:00Z', 30)])['starts']['19:00']).toEqual({ courts: 1, min: 30, max: 90 });
+    // 18:40 London: the 19:00 slot closed for online booking at 18:30, the 20:00 slot has not.
+    const cutOff = [slot('2026-11-03T19:00:00Z', 60, { bookableUntil: '2026-11-03T18:30:00Z' }), slot('2026-11-03T20:00:00Z', 60, { bookableUntil: '2026-11-03T19:30:00Z' })];
+    expect(Object.keys(day(cutOff, Date.parse('2026-11-03T18:40:00Z')).starts)).toEqual(['20:00']);
+    expect(Object.keys(day(cutOff, Date.parse('2026-11-03T18:00:00Z')).starts)).toEqual(['19:00', '20:00']);
+  });
   it('London time: in summer a 06:00 UTC slot is the 07:00 London start', () => {
-    const reply = [{ id: 'USCAPADWO02', locations: [{ locationNameToDisplay: 'Padel Tennis Court 1', slots: [{ startTime: '2026-07-01T06:00:00Z', status: 'Available', availability: { inCentre: 1 }, isBeforeTimetableSlotBookablePeriod: false }] }] }];
+    const reply = [{ id: 'USCAPADWO02', locations: [{ locationNameToDisplay: 'Padel Tennis Court 1', slots: [{ startTime: '2026-07-01T06:00:00Z', endTime: '2026-07-01T06:59:59Z', status: 'Available', availability: { inCentre: 1 }, isBeforeTimetableSlotBookablePeriod: false }] }] }];
     expect(Object.keys(parseGladstone(reply, ['2026-07-01'])['2026-07-01'].starts)).toEqual(['07:00']);
   });
 });
@@ -1159,7 +1175,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       const ids = await t.addPeople(NAMES.slice(0, 4));
       expect((await t.call('/api/state')).json.people.every((p) => p.venues.includes('cu'))).toBe(true);   // new people can do every venue
       const body = macBody(NOW);                              // the seed's read is at NOW: an older one is refused (409)
-      body.venues.cu = parseGladstone(GLADSTONE, londonDates(NOW));
+      body.venues.cu = parseGladstone(GLADSTONE, londonDates(NOW), NOW);
       // Leave St Ives and PDL with no free court at 07:00 on 3 Nov, so the University alone is ready.
       body.venues.si['2026-11-03'] = { status: 'ok', starts: {} };
       body.venues.pdl['2026-11-03'] = { status: 'ok', starts: {} };
@@ -1177,6 +1193,17 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect(s.venueInfo.cu).toMatchObject({ label: 'University of Cambridge Sports Centre', short: 'Cambridge Uni' });
       expect(t.relayCalls.some((c) => /Cambridge Uni: 4 in \(Test Ann, Test Bob, Test Cat, Test Dan\), starts 07:00 \(60 to 180 min, 2 courts\), book <https:\/\/cambridgesport\.gladstonego\.cloud\/book\/calendar\/USCAPADWO02\?activityDate=2026-11-03T06:00:00\.000Z>/.test(c.body.text))).toBe(true);
       expect(bookUrl(venueConfig(), 'cu', '2026-07-01')).toBe('https://cambridgesport.gladstonego.cloud/book/calendar/USCAPADWO02?activityDate=2026-07-01T06:00:00.000Z');
+    });
+
+    it('a later read without University days (an older reader) leaves it "couldn\'t check", never the last read\'s days (review of PR #854)', async () => {
+      const first = macBody(NOW);
+      first.venues.cu = parseGladstone(GLADSTONE, londonDates(NOW), NOW);
+      expect((await t.call('/api/courts', first, { robot: ROBOT })).status).toBe(200);
+      expect((await t.call('/api/state')).json.availability.venues.cu['2026-11-03'].status).toBe('ok');
+      expect((await t.call('/api/courts', macBody(NOW), { robot: ROBOT })).status).toBe(200);
+      const s = (await t.call('/api/state')).json;
+      expect(s.availability.venues.cu['2026-11-03']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
+      expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
     });
 
     it('needs the robot key: none, another key, or a wrong one is 401', async () => {

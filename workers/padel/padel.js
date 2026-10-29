@@ -309,39 +309,48 @@ export function parsePulse(json, nowMs) {
 // and 2, both doubles) holding 60-minute slots on the hour, in UTC. A slot is free when its status
 // is "Available" with a place left; a slot before its booking window opens (non-members book 7
 // days ahead) carries isBeforeTimetableSlotBookablePeriod, and a day of nothing but those is "not
-// open yet". A day missing from the reply, or any other shape, is an error: never "no court free".
-export function parseGladstone(json, dates) {
+// open yet". A slot past its bookableUntil (30 minutes before it starts) cannot be booked online, so
+// it is not free. A day missing from the reply, or any other shape, is an error: never "no court free".
+// nowMs is the time of the read (the cut-off is judged against it).
+export function parseGladstone(json, dates, nowMs) {
   const bad = (reason) => Object.fromEntries(dates.map((d) => [d, { status: 'error', reason }]));
   if (!Array.isArray(json)) return bad('unexpected shape');
   const rows = json.filter((a) => a && a.id === UNI_ACTIVITY);
   if (!rows.length) return bad('no padel court hire in the reply');
   const tally = Object.fromEntries(dates.map((d) => [d, { starts: {}, seen: 0, notYet: 0 }]));
-  const free = (x) => x && x.status === 'Available' && x.availability && x.availability.inCentre > 0 && !x.isBeforeTimetableSlotBookablePeriod;
+  const free = (x) => x && x.status === 'Available' && x.availability && x.availability.inCentre > 0 && !x.isBeforeTimetableSlotBookablePeriod
+    && !(Date.parse(x.bookableUntil || '') <= nowMs);
   for (const row of rows) {
     if (!Array.isArray(row.locations)) return bad('unexpected shape');
     for (const loc of row.locations) {
       if (!loc || !Array.isArray(loc.slots)) return bad('unexpected shape');
       if (/single/i.test(String(loc.locationNameToDisplay || ''))) continue;      // never a singles court
-      const slots = loc.slots.slice().sort((a, b) => String(a && a.startTime).localeCompare(String(b && b.startTime)));
+      // In time order, each start once (a start listed twice is one court, not two).
+      const slots = [];
+      for (const s of loc.slots) {
+        const start = Date.parse(s && s.startTime);
+        const len = Math.round((Date.parse(s && s.endTime) - start) / 60000);
+        if (!Number.isFinite(start) || !(len > 0) || typeof s.status !== 'string') return bad('unexpected shape');
+        if (!slots.some((x) => x.start === start)) slots.push({ ...s, start, len });
+      }
+      slots.sort((a, b) => a.start - b.start);
       for (let i = 0; i < slots.length; i++) {
         const s = slots[i];
-        const ms = Date.parse(s && s.startTime);
-        if (!Number.isFinite(ms) || typeof s.status !== 'string') return bad('unexpected shape');
+        const ms = s.start;
         const p = londonParts(ms);
         const day = tally[p.date];
         if (!day) continue;
         day.seen++;
         if (s.isBeforeTimetableSlotBookablePeriod) { day.notYet++; continue; }
         if (!free(s)) continue;
-        // The longest booking: this slot and every free slot straight after it on the same court.
-        let run = 0;
-        for (let k = i; k < slots.length && free(slots[k]) && run < RUN_CAP_MIN; k++) {
-          if (k > i && Date.parse(slots[k].startTime) - Date.parse(slots[k - 1].startTime) > 60 * 60000) break;
-          run += 60;
-        }
+        // The longest booking: this slot and every free slot that starts exactly as the one before
+        // it ends, on the same court, capped at RUN_CAP_MIN.
+        let run = s.len;
+        for (let k = i + 1; k < slots.length && free(slots[k]) && slots[k].start === slots[k - 1].start + slots[k - 1].len * 60000 && run + slots[k].len <= RUN_CAP_MIN; k++) run += slots[k].len;
         const t = `${p.hh}:${p.mm}`;
-        const st = day.starts[t] || (day.starts[t] = { courts: 0, min: 60, max: 60 });
+        const st = day.starts[t] || (day.starts[t] = { courts: 0, min: s.len, max: run });
         st.courts++;
+        st.min = Math.min(st.min, s.len);
         st.max = Math.max(st.max, run);
       }
     }
