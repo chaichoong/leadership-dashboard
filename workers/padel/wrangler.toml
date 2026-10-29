@@ -4,8 +4,9 @@
 # play at which hours over the next 14 days in D1, the courts free at three venues, and ONE Slack DM
 # to Kevin the first time 4+ people line up on an hour where a court is free. See padel.js for the routes.
 #
-# St Ives and PDL (Matchi) are read on the Mac mini by scripts/padel-courts.mjs every 15 minutes,
-# because Matchi answers Cloudflare with HTTP 429; it POSTs to /api/courts with ROBOT_KEY. Pulse is
+# St Ives and PDL (Matchi) and the University of Cambridge Sports Centre (Gladstone Go, added 29 Oct
+# 2026) are read on the Mac mini by scripts/padel-courts.mjs every 15 minutes, because Matchi
+# answers Cloudflare with HTTP 429; it POSTs to /api/courts with ROBOT_KEY. Pulse is
 # read by this Worker, at most once per 15 minutes, when the page asks.
 #
 # Secrets (set from a 0600 file through stdin, never typed on a command line):
@@ -62,6 +63,8 @@ PDL_MATCHI_ID = "3122"
 PP_LABEL = "Pulse Padel Huntingdon"
 PP_SHORT = "Huntingdon"
 PP_CLUB_ID = "VEqVgpQmiJLiEC1Lm4z3"
+CU_LABEL = "University of Cambridge Sports Centre"
+CU_SHORT = "Cambridge Uni"
 PAGE_URL = "https://padel.runpreneur.org.uk/"
 ALERT_TO = "kevin@runpreneur.org.uk"
 

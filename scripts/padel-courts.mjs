@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// padel-courts.mjs: reads which courts are free at St Ives and PDL (Matchi) on the Mac mini and
-// hands the result to the padel Worker (workers/padel), every 15 minutes from 06:30 to 23:00 London.
+// padel-courts.mjs: reads which courts are free at St Ives and PDL (Matchi) and the University of
+// Cambridge Sports Centre (Gladstone Go) on the Mac mini and hands the result to the padel Worker
+// (workers/padel), every 15 minutes from 06:30 to 23:00 London.
 //
 // WHY (27 Oct 2026)
 // -----------------
@@ -9,7 +10,10 @@
 // this Mac the pages return 200 in one burst with 250 ms gaps. So this job reads 28 pages (2 venues
 // x 14 days)
 // here and POSTs the parsed days to https://padel.runpreneur.org.uk/api/courts.
-// Pulse Padel is still read by the Worker itself.
+// Pulse Padel is still read by the Worker itself. The University (added 29 Oct 2026, Kevin: "all
+// the padel courts within 30 minutes of Willingham") is two calls a run: an anonymous session, then
+// its portal's own availability feed for all 14 days, with the header X-Use-Sso: 1 that the portal
+// adds itself (without it every call is 401). parseGladstone in the Worker's file reads it.
 //
 // WHAT IT DOES
 // ------------
@@ -28,8 +32,9 @@
 // FAILS LOUDLY (exit 1, a line starting "FAILED:", which ~/tools/run-job.sh records):
 //   - any day the parser could not read (an error that is not a network one: Matchi changed its
 //     page, or a login wall), on ANY day, even when every other page read fine;
-//   - a venue that errored on every day whose booking window must be open (St Ives today and
-//     tomorrow, PDL all 14 days), whatever the reason (a 404 on every PDL day fails); St Ives
+//   - a venue that errored on every day whose booking window must be open (St Ives and the
+//     University today and tomorrow, PDL all 14 days), whatever the reason (a 404 on every PDL day
+//     fails, and so does a University feed that refuses us); St Ives
 //     answers "allows bookings no more than 7 days" beyond its window, read as closed: fine;
 //   - a must-be-open day that came back closed (no court cells at all);
 //   - the POST did not answer 200.
@@ -50,12 +55,13 @@ import { readFileSync, appendFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseMatchi, matchiUrl, londonDates, londonParts, MATCHI_HEADERS } from '../workers/padel/padel.js';
+import { parseMatchi, parseGladstone, matchiUrl, londonDates, londonParts, londonMidnightMs, addDays, MATCHI_HEADERS, UNI_HOST, UNI_ACTIVITY } from '../workers/padel/padel.js';
 
 export const ENDPOINT = 'https://padel.runpreneur.org.uk/api/courts';
 export const KEY_FILE = join(homedir(), '.config/od/padel_robot_key');
 export const LOG_DIR = join(homedir(), 'knowledge-os/logs/padel-courts');
-export const VENUES = [{ code: 'si', id: '2619', name: 'St Ives' }, { code: 'pdl', id: '3122', name: 'PDL' }];
+export const VENUES = [{ code: 'si', id: '2619', name: 'St Ives' }, { code: 'pdl', id: '3122', name: 'PDL' }, { code: 'cu', name: 'Cambridge Uni' }];
+const MATCHI = VENUES.filter((v) => v.id);
 export const GAP_MS = 250;
 export const PAGE_TIMEOUT_MS = 10000;
 export const POST_TIMEOUT_MS = 30000;
@@ -70,9 +76,10 @@ export function isQuiet(nowMs) {
   return m < QUIET_UNTIL || m >= QUIET_FROM;
 }
 
-// The days whose booking window must be open: St Ives today and tomorrow, PDL all 7.
+// The days whose booking window must be open: St Ives and the University (7 days ahead for
+// non-members) today and tomorrow, PDL all 14.
 export function mustBeOpen(code, index) {
-  return code === 'si' ? index < 2 : true;
+  return code === 'si' || code === 'cu' ? index < 2 : true;
 }
 // The reasons readDay gives for a page that never arrived. Every other error reason comes from
 // parseMatchi: the page arrived and could not be read.
@@ -80,6 +87,9 @@ export const isNetworkReason = (reason) => /^HTTP \d{3}$/.test(reason || '') || 
 // Worth one more try: a timeout, a 5xx or no connection. Never a 4xx or a 429 (Matchi refusing
 // us, which another request at once would only make worse).
 export const isRetryable = (reason) => /^HTTP 5\d\d$/.test(reason || '') || reason === 'timed out' || reason === 'could not reach the site';
+// A University day missing from an otherwise good reply (a closure day has no slots) reads
+// "couldn't check" but does not fail the run on its own; a feed missing every open day still does.
+const isSoftReason = (reason) => isNetworkReason(reason) || reason === 'day not in the reply';
 
 // Fetch one page. Never throws: a failure is an error day with its reason.
 export async function readDay(fetchImpl, id, date) {
@@ -92,6 +102,27 @@ export async function readDay(fetchImpl, id, date) {
   }
 }
 
+// The University: one anonymous session, then one read of all 14 days. Never throws: a failure is
+// every day an error with its reason.
+export const UNI_HEADERS = Object.freeze({ ...MATCHI_HEADERS, Accept: 'application/json, text/plain, */*', 'X-Use-Sso': '1' });
+export const uniUrl = (dates) => `${UNI_HOST}/api/availability/V2/sessions?webBookableOnly=true&siteIds=CBU&activityIds=${UNI_ACTIVITY}`
+  + `&dateFrom=${new Date(londonMidnightMs(dates[0])).toISOString()}&dateTo=${new Date(londonMidnightMs(addDays(dates[dates.length - 1], 1)) - 1).toISOString()}`;
+export async function readUni(fetchImpl, dates) {
+  const fail = (reason) => Object.fromEntries(dates.map((d) => [d, { status: 'error', reason }]));
+  try {
+    const a = await fetchImpl(`${UNI_HOST}/api/samlauthentication/anonymous`, { headers: { ...UNI_HEADERS }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
+    if (a.status !== 200) return fail(`HTTP ${a.status}`);
+    const cookie = (typeof a.headers.getSetCookie === 'function' ? a.headers.getSetCookie() : []).map((c) => c.split(';')[0]).join('; ');
+    const r = await fetchImpl(uniUrl(dates), { headers: { ...UNI_HEADERS, Cookie: cookie }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
+    if (r.status !== 200) return fail(`HTTP ${r.status}`);
+    let json;
+    try { json = await r.json(); } catch { return fail('unexpected shape'); }
+    return parseGladstone(json, dates);
+  } catch (e) {
+    return fail(e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'timed out' : 'could not reach the site');
+  }
+}
+
 // What the Worker stores: no court names, just counts and the shortest and longest booking.
 export function toPayloadDay(day) {
   if (day.status !== 'ok') return day.status === 'closed' ? { status: 'closed' } : { status: 'error', reason: day.reason || 'unknown' };
@@ -100,12 +131,12 @@ export function toPayloadDay(day) {
   return { status: 'ok', starts };
 }
 
-// Read the 28 pages (2 venues x 14 days) one after another.
+// Read the 28 Matchi pages (2 venues x 14 days) one after another, then the University's feed.
 export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs }) {
   const dates = londonDates(nowMs);
   const raw = {};
   let first = true;
-  for (const v of VENUES) {
+  for (const v of MATCHI) {
     raw[v.code] = {};
     for (const date of dates) {
       if (!first) await sleep(GAP_MS);
@@ -120,6 +151,14 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
       raw[v.code][date] = day;
     }
   }
+  // The University: the same one more try after 2 s when the whole read was lost to the network.
+  await sleep(GAP_MS);
+  let uni = await readUni(fetchImpl, dates);
+  if (Object.values(uni).every((d) => d.status === 'error' && isRetryable(d.reason))) {
+    await sleep(RETRY_MS);
+    uni = await readUni(fetchImpl, dates);
+  }
+  raw.cu = uni;
   return { dates, raw };
 }
 
@@ -145,7 +184,7 @@ export function countStatuses(raw) {
 const reasonsOf = (days) => [...new Set(days.map((d) => d.reason))].slice(0, 3).join(', ');
 export function readProblems(raw, dates) {
   const problems = [];
-  const all = Object.values(raw).flatMap((days) => Object.values(days));
+  const all = MATCHI.flatMap((v) => Object.values(raw[v.code] || {}));
   const everyPage = all.length > 0 && all.every((d) => d.status === 'error');
   if (everyPage) problems.push(`every Matchi page errored (${reasonsOf(all)})`);
   for (const v of VENUES) {
@@ -153,12 +192,12 @@ export function readProblems(raw, dates) {
     dates.forEach((date, i) => {
       const d = raw[v.code]?.[date];
       if (!d) return;
-      if (d.status === 'error' && !isNetworkReason(d.reason)) problems.push(`${v.name} ${date} could not be read (${d.reason})`);
+      if (d.status === 'error' && !isSoftReason(d.reason)) problems.push(`${v.name} ${date} could not be read (${d.reason})`);
       if (!mustBeOpen(v.code, i)) return;
       open.push(d);
       if (d.status === 'closed') problems.push(`${v.name} ${date} has no court cells`);
     });
-    if (!everyPage && open.length && open.every((d) => d.status === 'error')) problems.push(`${v.name} errored on every day that should be open (${reasonsOf(open)})`);
+    if ((!everyPage || !v.id) && open.length && open.every((d) => d.status === 'error')) problems.push(`${v.name} errored on every day that should be open (${reasonsOf(open)})`);
   }
   return problems;
 }
@@ -183,7 +222,7 @@ function readKey() {
   try { return readFileSync(KEY_FILE, 'utf8').trim(); } catch { return ''; }
 }
 const hhmm = (iso) => { if (!iso) return 'never'; const p = londonParts(Date.parse(iso)); return `${p.hh}:${p.mm}`; };
-const summaryOf = (counts) => VENUES.map((v) => {
+const summaryOf = (counts) => VENUES.filter((v) => counts[v.code]).map((v) => {
   const c = counts[v.code];
   return `${v.name} ok ${c.ok}${c.closed ? `, closed ${c.closed}` : ''}${c.error ? `, error ${c.error}` : ''}`;
 }).join('; ');

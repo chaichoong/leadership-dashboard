@@ -505,7 +505,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } } });
     const tomorrow = await openAsTestAnn(page);
     const chips = page.locator(`[data-slot="${tomorrow}|19"]`).locator('xpath=..').locator('.chip');
-    await expect(chips.locator('[aria-hidden]')).toHaveText(['St Ives ✓', /^Cambridge /, /^Huntingdon /]);
+    await expect(chips.locator('[aria-hidden]')).toHaveText(['St Ives ✓', /^Cambridge /, /^Huntingdon /, /^Cambridge Uni /]);   // four venues since 29 Oct 2026
     await expect(chips.first()).toHaveClass(/free/);
     await expect(chips.first().locator('.sr')).toHaveText('St Ives: a court free at 19:00 (60 min).');
     await expect(page.locator(`[data-day="${tomorrow}"] small`)).toHaveText('');

@@ -25,15 +25,17 @@
 // A slot is "YYYY-MM-DD|HH": the London date and two-digit start hour, 07 to 21.
 // Venues: si = St Ives Golf Club (Matchi 2619), pdl = PDL Padel United Cambridge (Matchi 3122),
 // pp = Pulse Padel Huntingdon (the Nettla booking widget's public availability endpoint, called
-// at most once per 15 minutes: Kevin's go-ahead, 27 Oct 2026).
+// at most once per 15 minutes: Kevin's go-ahead, 27 Oct 2026), cu = University of Cambridge Sports
+// Centre (its Gladstone Go booking portal's own feed: Kevin, 29 Oct 2026, "all the padel courts
+// within 30 minutes of Willingham"; the other venues in range are members only or not built).
 //
 // WHO READS WHAT. Matchi answers every /book/schedule request from Cloudflare's edge with HTTP 429
-// (12 of 12 probes on 27 Oct 2026) and 200 from the Mac mini. So St Ives and PDL are read by
-// scripts/padel-courts.mjs on the Mac every 15 minutes (06:30 to 23:00 London), which POSTs the
-// parsed days to /api/courts. That script imports parseMatchi, matchiUrl, MATCHI_HEADERS and
-// londonDates from this file, so both sides parse one way. Pulse is read here.
+// (12 of 12 probes on 27 Oct 2026) and 200 from the Mac mini. So St Ives, PDL and the University
+// are read by scripts/padel-courts.mjs on the Mac every 15 minutes (06:30 to 23:00 London), which
+// POSTs the parsed days to /api/courts. That script imports parseMatchi, parseGladstone, matchiUrl,
+// MATCHI_HEADERS and londonDates from this file, so both sides parse one way. Pulse is read here.
 //
-// FRESHNESS. A venue's data counts only while it is fresh: St Ives and PDL for 45 minutes after
+// FRESHNESS. A venue's data counts only while it is fresh: the Mac's venues for 45 minutes after
 // the Mac's read (and the evening's last read, 22:30 London or later, until 06:45 the next
 // morning while the Mac sleeps: matchiFresh), Pulse for 20 minutes. A venue that is not fresh
 // shows "couldn't check" with its own booking link and is NEVER counted towards a DM.
@@ -50,10 +52,11 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-29.1';
+export const VERSION = '2026-10-29.2';
 export const TZ = 'Europe/London';
-export const VENUES = ['si', 'pdl', 'pp'];
-const MATCHI_VENUES = ['si', 'pdl'];
+export const VENUES = ['si', 'pdl', 'pp', 'cu'];
+const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
+const MAC_VENUES = ['si', 'pdl', 'cu'];              // everything the Mac reads (cu may be missing from an older reader)
 export const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);          // 7..21
 const HH = new Set(HOURS.map((h) => String(h).padStart(2, '0')));
 export const DAYS = 14;                          // the window: today and the 13 days after (Kevin, 27 Oct 2026)
@@ -96,11 +99,19 @@ export function venueConfig(env = {}) {
     si: { code: 'si', label: env.SI_LABEL || 'St Ives Golf Club', short: env.SI_SHORT || 'St Ives', matchiId: env.SI_MATCHI_ID || '2619' },
     pdl: { code: 'pdl', label: env.PDL_LABEL || 'PDL Padel United Cambridge', short: env.PDL_SHORT || 'Cambridge', matchiId: env.PDL_MATCHI_ID || '3122' },
     pp: { code: 'pp', label: env.PP_LABEL || 'Pulse Padel Huntingdon', short: env.PP_SHORT || 'Huntingdon', clubId: env.PP_CLUB_ID || 'VEqVgpQmiJLiEC1Lm4z3' },
+    cu: { code: 'cu', label: env.CU_LABEL || 'University of Cambridge Sports Centre', short: env.CU_SHORT || 'Cambridge Uni' },
   };
 }
 export const matchiUrl = (id, date) => `https://www.matchi.se/book/schedule?facilityId=${id}&date=${date}&sport=5`;
+// The University portal's own calendar for that day (read 29 Oct 2026): 06:00 UTC is 06:00 or
+// 07:00 London, before the first slot, so the page lists the whole day.
+export const UNI_HOST = 'https://cambridgesport.gladstonego.cloud';
+export const UNI_ACTIVITY = 'USCAPADWO02';            // "Padel 55mins Non Member": court hire for anyone
+export const uniBookUrl = (date) => `${UNI_HOST}/book/calendar/${UNI_ACTIVITY}?activityDate=${date}T06:00:00.000Z`;
 export function bookUrl(cfg, code, date) {
-  return code === 'pp' ? PULSE_PAGE : matchiUrl(cfg[code].matchiId, date);
+  if (code === 'pp') return PULSE_PAGE;
+  if (code === 'cu') return uniBookUrl(date);
+  return matchiUrl(cfg[code].matchiId, date);
 }
 
 // ── London time. Workers run in UTC; every date and hour the group sees is London local. ──
@@ -290,6 +301,60 @@ export function parsePulse(json, nowMs) {
   return { status: 'ok', byDate };
 }
 
+// ── University of Cambridge Sports Centre (Gladstone Go), read on the Mac ──
+// The portal's own feed (read live 29 Oct 2026, tests/fixtures/padel/gladstone-sessions-2026-11-03.json):
+// GET /api/availability/V2/sessions?webBookableOnly=true&siteIds=CBU&activityIds=USCAPADWO02&dateFrom&dateTo,
+// with the anonymous session cookie and the header X-Use-Sso: 1 (the portal's own interceptor adds
+// it; without it every call is 401). One row per day, each with locations (Padel Tennis Court 1
+// and 2, both doubles) holding 60-minute slots on the hour, in UTC. A slot is free when its status
+// is "Available" with a place left; a slot before its booking window opens (non-members book 7
+// days ahead) carries isBeforeTimetableSlotBookablePeriod, and a day of nothing but those is "not
+// open yet". A day missing from the reply, or any other shape, is an error: never "no court free".
+export function parseGladstone(json, dates) {
+  const bad = (reason) => Object.fromEntries(dates.map((d) => [d, { status: 'error', reason }]));
+  if (!Array.isArray(json)) return bad('unexpected shape');
+  const rows = json.filter((a) => a && a.id === UNI_ACTIVITY);
+  if (!rows.length) return bad('no padel court hire in the reply');
+  const tally = Object.fromEntries(dates.map((d) => [d, { starts: {}, seen: 0, notYet: 0 }]));
+  const free = (x) => x && x.status === 'Available' && x.availability && x.availability.inCentre > 0 && !x.isBeforeTimetableSlotBookablePeriod;
+  for (const row of rows) {
+    if (!Array.isArray(row.locations)) return bad('unexpected shape');
+    for (const loc of row.locations) {
+      if (!loc || !Array.isArray(loc.slots)) return bad('unexpected shape');
+      if (/single/i.test(String(loc.locationNameToDisplay || ''))) continue;      // never a singles court
+      const slots = loc.slots.slice().sort((a, b) => String(a && a.startTime).localeCompare(String(b && b.startTime)));
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        const ms = Date.parse(s && s.startTime);
+        if (!Number.isFinite(ms) || typeof s.status !== 'string') return bad('unexpected shape');
+        const p = londonParts(ms);
+        const day = tally[p.date];
+        if (!day) continue;
+        day.seen++;
+        if (s.isBeforeTimetableSlotBookablePeriod) { day.notYet++; continue; }
+        if (!free(s)) continue;
+        // The longest booking: this slot and every free slot straight after it on the same court.
+        let run = 0;
+        for (let k = i; k < slots.length && free(slots[k]) && run < RUN_CAP_MIN; k++) {
+          if (k > i && Date.parse(slots[k].startTime) - Date.parse(slots[k - 1].startTime) > 60 * 60000) break;
+          run += 60;
+        }
+        const t = `${p.hh}:${p.mm}`;
+        const st = day.starts[t] || (day.starts[t] = { courts: 0, min: 60, max: 60 });
+        st.courts++;
+        st.max = Math.max(st.max, run);
+      }
+    }
+  }
+  const out = {};
+  for (const d of dates) {
+    const day = tally[d];
+    out[d] = !day.seen ? { status: 'error', reason: 'day not in the reply' }
+      : day.notYet === day.seen ? { status: 'closed' } : { status: 'ok', starts: day.starts };
+  }
+  return out;
+}
+
 // ── From raw starts to the page's hour rows ──
 // An hour row lists its starts with, for each, the shortest and longest booking (max falls back to
 // min for a read that carried none) and how many courts are free; courts and max are the hour's best.
@@ -352,8 +417,8 @@ export function assembleAvailability(matchi, pulse) {
   return {
     matchiFetchedAt: matchi?.readAt || null,
     pulseFetchedAt: pulse?.fetchedAt || null,
-    goodAt: { si: matchi?.goodAt?.si || null, pdl: matchi?.goodAt?.pdl || null, pp: pulse?.goodAt || null },
-    venues: { si: matchi?.venues?.si || {}, pdl: matchi?.venues?.pdl || {}, pp: pulse?.days || {} },
+    goodAt: { si: matchi?.goodAt?.si || null, pdl: matchi?.goodAt?.pdl || null, pp: pulse?.goodAt || null, cu: matchi?.goodAt?.cu || null },
+    venues: { si: matchi?.venues?.si || {}, pdl: matchi?.venues?.pdl || {}, pp: pulse?.days || {}, cu: matchi?.venues?.cu || {} },
   };
 }
 
@@ -382,13 +447,14 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     bookedDays.add(m[1]);
   }
   const a = availability || {};
-  const fetchedAt = { si: a.matchiFetchedAt || null, pdl: a.matchiFetchedAt || null, pp: a.pulseFetchedAt || null };
+  const fetchedAt = { si: a.matchiFetchedAt || null, pdl: a.matchiFetchedAt || null, pp: a.pulseFetchedAt || null, cu: a.matchiFetchedAt || null };
   const fresh = {
     si: matchiFresh(fetchedAt.si, nowMs),
     pdl: matchiFresh(fetchedAt.pdl, nowMs),
     pp: ageOk(fetchedAt.pp, nowMs, PULSE_FRESH_MS),
+    cu: matchiFresh(fetchedAt.cu, nowMs),
   };
-  const checkedAt = { si: a.goodAt?.si || null, pdl: a.goodAt?.pdl || null, pp: a.goodAt?.pp || null };
+  const checkedAt = { si: a.goodAt?.si || null, pdl: a.goodAt?.pdl || null, pp: a.goodAt?.pp || null, cu: a.goodAt?.cu || null };
   const venuesOut = {};
   for (const code of VENUES) {
     venuesOut[code] = {};
@@ -530,7 +596,7 @@ export function makeRepo(db) {
       return Number(r?.n || 0);
     },
     async addPerson(name, nowIso) {
-      await db.prepare("INSERT INTO people (name, venues, created_at) VALUES (?, 'si,pdl,pp', ?) ON CONFLICT(name) DO NOTHING").bind(name, nowIso).run();
+      await db.prepare('INSERT INTO people (name, venues, created_at) VALUES (?1, ?2, ?3) ON CONFLICT(name) DO NOTHING').bind(name, VENUES.join(','), nowIso).run();
       const r = await db.prepare('SELECT id, name, venues, votes_at FROM people WHERE name = ? COLLATE NOCASE').bind(name).first();
       return r ? toPerson(r) : null;
     },
@@ -716,13 +782,14 @@ export function cleanCourts(body, nowMs) {
   if (!Number.isFinite(readAtMs)) return { error: 'readAt must be a date and time' };
   if (Math.abs(nowMs - readAtMs) > READ_AT_SKEW_MS) return { error: 'readAt is not within 10 minutes of now' };
   if (!isObj(body.venues)) return { error: 'venues must be an object' };
-  // Both venues, every time: a venue left out would keep its old days under the new readAt and
-  // read as fresh.
+  // St Ives and PDL every time. The University may be missing (a reader older than 29 Oct 2026);
+  // saveMatchi then stores no University days under the new readAt, so it reads "couldn't check",
+  // never an old read passed off as fresh.
   for (const code of MATCHI_VENUES) if (!isObj(body.venues[code])) return { error: `venues.${code} is needed` };
   const window = new Set(londonDates(nowMs));
   const venues = {};
   for (const [code, days] of Object.entries(body.venues)) {
-    if (!MATCHI_VENUES.includes(code)) return { error: `unknown venue: ${code.slice(0, 10)}` };
+    if (!MAC_VENUES.includes(code)) return { error: `unknown venue: ${code.slice(0, 10)}` };
     if (!isObj(days)) return { error: `${code} must be an object of dates` };
     venues[code] = {};
     for (const [date, day] of Object.entries(days)) {
@@ -736,7 +803,8 @@ export function cleanCourts(body, nowMs) {
   return { readAt: new Date(readAtMs).toISOString(), venues };
 }
 async function saveMatchi(repo, prev, clean) {
-  const next = { readAt: clean.readAt, goodAt: { si: prev?.goodAt?.si || null, pdl: prev?.goodAt?.pdl || null }, venues: { si: prev?.venues?.si || {}, pdl: prev?.venues?.pdl || {} } };
+  // Every Mac venue starts empty: only what this read carries is stored under its readAt.
+  const next = { readAt: clean.readAt, goodAt: Object.fromEntries(MAC_VENUES.map((c) => [c, prev?.goodAt?.[c] || null])), venues: Object.fromEntries(MAC_VENUES.map((c) => [c, {}])) };
   for (const [code, days] of Object.entries(clean.venues)) {
     next.venues[code] = days;
     if (Object.values(days).some((d) => d.status !== 'error')) next.goodAt[code] = clean.readAt;
