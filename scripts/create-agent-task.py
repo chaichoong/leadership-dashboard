@@ -1936,11 +1936,28 @@ def build_update(existing_fields, incoming_fields, today_iso):
     in_due = str(incoming_fields.get(F["due"]) or "")[:10]
     ex_hard = bool(existing_fields.get(F["hardDeadline"]))
     in_hard = bool(incoming_fields.get(F["hardDeadline"]))
+    # WHOSE HARD DATE IS IT (28 Oct 2026, finding 20261024-phase-3-1067). The
+    # marker line is written by apply_letter_deadline and by nothing else, so
+    # it is the one reliable signal that a date was READ OUT OF THE LETTER in
+    # code rather than judged by a model. "Two hard dates keep the earlier" is
+    # right between two letter dates and wrong against a judged one: on
+    # 23 Oct 2026 four tasks were created at 08:08-08:09 carrying Hard
+    # Deadline and the creation day as the due date, the real letters were
+    # folded in an hour later with 2026-10-27 and 2026-11-04 stamped, and
+    # min() kept the creation day on all four. Hard Deadline plus a creation
+    # day makes a task overdue the next morning, which is how
+    # hard-deadline-passed-still-open rose to 15 on dates that were never
+    # deadlines. A stamped date therefore beats an unstamped one even when it
+    # is later; between two stamped dates the earlier still wins.
+    ex_stamped = DEADLINE_MARKER in str(existing_fields.get(F["desc"], "") or "")
+    in_stamped = DEADLINE_MARKER in str(incoming_fields.get(F["desc"], "") or "")
     if in_hard and in_due:
         if not ex_hard:
             patch[F["due"]] = in_due
             patch[F["hardDeadline"]] = True
         elif not ex_due or in_due < ex_due:
+            patch[F["due"]] = in_due
+        elif in_stamped and not ex_stamped:
             patch[F["due"]] = in_due
     elif not ex_hard and existing_status != "Approval":
         dues = [d for d in (ex_due, in_due) if d]
@@ -2894,6 +2911,33 @@ def selftest():
           ph[F["due"]] == "2026-09-01" and ph[F["hardDeadline"]] is True)
     both = build_update(hard_ex, hard_in, "2026-08-25")
     check("two hard dates keep the earlier", both[F["due"]] == "2026-09-01")
+
+    # THE LETTER'S OWN DATE BEATS A JUDGED ONE (28 Oct 2026, finding
+    # 20261024-phase-3-1067). Four live tasks on 23 Oct 2026 held Hard
+    # Deadline and the creation day; the folded letter stated 27 Oct and
+    # 4 Nov, and min() kept the creation day on every one.
+    judged_ex = {F["desc"]: "no marker here", F["status"]: {"name": "Today"},
+                 F["due"]: "2026-10-23", F["hardDeadline"]: True}
+    stamped_in = {F["name"]: "INBOUND: Simarc ground rent",
+                  F["desc"]: "Deadline: 2026-10-27\n\n" + DEADLINE_MARKER + "2026-10-27",
+                  F["status"]: "Today", F["due"]: "2026-10-27",
+                  F["hardDeadline"]: True}
+    pl = build_update(judged_ex, stamped_in, "2026-10-23")
+    check("a stamped letter date beats a judged hard date, even when later",
+          pl[F["due"]] == "2026-10-27")
+    # CONTROL for the same rule: between two STAMPED dates the earlier still
+    # wins, so this is not a blanket "the newest date wins".
+    stamped_ex = dict(judged_ex)
+    stamped_ex[F["desc"]] = DEADLINE_MARKER + "2026-10-23"
+    pb = build_update(stamped_ex, stamped_in, "2026-10-23")
+    check("control: two stamped dates still keep the earlier",
+          F["due"] not in pb)
+    # CONTROL for the soft side: an unstamped later date is still refused.
+    judged_in = dict(stamped_in)
+    judged_in[F["desc"]] = "no marker"
+    pc = build_update(judged_ex, judged_in, "2026-10-23")
+    check("control: an unstamped later hard date is still refused",
+          F["due"] not in pc)
     apv_hard = {F["desc"]: "x", F["status"]: {"name": "Approval"}, F["due"]: "2026-09-15"}
     pa = build_update(apv_hard, hard_in, "2026-08-25")
     check("a hard deadline updates due even at Approval, without moving status",

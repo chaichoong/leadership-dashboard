@@ -654,6 +654,48 @@ const SECTION_MAX = 2900;
 function capSection(text) {
     return text.length > SECTION_MAX ? `${text.slice(0, SECTION_MAX - 40)}\n… cut short: the rest is in the morning report` : text;
 }
+
+// EVERY SLACK LIMIT, ENFORCED AT THE BOUNDARY (28 Oct 2026, finding
+// 20261028-phase-5-1105). On 27 Oct Slack refused the whole 09:00 brief with
+// `invalid_blocks`, so Kevin got the money-only DM and no NEEDS YOU list — and
+// since 23 Sep the brief is the ONLY route that list reaches him. capSection
+// above guarded the must-see sections and nothing guarded the rest: a header is
+// capped at 150 characters by Slack, a section at 3000, a message at 50 blocks,
+// and a section with empty text is refused outright. All four of those are
+// model-written text in buildBriefBlocks, so the length changes every morning
+// and a brief that posts today can be refused tomorrow. This runs inside
+// slackPost, so EVERY caller is covered rather than the one that was noticed.
+const HEADER_MAX = 150;
+const BLOCKS_MAX = 50;
+function hardenBlocks(blocks) {
+    if (!Array.isArray(blocks)) return blocks;
+    const out = [];
+    for (const b of blocks) {
+        if (!b || typeof b !== 'object') continue;
+        if (b.type === 'header') {
+            const t = String((b.text && b.text.text) || '').trim();
+            if (!t) continue;
+            out.push({ ...b, text: { ...b.text, text: t.length > HEADER_MAX ? t.slice(0, HEADER_MAX - 1) + '…' : t } });
+            continue;
+        }
+        if (b.type === 'section' && b.text) {
+            const t = String(b.text.text || '');
+            // An empty section is refused by Slack, and an empty one carries
+            // nothing anyway, so dropping it is never a loss of information.
+            if (!t.trim()) continue;
+            out.push({ ...b, text: { ...b.text, text: capSection(t) } });
+            continue;
+        }
+        out.push(b);
+    }
+    if (out.length > BLOCKS_MAX) {
+        const kept = out.slice(0, BLOCKS_MAX - 1);
+        kept.push({ type: 'section', text: { type: 'mrkdwn',
+            text: `… ${out.length - (BLOCKS_MAX - 1)} more sections cut short: the rest is in the morning report` } });
+        return kept;
+    }
+    return out;
+}
 function mustSeeBlocks(tasks, needsRow, today, tenantRow) {
     const section = text => ({ type: 'section', text: { type: 'mrkdwn', text: capSection(text) } });
     const blocks = [section(deadlinesText(tasks ? tasks.deadlines : null, today))];
@@ -1007,7 +1049,7 @@ async function slackLookup(token, email) {
     return d.user.id;
 }
 
-async function slackPost(token, channel, text, blocks) {
+async function slackPostRaw(token, channel, text, blocks) {
     const r = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },
@@ -1016,6 +1058,28 @@ async function slackPost(token, channel, text, blocks) {
     const d = await r.json();
     if (!d.ok) throw new Error('Slack post failed: ' + d.error);
     return d;
+}
+
+// A REFUSED BLOCK SET MUST NOT COST THE WHOLE BRIEF (28 Oct 2026, finding
+// 20261028-phase-5-1105). Blocks are hardened first, which is what stops the
+// known limits. The retry is for a limit we have NOT modelled: rather than
+// drop to the money-only DM, re-post the first TOP_BLOCKS blocks, which is the
+// header, the must-see sections (deadlines, only-you, NEEDS YOU, tenant chain)
+// and THE ONE THING — the part Kevin must read. Only a second refusal throws,
+// and only then is the fallback stub written.
+const TOP_BLOCKS = 7;
+async function slackPost(token, channel, text, blocks) {
+    const safe = hardenBlocks(blocks);
+    try {
+        return await slackPostRaw(token, channel, text, safe);
+    } catch (err) {
+        if (!String(err && err.message).includes('invalid_blocks') || !Array.isArray(safe) || safe.length <= TOP_BLOCKS) throw err;
+        console.error('[ceo-brief] Slack refused the block set; retrying with the top sections only:', err.message);
+        const top = safe.slice(0, TOP_BLOCKS);
+        top.push({ type: 'section', text: { type: 'mrkdwn',
+            text: '… the rest of the brief was cut short: Slack refused the full message. It is on the CEO Brief tab.' } });
+        return await slackPostRaw(token, channel, text, top);
+    }
 }
 
 // The 09:00 CEO brief blocks. Money line included so ONE message covers the morning. `must` is
@@ -1133,14 +1197,26 @@ async function storeFallbackMarker(pat, m, tasks, huddle, reason, sentBrief) {
                 return;
             }
         }
+        // SAY WHICH FAILURE IT WAS (28 Oct 2026, finding 20261028-phase-5-1105).
+        // On 27 Oct the brief COMPOSED fine and Slack refused to post it, and
+        // the stub said "could not be written today" — so the one surface a
+        // human reads named the wrong fault, and the next morning's CEO agent
+        // read the stub as a real brief and carried a false line into today's.
+        // A rejection by Slack and a brief that was never written are different
+        // problems with different fixes, so the stub names the one that happened.
+        const refused = String(reason || '').includes('Slack post failed');
         const marker = sentBrief ? { ...sentBrief } : {
-            one_thing: 'The CEO brief could not be written today. The money message was sent instead.',
-            first_step: 'Open the Money tab in the app; the reason is in the CEO Brief tab and the worker logs.',
+            one_thing: refused
+                ? `The CEO brief was written but Slack REFUSED to post it (${String(reason).slice(0, 120)}). The money message was sent instead.`
+                : 'The CEO brief could not be written today. The money message was sent instead.',
+            first_step: refused
+                ? 'Read today\'s brief on the CEO Brief tab; the NEEDS YOU list is in the morning report. The refusal is in the worker logs.'
+                : 'Open the Money tab in the app; the reason is in the CEO Brief tab and the worker logs.',
             why: '',
             ignore: [],
             handed_off: [],
             flags: [],
-            headline: 'Brief failed today',
+            headline: refused ? 'Brief REFUSED by Slack' : 'Brief failed today',
         };
         marker.fallback = true;
         marker.fallback_reason = String(reason).slice(0, 300);
