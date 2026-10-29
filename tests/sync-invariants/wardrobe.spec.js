@@ -5,7 +5,7 @@
 // the clear-out. Fixture names are generic: the real wardrobe lives only in Airtable.
 
 const { test, expect } = require('@playwright/test');
-const { MOCK_PAT, localTodayISO, makeFixtures, setupMockAirtable } = require('./helpers');
+const { MOCK_PAT, WEATHER_FIXTURE, localTodayISO, makeFixtures, setupMockAirtable } = require('./helpers');
 
 const WR = { name: 'fldG9hxGddp8ijUwW', type: 'fldnUA7o3eR62r1FW', colour: 'fldbA3Yql3NAjdUAq', swatch: 'fld44tZ76VsKRH0Db',
   usedFor: 'fldqINoZ665Tdmb0V', status: 'fld8Z9QI5pP97cymY', action: 'fldoYeCu7oAqgPZd8', layerRole: 'fld7VonuseNOhkCcw',
@@ -75,6 +75,7 @@ async function open(page, hash, opts = {}) {
   }, MOCK_PAT);
   await setupMockAirtable(page, { ...makeFixtures(), wardrobe: wardrobe(), outfits: outfits(), ...(opts.fixtures || {}) });
   if (opts.weatherDown) await page.route('**/api.open-meteo.com/**', r => r.fulfill({ status: 503, body: 'down' }));
+  if (opts.weather) await page.route('**/api.open-meteo.com/**', opts.weather);
   if (opts.live) opts.store = await liveTables(page, opts.fail);
   await page.goto('/' + (hash ? '#' + hash : ''));
   return errors;
@@ -320,10 +321,62 @@ test.describe('Today hour by hour', () => {
     await expect(row('Wind (mph)').first()).toHaveText('13');         // 06:00
     await expect(row('Wind (mph)').last()).toHaveText('22');          // 23:00: 21.5
     await expect(page.locator('#homeWear .wear-chips')).toContainText('Wind 17 mph');
+    await expect(page.locator('#homeWear .wear-chips')).toContainText('Sunset 16:12');
     await expect(page.locator('#homeWear')).not.toContainText('km/h');
     const now = new Date().getHours();
     if (now >= 6) await expect(strip.locator('thead th[aria-current="time"]')).toHaveText(String(now).padStart(2, '0') + ':00');
     expect(realErrors(errors)).toEqual([]);
+  });
+
+  // Kevin, 29 Oct 2026: the green hour follows the clock and the weather is read again for it.
+  test('left open, the green hour moves on and "Feels like now" is read again for the new hour', async ({ page }) => {
+    await page.clock.install({ time: new Date(2026, 0, 15, 9, 40) });   // 09:40 on the browser's own clock
+    const reads = [];
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;   // the place is where the browser is (same machine)
+    const errors = await open(page, 'home', { weather: async (route) => {
+      reads.push(Date.now());
+      const body = { ...WEATHER_FIXTURE, timezone: zone,
+        current: { ...WEATHER_FIXTURE.current, apparent_temperature: reads.length === 1 ? 10.5 : 3.2 } };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    } });
+    const strip = page.locator('#homeWear .wear-hours');
+    await expect(strip.locator('thead th[aria-current="time"]')).toHaveText('09:00', { timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-temp')).toContainText('11°C');
+    await expect(strip.locator('thead th.wear-past')).toHaveCount(3);                 // 06:00 to 08:00
+    const before = reads.length;
+    await page.clock.runFor(21 * 60 * 1000);                                           // to 10:01
+    await expect(strip.locator('thead th[aria-current="time"]')).toHaveText('10:00');
+    await expect(strip.locator('thead th.wear-past')).toHaveCount(4);
+    await expect(page.locator('#homeWear .wear-temp')).toContainText('3°C');
+    expect(reads.length).toBeGreaterThan(before);
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('weather down after the first read: the hour still moves, the card says the reading is old, and it does not ask every minute', async ({ page }) => {
+    await page.clock.install({ time: new Date(2026, 0, 15, 9, 40) });
+    let reads = 0;
+    await open(page, 'home', { weather: async (route) => {
+      reads += 1;
+      if (reads > 1) return route.fulfill({ status: 503, body: 'down' });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(WEATHER_FIXTURE) });
+    } });
+    const strip = page.locator('#homeWear .wear-hours');
+    await expect(strip.locator('thead th[aria-current="time"]')).toHaveText('09:00', { timeout: 20000 });
+    await page.clock.runFor(21 * 60 * 1000);                                           // 09:40 to 10:01: 21 ticks
+    await expect(strip.locator('thead th[aria-current="time"]')).toHaveText('10:00');
+    await expect(page.locator('#homeWear')).toContainText('this is the reading from 09:40');
+    expect(reads).toBeLessThanOrEqual(3);                                              // first read, 09:55, 10:00
+  });
+
+  test('a focused Wearing button keeps its focus while the hour moves on', async ({ page }) => {
+    await page.clock.install({ time: new Date(2026, 0, 15, 9, 58) });
+    await open(page, 'home');
+    const strip = page.locator('#homeWear .wear-hours');
+    await expect(strip.locator('thead th[aria-current="time"]')).toHaveText('09:00', { timeout: 20000 });
+    await page.locator('#homeWear [data-wear-option="Out casual"]').focus();
+    await page.clock.runFor(3 * 60 * 1000);
+    await expect(strip.locator('thead th[aria-current="time"]')).toHaveText('10:00');
+    await expect(page.locator('#homeWear [data-wear-option="Out casual"]')).toBeFocused();
   });
 
   test('on a phone the strip scrolls inside the card, never the page', async ({ page }) => {

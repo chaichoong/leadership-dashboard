@@ -15,10 +15,10 @@
 (function () {
     'use strict';
     const TAB = 'wardrobe';
-    const WEATHER_MAX_AGE_MS = 30 * 60 * 1000;
+    const WEATHER_MAX_AGE_MS = 15 * 60 * 1000;   // Open-Meteo's "current" moves every 15 minutes (Kevin, 29 Oct 2026: exact conditions)
     const HOUR_FROM = 6;            // the hourly strip runs 06:00 to 23:00 (Kevin, 28 Oct 2026)
     const WINDY_MPH = 15;           // the wind chip turns amber from here (was 25 km/h)
-    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, saving: false, view: 'own', form: null };   // form: null, 'add' or the id of the piece being removed
+    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, wxTriedAt: 0, wxTriedHour: null, shownHour: null, saving: false, view: 'own', form: null };   // form: null, 'add' or the id of the piece being removed
     const UNKNOWN_WX = { feelsNow: null, actualNow: null, feelsMin: null, feelsMax: null, rainChance: null, code: null };
 
     const signedIn = () => typeof PAT === 'string' && PAT.length > 0;
@@ -84,11 +84,12 @@
         return state.wxLoading;
     }
     async function readWeather() {
+        state.wxTriedAt = Date.now(); state.wxTriedHour = placeHour(state.wx);   // followTheHour retries a failed read once an hour or every 15 minutes, never every minute
         try {
             const c = await coords();
             const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + encodeURIComponent(c.lat.toFixed(3)) + '&longitude=' + encodeURIComponent(c.lon.toFixed(3))
                 + '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m'
-                + '&daily=apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,weather_code'
+                + '&daily=apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,weather_code,sunset'
                 + '&hourly=apparent_temperature,precipitation,wind_speed_10m&wind_speed_unit=mph&timezone=auto&forecast_days=1';
             const resp = await fetch(url);
             if (!resp.ok) throw new Error('weather ' + resp.status);
@@ -105,6 +106,8 @@
                 feelsMin: n((day.apparent_temperature_min || [])[0]), feelsMax: n((day.apparent_temperature_max || [])[0]),
                 rainChance: n((day.precipitation_probability_max || [])[0]), code: n((day.weather_code || [])[0]) ?? n(cur.weather_code),
                 place: c.place, mine: c.mine, hours,
+                sunset: (/T(\d\d:\d\d)/.exec((day.sunset || [])[0] || '') || [])[1] || null,   // the place's own clock
+                timezone: typeof d.timezone === 'string' ? d.timezone : null,
             };
             if (wx.feelsNow == null || wx.feelsMin == null || wx.feelsMax == null) throw new Error('weather reply missing temperatures');
             state.wx = wx; state.wxError = null; state.wxAt = Date.now(); state.wxDay = today();
@@ -140,9 +143,16 @@
     }
 
     // One column per hour: feels-like °C, rain in mm, wind in mph. Hours gone are faded, this hour is marked.
-    function hourStrip(hours) {
+    // The hour now on the weather place's clock, the clock the hourly times are in (by zone name, so a clock-change day
+    // stays right); the device clock if the reply named no zone.
+    function placeHour(wx) {
+        try {
+            if (wx && wx.timezone) return Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: wx.timezone }).format(new Date()));
+        } catch (err) { console.error('[wardrobe] Unknown weather timezone:', wx.timezone, err); }
+        return new Date().getHours();
+    }
+    function hourStrip(hours, now) {
         if (!hours || !hours.length) return '';
-        const now = new Date().getHours();
         const fmt1 = (v) => (v == null ? '–' : (Math.round(v * 10) / 10).toFixed(1));
         const cell = (h, body, extra) => `<td class="${h.hour < now ? 'wear-past' : h.hour === now ? 'wear-now' : ''}${extra || ''}">${body}</td>`;
         return `<div class="wear-hours" role="region" aria-label="Today hour by hour" tabindex="0"><table>
@@ -177,8 +187,10 @@
                     <span class="wear-chip">Feels ${Math.round(wx.feelsMin)}° to ${Math.round(wx.feelsMax)}° today</span>
                     ${wx.rainChance != null ? `<span class="wear-chip${wx.rainChance >= P().RULES.RAIN_PCT ? ' wear-chip-rain' : ''}">Rain ${Math.round(wx.rainChance)}%</span>` : ''}
                     ${wx.wind != null ? `<span class="wear-chip${wx.wind >= WINDY_MPH ? ' wear-chip-wind' : ''}">Wind ${Math.round(wx.wind)} mph</span>` : ''}
+                    ${wx.sunset ? `<span class="wear-chip wear-chip-sun">Sunset ${esc(wx.sunset)}</span>` : ''}
                 </div></div>` : ''}
-        </div>${wx ? hourStrip(wx.hours) : ''}`;
+        </div>${wx ? hourStrip(wx.hours, placeHour(wx)) : ''}`;
+        state.shownHour = wx ? placeHour(wx) : null;   // followTheHour redraws when the clock moves past it
         if (state.dataError) {
             el.innerHTML = head + `<p class="wear-error">${esc(state.dataError)} Press Refresh in the Wardrobe page's bar to try again.</p>`;
             return;
@@ -188,8 +200,9 @@
         const picks = currentPicks();
         const best = P().bestOption(picks);
         const why = wx ? `<p class="wear-why" role="status"><b>Why:</b> ${esc(P().reasonFor(wx, picks))}</p>` : `<p class="wear-error" role="status">${esc(state.wxError || 'Reading today\'s weather…')}</p>`;
+        const stale = wx && state.wxError ? `<p class="wear-error">The weather could not be read again, so this is the reading from ${esc(new Date(state.wxAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))}.</p>` : '';
         const locate = wx && !wx.mine && navigator.geolocation ? '<button type="button" class="wear-link" data-wear-locate>Use my location</button>' : '';
-        el.innerHTML = head + why
+        el.innerHTML = head + stale + why
             + `<div class="wear-opts">${picks.map(p => optionCard(p, best)).join('')}</div>`
             + `<p class="wear-src">Weather from Open-Meteo for ${esc(place)}. ${locate}<button type="button" class="wear-link" data-wear-open>Open your wardrobe</button></p>`;
     }
@@ -439,7 +452,7 @@
                     return broken.length ? { status: 'fail', detail: `${broken.length} outfit(s) point at missing clothes: ${broken.slice(0, 3).map(o => o.name).join(', ')}` }
                         : { status: 'pass', detail: 'All links resolve' };
                 } },
-                { name: "Today's weather read", kind: 'sync', run: () => (state.wx ? { status: 'pass', detail: `${state.wx.place}, read ${Math.max(0, Math.round((Date.now() - state.wxAt) / 60000))} min ago` }
+                { name: "Today's weather read", kind: 'sync', run: () => (state.wx ? { status: state.wxError ? 'warn' : 'pass', detail: `${state.wx.place}, read ${Math.max(0, Math.round((Date.now() - state.wxAt) / 60000))} min ago` }
                     : state.wxError ? { status: 'fail', detail: state.wxError } : { status: 'warn', detail: 'Not read yet' }) },
                 { name: 'An outfit ready for every option today', kind: 'sync', run: () => {
                     if (!state.data) return { status: 'warn', detail: 'Not read yet' };
@@ -532,6 +545,32 @@
         const newDay = () => signedIn() && state.data && state.wxDay !== today();
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && newDay()) refresh(true); });
         setInterval(() => { if (document.visibilityState === 'visible' && newDay()) refresh(true); }, 5 * 60 * 1000);
+        // Home open: the green column follows the clock, and each new hour (or 15 minutes) reads the weather again
+        // so "Feels like now" is this hour's (Kevin, 29 Oct 2026). Focus and the strip scroll survive the redraw.
+        const followTheHour = () => {
+            const home = document.getElementById('tab-home');
+            if (!signedIn() || document.visibilityState !== 'visible' || !home || !home.classList.contains('active') || !state.wx || newDay()) return;
+            const hour = placeHour(state.wx);
+            const due = Date.now() - state.wxTriedAt >= WEATHER_MAX_AGE_MS || hour !== state.wxTriedHour;
+            if (hour === state.shownHour && !due) return;
+            (due ? loadWeather(true) : Promise.resolve()).then(() => {
+                const card = document.getElementById('homeWear');
+                if (state.saving || !card) return;   // the save redraws the card itself
+                // Put focus and the strip's scroll back where they were.
+                const f = card.contains(document.activeElement) ? document.activeElement : null;
+                const key = f && ['data-wear-option', 'data-wear-locate', 'data-wear-open'].find(a => f.hasAttribute(a));
+                const sel = !f ? null : f.classList.contains('wear-hours') ? '.wear-hours' : key ? `[${key}="${CSS.escape(f.getAttribute(key))}"]` : null;
+                const strip = card.querySelector('.wear-hours');
+                const left = strip ? strip.scrollLeft : 0;
+                renderHomeCard();
+                const again = card.querySelector('.wear-hours');
+                if (again) again.scrollLeft = left;
+                const back = sel && card.querySelector(sel);
+                if (back) back.focus({ preventScroll: true });
+            });
+        };
+        document.addEventListener('visibilitychange', followTheHour);
+        setInterval(followTheHour, 60 * 1000);
     }
 
     function focusIn(sel) { const f = document.querySelector('#wardrobePage ' + sel); if (f) f.focus(); }
