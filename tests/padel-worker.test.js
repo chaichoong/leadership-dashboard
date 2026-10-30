@@ -422,7 +422,7 @@ function mapRepo() {
       async setBooked(slot, person_id, venue, now, d = {}, admin = false) {
         const was = booked.get(slot);
         if (was && was.paid_at && !(admin && (was.splitwise_state == null || was.splitwise_state === 'failed'))) return false;
-        booked.set(slot, { ...(was || {}), slot, person_id, venue, created_at: now, start: d.start ?? was?.start ?? null, minutes: d.minutes ?? was?.minutes ?? null, courts: d.courts ?? was?.courts ?? 1 });
+        booked.set(slot, { ...(was || {}), slot, person_id, venue, created_at: now, start: d.start ?? was?.start ?? null, minutes: d.minutes ?? was?.minutes ?? null, courts: d.courts ?? was?.courts ?? 1, ...(was?.paid_at ? { paid_at: now } : {}) });
         return true;
       },
       async setCourts(slot, courts) { const b = booked.get(slot); if (!b) return false; b.courts = courts; return true; },
@@ -1329,8 +1329,14 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       // Before the robot starts, Kevin may Undo; anyone else may not, even straight through the repo.
       expect(await t.repo.clearBooked(SLOT, false)).toBe(false);
       expect((await book(a, { minutes: 60 })).status).toBe(409);
+      const readAt = (await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings[0].paidAt;   // the robot reads 90 minutes
+      t.setNow(NOW + MIN);
       expect((await t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, minutes: 60 }, { admin: ADMIN })).status).toBe(200);
-      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      // Kevin's re-mark made a new version: the robot's claim on what it read before cannot win.
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), readAt)).toBe(false);
+      const now = (await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings[0];
+      expect(now).toMatchObject({ minutes: 60, paidAt: iso(NOW + MIN) });
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), now.paidAt)).toBe(true);
       for (const call of [
         () => t.call('/api/booked', { slot: SLOT, booked: false }, { admin: ADMIN }),
         () => t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, start: '19:00' }, { admin: ADMIN }),

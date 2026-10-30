@@ -713,7 +713,8 @@ export function makeRepo(db) {
     // the check is in the statement, so no read-then-write race can get round it.
     async setBooked(slot, personId, venue, nowIso, details = {}, admin = false) {
       const r = await db.prepare(`INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 1), ?7)
-        ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at
+        ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at,
+          paid_at = CASE WHEN booked.paid_at IS NULL THEN NULL ELSE excluded.created_at END   -- a re-marked paid booking is a new version: a robot holding the old one cannot claim it
         WHERE booked.paid_at IS NULL OR (?8 = 1 AND COALESCE(booked.splitwise_state, '') IN ('', 'failed'))`)
         .bind(slot, personId, venue, details.start ?? null, details.minutes ?? null, details.courts ?? null, nowIso, admin ? 1 : 0).run();
       return (r.meta?.changes || 0) === 1;
