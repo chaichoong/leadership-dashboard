@@ -216,7 +216,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       <li><span class="chip striped" aria-hidden="true">St Ives soon</span> not open for booking yet</li>
       <li><span class="chip striped" aria-hidden="true">St Ives ?</span> couldn't check</li>
     </ul>
-    <p class="note">St Ives = St Ives Golf Club. Cambridge = PDL Padel United. Huntingdon = Pulse Padel at the garden centre. St Ives and Cambridge are checked every 15 minutes from 06:30 to 23:00, Huntingdon every 15 to 30 minutes; a court can go between checks, so the booking site has the last word. Once an hour on a day is marked Booked, that day's other hours drop out of Ready to book.</p>
+    <p class="note">St Ives = St Ives Golf Club. Cambridge = PDL Padel United. Huntingdon = Pulse Padel at the garden centre. Cambridge Uni = University of Cambridge Sports Centre, West Cambridge (hour slots, bookable 7 days ahead). St Ives, Cambridge and Cambridge Uni are checked every 15 minutes from 06:30 to 23:00, Huntingdon every 15 to 30 minutes; a court can go between checks, so the booking site has the last word. Once an hour on a day is marked Booked, that day's other hours drop out of Ready to book.</p>
   </footer>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -224,7 +224,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 <script>
 (() => {
   'use strict';
-  const CODES = ['si', 'pdl', 'pp'];
+  const CODES = ['si', 'pdl', 'pp', 'cu'];
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const SAVE_RETRY_MS = [5000, 15000, 45000];        // a failed save tries again after 5, 15 and 45 s

@@ -8,16 +8,16 @@
 -- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
 -- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
 -- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql,
--- 0003-booked-details.sql.
+-- 0003-booked-details.sql, 0004-people-university.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
--- One row per player. venues = the venue codes this person can get to (si, pdl, pp). votes_at = when
+-- One row per player. venues = the venue codes this person can get to (si, pdl, pp, cu). votes_at = when
 -- this person last saved their ticks (sql-changes/0001-votes-at.sql, 27 Oct 2026).
 CREATE TABLE IF NOT EXISTS people (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  venues TEXT NOT NULL DEFAULT 'si,pdl,pp',
+  venues TEXT NOT NULL DEFAULT 'si,pdl,pp,cu',
   created_at TEXT NOT NULL,
   votes_at TEXT
 );

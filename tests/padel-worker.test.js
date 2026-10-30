@@ -18,7 +18,7 @@ import worker from '../workers/padel/worker.js';
 import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
-  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh,
+  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,6 +29,7 @@ const CLOSED = fixture('matchi-2619-2026-11-05.html');
 const ST_IVES_TODAY = fixture('matchi-2619-2026-10-27.html');    // read live on 27 Oct 2026 at 13:10
 const PDL_TODAY = fixture('matchi-3122-2026-10-27.html');
 const PULSE = JSON.parse(fixture('pulse-search.json'));
+const GLADSTONE = JSON.parse(fixture('gladstone-sessions-2026-11-03.json'));   // the University feed for 3 to 6 Nov, read 29 Oct 2026
 const countClass = (html, cls) => (html.match(new RegExp(`class="slot ${cls}"`, 'g')) || []).length;
 
 // 09:45 London on Tue 27 Oct 2026 (GMT since 25 Oct): the window is 27 Oct to 2 Nov.
@@ -168,6 +169,64 @@ describe('parseMatchi', () => {
     expect(parseMatchi('<html><body>Please log in</body></html>')).toEqual({ status: 'error', reason: 'not a schedule page' });
     expect(parseMatchi('<div class="schedule"><p>Maintenance</p></div>')).toEqual({ status: 'error', reason: 'no court cells recognised' });
     expect(parseMatchi(undefined).status).toBe('error');
+  });
+});
+
+describe('parseGladstone (the University feed, read live on 29 Oct 2026)', () => {
+  const DATES = ['2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07'];
+  it('matches the University calendar for Tue 3 Nov, hour by hour (read in the browser the same day)', () => {
+    const r = parseGladstone(GLADSTONE, DATES, Date.parse('2026-10-29T12:00:00Z'));
+    // The portal's calendar for 3 Nov offered "Book now" at: 07 (both courts), 08 (both), 09 (Court 2),
+    // 11 (Court 2), 14 (Court 1), 15 (Court 1), 17 (Court 2), 21 (Court 1).
+    expect(r['2026-11-03']).toEqual({ status: 'ok', starts: {
+      '07:00': { courts: 2, min: 60, max: 180 }, '08:00': { courts: 2, min: 60, max: 120 }, '09:00': { courts: 1, min: 60, max: 60 },
+      '11:00': { courts: 1, min: 60, max: 60 }, '14:00': { courts: 1, min: 60, max: 120 }, '15:00': { courts: 1, min: 60, max: 60 },
+      '17:00': { courts: 1, min: 60, max: 60 }, '21:00': { courts: 1, min: 60, max: 60 },
+    } });
+    // 6 Nov is beyond a non-member's 7 days: every slot is before its window, so "not open yet".
+    expect(r['2026-11-06']).toEqual({ status: 'closed' });
+    // 7 Nov is not in the reply at all: an error, never "no court free".
+    expect(r['2026-11-07']).toEqual({ status: 'error', reason: 'day not in the reply' });
+  });
+  it('a reply it does not recognise is an error on every day, never guessed slots', () => {
+    expect(parseGladstone({}, ['2026-11-03'])).toEqual({ '2026-11-03': { status: 'error', reason: 'unexpected shape' } });
+    expect(parseGladstone([{ id: 'SOMETHING_ELSE', locations: [] }], ['2026-11-03'])).toEqual({ '2026-11-03': { status: 'error', reason: 'no padel court hire in the reply' } });
+    const broken = JSON.parse(JSON.stringify(GLADSTONE));
+    delete broken[0].locations[0].slots;
+    expect(parseGladstone(broken, ['2026-11-03'])['2026-11-03']).toEqual({ status: 'error', reason: 'unexpected shape' });
+  });
+  it('a court named singles never counts, and a taken slot ends the longest booking', () => {
+    const slot = (start, status, inCentre = 1) => ({ startTime: start, endTime: start.replace(':00:00Z', ':59:59Z'), status, availability: { inCentre }, isBeforeTimetableSlotBookablePeriod: false });
+    const reply = [{ id: 'USCAPADWO02', locations: [
+      { locationNameToDisplay: 'Padel Tennis Court 1', slots: [slot('2026-11-03T19:00:00Z', 'Available'), slot('2026-11-03T20:00:00Z', 'Unavailable', 0)] },
+      { locationNameToDisplay: 'Singles Court', slots: [slot('2026-11-03T19:00:00Z', 'Available'), slot('2026-11-03T20:00:00Z', 'Available')] },
+    ] }];
+    expect(parseGladstone(reply, ['2026-11-03'])['2026-11-03']).toEqual({ status: 'ok', starts: { '19:00': { courts: 1, min: 60, max: 60 } } });
+  });
+  it('the longest booking needs slots that follow on exactly; a start listed twice is one court; a slot past its online cut-off is not free (review of PR #854)', () => {
+    const slot = (start, mins = 60, extra = {}) => ({ startTime: start, endTime: new Date(Date.parse(start) + mins * 60000 - 1000).toISOString(), status: 'Available', availability: { inCentre: 1 }, isBeforeTimetableSlotBookablePeriod: false, ...extra });
+    const day = (slots, nowMs) => parseGladstone([{ id: 'USCAPADWO02', locations: [{ locationNameToDisplay: 'Padel Tennis Court 1', slots }] }], ['2026-11-03'], nowMs)['2026-11-03'];
+    // Out of order, a gap at 20:00, and 19:00 listed twice: 18:00 runs 120 minutes, 21:00 stands alone, one court each.
+    expect(day([slot('2026-11-03T21:00:00Z'), slot('2026-11-03T19:00:00Z'), slot('2026-11-03T18:00:00Z'), slot('2026-11-03T19:00:00Z')])).toEqual({ status: 'ok', starts: {
+      '18:00': { courts: 1, min: 60, max: 120 }, '19:00': { courts: 1, min: 60, max: 60 }, '21:00': { courts: 1, min: 60, max: 60 },
+    } });
+    // Five hours in a row: the cap, 180.
+    expect(day(['07', '08', '09', '10', '11'].map((h) => slot(`2026-11-03T${h}:00:00Z`)))['starts']['07:00'].max).toBe(180);
+    // Half-hour slots at 19:00 and 20:00 with nothing at 19:30 do not follow on: 30 minutes each.
+    expect(day([slot('2026-11-03T19:00:00Z', 30), slot('2026-11-03T20:00:00Z', 30)])['starts']['19:00']).toEqual({ courts: 1, min: 30, max: 30 });
+    // A slot of more than 180 minutes (or one ending a day later) is an unreadable reply, never a 240-minute booking.
+    expect(day([slot('2026-11-03T07:00:00Z', 240)])).toEqual({ status: 'error', reason: 'unexpected shape' });
+    expect(day([slot('2026-11-03T07:00:00Z', 1500)])).toEqual({ status: 'error', reason: 'unexpected shape' });
+    // Half-hour slots: three in a row is 90 minutes, not 180.
+    expect(day([slot('2026-11-03T19:00:00Z', 30), slot('2026-11-03T19:30:00Z', 30), slot('2026-11-03T20:00:00Z', 30)])['starts']['19:00']).toEqual({ courts: 1, min: 30, max: 90 });
+    // 18:40 London: the 19:00 slot closed for online booking at 18:30, the 20:00 slot has not.
+    const cutOff = [slot('2026-11-03T19:00:00Z', 60, { bookableUntil: '2026-11-03T18:30:00Z' }), slot('2026-11-03T20:00:00Z', 60, { bookableUntil: '2026-11-03T19:30:00Z' })];
+    expect(Object.keys(day(cutOff, Date.parse('2026-11-03T18:40:00Z')).starts)).toEqual(['20:00']);
+    expect(Object.keys(day(cutOff, Date.parse('2026-11-03T18:00:00Z')).starts)).toEqual(['19:00', '20:00']);
+  });
+  it('London time: in summer a 06:00 UTC slot is the 07:00 London start', () => {
+    const reply = [{ id: 'USCAPADWO02', locations: [{ locationNameToDisplay: 'Padel Tennis Court 1', slots: [{ startTime: '2026-07-01T06:00:00Z', endTime: '2026-07-01T06:59:59Z', status: 'Available', availability: { inCentre: 1 }, isBeforeTimetableSlotBookablePeriod: false }] }] }];
+    expect(Object.keys(parseGladstone(reply, ['2026-07-01'])['2026-07-01'].starts)).toEqual(['07:00']);
   });
 });
 
@@ -320,7 +379,7 @@ function mapRepo() {
       async countPeople() { return people.size; },
       async addPerson(name, now) {
         let p = [...people.values()].find((x) => x.name.toLowerCase() === name.toLowerCase());
-        if (!p) { p = { id: nextId++, name, venues: 'si,pdl,pp', created_at: now }; people.set(p.id, p); }
+        if (!p) { p = { id: nextId++, name, venues: 'si,pdl,pp,cu', created_at: now }; people.set(p.id, p); }
         return out(p);
       },
       async setVenues(id, venues) { const p = people.get(id); if (!p) return false; p.venues = venues.join(','); return true; },
@@ -533,7 +592,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     expect(t.rows.alerts()).toHaveLength(0);
     expect(s.ready).toEqual([]);
     expect(s.nearly).toEqual([]);
-    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: true });
+    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: true, cu: false });
     expect(s.availability.venues.si['2026-10-28']).toEqual({ status: 'error', reason: 'not checked recently', hours: {} });
     expect(s.availability.checkedAt.si).toBe(iso(NOW - 2 * 24 * 60 * MIN));
   });
@@ -543,10 +602,10 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     await t.seedAvailability(EVENING, NOW - 44 * MIN, NOW - 19 * MIN);
     for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-29|08'] });
     let s = (await t.call('/api/state')).json;
-    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: true });
+    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: true, cu: true });
     await t.seedAvailability(EVENING, NOW - 46 * MIN, NOW - 21 * MIN);
     s = (await t.call('/api/state', undefined, { drain: false })).json;
-    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false });
+    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false, cu: false });
     expect(s.ready).toEqual([]);
     expect(s.nearly).toEqual([]);
   });
@@ -577,7 +636,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const s = (await t.call('/api/state')).json;
     expect(s.days[0]).toBe('2026-10-28');
     expect(s.days[13]).toBe('2026-11-10');
-    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: false });
+    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: false, cu: true });
     expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
     expect(s.availability.venues.si['2026-11-10']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
     expect(s.availability.venues.pdl['2026-11-10']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
@@ -589,7 +648,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     t.setNow(Date.parse('2026-10-27T23:40:00Z'));
     for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-10-28|19'] });
     const s = (await t.call('/api/state')).json;
-    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: false });
+    expect(s.availability.fresh).toEqual({ si: true, pdl: true, pp: false, cu: true });
     expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
     expect(s.availability.venues.pp['2026-10-28']).toEqual({ status: 'error', reason: 'not checked recently', hours: {} });
     expect(s.ready.map((r) => r.slot)).toEqual(['2026-10-28|19']);
@@ -1035,7 +1094,7 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     const a = (await t.call('/api/person', { name: '  test   ann ' })).json;
     const b = (await t.call('/api/person', { name: 'TEST ANN' })).json;
     expect(a.id).toBe(b.id);
-    expect(a).toEqual({ id: a.id, name: 'test ann', venues: ['si', 'pdl', 'pp'], savedAt: null });
+    expect(a).toEqual({ id: a.id, name: 'test ann', venues: ['si', 'pdl', 'pp', 'cu'], savedAt: null });
     const z = (await t.call('/api/person', { name: 'Test Zoë' })).json;
     expect((await t.call('/api/person', { name: 'TEST ZOË' })).json.id).toBe(z.id);
     expect((await t.call('/api/person', { name: 'test zoe' })).json.id).toBe(z.id);
@@ -1117,6 +1176,41 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
   });
 
   describe('POST /api/courts (the Mac\'s Matchi read)', () => {
+    it('University days in the Mac\'s read: its hours show, count towards a DM, and Book opens its calendar on that day (Kevin, 29 Oct 2026)', async () => {
+      const ids = await t.addPeople(NAMES.slice(0, 4));
+      expect((await t.call('/api/state')).json.people.every((p) => p.venues.includes('cu'))).toBe(true);   // new people can do every venue
+      const body = macBody(NOW);                              // the seed's read is at NOW: an older one is refused (409)
+      body.venues.cu = parseGladstone(GLADSTONE, londonDates(NOW), NOW);
+      // Leave St Ives and PDL with no free court at 07:00 on 3 Nov, so the University alone is ready.
+      body.venues.si['2026-11-03'] = { status: 'ok', starts: {} };
+      body.venues.pdl['2026-11-03'] = { status: 'ok', starts: {} };
+      expect((await t.call('/api/courts', body, { robot: ROBOT })).status).toBe(200);
+      for (const id of ids) await t.call('/api/vote', { person_id: id, add: ['2026-11-03|07'] });
+      const s = (await t.call('/api/state')).json;
+      expect(s.availability.fresh.cu).toBe(true);
+      expect(s.availability.venues.cu['2026-11-03'].hours['07']).toMatchObject({ free: true, courts: 2, min: 60, max: 180 });
+      expect(s.availability.venues.cu['2026-11-06']).toEqual({ status: 'closed', hours: {} });
+      expect(s.availability.venues.cu['2026-10-28']).toEqual({ status: 'error', reason: 'day not in the reply', hours: {} });
+      const r = s.ready.find((x) => x.slot === '2026-11-03|07');
+      expect(r.venues.map((v) => v.code)).toEqual(['cu']);   // St Ives and PDL have no court then; Huntingdon's seed has no 3 Nov
+      const cu = r.venues.find((v) => v.code === 'cu');
+      expect(cu).toMatchObject({ count: 4, courts: 2, book: 'https://cambridgesport.gladstonego.cloud/book/calendar/USCAPADWO02?activityDate=2026-11-03T06:00:00.000Z' });
+      expect(s.venueInfo.cu).toMatchObject({ label: 'University of Cambridge Sports Centre', short: 'Cambridge Uni' });
+      expect(t.relayCalls.some((c) => /Cambridge Uni: 4 in \(Test Ann, Test Bob, Test Cat, Test Dan\), starts 07:00 \(60 to 180 min, 2 courts\), book <https:\/\/cambridgesport\.gladstonego\.cloud\/book\/calendar\/USCAPADWO02\?activityDate=2026-11-03T06:00:00\.000Z>/.test(c.body.text))).toBe(true);
+      expect(bookUrl(venueConfig(), 'cu', '2026-07-01')).toBe('https://cambridgesport.gladstonego.cloud/book/calendar/USCAPADWO02?activityDate=2026-07-01T06:00:00.000Z');
+    });
+
+    it('a later read without University days (an older reader) leaves it "couldn\'t check", never the last read\'s days (review of PR #854)', async () => {
+      const first = macBody(NOW);
+      first.venues.cu = parseGladstone(GLADSTONE, londonDates(NOW), NOW);
+      expect((await t.call('/api/courts', first, { robot: ROBOT })).status).toBe(200);
+      expect((await t.call('/api/state')).json.availability.venues.cu['2026-11-03'].status).toBe('ok');
+      expect((await t.call('/api/courts', macBody(NOW), { robot: ROBOT })).status).toBe(200);
+      const s = (await t.call('/api/state')).json;
+      expect(s.availability.venues.cu['2026-11-03']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
+      expect(s.availability.venues.si['2026-10-28'].status).toBe('ok');
+    });
+
     it('needs the robot key: none, another key, or a wrong one is 401', async () => {
       for (const robot of ['', 'feedc0de1234567890abcdef', `${ROBOT}x`]) expect((await t.call('/api/courts', macBody(), { robot })).status, robot).toBe(401);
     });
@@ -1146,12 +1240,14 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect(s.availability.venues.si['2026-11-05']).toEqual({ status: 'closed', hours: {} });
       expect(s.availability.venues.pdl['2026-11-09'].status).toBe('ok');
       expect(s.availability.venues.pdl['2026-10-28'].hours['09'].free).toBe(true);
-      expect(s.availability.checkedAt).toEqual({ si: iso(NOW - 30 * 1000), pdl: iso(NOW - 30 * 1000), pp: iso(NOW) });
+      expect(s.availability.checkedAt).toEqual({ si: iso(NOW - 30 * 1000), pdl: iso(NOW - 30 * 1000), pp: iso(NOW), cu: null });
+      // A read with no University days (an older reader) stores none under its readAt: "couldn't check", never stale days passed off as fresh.
+      expect(s.availability.venues.cu['2026-10-28']).toEqual({ status: 'error', reason: 'not in the last read', hours: {} });
 
       const g = await t.call('/api/courts', undefined, { robot: ROBOT });
       expect(g.json).toEqual({
         ok: true, version: VERSION, matchiFetchedAt: iso(NOW - 30 * 1000), pulseFetchedAt: iso(NOW),
-        venueStatus: { si: { ok: 7, closed: 7 }, pdl: { ok: 14 }, pp: { ok: 14 } },
+        venueStatus: { si: { ok: 7, closed: 7 }, pdl: { ok: 14 }, pp: { ok: 14 }, cu: { missing: 14 } },   // this body has no University days (an older reader)
       });
     });
 
@@ -1239,7 +1335,7 @@ describe('pure state rules', () => {
   });
   it('a venue never read counts for nothing', () => {
     const s = computeState({ people, votes, booked: [], availability: null, dates, nowMs: NOW });
-    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false });
+    expect(s.availability.fresh).toEqual({ si: false, pdl: false, pp: false, cu: false });
     expect(s.ready).toEqual([]);
   });
   it('a booked hour offers a second court only with 8 in at that venue and another court free at the booked start (Kevin, 29 Oct 2026)', () => {
