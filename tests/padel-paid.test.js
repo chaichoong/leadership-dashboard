@@ -109,11 +109,18 @@ describe('the pure parts', () => {
   });
   it('knows an entry for the same date, written any usual way, whatever time it says, and nothing else', () => {
     for (const d of ['Tues 3rd Nov @ 19:30 (90mins)', 'Tue 3 Nov 19:30 Testford', 'Tue 3 Nov, Testford, 19:30, 90 min', '3 nov 19.30',
-      'Nov 3rd 19:30', 'Tuesday 3 November 7.30pm', '03 Nov', 'Tues 3rd Nov', 'Padel 3 Nov £36.00', 'Tue 3rd of Nov', '3Nov 19:30', '03/11 19:30',
+      'Nov 3rd 19:30', 'Tuesday 3 November 7.30pm', '03 Nov', 'Tues 3rd Nov', 'Padel 3 Nov £36.00', 'Tue 3rd of Nov', '3Nov 19:30', 'Nov. 3',
       'Tue 3 Nov 18:30', 'Tue 3 Nov, Testford, 08:00, 60 min'])           // one booking a day: the time never decides
       expect([d, sameBooking({ description: d, date: AT }, b)]).toEqual([d, true]);
     for (const d of ['Tue 13 Nov 19:30', 'Sun 1 Nov 19:30', 'Tue 3 Oct 19:30', 'Padel', '13/11', '3/12', 'Nov 30th', '23 Nov'])
       expect([d, sameBooking({ description: d, date: AT }, b)]).toEqual([d, false]);
+    // Ordinary words and fractions are not dates.
+    const on = (date) => booking({ date, day: 'x' });
+    for (const [d, date] of [['market 3 balls', '2026-03-03'], ['maybe 5 of us', '2026-05-05'], ['Padel 1/2 court hire', '2026-02-01'],
+      ['3 novel ideas', '2026-11-03'], ['juniper 4', '2026-06-04'], ['Padel 3/11', '2026-11-03']])
+      expect([d, sameBooking({ description: d }, on(date))]).toEqual([d, false]);
+    for (const [d, date] of [['Sat 7 March', '2026-03-07'], ['May 5th', '2026-05-05'], ['4 Sept', '2026-09-04'], ['1st June', '2026-06-01']])
+      expect([d, sameBooking({ description: d }, on(date))]).toEqual([d, true]);
     expect(sameBooking({ description: 'Tues 3rd Nov @ 19:30', date: AT, deleted_at: '2026-11-01' }, b)).toBe(false);
     expect(sameBooking({ description: 'Tues 3rd Nov @ 19:30', date: '2025-10-30T10:00:00Z' }, b)).toBe(false);   // last year's
   });

@@ -82,10 +82,11 @@ export function textFor(b, names, sharePence) {
 }
 // An entry already in the group for a booking. One booking a day is the group's rule, so the date
 // is the match, never the time: the robot's own description, or the day and month written any usual
-// way ("Tues 3rd Nov @ 19:30 (90mins)", "Nov 3rd", "3rd of Nov", "3Nov", "03/11"), on an entry dated
+// way ("Tues 3rd Nov @ 19:30 (90mins)", "Nov 3rd", "3rd of Nov", "3Nov", "3 November"), on an entry dated
 // within 45 days of the game (last year's "3 Nov" is not this year's). checkEntry then decides
 // whether that entry agrees with the booking.
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+// Each month as people spell it, and nothing longer: "mar" must not find "market", nor "may" "maybe".
+const MONTHS = ['jan(uary)?', 'feb(ruary)?', 'mar(ch)?', 'apr(il)?', 'may', 'june?', 'july?', 'aug(ust)?', 'sep(t|tember)?', 'oct(ober)?', 'nov(ember)?', 'dec(ember)?'];
 export function sameBooking(expense, b) {
   if (!expense || expense.deleted_at) return false;
   const when = Date.parse(expense.date || expense.created_at || '');
@@ -93,10 +94,9 @@ export function sameBooking(expense, b) {
   const d = String(expense.description || '');
   if (d === description(b)) return true;
   const day = Number(b.date.slice(8, 10));
-  const month = Number(b.date.slice(5, 7));
-  const mon = MONTHS[month - 1];
+  const mon = `(${MONTHS[Number(b.date.slice(5, 7)) - 1]})`;
   const th = '(st|nd|rd|th)?';
-  return new RegExp(`\\b0?${day}${th}(\\s+of)?\\s*${mon}|\\b${mon}[a-z]*\\.?\\s*0?${day}${th}\\b|\\b0?${day}/0?${month}\\b`, 'i').test(d);
+  return new RegExp(`\\b0?${day}${th}(\\s+of)?\\s*${mon}\\b|\\b${mon}\\.?\\s*0?${day}${th}\\b`, 'i').test(d);
 }
 // The Splitwise form, as agent-browser plan steps. Everyone in the group who is not playing is
 // unticked under "equally", by the Splitwise id on his or her row; the players stay ticked.
