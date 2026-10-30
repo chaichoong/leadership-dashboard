@@ -1097,8 +1097,8 @@ def fold_on_address_only(name_a, name_b, shared):
 # thread exemption is therefore spent only on a number whose SHAPE is a UK
 # phone number, and the shape is read off the digits rather than matched in
 # the text, because people write one number six ways: 07700900747,
-# 07398 536055, 07398-536055, +44 7700 900747, +44 (0)7398 536055,
-# (07398) 536055, 0044 7398 536055. Two review rounds went on this: the first
+# 07700 900318, 07700-900318, +44 7700 900747, +44 (0)7700 900318,
+# (07700) 900318, 0044 7700 900318. Two review rounds went on this: the first
 # version missed the spaced form and would have refused two real SMS messages
 # from one tenant (caught by the live back-test), and the second accepted
 # `UTR 0123456789` as a phone because it only counted digits after the 0.
@@ -1108,7 +1108,7 @@ DUPE_PHONE_CANDIDATE_RE = re.compile(r"\+?\d[\d ()\-.]{7,20}\d")
 # valid UK landline (01406 is a real area code), so no shape test separates
 # it from "call 01406 536055". The first attempt read the word in FRONT of
 # the number and refused a list of reference labels; review found it both too
-# broad and too narrow in one pass — `mobile no 07398 536055` was denied
+# broad and too narrow in one pass — `mobile no 07700 900318` was denied
 # (losing a real SMS thread, because "no" was on the list) while `a/c 01406
 # 536055` sailed through (because the list had no entry for it). A list of
 # labels will always be both.
@@ -1175,14 +1175,14 @@ def _phone_numbers(name):
     every UK phone number in `name`.
 
     Keyed on all TEN digits, not on the nine `dupe_signals` compares, so a
-    mobile and a landline that agree on their last nine (07398 536055 and
-    01398 536055) stay two numbers (review, round 5).
+    mobile and a landline that agree on their last nine (07700 900318 and
+    01700 900318) stay two numbers (review, round 5).
 
     Grouped BY NUMBER, not flattened, because the pieces are what the strong
-    set actually receives: `dupe_signals` reads "07398 536055" as two
+    set actually receives: `dupe_signals` reads "07700 900318" as two
     reference numbers rather than one phone number, so every digit run of
     four or more digits is listed under its number — the same floor
-    `dupe_signals` uses, so a run of three ("07398 536 055") contributes no
+    `dupe_signals` uses, so a run of three ("07700 900 318") contributes no
     id of its own. Flattening across numbers let two DIFFERENT mobiles that
     share one digit group read as one thread.
     """
@@ -1301,9 +1301,9 @@ def fold_on_a_number_only(name_a, name_b, shared):
     # number in both. Three rounds of review went into this test. Unioning
     # the two names' ids let a reference equal to a run inside somebody's
     # mobile buy a free fold ("Vermguard invoice 536055" into "SMS reply from
-    # 07398 536055"); intersecting the flattened ids let two DIFFERENT
-    # mobiles sharing a digit group read as one thread ("07398 536055" and
-    # "07398 112233"), which the queue has its own test against; and judging
+    # 07700 900318"); intersecting the flattened ids let two DIFFERENT
+    # mobiles sharing a digit group read as one thread ("07700 900318" and
+    # "07700 900412"), which the queue has its own test against; and judging
     # the number by the label in front of it was both too broad and too
     # narrow at once.
     if _about_a_message(name_a) and _about_a_message(name_b):
@@ -2950,8 +2950,8 @@ def selftest():
           all(decide({F["name"]: "INBOUND: SMS reply from %s" % n},
                      [row("recM", "INBOUND: SMS from %s - unknown content" % n)]
                      )["action"] == "update"
-              for n in ("07398 536055", "07398-536055", "07398536055",
-                        "+44 (0)7398 536055", "(07398) 536055", "0044 7398 536055")))
+              for n in ("07700 900318", "07700-900318", "07700900318",
+                        "+44 (0)7700 900318", "(07700) 900318", "0044 7700 900318")))
     # A 10-digit reference beginning with 0 looks like a phone number until
     # you count the subscriber digits. (Not claimed here: two HMRC tasks that
     # share `hmrc` and `utr` fold on the WORD pass, at exactly the bar, with
@@ -2964,14 +2964,14 @@ def selftest():
                               "Road, acct 0123456789", status="Approval")]
                  )["action"] == "create")
     check("a reference matching a run inside someone's mobile is not that thread",
-          decide({F["name"]: "COMPLIANCE: Vermguard invoice 536055 overdue"},
-                 [row("recN", "INBOUND: SMS reply from 07398 536055")])["action"] == "create")
+          decide({F["name"]: "COMPLIANCE: Vermguard invoice 900318 overdue"},
+                 [row("recN", "INBOUND: SMS reply from 07700 900318")])["action"] == "create")
     check("two different mobiles sharing a digit group are two threads",
-          decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
-                 [row("recQ", "INBOUND: SMS from 07398 112233 - unknown content")]
+          decide({F["name"]: "INBOUND: SMS reply from 07700 900318"},
+                 [row("recQ", "INBOUND: SMS from 07700 900412 - unknown content")]
                  )["action"] == "create"
-          and decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
-                     [row("recQ", "INBOUND: SMS from 07700 536055 - unknown content")]
+          and decide({F["name"]: "INBOUND: SMS reply from 07700 900318"},
+                     [row("recQ", "INBOUND: SMS from 07701 900318 - unknown content")]
                      )["action"] == "create")
     # THE EXEMPTION IS FOR A MESSAGE THREAD, so the test is on the matter.
     # "account 01406 536055" is digit-for-digit a valid UK landline; what
@@ -2985,13 +2985,13 @@ def selftest():
               for lbl in ("account", "a/c", "customer")))
     # A message thread keeps its fold however the number is written, as long
     # as both names say they are about a message. A task that quotes a mobile
-    # without saying so ("tenant reports boiler leak - mobile no 07398
-    # 536055") now loses the exemption and makes a second card: the cheap
+    # without saying so ("tenant reports boiler leak - mobile no 07700
+    # 900318") now loses the exemption and makes a second card: the cheap
     # direction, and the price of not letting `missed`, `ring`, `mobile` or
     # `call` speak for a message (review, round 6).
     check("a message thread keeps its fold even when the number is labelled",
-          decide({F["name"]: "INBOUND: SMS from tenant - mobile no 07398 536055"},
-                 [row("recB", "INBOUND: text from mobile no 07398 536055 - boiler leak")]
+          decide({F["name"]: "INBOUND: SMS from tenant - mobile no 07700 900318"},
+                 [row("recB", "INBOUND: text from mobile no 07700 900318 - boiler leak")]
                  )["action"] == "update")
     check("a word that only sometimes means a message never speaks for one",
           all(decide({F["name"]: "INBOUND: Vectis Water a/c 01406 536055 - %s" % na},
@@ -3006,8 +3006,8 @@ def selftest():
                  [row("recC", "COMPLIANCE: HMRC CFS-0000000 response - rental income "
                               "schedule", status="Approval")])["action"] == "create")
     check("a mobile and a landline agreeing on nine digits are two numbers",
-          decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
-                 [row("recL", "INBOUND: voicemail from 01398 536055 - unknown content")]
+          decide({F["name"]: "INBOUND: SMS reply from 07700 900318"},
+                 [row("recL", "INBOUND: voicemail from 01700 900318 - unknown content")]
                  )["action"] == "create")
     # A reference LABEL rides on every task of its kind, so it is not a
     # subject word: an HMRC filing folded into the APPROVED compliance-check
@@ -3017,8 +3017,8 @@ def selftest():
                  [row("recH", "COMPLIANCE: HMRC check CFS-0000000 response - UTR 0123456789",
                       status="Approval")])["action"] == "create")
     check("a separator the text uses instead of a space keeps one thread",
-          all(decide({F["name"]: "INBOUND: SMS reply from 07398%s536055" % sep},
-                     [row("recW", "INBOUND: SMS from 07398%s536055 - unknown" % sep)]
+          all(decide({F["name"]: "INBOUND: SMS reply from 07700%s900318" % sep},
+                     [row("recW", "INBOUND: SMS from 07700%s900318 - unknown" % sep)]
                      )["action"] == "update"
               for sep in (" ", "\u00a0", "\u2013", "\u2009", ".", "-")))
     check("a shared reference still folds when the words agree",

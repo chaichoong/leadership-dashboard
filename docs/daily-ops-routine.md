@@ -81,13 +81,13 @@ report. It should take minutes.
          phase 4  fix          drain findings → ONE pull request
          phase 5  report       loop health → ONE Slack DM
 
-08:00  uc-check          slot     Mica's Universal Credit list
 09:00  inbound-triage    slot  ┐  (the lock serialises these two)
 09:00  task-manager      slot  ┘  board pass; field hygiene at 09:00 only
-09:15  prospecting       slot     daily cold outbound
 11:00  prod-sweep-weekly slot     SUNDAYS ONLY — full browser walk
 13:00  inbound-triage + task-manager
 17:00  inbound-triage + task-manager
+21:00  payment-run       slot     FRIDAYS ONLY — the week's payment list
+       (uc-check 08:00 off since 27 Aug 2026; prospecting 09:15 parked 27 Sep 2026)
 ```
 
 **A slot is not a second Claude routine.** It is a wrapped shell job: launchd
@@ -241,8 +241,23 @@ half no arrivals list can show: **saying when one did not run.**
 | Inbox Triage | `com.kevinbrittain.inbound-triage` | 09:00 / 13:00 / 17:00 | Kevin, 24 Aug 2026 |
 | Task Board Manager board pass | `com.kevinbrittain.task-manager` | 09:20 / 13:20 / 17:20 (moved off :00 on 14 Sep 2026) | Kevin, 25 Aug 2026 |
 | CEO huddle + memory sweep | `com.kevinbrittain.ceo-agent` | 06:45 | Kevin, 26 Aug 2026 |
-| Prospecting | `com.kevinbrittain.prospecting` | 09:15 | Kevin, 26 Aug 2026 |
 | Production sweep (full walk) | `com.kevinbrittain.prod-sweep-weekly` | Sundays 11:00 | Kevin, 26 Aug 2026 |
+| Payment list | `com.kevinbrittain.payment-run` | Fridays 21:00 | Kevin, 18 Sep 2026 |
+
+This table IS `APPROVED_SLOTS` in `scripts/check-routines.py`, and the two must say the same
+thing: a slot listed here but switched off tells the morning run to expect a job that must never
+fire, and a slot missing here tells it not to expect one that should (findings
+20261015-phase-1-896 and 20261025-phase-1-1078). Two slots have been taken OUT and are not
+coming back on their own:
+
+- **Prospecting** (`com.kevinbrittain.prospecting`, 09:15, ruled in 26 Aug 2026) — PARKED
+  27 Sep 2026 by Kevin, bringing forward his 16 Sep ruling that Operations Director is parked
+  to January 2027. The launchd job is unloaded, its plist removed, its `APPROVED_SLOTS` entry
+  deleted and `install-slot-jobs.sh` no longer installs it; `scripts/job-schedule.json` keeps
+  the entry at `enabled: false` because the note on it IS the record of why. Revisit at the
+  January 2027 OD decision session, not before.
+- **UC check** (`com.kevinbrittain.uc-check`, 08:00) — switched off 27 Aug 2026 (Kevin, estate
+  audit). Its register row "UC Verification" is Paused, and no work is routed to Mica.
 
 And three script jobs, with no Claude in them at all:
 `com.kevinbrittain.drift-scan` (06:20), `com.kevinbrittain.data-invariants`
@@ -423,7 +438,10 @@ Raised 15 Oct 2026 (Kevin): about 14 findings filed a day against about 4 fixed;
 - Phase 5 reports "the fix queue did not run" on the BROKEN line and still writes the report
   whenever phase 4 left no PR and no closed findings.
 
-Cap at **25** findings and one pull request, then **merge it through the gate**:
+Cap at **25** findings. Open **one** pull request for the fixes that touch no protected
+path and, when any finding needs a protected path, **a second** holding only those
+(queue-fixer STEP 4), so the first still merges itself and the second raises ONE MERGE
+card for Kevin. Never more than two. Then **merge through the gate**:
 
 ```
 python3 scripts/fixer-merge.py merge --pr <n>
@@ -435,6 +453,15 @@ money, auth, the approval loop, the send path, shared files and the workers. Tho
 on a green gate the fixer opens the PR and a MERGE card comes to Kevin (queue-fixer STEP 4; since
 7 Oct 2026 a protected fix is never deferred for that reason). A red gate leaves the PR open and
 merges nothing.
+
+This line read "25 findings and one pull request" until 30 Oct 2026, and the one-PR half of it
+cancelled the protected route above (finding 20261028-agent-dispatch-1112). daily-ops follows
+queue-fixer "with these changes", so its own cap won, and the phase named it as the binding limit
+on 23, 24, 25 and 26 Oct while stopping far inside the 90-minute budget. Two critical findings
+(20261014-agent-dispatch-871 and 20261019-agent-dispatch-998) were never put in a protected PR
+because of it: 871 was claimed on 22 Oct and reopened for exactly this reason, and deferred again
+on 30 Oct. One PR is the rule for ordinary fixes; it was never a reason to leave a protected one
+unwritten.
 
 ## Phase 5 — Report
 

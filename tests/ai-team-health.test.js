@@ -176,13 +176,28 @@ print(json.dumps({"calls": len(calls)}))`);
 // the rest of this fixture: an open wall after a carry-out, a park after it, a wait past the
 // dispatcher's 14-day reply window, a same-day approval after a carry-out (the Notes stamp holds the
 // date only), an approval put off to a later date, a task on no board, and Upcoming with no date or
-// Some Day. Built relative to the real clock so report() can be driven end to end. Every test runs
+// Some Day. Built relative to a PINNED clock so report() can be driven end to end. Every test runs
 // the real loop-health.py functions, which read their rules from the real agent-dispatch.py; the
 // carry-out test runs the real cmd_complete.
+//
+// The clock is pinned, and that is the fix for a flake, not a convenience (finding
+// 20261028-agent-dispatch-1109; PR #843 was REFUSED at 2026-10-27T23:18:59Z on this file and
+// MERGED at 00:10:59Z with no change). The fixture steps back in multiples of 24h while
+// loop-health.reply_overdue_rows counts LONDON CALENDAR days, so a UK clock change inside the
+// window makes 19 x 24h land on a different London date for the hour 23:00-00:00 UTC. The code
+// is right; the arithmetic that built the fixture was. 14 Jan 2026 12:00 UTC is mid-GMT, with no
+// clock change within 20 days back or anything forward that these rows reach. report() reads its
+// own clock (scripts/loop-health.py:431), so that is pinned in the same block — pinning N alone
+// would leave half the run on the real clock.
 const FIX = `
 from zoneinfo import ZoneInfo
 LON = ZoneInfo("Europe/London")
-N = datetime.now(timezone.utc)
+N = datetime(2026, 1, 14, 12, 0, tzinfo=timezone.utc)
+class _Pinned(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return N.astimezone(tz) if tz else N.astimezone().replace(tzinfo=None)
+lh.datetime = _Pinned
 D = lh.dispatcher()
 def day(dt): return dt.astimezone(LON).date().isoformat()
 def stamp(dt): return dt.astimezone(LON).strftime("%d %b %Y")

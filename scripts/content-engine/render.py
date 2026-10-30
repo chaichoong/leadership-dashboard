@@ -1477,6 +1477,29 @@ def _when(iso):
 RESUBMIT_DIR = os.path.expanduser("~/.config/od/content_engine_resubmit")   # <day>.md: the receipt for a card Kevin sent back
 
 
+def redo_queue_order(ledger):
+    """Tonight's sent-back redo queue, in order. The night's recorded plan first, then any day sent back after it.
+
+    Read through ONE function so the place, the total and the head of the queue can never disagree
+    (finding 20261021-queue-fixer-1026: two readings of "the queue" is how a draining queue read as a jam)."""
+    live = watch.redo_order(ledger, exclude=watch.gap_days(), start=watch.start_day())
+    planned = watch.planned_redo_order()
+    # Not filtered to days still in `live`: the day that drained tonight is exactly the one whose place must stay
+    # counted, or the day behind it moves to the front and reads as stuck.
+    return (planned + [d for d in live if d not in planned]) if planned else live
+
+
+def waited_nights(day, now=None):
+    """Nights this day's parked receipt has waited, or None when no receipt is parked for it."""
+    t = watch.receipt_parked(day)
+    if t is None or t == float("inf") or t != t:
+        return None
+    try:
+        return nights_parked(t, now=now)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def redo_queue_place(day, ledger):
     """(place, total) for `day` in the night's sent-back redo queue, or (None, total) when it is not in it.
 
@@ -1498,7 +1521,7 @@ def redo_queue_place(day, ledger):
     planned = watch.planned_redo_order()
     # Not filtered to days still in `live`: the day that drained tonight is exactly the one whose place must stay
     # counted, or the day behind it moves to the front and reads as stuck.
-    redo = (planned + [d for d in live if d not in planned]) if planned else live
+    redo = redo_queue_order(ledger)
     mine = {v.get("day") for v in ledger.values()
             if (v.get("episode") == day or (v.get("day") == day and not v.get("episode")))
             and v.get("status") == "new" and v.get("reset")}
@@ -1532,12 +1555,31 @@ def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
         if place is not None and place > 1:
             why = ("it is %d of %d sent-back days in the night's redo queue, so about %d more night(s): "
                    "one redo a night, longest-waiting first" % (place, total, place - 1))
-            # The estimate is queue POSITION. When the day has already waited longer than the position says is left,
-            # the queue is not draining at one a night and the estimate has been wrong every night it was printed
-            # (finding 20261018-phase-3-975: 2106 read "about 1 night away" for 8 nights running).
-            if waited > place - 1:
-                why += ("; BUT its receipt has been parked %d night(s) already, so the queue is NOT draining at one "
-                        "a night and this estimate cannot be trusted" % waited)
+            # JUDGE THE ORDER, NOT THE CLOCK (finding 20261021-queue-fixer-1026, recurrence 30 Oct 2026).
+            # Until today this warned whenever `waited > place - 1`: the nights parked against the nights the
+            # POSITION says are left. Those measure different things — nights_parked counts every night the day
+            # spent further back, `place - 1` counts from the front — so a day that correctly waited its turn
+            # behind two days that both drained read as a jam. The night log of 29-30 Oct has the plan rendering
+            # day 2132 one night and 2112 the next with the queue shrinking 6, 5, 4, draining exactly as
+            # designed, while the morning report said it was NOT draining. That is the same defect as findings
+            # 20261016-phase-3-935 and 20261020-phase-3-1004: the one line meant to tell a jam from a queue
+            # cried wolf on every normal wait.
+            #
+            # The queue is ordered longest-waiting first, so that order IS the invariant: in a correct queue the
+            # day at the front has waited at least as long as every day behind it. A day further back that has
+            # waited LONGER is being jumped, which is exactly the starvation of 18 Oct 2026 (finding
+            # 20261018-phase-3-975, day 2100 re-taking the slot while 2106 waited eight nights). So the warning
+            # fires on the broken order and never on a wait, and it says which day is in front rather than
+            # declaring the estimate untrustworthy.
+            head = next(iter(redo_queue_order(ledger)), None)
+            head_waited = waited_nights(head) if head is not None and head != day else None
+            if head_waited is not None and waited > head_waited:
+                why += ("; BUT it has been parked %d night(s) while day %d in front of it has waited only %d, so "
+                        "the queue is out of order and NOT draining longest-waiting first: this day is being "
+                        "jumped, and the estimate cannot be trusted" % (waited, head, head_waited))
+            elif waited:
+                why += ("; its receipt has been parked %d night(s), most of that waiting its turn further back "
+                        "in a queue that is in the right order" % waited)
             return why
         if place == 1:
             if waited >= 1:

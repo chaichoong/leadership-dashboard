@@ -10,8 +10,10 @@
 // Two rules, both driven here against the real functions:
 //   1. the queue is ordered by how long each day has WAITED (its parked receipt), not by
 //      day number, so a re-sent-back day goes behind the days already waiting;
-//   2. a day that is still first after a night with its receipt parked reports STUCK, and
-//      a position estimate the waiting has already outrun says so.
+//   2. a day that is still first after a night with its receipt parked reports STUCK, and a day
+//      further back that has waited LONGER than the day in front of it is being jumped, and says
+//      so (reworded 30 Oct 2026: it used to judge the clock against the position, which flagged
+//      every normal wait — finding 20261021-queue-fixer-1026).
 //
 // Back-tested: restoring the `key=lambda d: (failed_at(d), d)` sort turns the first test
 // red, and dropping the `waited` branches turns the last two red.
@@ -109,18 +111,50 @@ print(render.resubmit_due(2106, ledger, os.path.getmtime(os.path.join(${JSON.str
     expect(out).not.toContain('so tonight');
   });
 
-  it('flags a position estimate the waiting has already outrun', () => {
+  // Reworded 30 Oct 2026 (finding 20261021-queue-fixer-1026, recurrence). The warning used to fire
+  // whenever the nights parked exceeded `place - 1`, which measures something else entirely: a day
+  // that correctly waited its turn behind two days that both drained read as a jam, every normal
+  // wait. It now fires on the ORDER, which is the real invariant — the queue is longest-waiting
+  // first, so a day further back that has waited LONGER is being jumped. That is this very case,
+  // and the case below is the one that used to cry wolf.
+  it('flags a day being jumped: it has waited longer than the day in front of it', () => {
     const dir = receipts({ 2100: '2026-10-17T17:23:00Z', 2106: '2026-10-10T14:16:00Z' });
     const out = py(`import render, watch, os
 ${LEDGER}
 del ledger["c.insv"]
 ledger["b.insv"]["reset"] = "10 Oct"; ledger["a.insv"]["reset"] = "17 Oct"
 watch.RESUBMIT_DIR = ${JSON.stringify(dir)}
+render.RESUBMIT_DIR = ${JSON.stringify(dir)}
 watch.gap_days = lambda *a, **k: set(); watch.start_day = lambda *a, **k: 2054
 watch.redo_order = lambda *a, **k: [2100, 2106]   # the old day-number order, to put 2106 second
 print(render.resubmit_due(2106, ledger, os.path.getmtime(os.path.join(${JSON.stringify(dir)}, "2106.md")),
                           {"verdict": "changes"}, {}))`);
     expect(out).toContain('2 of 2');
-    expect(out).toContain('NOT draining at one a night');
+    expect(out).toContain('NOT draining longest-waiting first');
+    expect(out).toContain('being jumped');
+    expect(out).toContain('cannot be trusted');
+    expect(out).toContain('day 2100 in front of it');
+  });
+
+  it('CONTROL: a day waiting its turn in a correctly ordered queue is not flagged', () => {
+    // The case that cried wolf. Same two days, same places, but the queue is in the RIGHT order:
+    // the day in front has waited longest, so this day is simply waiting. Before 30 Oct 2026 this
+    // read "NOT draining at one a night and this estimate cannot be trusted" every morning.
+    const dir = receipts({ 2100: '2026-10-10T14:16:00Z', 2106: '2026-10-17T17:23:00Z' });
+    const out = py(`import render, watch, os
+${LEDGER}
+del ledger["c.insv"]
+ledger["a.insv"]["reset"] = "10 Oct"; ledger["b.insv"]["reset"] = "17 Oct"
+watch.RESUBMIT_DIR = ${JSON.stringify(dir)}
+render.RESUBMIT_DIR = ${JSON.stringify(dir)}
+watch.gap_days = lambda *a, **k: set(); watch.start_day = lambda *a, **k: 2054
+watch.redo_order = lambda *a, **k: [2100, 2106]
+print(render.resubmit_due(2106, ledger, os.path.getmtime(os.path.join(${JSON.stringify(dir)}, "2106.md")),
+                          {"verdict": "changes"}, {}))`);
+    expect(out).toContain('2 of 2');
+    expect(out).toContain('in the right order');
+    expect(out).not.toContain('NOT draining');
+    expect(out).not.toContain('being jumped');
+    expect(out).not.toContain('cannot be trusted');
   });
 });
