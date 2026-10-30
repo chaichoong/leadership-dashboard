@@ -600,6 +600,8 @@ function assertUploadable(files) {
 const PADEL_PAID_URL = 'https://padel.runpreneur.org.uk/api/robot/paid';
 const PADEL_ROBOT_KEY_FILE = path.join(os.homedir(), '.config', 'od', 'padel_robot_key');
 const PADEL_SAVE = "button.submit:has-text('Save')";
+// The only clicks the expense form needs: open it, choose "equally", untick a member's row.
+const PADEL_CLICK_RE = /^(text=Add an expense|text=equally|\.split_method\.equal \.person\[data-id='\d+'\] input\.share)$/;
 // Why a plan is not this booking's Splitwise expense, or null. The description is the one
 // scripts/padel-paid.mjs writes (tests/padel-paid.test.js proves the two agree).
 function padelPlanProblem(plan, b) {
@@ -613,6 +615,7 @@ function padelPlanProblem(plan, b) {
       try { host = new URL(s.url).hostname; } catch { host = ''; }
       if (host !== 'secure.splitwise.com') return `a padel plan goes to Splitwise only, not ${s.url}`;
     }
+    if (s.do === 'click' && !PADEL_CLICK_RE.test(String(s.selector))) return `a padel plan may not click ${s.selector}`;
   }
   const fills = steps.filter((s) => s.do === 'fill');
   const want = [['input.description', desc], ["input[placeholder='0.00']", total]];

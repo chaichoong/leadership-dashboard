@@ -56,6 +56,7 @@ export const SW = 'https://secure.splitwise.com';
 export const STALE_CLAIM_MS = 30 * 60 * 1000;      // a claim this old means the robot stopped part-way
 export const TEXT_FROM = '07:30';                   // texts go out between these London times only
 export const TEXT_UNTIL = '21:30';
+export const TEXT_LAST_START = '21:00';
 export const DELIVERY_WAIT_MS = 20000;              // how long an iMessage has to show it was delivered
 
 // ── Pure parts ──
@@ -80,24 +81,11 @@ export function textFor(b, names, sharePence) {
     + `Playing: ${firstNames(names).join(', ')}. Your share is £${money(sharePence)} and it's in Splitwise to settle up. Kev`;
 }
 // An entry already in the group for a booking. One booking a day is the group's rule, so the date
-// is the match: the day and month in the description, either way round ("3rd Nov", "Nov 3"), on an
-// entry dated within 45 days of the game (last year's "3 Nov" is not this year's). If the
-// description gives a time it must be the start, in 24 or 12-hour form ("19:30", "7.30pm", "7:30").
-// Kevin's own ways of writing it: "Tues 3rd Nov @ 19:30 (90mins)", "Sun 1 Nov 13:00 Huntingdon (60 mins)".
+// is the match, never the time: the robot's own description, or the day and month written any usual
+// way ("Tues 3rd Nov @ 19:30 (90mins)", "Nov 3rd", "3rd of Nov", "3Nov", "03/11"), on an entry dated
+// within 45 days of the game (last year's "3 Nov" is not this year's). checkEntry then decides
+// whether that entry agrees with the booking.
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const hhmm = (h, m) => `${String(h).padStart(2, '0')}:${m}`;
-export function timesIn(text) {
-  const out = [];
-  for (const [, h0, mm, mer] of String(text).matchAll(/(?<![£$€.\d])\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b/gi)) {
-    if (mm === undefined && !mer) continue;                          // a bare number is a day or a length
-    const h = Number(h0);
-    const m = mm === undefined ? '00' : mm;
-    if (h > 23 || Number(m) > 59 || (mer && (h < 1 || h > 12))) continue;
-    if (mer) out.push(hhmm((h % 12) + (mer.toLowerCase() === 'pm' ? 12 : 0), m));
-    else out.push(hhmm(h, m), ...(h < 12 ? [hhmm(h + 12, m)] : []));   // "7:30" is either
-  }
-  return out;
-}
 export function sameBooking(expense, b) {
   if (!expense || expense.deleted_at) return false;
   const when = Date.parse(expense.date || expense.created_at || '');
@@ -105,11 +93,10 @@ export function sameBooking(expense, b) {
   const d = String(expense.description || '');
   if (d === description(b)) return true;
   const day = Number(b.date.slice(8, 10));
-  const mon = MONTHS[Number(b.date.slice(5, 7)) - 1];
-  const dayMonth = new RegExp(`\\b0?${day}(st|nd|rd|th)?\\s+${mon}|\\b${mon}[a-z]*\\.?\\s+0?${day}(st|nd|rd|th)?\\b`, 'i');
-  if (!dayMonth.test(d)) return false;
-  const times = timesIn(d);
-  return !times.length || times.includes(b.start);
+  const month = Number(b.date.slice(5, 7));
+  const mon = MONTHS[month - 1];
+  const th = '(st|nd|rd|th)?';
+  return new RegExp(`\\b0?${day}${th}(\\s+of)?\\s*${mon}|\\b${mon}[a-z]*\\.?\\s*0?${day}${th}\\b|\\b0?${day}/0?${month}\\b`, 'i').test(d);
 }
 // The Splitwise form, as agent-browser plan steps. Everyone in the group who is not playing is
 // unticked under "equally", by the Splitwise id on his or her row; the players stay ticked.
@@ -153,6 +140,9 @@ export function checkEntry(e, b, kevinId, playerIds) {
 }
 const clock = (ms) => { const p = londonParts(ms); return `${p.hh}:${p.mm}`; };
 export const textHours = (ms) => clock(ms) >= TEXT_FROM && clock(ms) < TEXT_UNTIL;
+// A texts step starts by 21:00, so a normal run (a few players, under a minute each) ends well
+// before 21:30; the 21:30 check before each text only bites if the Mac slept mid-run.
+export const textStart = (ms) => textHours(ms) && clock(ms) < TEXT_LAST_START;
 
 // ── The outside world, behind small functions the tests replace ──
 const run = (cmd, args, opts = {}) => new Promise((resolve) => {
@@ -204,8 +194,8 @@ export async function deliveryOf(number, sinceMs) {
   return { known: true, readable: true, error: Number(error) || 0, delivered: delivered === '1', sent: sent === '1', service };
 }
 // One text per person. iMessage first; SMS only when Messages' own record shows the iMessage failed,
-// or osascript failed and Messages holds no such message at all. A slow iMessage is never followed by
-// a second text, and one whose delivery cannot be read counts as sent and says so.
+// or osascript failed and Messages holds no such message at all. Anything else that is not a clear
+// "sent" is unsure (ok: null): never sent again, and counted as not confirmed.
 export async function texted(number, text, { send = sendMessage, delivery = deliveryOf, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {}) {
   const t0 = now() - 2000;
   const first = await send(number, text, 'iMessage');
@@ -219,8 +209,7 @@ export async function texted(number, text, { send = sendMessage, delivery = deli
   }
   const refused = (d.known && d.error) || (first.code !== 0 && d.readable && !d.known);
   if (!refused) {
-    if (first.code !== 0) return { ok: false, why: 'Messages did not take it' };   // cannot tell: never risk a second text
-    return { ok: true, via: d.readable ? 'iMessage (not yet delivered)' : 'iMessage (delivery not readable)' };
+    return { ok: null, via: first.code !== 0 ? 'iMessage (Messages did not answer)' : d.readable ? 'iMessage (not yet delivered)' : 'iMessage (delivery not readable)' };
   }
   const sms = await send(number, text, 'SMS');
   return sms.code === 0 ? { ok: true, via: 'SMS' } : { ok: false, why: 'Messages refused both iMessage and SMS' };
@@ -229,15 +218,16 @@ export async function texted(number, text, { send = sendMessage, delivery = deli
 // ── The run ──
 function readKey() { try { return readFileSync(KEY_FILE, 'utf8').trim(); } catch { return ''; } }
 function readPlayers() { try { return JSON.parse(readFileSync(PLAYERS_FILE, 'utf8')); } catch { return null; } }
-// The texts ledger. A line goes in BEFORE each send and another after it; a person's last line
-// decides: "sending" or sent means never again, and only a send Messages refused may go again.
+// The texts ledger. A line goes in BEFORE each send and another after it. A person's last line
+// decides: sent (ok true) or unsure ("sending", ok null) is never sent again; only a send Messages
+// refused (ok false) may go again.
 export function makeLedger(file = join(LOG_DIR, 'texts.jsonl')) {
   const rows = () => {
     try { return readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); }
     catch (e) { if (e.code === 'ENOENT') return []; throw e; }      // unreadable: stop, never guess
   };
   return {
-    has: (slot, person) => { const mine = rows().filter((r) => r.slot === slot && r.person === person); return mine.length > 0 && mine[mine.length - 1].ok !== false; },
+    last: (slot, person) => rows().filter((r) => r.slot === slot && r.person === person).pop() || null,
     add: (row) => { mkdirSync(dirname(file), { recursive: true }); appendFileSync(file, `${JSON.stringify(row)}\n`); },
   };
 }
@@ -274,7 +264,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
       const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now });
       if (r) problems.push(`${b.slot} Splitwise: ${r}`);
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {
-      if (!textHours(now())) continue;                               // texts wait for the morning
+      if (!textStart(now())) continue;                              // texts wait for the morning
       const r = await textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now });
       if (r) problems.push(`${b.slot} texts: ${r}`);
     }
@@ -350,24 +340,25 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now }
   const names = b.players.map((p) => p.name);
   let sent = 0;
   let due = 0;
+  let unsure = 0;
   let why = '';
-  let unread = false;
   let late = false;
   for (const p of b.players) {
     const info = players.players[String(p.id)];
     if (!info || info.self) continue;
     due++;
-    if (ledger.has(b.slot, p.id)) { sent++; continue; }              // never twice to one person
+    const last = ledger.last(b.slot, p.id);
+    if (last && last.ok !== false) { sent++; if (last.ok !== true) unsure++; continue; }   // never twice to one person
     if (!textHours(now())) { late = true; continue; }                 // checked before every text
     const number = (info.phones || [])[0];
     if (!number) { why = why || 'a player has no phone number'; continue; }
     ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, state: 'sending' });
     const r = await textOne(number, textFor(b, names, check.owes[info.splitwise_id]));
-    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ok: r.ok, via: r.via || null });
-    if (r.ok) sent++; else why = why || r.why || 'Messages did not send it';
-    if (r.ok && /not readable/.test(r.via || '')) unread = true;
+    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ok: r.ok, via: r.via || null });   // ok: true, false or null (unsure)
+    if (r.ok !== false) sent++; else why = why || r.why || 'Messages did not send it';
+    if (r.ok === null) unsure++;
   }
-  const note = `${sent} of ${due} sent${unread ? ' (delivery not checked)' : ''}${late ? '; the rest wait: Retry after 07:30' : ''}${why ? `: ${why}` : ''}`;
+  const note = `${sent} of ${due} sent${unsure ? ` (${unsure} not confirmed)` : ''}${late ? '; the rest wait: Retry after 07:30' : ''}${why ? `: ${why}` : ''}`;
   if (sent === due) { await mark(b, 'texts', 'done', note); return null; }
   await mark(b, 'texts', 'failed', note);
   return note;

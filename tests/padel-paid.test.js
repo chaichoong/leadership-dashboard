@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
-  description, equalShares, firstNames, textFor, sameBooking, timesIn, buildPlan, checkEntry, runOnce, texted, textHours, makeLedger, PAID_URL,
+  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL,
 } from '../scripts/padel-paid.mjs';
 
 const require_ = createRequire(import.meta.url);
@@ -107,20 +107,13 @@ describe('the pure parts', () => {
     expect(firstNames(['Test Payer', 'Rob Alpha', 'Rob Beta', 'Cat'])).toEqual(['Test', 'Rob A', 'Rob B', 'Cat']);
     expect(textFor(b, ['Ann One', 'Bob Two'], 1800)).toBe('Padel booked: Tue 3 Nov at Testford (Test Padel Club), 19:30 for 90 min. Playing: Ann, Bob. Your share is £18.00 and it\'s in Splitwise to settle up. Kev');
   });
-  it('reads times the way people write them, and never a day, a length or a price', () => {
-    expect(timesIn('Tues 3rd Nov @ 19:30 (90mins)')).toEqual(['19:30']);
-    expect(timesIn('Tuesday 3 November 7.30pm')).toEqual(['19:30']);
-    expect(timesIn('7am 12pm 12am')).toEqual(['07:00', '12:00', '00:00']);
-    expect(timesIn('7:30')).toEqual(['07:30', '19:30']);
-    expect(timesIn('3 Nov (60 mins) £12.50 2026')).toEqual([]);
-  });
-  it('knows an entry for the same date, written any usual way, and nothing else', () => {
+  it('knows an entry for the same date, written any usual way, whatever time it says, and nothing else', () => {
     for (const d of ['Tues 3rd Nov @ 19:30 (90mins)', 'Tue 3 Nov 19:30 Testford', 'Tue 3 Nov, Testford, 19:30, 90 min', '3 nov 19.30',
-      'Nov 3rd 19:30', 'Tuesday 3 November 7.30pm', '03 Nov 19:30', 'Tues 3rd Nov', 'Padel 3 Nov £36.00'])
+      'Nov 3rd 19:30', 'Tuesday 3 November 7.30pm', '03 Nov', 'Tues 3rd Nov', 'Padel 3 Nov £36.00', 'Tue 3rd of Nov', '3Nov 19:30', '03/11 19:30',
+      'Tue 3 Nov 18:30', 'Tue 3 Nov, Testford, 08:00, 60 min'])           // one booking a day: the time never decides
       expect([d, sameBooking({ description: d, date: AT }, b)]).toEqual([d, true]);
-    for (const d of ['Tue 13 Nov 19:30', 'Sun 1 Nov 19:30', 'Tue 3 Nov 18:30', 'Tue 3 Oct 19:30', 'Padel'])
+    for (const d of ['Tue 13 Nov 19:30', 'Sun 1 Nov 19:30', 'Tue 3 Oct 19:30', 'Padel', '13/11', '3/12', 'Nov 30th', '23 Nov'])
       expect([d, sameBooking({ description: d, date: AT }, b)]).toEqual([d, false]);
-    expect(sameBooking({ description: 'Tue 3 Nov 7:00' }, booking({ start: '07:00' }))).toBe(true);    // a morning game written without am
     expect(sameBooking({ description: 'Tues 3rd Nov @ 19:30', date: AT, deleted_at: '2026-11-01' }, b)).toBe(false);
     expect(sameBooking({ description: 'Tues 3rd Nov @ 19:30', date: '2025-10-30T10:00:00Z' }, b)).toBe(false);   // last year's
   });
@@ -144,7 +137,10 @@ describe('the pure parts', () => {
     // Ids of different lengths: compared as numbers, not as text.
     expect(checkEntry(entry(1, d, { 11: 1800, 127: 1800 }), b, 11, [127, 11]).ok).toBe(true);
   });
-  it('texts only by day: 07:30 to 21:30 London', () => {
+  it('texts only by day: a step starts 07:30 to 21:00, and no text goes after 21:30 London', () => {
+    expect(textStart(Date.parse('2026-11-01T20:59:00Z'))).toBe(true);
+    expect(textStart(Date.parse('2026-11-01T21:00:00Z'))).toBe(false);
+    expect(textHours(Date.parse('2026-11-01T21:00:00Z'))).toBe(true);
     expect(textHours(Date.parse('2026-11-01T07:29:00Z'))).toBe(false);
     expect(textHours(Date.parse('2026-11-01T07:30:00Z'))).toBe(true);
     expect(textHours(Date.parse('2026-07-01T20:29:00Z'))).toBe(true);    // 21:29 BST
@@ -153,24 +149,26 @@ describe('the pure parts', () => {
 });
 
 describe('the texts ledger', () => {
-  it('a person\'s last line decides: sending or sent is never again, only a refused send may go again', () => {
+  it('a person\'s last line decides: sent or unsure is never again, only a refused send may go again', () => {
     const file = join(tmp(), 'texts.jsonl');
     const l = makeLedger(file);
-    expect(l.has('s', 2)).toBe(false);                                   // no file yet
+    const mayGo = (slot, person) => { const r = l.last(slot, person); return !r || r.ok === false; };
+    expect(mayGo('s', 2)).toBe(true);                                    // no file yet
     l.add({ slot: 's', person: 2, state: 'sending' });
-    expect(l.has('s', 2)).toBe(true);                                    // stopped mid-send: never risk a second
+    expect(mayGo('s', 2)).toBe(false);                                   // stopped mid-send: never risk a second
     l.add({ slot: 's', person: 2, ok: false });
-    expect(l.has('s', 2)).toBe(false);                                   // Messages refused it: may go again
+    expect(mayGo('s', 2)).toBe(true);                                    // Messages refused it: may go again
     l.add({ slot: 's', person: 2, state: 'sending' });
-    l.add({ slot: 's', person: 2, ok: true });
-    expect(l.has('s', 2)).toBe(true);
-    expect(l.has('s', 3)).toBe(false);
-    expect(l.has('other', 2)).toBe(false);
+    l.add({ slot: 's', person: 2, ok: null });
+    expect(mayGo('s', 2)).toBe(false);                                   // unsure: never again
+    l.add({ slot: 's', person: 3, ok: true });
+    expect(mayGo('s', 3)).toBe(false);
+    expect(mayGo('other', 2)).toBe(true);
   });
   it('a ledger it cannot read stops the run rather than guessing', () => {
     const file = join(tmp(), 'texts.jsonl');
     writeFileSync(file, '{"slot":"s","person":2,"ok":true}\n{not json\n');
-    expect(() => makeLedger(file).has('s', 2)).toThrow();
+    expect(() => makeLedger(file).last('s', 2)).toThrow();
   });
 });
 
@@ -298,12 +296,14 @@ describe('a run', () => {
     expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'failed', note: '2 of 3 sent: Messages refused both iMessage and SMS' });
   });
 
-  it('texts whose delivery cannot be read count as sent, and the note says delivery was not checked', async () => {
+  it('a text Messages did not confirm counts as sent, is never sent again, and the note says so', async () => {
     const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
     const w = worker([b]);
-    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), { textOk: () => ({ ok: true, via: 'iMessage (delivery not readable)' }) });
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), { textOk: (n) => (n.endsWith('04') ? { ok: null, via: 'iMessage (delivery not readable)' } : { ok: true, via: 'iMessage' }) });
+    r.ledger.add({ slot: b.slot, person: 2, state: 'sending' });      // a run that stopped mid-send for Bob
     expect(await r.run()).toBe(0);
-    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (delivery not checked)' });
+    expect(r.sent.map((x) => x.number)).toEqual(['+447700900003', '+447700900004']);
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (2 not confirmed)' });
   });
 
   it('an entry changed in Splitwise after it was checked: no texts, and the step says why', async () => {
@@ -319,14 +319,16 @@ describe('a run', () => {
     const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
     const w = worker([b]);
     const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
-      opts: { now: () => Date.parse(r.sent.length ? '2026-11-01T21:31:00Z' : '2026-11-01T21:29:00Z') } });
+      opts: { now: () => Date.parse(r.sent.length ? '2026-11-01T21:31:00Z' : '2026-11-01T20:59:00Z') } });   // the Mac slept mid-run
     expect(await r.run()).toBe(1);
     expect(r.sent).toHaveLength(1);
     expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'failed', note: '1 of 3 sent; the rest wait: Retry after 07:30' });
     const w2 = worker([booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } })]);
-    const r2 = go(w2, splitwise(), { opts: { now: () => Date.parse('2026-11-01T22:00:00Z') } });
-    expect(await r2.run()).toBe(0);
-    expect(w2.posts).toEqual([]);                             // after hours: not even claimed
+    for (const late of ['2026-11-01T21:05:00Z', '2026-11-01T22:00:00Z', '2026-11-01T07:00:00Z']) {
+      const r2 = go(w2, splitwise(), { opts: { now: () => Date.parse(late) } });
+      expect(await r2.run()).toBe(0);
+    }
+    expect(w2.posts).toEqual([]);                             // outside 07:30 to 21:00: not even claimed
     const w3 = worker([booking({ splitwise: { state: 'claimed', at: '2026-11-01T11:00:00.000Z', note: null } })]);
     expect(await go(w3, splitwise()).run()).toBe(1);
     expect(w3.posts).toEqual([expect.objectContaining({ step: 'splitwise', state: 'failed', note: 'the robot stopped part-way: check Splitwise before Retry' })]);
@@ -351,16 +353,17 @@ describe('texted(): one text per person, SMS only when the iMessage definitely f
   it('iMessage refused by Messages: sent again as SMS', async () => {
     expect(await try_({ code: 0 }, [{ known: true, readable: true, error: 22 }])).toEqual({ r: { ok: true, via: 'SMS' }, sends: ['iMessage', 'SMS'] });
   });
-  it('a slow iMessage (no error, not yet sent): no second text', async () => {
+  it('a slow iMessage (no error, not yet sent): unsure, no second text', async () => {
     const out = await try_({ code: 0 }, [{ known: true, readable: true, error: 0, delivered: false, sent: false }]);
-    expect(out).toEqual({ r: { ok: true, via: 'iMessage (not yet delivered)' }, sends: ['iMessage'] });
+    expect(out).toEqual({ r: { ok: null, via: 'iMessage (not yet delivered)' }, sends: ['iMessage'] });
   });
-  it('delivery unreadable: counts as sent, says so, no second text', async () => {
-    expect(await try_({ code: 0 }, [BLIND])).toEqual({ r: { ok: true, via: 'iMessage (delivery not readable)' }, sends: ['iMessage'] });
+  it('delivery unreadable: unsure, no second text', async () => {
+    expect(await try_({ code: 0 }, [BLIND])).toEqual({ r: { ok: null, via: 'iMessage (delivery not readable)' }, sends: ['iMessage'] });
   });
-  it('osascript failed and Messages holds no message: SMS; failed and unreadable: not sent, no second try', async () => {
+  it('osascript failed and Messages holds no message: SMS; failed and unreadable, or still pending: unsure, no second text', async () => {
     expect((await try_({ code: 1, stderr: 'timeout' }, [NONE])).sends).toEqual(['iMessage', 'SMS']);
-    expect(await try_({ code: 1, stderr: 'timeout' }, [BLIND])).toEqual({ r: { ok: false, why: 'Messages did not take it' }, sends: ['iMessage'] });
+    expect(await try_({ code: 1, stderr: 'timeout' }, [BLIND])).toEqual({ r: { ok: null, via: 'iMessage (Messages did not answer)' }, sends: ['iMessage'] });
+    expect((await try_({ code: 1, stderr: 'timeout' }, [{ known: true, readable: true, error: 0 }])).sends).toEqual(['iMessage']);
   });
   it('Messages not allowed on the Mac: not sent, and says what to fix', async () => {
     const out = await try_({ code: 1, stderr: 'execution error: Not authorized to send Apple events to Messages. (-1743)' }, [NONE]);
@@ -403,6 +406,8 @@ describe("agent-browser's padel approval (commit --padel-slot)", () => {
     expect((await ok(edit((s) => { s.push({ do: 'submit', selector: "button.submit:has-text('Save')" }); }))).why).toBe('a padel plan ends with one Save');
     expect((await ok(edit((s) => { s.splice(2, 0, { do: 'upload', selector: 'input', files: ['x'] }); }))).why).toMatch(/may not "upload"/);
     expect((await ok({ steps: [] })).ok).toBe(false);
+    for (const sel of ['text=Delete', 'text=Settle up', "a[href*='example.com']", 'text=Paid by', ".split_method.equal .person[data-id='12'] input.amount"])
+      expect([sel, (await ok(edit((s) => { s.splice(3, 0, { do: 'click', selector: sel }); }))).why]).toEqual([sel, `a padel plan may not click ${sel}`]);
   });
   it('commit checks the plan\'s proof first, and refuses --task with --padel-slot, before any browser opens', () => {
     const runIt = (p, extra) => {
