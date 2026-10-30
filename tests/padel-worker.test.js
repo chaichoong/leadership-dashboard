@@ -35,6 +35,7 @@ const countClass = (html, cls) => (html.match(new RegExp(`class="slot ${cls}"`, 
 // 09:45 London on Tue 27 Oct 2026 (GMT since 25 Oct): the window is 27 Oct to 2 Nov.
 const NOW = Date.parse('2026-10-27T09:45:00Z');
 const ROBOT = 'robot0000111122223333444455556666';
+const ADMIN = 'admin0000111122223333444455556666';
 const RELAY_OK = JSON.stringify({ ok: true, sent: [{ email: 'kevin@runpreneur.org.uk', ok: true, ts: '1793000000.000100', error: null }], refused: [] });
 const iso = (ms) => new Date(ms).toISOString();
 const MIN = 60 * 1000;
@@ -369,7 +370,7 @@ function mapRepo() {
   const alerts = new Map();
   const rate = new Map();
   const cache = new Map();
-  const out = (p) => ({ id: p.id, name: p.name, venues: p.venues.split(',').filter(Boolean), savedAt: p.votes_at || null });
+  const out = (p) => ({ id: p.id, name: p.name, venues: p.venues.split(',').filter(Boolean), savedAt: p.votes_at || null, ...(p.real_name ? { realName: p.real_name } : {}) });
   return {
     rows: { alerts: () => [...alerts.values()], people: () => [...people.values()], votes: () => [...votes.values()], rate: () => [...rate.values()] },
     putAlert: (row) => alerts.set(row.slot, { names: '', venues: '', relay_reply: null, ...row }),
@@ -391,11 +392,46 @@ function mapRepo() {
         if (people.has(pid)) people.get(pid).votes_at = now;
       },
       async listBooked(from) { return [...booked.values()].filter((b) => b.slot >= from); },
-      async setBooked(slot, person_id, venue, now, d = {}) {
-        const was = booked.get(slot) || {};
-        booked.set(slot, { slot, person_id, venue, created_at: now, start: d.start ?? was.start ?? null, minutes: d.minutes ?? was.minutes ?? null, courts: d.courts ?? was.courts ?? 1 });
+      async getBooked(slot) { return booked.get(slot) || null; },
+      async setRealName(id, realName) { const p = people.get(id); if (!p) return false; p.real_name = realName; return true; },
+      async setPaid(slot, price, players, now) {
+        const b = booked.get(slot);
+        if (!b || !(b.splitwise_state == null || b.splitwise_state === 'failed') || b.texts_state != null) return false;
+        Object.assign(b, { price_pence: price, players: JSON.stringify(players), paid_at: now, splitwise_state: null, splitwise_at: null, splitwise_note: null, texts_state: null, texts_at: null, texts_note: null });
+        return true;
       },
-      async clearBooked(slot) { booked.delete(slot); },
+      async clearPaid(slot) {
+        const b = booked.get(slot);
+        if (!b || !b.paid_at || !(b.splitwise_state == null || b.splitwise_state === 'failed') || b.texts_state != null) return false;
+        Object.assign(b, { price_pence: null, players: null, paid_at: null, splitwise_state: null, splitwise_at: null, splitwise_note: null, texts_state: null, texts_at: null, texts_note: null });
+        return true;
+      },
+      async markStep(slot, step, state, note, now, paidAt = null) {
+        const b = booked.get(slot);
+        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
+        const cur = b[`${step}_state`] ?? null;
+        const ok = state === 'claimed' ? cur === null && b.paid_at === paidAt && (step === 'splitwise' || b.splitwise_state === 'done')
+          : state === 'retry' ? cur === 'failed' : cur === 'claimed';
+        if (!ok) return false;
+        const to = state === 'retry' ? null : state;
+        Object.assign(b, { [`${step}_state`]: to, [`${step}_at`]: to ? now : null, [`${step}_note`]: to ? note : null });
+        return true;
+      },
+      async listPaidPending(from) { return [...booked.values()].filter((b) => b.slot >= from && b.paid_at && !(b.splitwise_state === 'done' && b.texts_state === 'done')).sort((a, b) => a.slot.localeCompare(b.slot)); },
+      // The same rules as makeRepo's SQL: a paid booking changes only by Kevin's phone, before the robot starts.
+      async setBooked(slot, person_id, venue, now, d = {}, admin = false) {
+        const was = booked.get(slot);
+        if (was && was.paid_at && !(admin && (was.splitwise_state == null || was.splitwise_state === 'failed'))) return false;
+        booked.set(slot, { ...(was || {}), slot, person_id, venue, created_at: now, start: d.start ?? was?.start ?? null, minutes: d.minutes ?? was?.minutes ?? null, courts: d.courts ?? was?.courts ?? 1, ...(was?.paid_at ? { paid_at: now } : {}) });
+        return true;
+      },
+      async setCourts(slot, courts) { const b = booked.get(slot); if (!b) return false; b.courts = courts; return true; },
+      async clearBooked(slot, admin = false) {
+        const b = booked.get(slot);
+        if (!b || (b.paid_at && !(admin && (b.splitwise_state == null || b.splitwise_state === 'failed')))) return false;
+        booked.delete(slot);
+        return true;
+      },
       async alertSlots(from) { return [...alerts.keys()].filter((s) => s >= from); },
       async claimAlert(slot, names, venues, now) {
         if (alerts.has(slot)) return false;
@@ -414,7 +450,9 @@ function mapRepo() {
         return true;
       },
       async prune(today) {
-        for (const m of [votes, booked, alerts]) for (const [k, v] of [...m]) if (v.slot < today) m.delete(k);
+        const weekAgo = new Date(Date.parse(`${today}T12:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10);
+        for (const m of [votes, alerts]) for (const [k, v] of [...m]) if (v.slot < today) m.delete(k);
+        for (const [k, v] of [...booked]) if (v.slot < today && (!v.paid_at || v.slot < weekAgo || (v.splitwise_state === 'done' && v.texts_state === 'done'))) booked.delete(k);
       },
     },
   };
@@ -480,6 +518,7 @@ function harness(make) {
   const sleeps = [];
   const env = {
     ROBOT_KEY: ROBOT,
+    ADMIN_KEY: ADMIN,
     RELAY_KEY: 'relay-key-test',
     PAGE_URL: 'https://padel.kevinbrittain.workers.dev/',
     RELAY: { fetch: vi.fn(async (req) => { relayCalls.push({ url: req.url, key: req.headers.get('X-Relay-Key'), body: await req.json() }); return relayReply(); }) },
@@ -489,9 +528,10 @@ function harness(make) {
   let now = NOW;
   let fetchImpl = pulseFetch(calls);
   const drain = async () => { while (waits.length) await Promise.all(waits.splice(0)); };
-  const call = async (path, body, { robot, method, raw, drain: doDrain = true, ip } = {}) => {
+  const call = async (path, body, { robot, admin, method, raw, drain: doDrain = true, ip } = {}) => {
     const headers = { 'Content-Type': 'application/json' };
     if (robot) headers['X-Robot-Key'] = robot;
+    if (admin) headers['X-Admin-Key'] = admin;
     if (ip) headers['CF-Connecting-IP'] = ip;
     const payload = raw !== undefined ? raw : (body ? JSON.stringify(body) : undefined);
     const req = new Request(`https://padel.kevinbrittain.workers.dev${path}`, { method: method || (payload !== undefined ? 'POST' : 'GET'), headers, body: payload });
@@ -1173,6 +1213,149 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
     t.setNow(Date.parse('2026-10-28T09:00:00Z'));
     await t.call('/api/refresh', {});
     expect(t.rows.votes()).toEqual([]);
+  });
+
+  describe("Kevin's phone, real names and Booked and paid (Kevin, 30 Oct 2026)", () => {
+    const book = async (id, extra = {}) => t.call('/api/booked', { slot: SLOT, person_id: id, venue: 'pdl', booked: true, start: '19:30', minutes: 90, ...extra });
+    it('only a request with the admin key may use /api/admin, and the state says which phone is which', async () => {
+      const [a] = await t.addPeople(['Test Ann']);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Annabel' })).status).toBe(401);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Annabel' }, { admin: 'wrong-key' })).status).toBe(401);
+      expect((await t.call('/api/state')).json.admin).toBe(false);
+      expect((await t.call('/api/state', undefined, { admin: ADMIN })).json.admin).toBe(true);
+      // Every reply that carries the state says so, a tick's included, so Kevin's buttons never vanish after a save.
+      expect((await t.call('/api/vote', { person_id: a, add: [SLOT] }, { admin: ADMIN })).json.admin).toBe(true);
+      expect((await t.call('/api/vote', { person_id: a, remove: [SLOT] })).json.admin).toBe(false);
+      expect((await t.call('/api/refresh', {}, { admin: ADMIN })).json.admin).toBe(true);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Annabel' }, { admin: ADMIN })).status).toBe(200);
+    });
+    it('a real name replaces the chosen name everywhere, keeps it as nick, and either name finds the same person', async () => {
+      const [a, b] = await t.addPeople(['Test Sparky', 'Test Bob']);
+      const r = await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Simon' }, { admin: ADMIN });
+      expect(r.json.people.find((p) => p.id === a)).toEqual({ id: a, name: 'Test Simon', nick: 'Test Sparky', venues: ['si', 'pdl', 'pp', 'cu'], savedAt: null });
+      expect(r.json.people.find((p) => p.id === b)).toEqual({ id: b, name: 'Test Bob', venues: ['si', 'pdl', 'pp', 'cu'], savedAt: null });
+      expect((await t.call('/api/person', { name: 'test simon' })).json.id).toBe(a);
+      expect((await t.call('/api/person', { name: 'Test Sparky' })).json.id).toBe(a);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: '12' }, { admin: ADMIN })).status).toBe(400);
+      expect((await t.call('/api/admin', { action: 'name', id: 999, real_name: 'Test Zed' }, { admin: ADMIN })).status).toBe(404);
+      // An empty real name gives the chosen name back.
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: '' }, { admin: ADMIN })).json.people.find((p) => p.id === a)).toEqual({ id: a, name: 'Test Sparky', venues: ['si', 'pdl', 'pp', 'cu'], savedAt: null });
+    });
+    it('Booked and paid needs a booked hour with its details, a sane price and real players; it shows on the booking', async () => {
+      const [a, b, c] = await t.addPeople(['Test Ann', 'Test Bob', 'Test Cat']);
+      const paid = (body) => t.call('/api/admin', { action: 'paid', slot: SLOT, ...body }, { admin: ADMIN });
+      expect((await paid({ price: 36, players: [a, b] })).status).toBe(409);            // not booked yet
+      await book(a);
+      for (const price of [0, -1, 1001, 'x', null]) expect((await paid({ price, players: [a, b] })).status).toBe(400);
+      expect((await paid({ price: 36, players: [] })).status).toBe(400);
+      expect((await paid({ price: 36, players: [a, a] })).status).toBe(400);
+      expect((await paid({ price: 36, players: [a, 999] })).status).toBe(400);
+      const r = await paid({ price: 36.5, players: [a, b, c] });
+      expect(r.status).toBe(200);
+      expect(r.json.admin).toBe(true);
+      expect(r.json.booked[SLOT]).toMatchObject({ person_id: a, venue: 'pdl', start: '19:30', minutes: 90, courts: 1 });
+      expect(r.json.booked[SLOT].paid).toEqual({ price: 3650, players: [a, b, c], at: iso(NOW), splitwise: { state: null, at: null, note: null }, texts: { state: null, at: null, note: null } });
+      // A price change before the robot starts is fine; Undo by anyone but Kevin's phone is refused.
+      expect((await paid({ price: 40, players: [a, b] })).json.booked[SLOT].paid.price).toBe(4000);
+      expect((await t.call('/api/booked', { slot: SLOT, booked: false })).status).toBe(409);
+      expect((await book(b)).status).toBe(409);
+      expect((await t.call('/api/admin', { action: 'unpaid', slot: SLOT }, { admin: ADMIN })).json.booked[SLOT].paid).toBeUndefined();
+      expect((await t.call('/api/booked', { slot: SLOT, booked: false })).status).toBe(200);   // unpaid again: anyone may undo
+    });
+    it('the robot claims each step once: done or failed only from claimed, nothing after a claim until Kevin retries a failure', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await t.call('/api/admin', { action: 'name', id: b, real_name: 'Test Robert' }, { admin: ADMIN });
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a, b] }, { admin: ADMIN });
+      expect((await t.call('/api/robot/paid')).status).toBe(401);
+      const list = (await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings;
+      expect(list).toEqual([{
+        slot: SLOT, date: '2026-10-28', day: 'Wed 28 Oct', venue: { code: 'pdl', short: 'Cambridge', label: 'PDL Padel United Cambridge' }, start: '19:30', minutes: 90, pricePence: 3600, paidAt: iso(NOW),
+        splitwise: { state: null, at: null, note: null }, texts: { state: null, at: null, note: null },
+        players: [{ id: a, name: 'Test Ann', nick: 'Test Ann' }, { id: b, name: 'Test Robert', nick: 'Test Bob' }],
+      }]);
+      const step = (step, state, note, paidAt = iso(NOW)) => t.call('/api/robot/paid', { slot: SLOT, step, state, note, paidAt }, { robot: ROBOT });
+      expect((await step('splitwise', 'done')).json.changed).toBe(false);               // never done without a claim
+      expect((await step('texts', 'claimed')).json.changed).toBe(false);                // never texts before the Splitwise entry is done
+      expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'splitwise', state: 'claimed' }, { robot: ROBOT })).status).toBe(400);   // a claim names the version it read
+      expect((await step('splitwise', 'claimed', null, '2026-01-01T00:00:00.000Z')).json.changed).toBe(false);   // ...and an old version never wins
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(false);            // a second claim never wins
+      expect((await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 50, players: [a, b] }, { admin: ADMIN })).status).toBe(409);
+      expect((await t.call('/api/admin', { action: 'retry', slot: SLOT, step: 'splitwise' }, { admin: ADMIN })).status).toBe(409);   // claimed is not failed
+      expect((await step('splitwise', 'failed', 'Splitwise refused it')).json.changed).toBe(true);
+      expect((await t.call('/api/state')).json.booked[SLOT].paid.splitwise).toMatchObject({ state: 'failed', note: 'Splitwise refused it' });
+      expect((await t.call('/api/admin', { action: 'retry', slot: SLOT, step: 'splitwise' }, { admin: ADMIN })).status).toBe(200);
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
+      expect((await step('splitwise', 'done', 'expense 123')).json.changed).toBe(true);
+      expect((await step('texts', 'claimed')).json.changed).toBe(true);
+      expect((await step('texts', 'done', '1 of 1 sent')).json.changed).toBe(true);
+      expect((await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings).toEqual([]);
+      expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'nope', state: 'done' }, { robot: ROBOT })).status).toBe(400);
+    });
+    it('a paid booking the robot has not finished survives midnight; a finished or unpaid one is cleared as before', async () => {
+      const [a] = await t.addPeople(['Test Ann']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a] }, { admin: ADMIN });
+      await t.repo.prune('2026-10-29');
+      expect(await t.repo.getBooked(SLOT)).toMatchObject({ slot: SLOT, price_pence: 3600 });
+      // After midnight the page still lists it for Kevin's Retry, and a retry of last night's booking is accepted.
+      t.setNow(Date.parse('2026-10-29T09:00:00Z'));
+      expect((await t.call('/api/state')).json.earlier).toEqual([{ slot: SLOT, day: 'Wed 28 Oct', venue: 'Cambridge', start: '19:30', minutes: 90, paid: expect.objectContaining({ price: 3600 }) }]);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'failed', 'no group', iso(NOW))).toBe(true);
+      expect((await t.call('/api/admin', { action: 'retry', slot: SLOT, step: 'splitwise' }, { admin: ADMIN })).status).toBe(200);
+      expect((await t.call('/api/admin', { action: 'retry', slot: '2026-10-20|19', step: 'splitwise' }, { admin: ADMIN })).status).toBe(400);   // older than a week
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'done', null, iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'texts', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'texts', 'done', null, iso(NOW))).toBe(true);
+      await t.repo.prune('2026-10-29');
+      expect(await t.repo.getBooked(SLOT)).toBeNull();
+    });
+    it('an unfinished paid booking is kept a week and no longer (review of PR #858)', async () => {
+      const [a] = await t.addPeople(['Test Ann']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a] }, { admin: ADMIN });
+      await t.repo.prune('2026-11-04');                       // 7 days on: still kept
+      expect(await t.repo.getBooked(SLOT)).not.toBeNull();
+      await t.repo.prune('2026-11-05');                       // 8 days on: gone
+      expect(await t.repo.getBooked(SLOT)).toBeNull();
+    });
+    it('once the robot has started on Splitwise, nothing changes or removes the booking, Kevin\'s phone included (review of PR #858)', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a, b] }, { admin: ADMIN });
+      // Before the robot starts, Kevin may Undo; anyone else may not, even straight through the repo.
+      expect(await t.repo.clearBooked(SLOT, false)).toBe(false);
+      expect((await book(a, { minutes: 60 })).status).toBe(409);
+      const readAt = (await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings[0].paidAt;   // the robot reads 90 minutes
+      t.setNow(NOW + MIN);
+      expect((await t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, minutes: 60 }, { admin: ADMIN })).status).toBe(200);
+      // Kevin's re-mark made a new version: the robot's claim on what it read before cannot win.
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), readAt)).toBe(false);
+      const now = (await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings[0];
+      expect(now).toMatchObject({ minutes: 60, paidAt: iso(NOW + MIN) });
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), now.paidAt)).toBe(true);
+      for (const call of [
+        () => t.call('/api/booked', { slot: SLOT, booked: false }, { admin: ADMIN }),
+        () => t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, start: '19:00' }, { admin: ADMIN }),
+        () => t.call('/api/admin', { action: 'paid', slot: SLOT, price: 48, players: [a, b] }, { admin: ADMIN }),
+        () => t.call('/api/admin', { action: 'unpaid', slot: SLOT }, { admin: ADMIN }),
+      ]) expect((await call()).status).toBe(409);
+      // "Booked 2nd court" (the court count alone) is anyone's, and keeps the paid record.
+      expect((await t.call('/api/booked', { slot: SLOT, person_id: b, venue: 'pdl', booked: true, courts: 2 })).status).toBe(200);
+      expect(await t.repo.getBooked(SLOT)).toMatchObject({ courts: 2, price_pence: 3600, splitwise_state: 'claimed', minutes: 60 });
+    });
+    it('a real name nobody else has; people listed by the name shown; a price is a real amount of at least a penny (review of PR #858)', async () => {
+      const [a, b, c] = await t.addPeople(['Test Zed', 'Test Sam', 'Test Amy']);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'test sam' }, { admin: ADMIN })).status).toBe(409);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Abe' }, { admin: ADMIN })).json.people.map((p) => p.name)).toEqual(['Test Abe', 'Test Amy', 'Test Sam']);
+      expect((await t.call('/api/admin', { action: 'name', id: b, real_name: 'Test Abe' }, { admin: ADMIN })).status).toBe(409);
+      await book(a);
+      for (const price of [true, '1e2', '', ' ', 0.001, '36.555', [36]]) expect((await t.call('/api/admin', { action: 'paid', slot: SLOT, price, players: [a, c] }, { admin: ADMIN })).status).toBe(400);
+      expect((await t.call('/api/admin', { action: 'paid', slot: SLOT, price: '36.50', players: [a, c] }, { admin: ADMIN })).json.booked[SLOT].paid.price).toBe(3650);
+    });
   });
 
   describe('POST /api/courts (the Mac\'s Matchi read)', () => {

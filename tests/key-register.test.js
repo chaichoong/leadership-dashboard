@@ -146,6 +146,21 @@ print(json.dumps({n: [by[n]["status"], by[n]["said"]] for n in ("airtable_pat", 
     void soon;
   });
 
+  it("the padel phone key's test is green only when the Worker answers admin: true (review of PR #858)", () => {
+    const env = home();
+    const out = py(env, `
+row = {"test": "padel-admin"}
+res = {}
+for label, reply in (("yes", (200, {}, {"admin": True})), ("no", (200, {}, {"admin": False})), ("down", (None, {}, {"error": "network error (URLError)"})), ("refused", (429, {}, {}))):
+    kr._http = lambda url, headers=None, data=None, method=None, reply=reply: reply
+    res[label] = kr.test_value(row, "a-phone-key-value-0123456789")
+print(json.dumps(res))`);
+    expect(out.yes).toEqual({ result: 'ok', said: 'works' });
+    expect(out.no.result).toBe('rejected');
+    expect(out.down.result).toBe('unreachable');
+    expect(out.refused.result).toBe('unreachable');
+  });
+
   it('a rejected key is red; an unreachable service is grey; a readable file is tightened; a missing one is red', () => {
     const env = home();
     chmodSync(join(env.od, 'airtable_pat'), 0o644);

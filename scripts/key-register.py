@@ -172,6 +172,11 @@ CATALOGUE = {
     # St Ives and PDL's free courts with it. A replace needs only the Worker secret; nobody else holds it.
     "padel_robot_key": {"service": "padel Worker", "kind": "shared", "test": "padel-robot",
                         "purpose": "the Mac job's key for the padel Worker's /api/courts (scripts/padel-courts.mjs)"},
+    # Kevin's phone key for the padel page (30 Oct 2026): the only device that may rename players, record
+    # Booked and paid, or change a paid booking. The phone holds it from a #admin= link put on his
+    # clipboard; a replace means the new link goes to his phone again.
+    "padel_admin_key": {"service": "padel Worker", "kind": "shared", "test": "padel-admin",
+                        "purpose": "Kevin's phone key for the padel page's People screen and Booked and paid (X-Admin-Key)"},
     "property_manager_passcode_kevin": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Kevin's passcode for Roy's page"},
     "property_manager_passcode_roy": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Roy's passcode for his page"},
 }
@@ -201,6 +206,7 @@ COPY_OF_AT = {
     ("agent-runner", "PROXY_TOKEN"): "proxy_service_token2",              # its wrangler toml and anthropic-proxy.js
     ("padel", "RELAY_KEY"): "slack_relay_key",                            # its X-Relay-Key to apple-inbound's /slack-relay
     ("padel", "ROBOT_KEY"): "padel_robot_key",                            # the Mac job's X-Robot-Key for /api/courts
+    ("padel", "ADMIN_KEY"): "padel_admin_key",                            # Kevin's phone's X-Admin-Key
 }
 # A Worker-only secret that is a key to an OUTSIDE service: any valid key from that service works, so
 # one paste may go to every Worker holding one. Any other Worker-only secret is a key we made that
@@ -624,10 +630,20 @@ def t_padel_robot(v, row):
     return _ok(s, b)
 
 
+def t_padel_admin(v, row):
+    """A GET of /api/state with Kevin's phone key: the Worker answers "admin": true only for its own key."""
+    s, _, b = _http("https://padel.runpreneur.org.uk/api/state", {"X-Admin-Key": v})
+    if s is not None and 200 <= s < 300:
+        if isinstance(b, dict) and b.get("admin") is True:
+            return {"result": "ok", "said": "works"}
+        return {"result": "rejected", "said": "the Worker did not take it as Kevin's phone key"}
+    return _ok(s, b)
+
+
 EXPIRY_TESTS = ("github", "cloudflare")    # these read the key's own end date, so an "ok" without one clears it
 TESTS = {"airtable": t_airtable, "github": t_github, "cloudflare": t_cloudflare, "gemini": t_gemini,
          "homeassistant": t_homeassistant, "stripe": t_stripe, "ticketmaster": t_ticketmaster, "pingen": t_pingen,
-         "youtube": t_youtube, "gdrive": t_gdrive, "padel-robot": t_padel_robot}
+         "youtube": t_youtube, "gdrive": t_gdrive, "padel-robot": t_padel_robot, "padel-admin": t_padel_admin}
 
 
 def test_value(row, value):

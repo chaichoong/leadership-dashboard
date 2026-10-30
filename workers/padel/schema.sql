@@ -8,7 +8,7 @@
 -- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
 -- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
 -- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql,
--- 0003-booked-details.sql, 0004-people-university.sql.
+-- 0003-booked-details.sql, 0004-people-university.sql, 0005-names-and-paid.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS people (
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   venues TEXT NOT NULL DEFAULT 'si,pdl,pp,cu',
   created_at TEXT NOT NULL,
-  votes_at TEXT
+  votes_at TEXT,
+  real_name TEXT                      -- Kevin's People screen (sql-changes/0005, 30 Oct 2026)
 );
 
 -- "I can play" ticks. A save adds and removes single hours (POST /api/vote { add, remove }).
@@ -39,7 +40,17 @@ CREATE TABLE IF NOT EXISTS booked (
   created_at TEXT NOT NULL,
   start TEXT,
   minutes INTEGER,
-  courts INTEGER NOT NULL DEFAULT 1
+  courts INTEGER NOT NULL DEFAULT 1,
+  -- Booked and paid (sql-changes/0005, 30 Oct 2026): the total, who is playing, and the robot's steps.
+  price_pence INTEGER,
+  players TEXT,
+  paid_at TEXT,
+  splitwise_state TEXT,
+  splitwise_at TEXT,
+  splitwise_note TEXT,
+  texts_state TEXT,
+  texts_at TEXT,
+  texts_note TEXT
 );
 
 -- One row per slot that has had its Slack DM. The row is inserted BEFORE the DM goes, with
