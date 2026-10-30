@@ -43,7 +43,9 @@
  *    `commit --padel-slot S --padel-paid-at T` asks the padel Worker and goes on only when
  *    that booking still has that exact version, its Splitwise step is claimed by the padel
  *    robot right now (scripts/padel-paid.mjs), and the plan is that booking's expense and
- *    nothing else: Splitwise pages only, its own description and total, one Save.
+ *    nothing else: Kevin's Padel group page, its own description and total, one Save, and
+ *    unticking exactly the group's members who are not playing (the group read live in the
+ *    same signed-in browser before the first click; who is who from the private players file).
  *
  * Every run appends to a JSONL ledger, so what a browser did on Kevin's behalf
  * is auditable after the fact rather than trusted at the time.
@@ -599,12 +601,15 @@ function assertUploadable(files) {
 // else. Returns { ok, why } so it can be tested.
 const PADEL_PAID_URL = 'https://padel.runpreneur.org.uk/api/robot/paid';
 const PADEL_ROBOT_KEY_FILE = path.join(os.homedir(), '.config', 'od', 'padel_robot_key');
+const PADEL_PLAYERS_FILE = path.join(os.homedir(), 'Projects', 'kevin-hq', 'padel', 'players.json');   // private: never in this repo
 const PADEL_SAVE = "button.submit:has-text('Save')";
 // The only clicks the expense form needs: open it, choose "equally", untick a member's row.
 const PADEL_CLICK_RE = /^(text=Add an expense|text=equally|\.split_method\.equal \.person\[data-id='\d+'\] input\.share)$/;
+const padelUnticked = (plan) => (plan.steps || []).filter((s) => s && s.do === 'click')
+  .map((s) => /data-id='(\d+)'/.exec(String(s.selector))).filter(Boolean).map((m) => Number(m[1]));
 // Why a plan is not this booking's Splitwise expense, or null. The description is the one
 // scripts/padel-paid.mjs writes (tests/padel-paid.test.js proves the two agree).
-function padelPlanProblem(plan, b) {
+function padelPlanProblem(plan, b, groupId, playerIds) {
   const steps = (plan && Array.isArray(plan.steps)) ? plan.steps : [];
   const desc = `${b.day}, ${b.venue && b.venue.short}, ${b.start}, ${b.minutes} min`;
   const total = (Number(b.pricePence) / 100).toFixed(2);
@@ -614,6 +619,7 @@ function padelPlanProblem(plan, b) {
       let host = '';
       try { host = new URL(s.url).hostname; } catch { host = ''; }
       if (host !== 'secure.splitwise.com') return `a padel plan goes to Splitwise only, not ${s.url}`;
+      if (s.url !== `https://secure.splitwise.com/#/groups/${groupId}`) return `a padel plan opens the Padel group only, not ${s.url}`;
     }
     if (s.do === 'click' && !PADEL_CLICK_RE.test(String(s.selector))) return `a padel plan may not click ${s.selector}`;
   }
@@ -622,9 +628,25 @@ function padelPlanProblem(plan, b) {
   if (fills.length !== 2 || want.some(([sel, v]) => !fills.some((f) => f.selector === sel && String(f.value) === v))) return `a padel plan fills "${desc}" and ${total}, nothing else`;
   const submits = steps.filter((s) => s.do === 'submit');
   if (submits.length !== 1 || submits[0].selector !== PADEL_SAVE || steps[steps.length - 1] !== submits[0]) return 'a padel plan ends with one Save';
+  if (padelUnticked({ steps }).some((id) => playerIds.includes(id))) return 'a padel plan may not untick a player';
   return null;
 }
-async function padelApproval(slot, paidAt, plan, { fetchImpl = globalThis.fetch, keyFile = PADEL_ROBOT_KEY_FILE } = {}) {
+// Read in the signed-in browser before the first click: the group's members as Splitwise lists them.
+// The plan must untick exactly the members who are not playing, and every player must be a member.
+function padelMembersProblem(plan, groupText, playerIds) {
+  let members = [];
+  try {
+    const m = String(groupText || '').match(/\{[\s\S]*\}/);
+    members = ((JSON.parse(m ? m[0] : '{}').group || {}).members || []).map((x) => Number(x.id)).filter(Boolean);
+  } catch { members = []; }
+  if (!members.length) return 'could not read the Padel group in Splitwise';
+  if (playerIds.some((id) => !members.includes(id))) return 'a player is not in the Padel group';
+  const want = members.filter((id) => !playerIds.includes(id)).sort((x, y) => x - y);
+  const got = padelUnticked(plan).sort((x, y) => x - y);
+  if (JSON.stringify(want) !== JSON.stringify(got)) return `the plan unticks ${got.length} members, not the ${want.length} who are not playing`;
+  return null;
+}
+async function padelApproval(slot, paidAt, plan, { fetchImpl = globalThis.fetch, keyFile = PADEL_ROBOT_KEY_FILE, playersFile = PADEL_PLAYERS_FILE } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}\|\d{2}$/.test(String(slot || ''))) return { ok: false, why: `--padel-slot must look like 2026-11-03|19, got "${slot}"` };
   if (!paidAt) return { ok: false, why: '--padel-paid-at is required: the version of the booking the robot read' };
   let key;
@@ -641,9 +663,14 @@ async function padelApproval(slot, paidAt, plan, { fetchImpl = globalThis.fetch,
   if (!b) return { ok: false, why: `no paid padel booking waiting for ${slot}` };
   if (b.paidAt !== paidAt) return { ok: false, why: `the booking for ${slot} changed since the robot read it` };
   if (!b.splitwise || b.splitwise.state !== 'claimed') return { ok: false, why: `the Splitwise step for ${slot} is not claimed by the robot (${b.splitwise ? b.splitwise.state : 'none'})` };
-  const problem = padelPlanProblem(plan, b);
+  let who;
+  try { who = JSON.parse(fs.readFileSync(playersFile, 'utf8')); } catch { return { ok: false, why: `no padel players file at ${playersFile}` }; }
+  const groupId = who && who.splitwise_group && who.splitwise_group.id;
+  const playerIds = (b.players || []).map((p) => Number(((who.players || {})[String(p.id)] || {}).splitwise_id));
+  if (!groupId || !playerIds.length || playerIds.some((id) => !id)) return { ok: false, why: 'the players file does not give the group and every player\'s Splitwise id' };
+  const problem = padelPlanProblem(plan, b, groupId, playerIds);
   if (problem) return { ok: false, why: problem };
-  return { ok: true, outcome: "Approved (padel Booked and paid on Kevin's phone)", slot };
+  return { ok: true, outcome: "Approved (padel Booked and paid on Kevin's phone)", slot, padel: { groupId, playerIds } };
 }
 
 function assertApproved(taskId, { window = false } = {}) {
@@ -3464,6 +3491,11 @@ async function main() {
 
     const res = await withPage(profile, false, async (page) => {
       let r;
+      if (approval && approval.padel) {
+        await page.goto(`https://secure.splitwise.com/api/v3.0/get_group/${approval.padel.groupId}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        const why = padelMembersProblem(plan, await domText(page, 400000), approval.padel.playerIds);
+        if (why) die(`the padel approval does not hold: ${why}. Nothing was submitted.`);
+      }
       try {
         r = await runSteps(page, plan.steps, cmd === 'commit', plan.confirm);
       } catch (e) {
@@ -3516,7 +3548,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,

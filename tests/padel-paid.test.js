@@ -385,15 +385,17 @@ describe("agent-browser's padel approval (commit --padel-slot)", () => {
   const dir = tmp();
   const keyFile = join(dir, 'key');
   writeFileSync(keyFile, 'robot-key-test\n');
+  const playersFile = join(dir, 'players.json');
+  writeFileSync(playersFile, JSON.stringify(PLAYERS));
   const reply = (bookings, status = 200) => async (url, init) => {
     expect(init.headers['X-Robot-Key']).toBe('robot-key-test');
     return new Response(JSON.stringify({ ok: true, bookings }), { status });
   };
   const b = booking({ splitwise: { state: 'claimed' } });
   const plan = buildPlan(b, GROUP, MEMBERS, [11, 12, 13, 14]);
-  const ok = (p = plan, bs = [b], opts = {}) => ab.padelApproval('2026-11-03|19', AT, p, { fetchImpl: reply(bs), keyFile, ...opts });
-  it('the plan padel-paid builds is approved: that booking, that version, Splitwise claimed', async () => {
-    expect(await ok()).toMatchObject({ ok: true });
+  const ok = (p = plan, bs = [b], opts = {}) => ab.padelApproval('2026-11-03|19', AT, p, { fetchImpl: reply(bs), keyFile, playersFile, ...opts });
+  it('the plan padel-paid builds is approved: that booking, that version, Splitwise claimed, with the group and players for the live check', async () => {
+    expect(await ok()).toMatchObject({ ok: true, padel: { groupId: GROUP, playerIds: [11, 12, 13, 14] } });
   });
   it('refused when the booking moved on', async () => {
     expect((await ab.padelApproval('2026-11-03|19', '2026-01-01T00:00:00.000Z', plan, { fetchImpl: reply([b]), keyFile })).why).toMatch(/changed since the robot read it/);
@@ -414,8 +416,21 @@ describe("agent-browser's padel approval (commit --padel-slot)", () => {
     expect((await ok(edit((s) => { s.push({ do: 'submit', selector: "button.submit:has-text('Save')" }); }))).why).toBe('a padel plan ends with one Save');
     expect((await ok(edit((s) => { s.splice(2, 0, { do: 'upload', selector: 'input', files: ['x'] }); }))).why).toMatch(/may not "upload"/);
     expect((await ok({ steps: [] })).ok).toBe(false);
+    expect((await ok(edit((s) => { s[0].url = 'https://secure.splitwise.com/#/groups/999'; }))).why).toMatch(/opens the Padel group only/);
+    expect((await ok(edit((s) => { s.splice(9, 0, { do: 'click', selector: ".split_method.equal .person[data-id='12'] input.share" }); }))).why).toBe('a padel plan may not untick a player');
+    expect((await ok(plan, [b], { playersFile: join(dir, 'none.json') })).why).toMatch(/no padel players file/);
+    expect((await ok(plan, [{ ...b, players: [...b.players, { id: 9, name: 'Test Out' }] }])).why).toMatch(/every player's Splitwise id/);
     for (const sel of ['text=Delete', 'text=Settle up', "a[href*='example.com']", 'text=Paid by', ".split_method.equal .person[data-id='12'] input.amount"])
       expect([sel, (await ok(edit((s) => { s.splice(3, 0, { do: 'click', selector: sel }); }))).why]).toEqual([sel, `a padel plan may not click ${sel}`]);
+  });
+  it('in the browser, before the first click: the plan unticks exactly the members not playing, read live from the group', () => {
+    const group = (ids) => JSON.stringify({ group: { id: GROUP, members: ids.map((id) => ({ id, first_name: 'x' })) } });
+    expect(ab.padelMembersProblem(plan, group(MEMBERS), [11, 12, 13, 14])).toBeNull();
+    // Someone joined the group since the plan was built: they would owe a share, so it stops.
+    expect(ab.padelMembersProblem(plan, group([...MEMBERS, 17]), [11, 12, 13, 14])).toBe('the plan unticks 2 members, not the 3 who are not playing');
+    expect(ab.padelMembersProblem(plan, group([11, 12, 13, 14, 15]), [11, 12, 13, 14])).toMatch(/unticks 2 members, not the 1/);
+    expect(ab.padelMembersProblem(plan, group([11, 12, 13, 15, 16]), [11, 12, 13, 14])).toBe('a player is not in the Padel group');
+    expect(ab.padelMembersProblem(plan, '<html>Log in</html>', [11, 12, 13, 14])).toBe('could not read the Padel group in Splitwise');
   });
   it('commit checks the plan\'s proof first, and refuses --task with --padel-slot, before any browser opens', () => {
     const runIt = (p, extra) => {
