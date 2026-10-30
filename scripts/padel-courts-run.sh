@@ -30,4 +30,15 @@ if [ -z "${NODE:-}" ]; then
   exit 1
 fi
 
-exec "$NODE" "$TARGET" run "$@"
+# The court read, then the padel page's Booked and paid (scripts/padel-paid.mjs, 30 Oct 2026: the
+# Splitwise entry and the texts), in the same tick. Each says FAILED on its own; the job fails if either does.
+"$NODE" "$TARGET" run "$@"
+courts=$?
+PAID="$(dirname "$TARGET")/padel-paid.mjs"
+paid=0
+if [ -f "$PAID" ]; then
+  "$NODE" "$PAID" run
+  paid=$?
+fi
+[ "$courts" -ne 0 ] && exit "$courts"
+exit "$paid"

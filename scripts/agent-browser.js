@@ -38,6 +38,11 @@
  *    at first" — the screenshot goes on the approval card via
  *    `agent-dispatch.py submit --attach`, and this is the half that makes the
  *    tap mean something.
+ *    ONE OTHER APPROVAL (Kevin, 30 Oct 2026): the padel page's "Booked and paid", saved
+ *    on Kevin's phone with its own key, approves one Splitwise expense for that booking.
+ *    `commit --padel-slot S --padel-paid-at T` asks the padel Worker and goes on only when
+ *    that booking still has that exact version and its Splitwise step is claimed by the
+ *    padel robot right now (scripts/padel-paid.mjs). Nothing else counts.
  *
  * Every run appends to a JSONL ledger, so what a browser did on Kevin's behalf
  * is auditable after the fact rather than trusted at the time.
@@ -51,6 +56,8 @@
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
+ *   node scripts/agent-browser.js commit  --plan PLAN.json --padel-slot "YYYY-MM-DD|HH" --padel-paid-at ISO --shot OUT.png
+ *       the padel robot's Splitwise entry: Kevin's Booked and paid is the approval (see 3. above)
  *   node scripts/agent-browser.js handover --task recXXX [--plan PLAN.json]   Kevin's turn: a VISIBLE window, the robot does
  *       every step up to his, then hands it over (plan in ~/knowledge-os/handover/recXXX.json by default)
  *   node scripts/agent-browser.js handover --task recXXX --dry-run --shot OUT.png   the agent's proof: same
@@ -586,6 +593,30 @@ function assertUploadable(files) {
 // the approval loop can never disagree about what "Approved" means.
 // `window` is set by `handover` alone: the one command that may open an approved robot form
 // card, because it fills the form in a window Kevin finishes and never presses the final click.
+// The padel approval (see 3. in the header): Kevin's Booked and paid for this exact booking version,
+// with the Splitwise step claimed by the padel robot. Returns { ok, why } so it can be tested.
+const PADEL_PAID_URL = process.env.PADEL_PAID_URL || 'https://padel.runpreneur.org.uk/api/robot/paid';
+const PADEL_ROBOT_KEY_FILE = process.env.PADEL_ROBOT_KEY_FILE || path.join(os.homedir(), '.config', 'od', 'padel_robot_key');
+async function padelApproval(slot, paidAt, { fetchImpl = globalThis.fetch, keyFile = PADEL_ROBOT_KEY_FILE } = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}\|\d{2}$/.test(String(slot || ''))) return { ok: false, why: `--padel-slot must look like 2026-11-03|19, got "${slot}"` };
+  if (!paidAt) return { ok: false, why: '--padel-paid-at is required: the version of the booking the robot read' };
+  let key;
+  try { key = fs.readFileSync(keyFile, 'utf8').trim(); } catch { return { ok: false, why: `no padel robot key at ${keyFile}` }; }
+  let body;
+  try {
+    const res = await fetchImpl(PADEL_PAID_URL, { headers: { 'X-Robot-Key': key }, signal: AbortSignal.timeout(20000) });
+    if (res.status !== 200) return { ok: false, why: `the padel Worker answered ${res.status}` };
+    body = await res.json();
+  } catch (e) {
+    return { ok: false, why: `could not read the padel booking (${e && e.name || 'error'})` };
+  }
+  const b = (body && Array.isArray(body.bookings) ? body.bookings : []).find((x) => x && x.slot === slot);
+  if (!b) return { ok: false, why: `no paid padel booking waiting for ${slot}` };
+  if (b.paidAt !== paidAt) return { ok: false, why: `the booking for ${slot} changed since the robot read it` };
+  if (!b.splitwise || b.splitwise.state !== 'claimed') return { ok: false, why: `the Splitwise step for ${slot} is not claimed by the robot (${b.splitwise ? b.splitwise.state : 'none'})` };
+  return { ok: true, outcome: "Approved (padel Booked and paid on Kevin's phone)", slot };
+}
+
 function assertApproved(taskId, { window = false } = {}) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(taskId || '')) die(`--task must be an Airtable record id, got "${taskId}"`);
   let out;
@@ -3395,7 +3426,12 @@ async function main() {
     // cannot prove its submit landed is refused while it is still cheap.
     if (cmd === 'commit') assertConfirmable(plan);
     let approval = null;
-    if (cmd === 'commit') approval = assertApproved(arg(rest, 'task'));
+    if (cmd === 'commit' && arg(rest, 'padel-slot', null)) {
+      if (arg(rest, 'task', null)) die('commit takes --task or --padel-slot, never both');
+      const padel = await padelApproval(arg(rest, 'padel-slot'), arg(rest, 'padel-paid-at', null));
+      if (!padel.ok) die(`the padel approval does not hold: ${padel.why}. Nothing was submitted.`);
+      approval = padel;
+    } else if (cmd === 'commit') approval = assertApproved(arg(rest, 'task'));
 
     const res = await withPage(profile, false, async (page) => {
       let r;
@@ -3414,7 +3450,7 @@ async function main() {
     });
 
     ledger({
-      cmd, profile, site: plan.site || null, task: arg(rest, 'task', null),
+      cmd, profile, site: plan.site || null, task: arg(rest, 'task', null), padelSlot: arg(rest, 'padel-slot', null),
       steps: res.done, screenshot: res.screenshot, url: res.url,
       approvedOutcome: approval ? approval.outcome : null,
     });
@@ -3451,7 +3487,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
