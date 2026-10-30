@@ -34,11 +34,7 @@ fi
 # Splitwise entry and the texts), in the same tick. Each says FAILED on its own; the job fails if either does.
 "$NODE" "$TARGET" run "$@"
 courts=$?
-PAID="$(dirname "$TARGET")/padel-paid.mjs"
-paid=0
-if [ -f "$PAID" ]; then
-  "$NODE" "$PAID" run
-  paid=$?
-fi
+"$NODE" "$(dirname "$TARGET")/padel-paid.mjs" run
+paid=$?
 [ "$courts" -ne 0 ] && exit "$courts"
 exit "$paid"

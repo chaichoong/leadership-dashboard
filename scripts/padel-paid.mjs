@@ -21,10 +21,14 @@
 //   * Each step is claimed at the Worker before it starts, naming the version of the booking it
 //     read; the Worker refuses a second claim, and refuses any change to the booking once the
 //     Splitwise step is claimed. A step that fails stays failed until Kevin taps Retry.
-//   * Before adding an entry, the group is searched for one on the same day and time (Kevin may
-//     have added it himself): if there is one, no second entry is made.
-//   * A text is never sent twice to the same person for the same booking: a ledger on this Mac
-//     (~/knowledge-os/logs/padel-paid/texts.jsonl) is read before every send.
+//   * One entry per booking. Before adding one, the group is searched for an entry on the same
+//     date (Kevin may have added it himself; one booking a day is the group's rule). If there is
+//     one, no second entry is made, and it must agree with the booking (total, who owes, paid by
+//     Kevin) or the step fails for Kevin to check. The texts quote that entry's own shares.
+//   * One text per person per booking: a ledger on this Mac (~/knowledge-os/logs/padel-paid/
+//     texts.jsonl) gets a line BEFORE each send, and only a send Messages definitely refused may
+//     go again. SMS follows an iMessage only when Messages shows the iMessage failed.
+//   * Texts go between 07:30 and 21:30 London only, checked before every single text.
 //   * No phone number, name or key is ever printed or sent to the Worker; notes say counts only.
 //   * The players' phone numbers and Splitwise ids live in ~/Projects/kevin-hq/padel/players.json
 //     (private, never in this repo).
@@ -62,7 +66,7 @@ export function equalShares(pricePence, n) {
   const base = Math.floor(pricePence / n);
   return Array.from({ length: n }, (_, i) => base + (i < pricePence - base * n ? 1 : 0));
 }
-// First names for the text; two players with one first name get an initial each ("Rich B", "Rich M").
+// First names for the text; two players with one first name get an initial each ("Sam A", "Sam B").
 export function firstNames(names) {
   const first = names.map((n) => String(n).trim().split(/\s+/)[0]);
   return names.map((n, i) => {
@@ -75,17 +79,37 @@ export function textFor(b, names, sharePence) {
   return `Padel booked: ${b.day} at ${b.venue.short} (${b.venue.label}), ${b.start} for ${b.minutes} min. `
     + `Playing: ${firstNames(names).join(', ')}. Your share is £${money(sharePence)} and it's in Splitwise to settle up. Kev`;
 }
-// An entry already in the group for that day and time: our own name for it, or Kevin's own way of
-// writing it ("Tues 3rd Nov @ 19:30 (90mins)", "Sun 1 Nov 13:00 Huntingdon (60 mins)").
+// An entry already in the group for a booking. One booking a day is the group's rule, so the date
+// is the match: the day and month in the description, either way round ("3rd Nov", "Nov 3"), on an
+// entry dated within 45 days of the game (last year's "3 Nov" is not this year's). If the
+// description gives a time it must be the start, in 24 or 12-hour form ("19:30", "7.30pm", "7:30").
+// Kevin's own ways of writing it: "Tues 3rd Nov @ 19:30 (90mins)", "Sun 1 Nov 13:00 Huntingdon (60 mins)".
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const hhmm = (h, m) => `${String(h).padStart(2, '0')}:${m}`;
+export function timesIn(text) {
+  const out = [];
+  for (const [, h0, mm, mer] of String(text).matchAll(/(?<![£$€.\d])\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b/gi)) {
+    if (mm === undefined && !mer) continue;                          // a bare number is a day or a length
+    const h = Number(h0);
+    const m = mm === undefined ? '00' : mm;
+    if (h > 23 || Number(m) > 59 || (mer && (h < 1 || h > 12))) continue;
+    if (mer) out.push(hhmm((h % 12) + (mer.toLowerCase() === 'pm' ? 12 : 0), m));
+    else out.push(hhmm(h, m), ...(h < 12 ? [hhmm(h + 12, m)] : []));   // "7:30" is either
+  }
+  return out;
+}
 export function sameBooking(expense, b) {
   if (!expense || expense.deleted_at) return false;
+  const when = Date.parse(expense.date || expense.created_at || '');
+  if (Number.isFinite(when) && Math.abs(when - Date.parse(`${b.date}T12:00:00Z`)) > 45 * 86400000) return false;
   const d = String(expense.description || '');
   if (d === description(b)) return true;
-  const [, , day] = b.date.split('-').map(Number);
-  const mon = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'][Number(b.date.slice(5, 7)) - 1];
-  const dayRe = new RegExp(`\\b${day}(st|nd|rd|th)?\\s*${mon}`, 'i');
-  const time = b.start.replace(':', '[:.]');
-  return dayRe.test(d) && new RegExp(`\\b${time}\\b`).test(d);
+  const day = Number(b.date.slice(8, 10));
+  const mon = MONTHS[Number(b.date.slice(5, 7)) - 1];
+  const dayMonth = new RegExp(`\\b0?${day}(st|nd|rd|th)?\\s+${mon}|\\b${mon}[a-z]*\\.?\\s+0?${day}(st|nd|rd|th)?\\b`, 'i');
+  if (!dayMonth.test(d)) return false;
+  const times = timesIn(d);
+  return !times.length || times.includes(b.start);
 }
 // The Splitwise form, as agent-browser plan steps. Everyone in the group who is not playing is
 // unticked under "equally", by the Splitwise id on his or her row; the players stay ticked.
@@ -110,16 +134,19 @@ export function buildPlan(b, groupId, memberIds, playerIds) {
     confirm: { selector: `text="${desc}"`, timeoutMs: 20000 },
   };
 }
-// The entry read back: the newest live expense with our description, its total and who owes what.
-export function checkEntry(expenses, b, kevinId, playerIds) {
-  const e = (expenses || []).filter((x) => !x.deleted_at && x.description === description(b)).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
-  if (!e) return { ok: false, why: 'the new entry is not in the group' };
+// The entries in the group for a booking: the robot's own (by its exact description) and any Kevin
+// added himself. More than one is a mess for Kevin to sort out, never a reason to add another.
+export const entriesFor = (expenses, b) => (expenses || []).filter((e) => sameBooking(e, b));
+// An entry checked against the booking: the total, exactly the players owing, and paid by Kevin.
+export function checkEntry(e, b, kevinId, playerIds) {
+  if (!e) return { ok: false, why: 'the entry is not in the group' };
   const cost = Math.round(Number(e.cost) * 100);
   if (cost !== b.pricePence) return { ok: false, why: `the entry says £${money(cost)}, not £${money(b.pricePence)}`, id: e.id };
   const owes = {};
   for (const u of e.users || []) { const o = Math.round(Number(u.owed_share) * 100); if (o > 0) owes[u.user_id ?? u.user?.id] = o; }
-  const owing = Object.keys(owes).map(Number).sort();
-  if (JSON.stringify(owing) !== JSON.stringify([...playerIds].sort())) return { ok: false, why: `${owing.length} people owe on the entry, not the ${playerIds.length} playing`, id: e.id };
+  const byNumber = (x, y) => x - y;
+  const owing = Object.keys(owes).map(Number).sort(byNumber);
+  if (JSON.stringify(owing) !== JSON.stringify([...playerIds].sort(byNumber))) return { ok: false, why: `${owing.length} people owe on the entry, not the ${playerIds.length} playing`, id: e.id };
   const payer = (e.users || []).find((u) => (u.user_id ?? u.user?.id) === kevinId);
   if (!payer || Math.round(Number(payer.paid_share) * 100) !== b.pricePence) return { ok: false, why: 'the entry is not paid by Kevin', id: e.id };
   return { ok: true, id: e.id, owes };
@@ -171,22 +198,29 @@ export async function deliveryOf(number, sinceMs) {
   const sql = `SELECT m.error, m.is_delivered, m.is_sent, m.service FROM message m JOIN handle h ON h.ROWID = m.handle_id
     WHERE m.is_from_me = 1 AND m.date >= ${apple} AND replace(replace(h.id, '+', ''), ' ', '') LIKE '%${digits}' ORDER BY m.date DESC LIMIT 1;`;
   const r = await run('/usr/bin/sqlite3', ['-readonly', '-separator', '|', `file:${join(homedir(), 'Library/Messages/chat.db')}?mode=ro`, sql], { timeout: 20000 });
-  if (r.code !== 0) return { known: false };
+  if (r.code !== 0) return { known: false, readable: false };
+  if (!r.stdout.trim()) return { known: false, readable: true };   // readable, and no such message
   const [error, delivered, sent, service] = r.stdout.trim().split('|');
-  if (!r.stdout.trim()) return { known: false };
-  return { known: true, error: Number(error) || 0, delivered: delivered === '1', sent: sent === '1', service };
+  return { known: true, readable: true, error: Number(error) || 0, delivered: delivered === '1', sent: sent === '1', service };
 }
+// One text per person. iMessage first; SMS only when Messages' own record shows the iMessage failed,
+// or osascript failed and Messages holds no such message at all. A slow iMessage is never followed by
+// a second text, and one whose delivery cannot be read counts as sent and says so.
 export async function texted(number, text, { send = sendMessage, delivery = deliveryOf, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {}) {
   const t0 = now() - 2000;
   const first = await send(number, text, 'iMessage');
-  if (first.code === 0) {
-    for (let waited = 0; waited < DELIVERY_WAIT_MS; waited += 4000) {
-      await sleep(4000);
-      const d = await delivery(number, t0);
-      if (d.known && d.error) break;                         // iMessage refused: send it as a text
-      if (d.known && (d.delivered || d.sent)) return { ok: true, via: 'iMessage' };
-      if (!d.known && waited >= 8000) return { ok: true, via: 'iMessage (delivery not readable)' };
-    }
+  if (/-1743|not authori[sz]ed/i.test(first.stderr || '')) return { ok: false, why: 'Messages needs permission on the Mac (Privacy, Automation)' };
+  let d = { known: false, readable: false };
+  for (let waited = 0; waited < DELIVERY_WAIT_MS; waited += 4000) {
+    await sleep(4000);
+    d = await delivery(number, t0);
+    if (d.known && d.error) break;                                   // iMessage refused: send it as a text
+    if (d.known && (d.delivered || d.sent)) return { ok: true, via: 'iMessage' };
+  }
+  const refused = (d.known && d.error) || (first.code !== 0 && d.readable && !d.known);
+  if (!refused) {
+    if (first.code !== 0) return { ok: false, why: 'Messages did not take it' };   // cannot tell: never risk a second text
+    return { ok: true, via: d.readable ? 'iMessage (not yet delivered)' : 'iMessage (delivery not readable)' };
   }
   const sms = await send(number, text, 'SMS');
   return sms.code === 0 ? { ok: true, via: 'SMS' } : { ok: false, why: 'Messages refused both iMessage and SMS' };
@@ -195,15 +229,21 @@ export async function texted(number, text, { send = sendMessage, delivery = deli
 // ── The run ──
 function readKey() { try { return readFileSync(KEY_FILE, 'utf8').trim(); } catch { return ''; } }
 function readPlayers() { try { return JSON.parse(readFileSync(PLAYERS_FILE, 'utf8')); } catch { return null; } }
-function ledgerHas(slot, person) {
-  try {
-    return readFileSync(join(LOG_DIR, 'texts.jsonl'), 'utf8').split('\n').filter(Boolean).some((l) => { const r = JSON.parse(l); return r.slot === slot && r.person === person && r.ok; });
-  } catch { return false; }
+// The texts ledger. A line goes in BEFORE each send and another after it; a person's last line
+// decides: "sending" or sent means never again, and only a send Messages refused may go again.
+export function makeLedger(file = join(LOG_DIR, 'texts.jsonl')) {
+  const rows = () => {
+    try { return readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); }
+    catch (e) { if (e.code === 'ENOENT') return []; throw e; }      // unreadable: stop, never guess
+  };
+  return {
+    has: (slot, person) => { const mine = rows().filter((r) => r.slot === slot && r.person === person); return mine.length > 0 && mine[mine.length - 1].ok !== false; },
+    add: (row) => { mkdirSync(dirname(file), { recursive: true }); appendFileSync(file, `${JSON.stringify(row)}\n`); },
+  };
 }
-function ledgerAdd(row) { mkdirSync(LOG_DIR, { recursive: true }); appendFileSync(join(LOG_DIR, 'texts.jsonl'), `${JSON.stringify(row)}\n`); }
 
 export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now = Date.now, log = (l) => process.stdout.write(`${l}\n`),
-  key = readKey(), players = readPlayers(), textOne = texted, has = ledgerHas, add = ledgerAdd } = {}) {
+  key = readKey(), players = readPlayers(), textOne = texted, ledger = makeLedger() } = {}) {
   if (!key) { log(`FAILED: padel-paid: no robot key at ${KEY_FILE}`); return 1; }
   const headers = { 'X-Robot-Key': key, 'Content-Type': 'application/json' };
   const get = await fetchImpl(PAID_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
@@ -211,13 +251,17 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
   const { bookings = [] } = await get.json();
   if (!bookings.length) return 0;                                   // nothing paid and waiting: silent
   if (!players || !players.players || !players.splitwise_group) { log(`FAILED: padel-paid: no players file at ${PLAYERS_FILE}`); return 1; }
+  const problems = [];
+  // A claim that does not win is normal (another run has it, or the booking changed). A done or
+  // failed the Worker did not record is not: it is reported, and the claim goes stale for Kevin.
   const mark = async (b, step, state, note) => {
-    const r = await fetchImpl(PAID_URL, { method: 'POST', headers, body: JSON.stringify({ slot: b.slot, step, state, note, paidAt: b.paidAt }) }).catch(() => null);
-    return !!(r && r.status === 200 && (await r.json()).changed);
+    const r = await fetchImpl(PAID_URL, { method: 'POST', headers, body: JSON.stringify({ slot: b.slot, step, state, note, paidAt: b.paidAt }), signal: AbortSignal.timeout(20000) }).catch(() => null);
+    const ok = !!(r && r.status === 200 && (await r.json().catch(() => ({}))).changed);
+    if (!ok && state !== 'claimed') problems.push(`${b.slot} ${step}: the Worker did not record ${state}`);
+    return ok;
   };
   const kevin = Object.entries(players.players).find(([, p]) => p.self);
   const kevinSw = kevin ? kevin[1].splitwise_id : null;
-  const problems = [];
   for (const b of bookings) {
     // A claim left behind by a run that stopped part-way: failed, so Kevin decides (check Splitwise, then Retry).
     for (const step of ['splitwise', 'texts']) {
@@ -231,7 +275,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
       if (r) problems.push(`${b.slot} Splitwise: ${r}`);
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {
       if (!textHours(now())) continue;                               // texts wait for the morning
-      const r = await textsStep(b, { players, kevinSw, ab, mark, textOne, has, add, now });
+      const r = await textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now });
       if (r) problems.push(`${b.slot} texts: ${r}`);
     }
   }
@@ -253,8 +297,17 @@ async function splitwiseStep(b, { players, kevinSw, ab, mark, now }) {
   const recent = (await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab))?.expenses;
   if (!recent) return 'could not read the group\'s entries';
   if (!(await mark(b, 'splitwise', 'claimed'))) return null;          // someone else has it, or the booking changed
-  const already = recent.find((e) => sameBooking(e, b));
-  if (already) { await mark(b, 'splitwise', 'done', `already in Splitwise (entry ${already.id})`); return null; }
+  const already = entriesFor(recent, b);
+  if (already.length > 1) {
+    await mark(b, 'splitwise', 'failed', `${already.length} entries for this day are already in Splitwise: check them before Retry`);
+    return `${already.length} entries for this day already in Splitwise`;
+  }
+  if (already.length) {
+    const c = checkEntry(already[0], b, kevinSw, ids);
+    if (c.ok) { await mark(b, 'splitwise', 'done', `already in Splitwise (entry ${c.id})`); return null; }
+    await mark(b, 'splitwise', 'failed', `an entry for this day is already in Splitwise, but ${c.why}: correct it, then Retry`);
+    return `the entry already in Splitwise disagrees: ${c.why}`;
+  }
   const plan = buildPlan(b, gid, members, ids);
   mkdirSync(LOG_DIR, { recursive: true });
   const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
@@ -267,7 +320,8 @@ async function splitwiseStep(b, { players, kevinSw, ab, mark, now }) {
     return `the save did not go through (screenshot ${shot})`;
   }
   const after = (await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab))?.expenses;
-  const check = checkEntry(after, b, kevinSw, ids);
+  const saved = (after || []).filter((e) => !e.deleted_at && e.description === description(b)).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
+  const check = checkEntry(saved, b, kevinSw, ids);
   if (!check.ok) {
     await mark(b, 'splitwise', 'failed', `saved, but ${check.why}: check Splitwise`);
     return check.why;
@@ -276,32 +330,47 @@ async function splitwiseStep(b, { players, kevinSw, ab, mark, now }) {
   return null;
 }
 
-async function textsStep(b, { players, kevinSw, ab, mark, textOne, has, add, now }) {
-  if (!(await mark(b, 'texts', 'claimed'))) return null;
+async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now }) {
+  // The texts quote the entry Splitwise holds, read before anything is claimed: the one the
+  // Splitwise step named, else the one entry for that date.
   const gid = players.splitwise_group.id;
   const ids = b.players.map((p) => players.players[String(p.id)]?.splitwise_id);
-  // Each player's own share from the entry; the equal split if the entry cannot be read.
   const expenses = (await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab))?.expenses;
-  const check = checkEntry(expenses, b, kevinSw, ids);
-  const equal = equalShares(b.pricePence, b.players.length);
+  if (!expenses) return 'could not read the group\'s entries';           // nothing claimed: tried again next run
+  const named = /entry (\d+)/.exec(b.splitwise.note || '');
+  const live = expenses.filter((e) => !e.deleted_at);
+  const mine = entriesFor(live, b);
+  const entry = (named && live.find((e) => String(e.id) === named[1])) || (mine.length === 1 ? mine[0] : null);
+  if (!(await mark(b, 'texts', 'claimed'))) return null;
+  const check = checkEntry(entry, b, kevinSw, ids);
+  if (!check.ok) {
+    await mark(b, 'texts', 'failed', `no texts sent: the Splitwise entry no longer matches (${check.why})`);
+    return `the Splitwise entry no longer matches: ${check.why}`;
+  }
   const names = b.players.map((p) => p.name);
   let sent = 0;
   let due = 0;
-  for (const [i, p] of b.players.entries()) {
+  let why = '';
+  let unread = false;
+  let late = false;
+  for (const p of b.players) {
     const info = players.players[String(p.id)];
     if (!info || info.self) continue;
     due++;
-    if (has(b.slot, p.id)) { sent++; continue; }                     // never twice to one person
+    if (ledger.has(b.slot, p.id)) { sent++; continue; }              // never twice to one person
+    if (!textHours(now())) { late = true; continue; }                 // checked before every text
     const number = (info.phones || [])[0];
-    if (!number) continue;
-    const share = check.ok && check.owes[info.splitwise_id] ? check.owes[info.splitwise_id] : equal[i];
-    const r = await textOne(number, textFor(b, names, share));
-    add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ok: r.ok, via: r.via || null });
-    if (r.ok) sent++;
+    if (!number) { why = why || 'a player has no phone number'; continue; }
+    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, state: 'sending' });
+    const r = await textOne(number, textFor(b, names, check.owes[info.splitwise_id]));
+    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ok: r.ok, via: r.via || null });
+    if (r.ok) sent++; else why = why || r.why || 'Messages did not send it';
+    if (r.ok && /not readable/.test(r.via || '')) unread = true;
   }
-  if (sent === due) { await mark(b, 'texts', 'done', `${sent} of ${due} sent`); return null; }
-  await mark(b, 'texts', 'failed', `${sent} of ${due} sent`);
-  return `${sent} of ${due} sent`;
+  const note = `${sent} of ${due} sent${unread ? ' (delivery not checked)' : ''}${late ? '; the rest wait: Retry after 07:30' : ''}${why ? `: ${why}` : ''}`;
+  if (sent === due) { await mark(b, 'texts', 'done', note); return null; }
+  await mark(b, 'texts', 'failed', note);
+  return note;
 }
 
 // ── The dry run: the Splitwise form filled for a booking, never saved, and the texts shown ──

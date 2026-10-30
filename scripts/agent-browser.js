@@ -41,8 +41,9 @@
  *    ONE OTHER APPROVAL (Kevin, 30 Oct 2026): the padel page's "Booked and paid", saved
  *    on Kevin's phone with its own key, approves one Splitwise expense for that booking.
  *    `commit --padel-slot S --padel-paid-at T` asks the padel Worker and goes on only when
- *    that booking still has that exact version and its Splitwise step is claimed by the
- *    padel robot right now (scripts/padel-paid.mjs). Nothing else counts.
+ *    that booking still has that exact version, its Splitwise step is claimed by the padel
+ *    robot right now (scripts/padel-paid.mjs), and the plan is that booking's expense and
+ *    nothing else: Splitwise pages only, its own description and total, one Save.
  *
  * Every run appends to a JSONL ledger, so what a browser did on Kevin's behalf
  * is auditable after the fact rather than trusted at the time.
@@ -594,10 +595,33 @@ function assertUploadable(files) {
 // `window` is set by `handover` alone: the one command that may open an approved robot form
 // card, because it fills the form in a window Kevin finishes and never presses the final click.
 // The padel approval (see 3. in the header): Kevin's Booked and paid for this exact booking version,
-// with the Splitwise step claimed by the padel robot. Returns { ok, why } so it can be tested.
-const PADEL_PAID_URL = process.env.PADEL_PAID_URL || 'https://padel.runpreneur.org.uk/api/robot/paid';
-const PADEL_ROBOT_KEY_FILE = process.env.PADEL_ROBOT_KEY_FILE || path.join(os.homedir(), '.config', 'od', 'padel_robot_key');
-async function padelApproval(slot, paidAt, { fetchImpl = globalThis.fetch, keyFile = PADEL_ROBOT_KEY_FILE } = {}) {
+// with the Splitwise step claimed by the padel robot, approving that booking's expense and nothing
+// else. Returns { ok, why } so it can be tested.
+const PADEL_PAID_URL = 'https://padel.runpreneur.org.uk/api/robot/paid';
+const PADEL_ROBOT_KEY_FILE = path.join(os.homedir(), '.config', 'od', 'padel_robot_key');
+const PADEL_SAVE = "button.submit:has-text('Save')";
+// Why a plan is not this booking's Splitwise expense, or null. The description is the one
+// scripts/padel-paid.mjs writes (tests/padel-paid.test.js proves the two agree).
+function padelPlanProblem(plan, b) {
+  const steps = (plan && Array.isArray(plan.steps)) ? plan.steps : [];
+  const desc = `${b.day}, ${b.venue && b.venue.short}, ${b.start}, ${b.minutes} min`;
+  const total = (Number(b.pricePence) / 100).toFixed(2);
+  for (const s of steps) {
+    if (!s || !['goto', 'wait', 'click', 'fill', 'submit'].includes(s.do)) return `a padel plan may not "${s && s.do}"`;
+    if (s.do === 'goto') {
+      let host = '';
+      try { host = new URL(s.url).hostname; } catch { host = ''; }
+      if (host !== 'secure.splitwise.com') return `a padel plan goes to Splitwise only, not ${s.url}`;
+    }
+  }
+  const fills = steps.filter((s) => s.do === 'fill');
+  const want = [['input.description', desc], ["input[placeholder='0.00']", total]];
+  if (fills.length !== 2 || want.some(([sel, v]) => !fills.some((f) => f.selector === sel && String(f.value) === v))) return `a padel plan fills "${desc}" and ${total}, nothing else`;
+  const submits = steps.filter((s) => s.do === 'submit');
+  if (submits.length !== 1 || submits[0].selector !== PADEL_SAVE || steps[steps.length - 1] !== submits[0]) return 'a padel plan ends with one Save';
+  return null;
+}
+async function padelApproval(slot, paidAt, plan, { fetchImpl = globalThis.fetch, keyFile = PADEL_ROBOT_KEY_FILE } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}\|\d{2}$/.test(String(slot || ''))) return { ok: false, why: `--padel-slot must look like 2026-11-03|19, got "${slot}"` };
   if (!paidAt) return { ok: false, why: '--padel-paid-at is required: the version of the booking the robot read' };
   let key;
@@ -614,6 +638,8 @@ async function padelApproval(slot, paidAt, { fetchImpl = globalThis.fetch, keyFi
   if (!b) return { ok: false, why: `no paid padel booking waiting for ${slot}` };
   if (b.paidAt !== paidAt) return { ok: false, why: `the booking for ${slot} changed since the robot read it` };
   if (!b.splitwise || b.splitwise.state !== 'claimed') return { ok: false, why: `the Splitwise step for ${slot} is not claimed by the robot (${b.splitwise ? b.splitwise.state : 'none'})` };
+  const problem = padelPlanProblem(plan, b);
+  if (problem) return { ok: false, why: problem };
   return { ok: true, outcome: "Approved (padel Booked and paid on Kevin's phone)", slot };
 }
 
@@ -3428,7 +3454,7 @@ async function main() {
     let approval = null;
     if (cmd === 'commit' && arg(rest, 'padel-slot', null)) {
       if (arg(rest, 'task', null)) die('commit takes --task or --padel-slot, never both');
-      const padel = await padelApproval(arg(rest, 'padel-slot'), arg(rest, 'padel-paid-at', null));
+      const padel = await padelApproval(arg(rest, 'padel-slot'), arg(rest, 'padel-paid-at', null), plan);
       if (!padel.ok) die(`the padel approval does not hold: ${padel.why}. Nothing was submitted.`);
       approval = padel;
     } else if (cmd === 'commit') approval = assertApproved(arg(rest, 'task'));
