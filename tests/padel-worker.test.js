@@ -396,32 +396,42 @@ function mapRepo() {
       async setRealName(id, realName) { const p = people.get(id); if (!p) return false; p.real_name = realName; return true; },
       async setPaid(slot, price, players, now) {
         const b = booked.get(slot);
-        if (!b || !(b.splitwise_state == null || b.splitwise_state === 'failed')) return false;
+        if (!b || !(b.splitwise_state == null || b.splitwise_state === 'failed') || b.texts_state != null) return false;
         Object.assign(b, { price_pence: price, players: JSON.stringify(players), paid_at: now, splitwise_state: null, splitwise_at: null, splitwise_note: null, texts_state: null, texts_at: null, texts_note: null });
         return true;
       },
       async clearPaid(slot) {
         const b = booked.get(slot);
-        if (!b || !b.paid_at || !(b.splitwise_state == null || b.splitwise_state === 'failed')) return false;
+        if (!b || !b.paid_at || !(b.splitwise_state == null || b.splitwise_state === 'failed') || b.texts_state != null) return false;
         Object.assign(b, { price_pence: null, players: null, paid_at: null, splitwise_state: null, splitwise_at: null, splitwise_note: null, texts_state: null, texts_at: null, texts_note: null });
         return true;
       },
-      async markStep(slot, step, state, note, now) {
+      async markStep(slot, step, state, note, now, paidAt = null) {
         const b = booked.get(slot);
-        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step)) return false;
+        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
         const cur = b[`${step}_state`] ?? null;
-        const ok = state === 'claimed' ? cur === null : state === 'retry' ? cur === 'failed' : cur === 'claimed';
+        const ok = state === 'claimed' ? cur === null && b.paid_at === paidAt && (step === 'splitwise' || b.splitwise_state === 'done')
+          : state === 'retry' ? cur === 'failed' : cur === 'claimed';
         if (!ok) return false;
         const to = state === 'retry' ? null : state;
         Object.assign(b, { [`${step}_state`]: to, [`${step}_at`]: to ? now : null, [`${step}_note`]: to ? note : null });
         return true;
       },
       async listPaidPending(from) { return [...booked.values()].filter((b) => b.slot >= from && b.paid_at && !(b.splitwise_state === 'done' && b.texts_state === 'done')).sort((a, b) => a.slot.localeCompare(b.slot)); },
-      async setBooked(slot, person_id, venue, now, d = {}) {
-        const was = booked.get(slot) || {};
-        booked.set(slot, { slot, person_id, venue, created_at: now, start: d.start ?? was.start ?? null, minutes: d.minutes ?? was.minutes ?? null, courts: d.courts ?? was.courts ?? 1 });
+      // The same rules as makeRepo's SQL: a paid booking changes only by Kevin's phone, before the robot starts.
+      async setBooked(slot, person_id, venue, now, d = {}, admin = false) {
+        const was = booked.get(slot);
+        if (was && was.paid_at && !(admin && (was.splitwise_state == null || was.splitwise_state === 'failed'))) return false;
+        booked.set(slot, { ...(was || {}), slot, person_id, venue, created_at: now, start: d.start ?? was?.start ?? null, minutes: d.minutes ?? was?.minutes ?? null, courts: d.courts ?? was?.courts ?? 1 });
+        return true;
       },
-      async clearBooked(slot) { booked.delete(slot); },
+      async setCourts(slot, courts) { const b = booked.get(slot); if (!b) return false; b.courts = courts; return true; },
+      async clearBooked(slot, admin = false) {
+        const b = booked.get(slot);
+        if (!b || (b.paid_at && !(admin && (b.splitwise_state == null || b.splitwise_state === 'failed')))) return false;
+        booked.delete(slot);
+        return true;
+      },
       async alertSlots(from) { return [...alerts.keys()].filter((s) => s >= from); },
       async claimAlert(slot, names, venues, now) {
         if (alerts.has(slot)) return false;
@@ -1260,12 +1270,15 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect((await t.call('/api/robot/paid')).status).toBe(401);
       const list = (await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings;
       expect(list).toEqual([{
-        slot: SLOT, date: '2026-10-28', day: 'Wed 28 Oct', venue: { code: 'pdl', short: 'Cambridge', label: 'PDL Padel United Cambridge' }, start: '19:30', minutes: 90, pricePence: 3600,
+        slot: SLOT, date: '2026-10-28', day: 'Wed 28 Oct', venue: { code: 'pdl', short: 'Cambridge', label: 'PDL Padel United Cambridge' }, start: '19:30', minutes: 90, pricePence: 3600, paidAt: iso(NOW),
         splitwise: { state: null, at: null, note: null }, texts: { state: null, at: null, note: null },
         players: [{ id: a, name: 'Test Ann', nick: 'Test Ann' }, { id: b, name: 'Test Robert', nick: 'Test Bob' }],
       }]);
-      const step = (step, state, note) => t.call('/api/robot/paid', { slot: SLOT, step, state, note }, { robot: ROBOT });
+      const step = (step, state, note, paidAt = iso(NOW)) => t.call('/api/robot/paid', { slot: SLOT, step, state, note, paidAt }, { robot: ROBOT });
       expect((await step('splitwise', 'done')).json.changed).toBe(false);               // never done without a claim
+      expect((await step('texts', 'claimed')).json.changed).toBe(false);                // never texts before the Splitwise entry is done
+      expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'splitwise', state: 'claimed' }, { robot: ROBOT })).status).toBe(400);   // a claim names the version it read
+      expect((await step('splitwise', 'claimed', null, '2026-01-01T00:00:00.000Z')).json.changed).toBe(false);   // ...and an old version never wins
       expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
       expect((await step('splitwise', 'claimed')).json.changed).toBe(false);            // a second claim never wins
       expect((await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 50, players: [a, b] }, { admin: ADMIN })).status).toBe(409);
@@ -1286,12 +1299,56 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a] }, { admin: ADMIN });
       await t.repo.prune('2026-10-29');
       expect(await t.repo.getBooked(SLOT)).toMatchObject({ slot: SLOT, price_pence: 3600 });
-      await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW));
-      await t.repo.markStep(SLOT, 'splitwise', 'done', null, iso(NOW));
-      await t.repo.markStep(SLOT, 'texts', 'claimed', null, iso(NOW));
-      await t.repo.markStep(SLOT, 'texts', 'done', null, iso(NOW));
+      // After midnight the page still lists it for Kevin's Retry, and a retry of last night's booking is accepted.
+      t.setNow(Date.parse('2026-10-29T09:00:00Z'));
+      expect((await t.call('/api/state')).json.earlier).toEqual([{ slot: SLOT, day: 'Wed 28 Oct', venue: 'Cambridge', start: '19:30', minutes: 90, paid: expect.objectContaining({ price: 3600 }) }]);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'failed', 'no group', iso(NOW))).toBe(true);
+      expect((await t.call('/api/admin', { action: 'retry', slot: SLOT, step: 'splitwise' }, { admin: ADMIN })).status).toBe(200);
+      expect((await t.call('/api/admin', { action: 'retry', slot: '2026-10-20|19', step: 'splitwise' }, { admin: ADMIN })).status).toBe(400);   // older than a week
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'done', null, iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'texts', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      expect(await t.repo.markStep(SLOT, 'texts', 'done', null, iso(NOW))).toBe(true);
       await t.repo.prune('2026-10-29');
       expect(await t.repo.getBooked(SLOT)).toBeNull();
+    });
+    it('an unfinished paid booking is kept a week and no longer (review of PR #858)', async () => {
+      const [a] = await t.addPeople(['Test Ann']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a] }, { admin: ADMIN });
+      await t.repo.prune('2026-11-04');                       // 7 days on: still kept
+      expect(await t.repo.getBooked(SLOT)).not.toBeNull();
+      await t.repo.prune('2026-11-05');                       // 8 days on: gone
+      expect(await t.repo.getBooked(SLOT)).toBeNull();
+    });
+    it('once the robot has started on Splitwise, nothing changes or removes the booking, Kevin\'s phone included (review of PR #858)', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a, b] }, { admin: ADMIN });
+      // Before the robot starts, Kevin may Undo; anyone else may not, even straight through the repo.
+      expect(await t.repo.clearBooked(SLOT, false)).toBe(false);
+      expect((await book(a, { minutes: 60 })).status).toBe(409);
+      expect((await t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, minutes: 60 }, { admin: ADMIN })).status).toBe(200);
+      expect(await t.repo.markStep(SLOT, 'splitwise', 'claimed', null, iso(NOW), iso(NOW))).toBe(true);
+      for (const call of [
+        () => t.call('/api/booked', { slot: SLOT, booked: false }, { admin: ADMIN }),
+        () => t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, start: '19:00' }, { admin: ADMIN }),
+        () => t.call('/api/admin', { action: 'paid', slot: SLOT, price: 48, players: [a, b] }, { admin: ADMIN }),
+        () => t.call('/api/admin', { action: 'unpaid', slot: SLOT }, { admin: ADMIN }),
+      ]) expect((await call()).status).toBe(409);
+      // "Booked 2nd court" (the court count alone) is anyone's, and keeps the paid record.
+      expect((await t.call('/api/booked', { slot: SLOT, person_id: b, venue: 'pdl', booked: true, courts: 2 })).status).toBe(200);
+      expect(await t.repo.getBooked(SLOT)).toMatchObject({ courts: 2, price_pence: 3600, splitwise_state: 'claimed', minutes: 60 });
+    });
+    it('a real name nobody else has; people listed by the name shown; a price is a real amount of at least a penny (review of PR #858)', async () => {
+      const [a, b, c] = await t.addPeople(['Test Zed', 'Test Sam', 'Test Amy']);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'test sam' }, { admin: ADMIN })).status).toBe(409);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Abe' }, { admin: ADMIN })).json.people.map((p) => p.name)).toEqual(['Test Abe', 'Test Amy', 'Test Sam']);
+      expect((await t.call('/api/admin', { action: 'name', id: b, real_name: 'Test Abe' }, { admin: ADMIN })).status).toBe(409);
+      await book(a);
+      for (const price of [true, '1e2', '', ' ', 0.001, '36.555', [36]]) expect((await t.call('/api/admin', { action: 'paid', slot: SLOT, price, players: [a, c] }, { admin: ADMIN })).status).toBe(400);
+      expect((await t.call('/api/admin', { action: 'paid', slot: SLOT, price: '36.50', players: [a, c] }, { admin: ADMIN })).json.booked[SLOT].paid.price).toBe(3650);
     });
   });
 

@@ -633,12 +633,9 @@ def t_padel_robot(v, row):
 def t_padel_admin(v, row):
     """A GET of /api/state with Kevin's phone key: the Worker answers "admin": true only for its own key."""
     s, _, b = _http("https://padel.runpreneur.org.uk/api/state", {"X-Admin-Key": v})
-    if 200 <= s < 300:
-        try:
-            if json.loads(b or "{}").get("admin") is True:
-                return {"result": "ok", "said": "works"}
-        except ValueError:
-            pass
+    if s is not None and 200 <= s < 300:
+        if isinstance(b, dict) and b.get("admin") is True:
+            return {"result": "ok", "said": "works"}
         return {"result": "rejected", "said": "the Worker did not take it as Kevin's phone key"}
     return _ok(s, b)
 

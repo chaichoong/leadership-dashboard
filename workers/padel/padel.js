@@ -25,8 +25,12 @@
 //        { action: 'unpaid', slot }                   take the price off again (before the robot has sent it)
 //        { action: 'retry', slot, step }              let the robot try a failed Splitwise entry or texts again
 //   GET  /api/robot/paid  (X-Robot-Key)     -> { ok, bookings }   paid bookings with a step still to do
-//   POST /api/robot/paid  (X-Robot-Key)     -> { ok, changed }    { slot, step, state, note }: claimed, then
-//        done or failed; a step is claimed once and never again unless Kevin taps Retry.
+//   POST /api/robot/paid  (X-Robot-Key)     -> { ok, changed }    { slot, step, state, note, paidAt }: claimed,
+//        then done or failed; a step is claimed once and never again unless Kevin taps Retry.
+//   TWO RULES, IN THE DATABASE (review of PR #858): (1) once the robot has claimed the Splitwise step,
+//   nothing changes or removes that booking, Kevin's phone included, until that step has failed; (2) the
+//   texts can be claimed only after the Splitwise entry is done, and a claim names the paid_at it read, so
+//   the robot never acts on a price or player list that changed under it.
 // The page itself is a static asset in ./public, served without this Worker (wrangler.toml
 // run_worker_first = ["/api/*"]); its headers live in public/_headers.
 //
@@ -455,7 +459,7 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     const out = { id: p.id, name: p.realName || p.name, venues: Array.isArray(p.venues) ? p.venues : splitVenues(p.venues), savedAt: p.savedAt ?? null };
     if (p.realName) out.nick = p.name;
     return out;
-  });
+  }).sort((x, y) => x.name.localeCompare(y.name, 'en', { sensitivity: 'base' }));
   const byId = new Map(ppl.map((p) => [p.id, p]));
   const voteMap = {};
   for (const v of votes) {
@@ -677,22 +681,26 @@ export function makeRepo(db) {
     // failed), so a price or player change can never race an entry already made.
     async setPaid(slot, pricePence, players, nowIso) {
       const r = await db.prepare(`UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
-        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND (splitwise_state IS NULL OR splitwise_state = 'failed')`)
+        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`)
         .bind(slot, pricePence, JSON.stringify(players), nowIso).run();
       return (r.meta?.changes || 0) === 1;
     },
     async clearPaid(slot) {
       const r = await db.prepare(`UPDATE booked SET price_pence = NULL, players = NULL, paid_at = NULL, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
-        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ? AND paid_at IS NOT NULL AND (splitwise_state IS NULL OR splitwise_state = 'failed')`).bind(slot).run();
+        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ? AND paid_at IS NOT NULL AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`).bind(slot).run();
       return (r.meta?.changes || 0) === 1;
     },
     // The robot's steps: claimed from nothing, then done or failed from claimed; Retry clears a failed one.
-    async markStep(slot, step, state, note, nowIso) {
-      if (!PAID_STEPS.includes(step)) return false;
-      const from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
+    async markStep(slot, step, state, note, nowIso, paidAt = null) {
+      if (!PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
+      let from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
+      if (state === 'claimed' && step === 'texts') from += " AND splitwise_state = 'done'";
+      if (state === 'claimed') from += ' AND paid_at = ?5';
       const to = state === 'retry' ? null : state;
+      const args = [slot, to, to ? nowIso : null, to ? note : null];
+      if (state === 'claimed') args.push(paidAt);            // ?5 exists only in a claim
       const r = await db.prepare(`UPDATE booked SET ${step}_state = ?2, ${step}_at = ?3, ${step}_note = ?4 WHERE slot = ?1 AND paid_at IS NOT NULL AND ${from}`)
-        .bind(slot, to, to ? nowIso : null, to ? note : null).run();
+        .bind(...args).run();
       return (r.meta?.changes || 0) === 1;
     },
     async listPaidPending(fromDate) {
@@ -701,12 +709,24 @@ export function makeRepo(db) {
       return r.results || [];
     },
     // A detail left out (an older page, or "Booked 2nd court" sending only courts) keeps its stored value.
-    async setBooked(slot, personId, venue, nowIso, details = {}) {
-      await db.prepare('INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 1), ?7) ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at')
-        .bind(slot, personId, venue, details.start ?? null, details.minutes ?? null, details.courts ?? null, nowIso).run();
+    // A paid booking changes only by Kevin's phone, and only before the robot starts on Splitwise:
+    // the check is in the statement, so no read-then-write race can get round it.
+    async setBooked(slot, personId, venue, nowIso, details = {}, admin = false) {
+      const r = await db.prepare(`INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 1), ?7)
+        ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at
+        WHERE booked.paid_at IS NULL OR (?8 = 1 AND COALESCE(booked.splitwise_state, '') IN ('', 'failed'))`)
+        .bind(slot, personId, venue, details.start ?? null, details.minutes ?? null, details.courts ?? null, nowIso, admin ? 1 : 0).run();
+      return (r.meta?.changes || 0) === 1;
     },
-    async clearBooked(slot) {
-      await db.prepare('DELETE FROM booked WHERE slot = ?').bind(slot).run();
+    // "Booked 2nd court": the court count alone, which the robot never reads, so anyone may set it.
+    async setCourts(slot, courts) {
+      const r = await db.prepare('UPDATE booked SET courts = ? WHERE slot = ?').bind(courts, slot).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    async clearBooked(slot, admin = false) {
+      const r = await db.prepare(`DELETE FROM booked WHERE slot = ?1 AND (paid_at IS NULL OR (?2 = 1 AND COALESCE(splitwise_state, '') IN ('', 'failed')))`)
+        .bind(slot, admin ? 1 : 0).run();
+      return (r.meta?.changes || 0) === 1;
     },
     // The slots whose DM is done, under way, or given up: every row. A claimed row is final.
     async alertSlots(fromDate) {
@@ -1036,8 +1056,9 @@ export function cleanBooking(body, slot) {
 
 // Booked and paid: a price in pounds (to the penny) and 1 to 16 distinct players who are on the list.
 export function cleanPaid(body, people) {
-  const price = Number(body.price);
-  if (!Number.isFinite(price) || price <= 0 || price > MAX_PRICE_POUNDS) return { error: `The price is a number of pounds, up to ${MAX_PRICE_POUNDS}` };
+  const raw = body.price;
+  const price = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d{1,4}(\.\d{1,2})?$/.test(raw.trim()) ? Number(raw) : NaN;
+  if (!Number.isFinite(price) || Math.round(price * 100) < 1 || price > MAX_PRICE_POUNDS) return { error: `The price is a number of pounds, up to ${MAX_PRICE_POUNDS}` };
   if (!Array.isArray(body.players) || !body.players.length || body.players.length > 16) return { error: 'Pick who is playing (1 to 16 people)' };
   const ids = [...new Set(body.players.map(intId))];
   if (ids.some((id) => !id) || ids.length !== body.players.length) return { error: 'Each player is picked once, from the list' };
@@ -1056,9 +1077,17 @@ async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
       const clean = cleanName(body.real_name);
       if (clean.error) return fail(clean.error, 400);
       realName = clean.name;
+      // Two people shown with one name would also make that name find the wrong one.
+      const f = foldName(realName);
+      if ((await repo.listPeople()).some((p) => p.id !== id && (foldName(p.name) === f || (p.realName && foldName(p.realName) === f)))) return fail('Someone else already has that name', 409);
     }
     await repo.setRealName(id, realName);
-  } else if (['paid', 'unpaid', 'retry'].includes(body.action)) {
+  } else if (body.action === 'retry') {
+    // A retry may be for a booking from the last week (paid late, the robot ran after midnight).
+    const m = SLOT_RE.exec(String(body.slot || ''));
+    if (!m || m[1] < addDays(dates[0], -PAID_KEEP_DAYS) || m[1] > dates[dates.length - 1]) return fail('Not a booking from the last week', 400);
+    if (!PAID_STEPS.includes(body.step) || !(await repo.markStep(m[0], body.step, 'retry', null, nowIso))) return fail('Only a step that failed can be tried again', 409);
+  } else if (['paid', 'unpaid'].includes(body.action)) {
     const clean = cleanSlots([body.slot], dates);
     if (clean.error || !clean.slots.length) return fail(clean.error || 'That hour has passed', 400);
     const slot = clean.slots[0];
@@ -1068,10 +1097,8 @@ async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
       const paid = cleanPaid(body, await repo.listPeople());
       if (paid.error) return fail(paid.error, 400);
       if (!(await repo.setPaid(slot, paid.pricePence, paid.players, nowIso))) return fail('This booking is already with the robot or in Splitwise. Change it in Splitwise.', 409);
-    } else if (body.action === 'unpaid') {
-      if (!(await repo.clearPaid(slot))) return fail('This booking is already with the robot or in Splitwise. Change it in Splitwise.', 409);
-    } else if (!PAID_STEPS.includes(body.step) || !(await repo.markStep(slot, body.step, 'retry', null, nowIso))) {
-      return fail('Only a step that failed can be tried again', 409);
+    } else if (!(await repo.clearPaid(slot))) {
+      return fail('This booking is already with the robot or in Splitwise. Change it in Splitwise.', 409);
     }
   } else {
     return fail('Unknown action', 400);
@@ -1092,7 +1119,7 @@ async function handleRobotPaid(request, env, repo, nowMs) {
       const paid = paidOf(b);
       return {
         slot: b.slot, date, day: dayLabel(date), venue: { code: b.venue, short: cfg[b.venue]?.short || b.venue, label: cfg[b.venue]?.label || b.venue },
-        start: b.start, minutes: b.minutes, pricePence: paid.price, splitwise: paid.splitwise, texts: paid.texts,
+        start: b.start, minutes: b.minutes, pricePence: paid.price, paidAt: b.paid_at, splitwise: paid.splitwise, texts: paid.texts,
         players: paid.players.map((id) => { const p = people.get(id); return p ? { id, name: p.realName || p.name, nick: p.name } : { id, name: null }; }),
       };
     });
@@ -1104,7 +1131,18 @@ async function handleRobotPaid(request, env, repo, nowMs) {
   const { slot, step, state } = parsed.body;
   if (typeof slot !== 'string' || !SLOT_RE.test(slot) || !PAID_STEPS.includes(step) || !['claimed', 'done', 'failed'].includes(state)) return fail('slot, step and state are needed', 400);
   const note = typeof parsed.body.note === 'string' ? parsed.body.note.slice(0, 200) : null;
-  return json({ ok: true, changed: await repo.markStep(slot, step, state, note, nowIso) });
+  const paidAt = typeof parsed.body.paidAt === 'string' ? parsed.body.paidAt : null;
+  if (state === 'claimed' && !paidAt) return fail('A claim names the paidAt it read', 400);
+  return json({ ok: true, changed: await repo.markStep(slot, step, state, note, nowIso, paidAt) });
+}
+
+// Paid bookings from the last week the robot has not finished: the page lists them for Kevin's Retry.
+async function earlierPaid(env, repo, today) {
+  const cfg = venueConfig(env);
+  return (await repo.listPaidPending(addDays(today, -PAID_KEEP_DAYS))).filter((b) => b.slot < today).map((b) => {
+    const [, date] = SLOT_RE.exec(b.slot);
+    return { slot: b.slot, day: dayLabel(date), venue: cfg[b.venue]?.short || b.venue, start: b.start, minutes: b.minutes, paid: paidOf(b) };
+  });
 }
 
 async function loadState(env, repo, nowMs) {
@@ -1114,6 +1152,7 @@ async function loadState(env, repo, nowMs) {
   ]);
   const state = computeState({ people, votes, booked, availability, dates, nowMs, cfg: venueConfig(env) });
   state.availability.stale = pulseDue(pulse, nowMs);
+  state.earlier = await earlierPaid(env, repo, dates[0]);
   return state;
 }
 
@@ -1293,17 +1332,21 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       const clean = cleanSlots([body.slot], dates);
       if (clean.error || !clean.slots.length) return fail(clean.error || 'That hour has passed', 400);
       const slot = clean.slots[0];
-      // A paid booking is Kevin's to change: anyone else's Undo or re-mark would orphan its Splitwise entry.
-      if (!admin && (await repo.getBooked(slot))?.paid_at) return fail("This booking is paid. Only Kevin's phone can change it.", 409);
+      // A paid booking is Kevin's to change, and nobody's once the robot has started on Splitwise:
+      // a removed or re-marked booking would orphan its Splitwise entry or send a second one.
+      const existing = await repo.getBooked(slot);
+      const paidRefusal = admin ? 'This booking is with the robot or in Splitwise. Change it in Splitwise.' : "This booking is paid. Only Kevin's phone can change it.";
       if (body.booked === false) {
-        await repo.clearBooked(slot);
+        if (existing && !(await repo.clearBooked(slot, admin))) return fail(paidRefusal, 409);
       } else if (body.booked === true) {
         const id = intId(body.person_id);
         if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
         if (!VENUES.includes(body.venue)) return fail('Unknown venue', 400);
         const details = cleanBooking(body, slot);
         if (details.error) return fail(details.error, 400);
-        await repo.setBooked(slot, id, body.venue, nowIso, details);
+        const courtsOnly = existing?.paid_at && details.courts !== undefined && details.start === undefined && details.minutes === undefined && body.venue === existing.venue;
+        if (courtsOnly) await repo.setCourts(slot, details.courts);
+        else if (!(await repo.setBooked(slot, id, body.venue, nowIso, details, admin))) return fail(paidRefusal, 409);
       } else {
         return fail('booked must be true or false', 400);
       }

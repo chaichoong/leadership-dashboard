@@ -201,6 +201,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     <section id="board" hidden>
       <div id="ready" class="block ready" hidden aria-live="polite"></div>
       <div id="nearly" class="block nearly" hidden></div>
+      <div id="earlier" class="block nearly" hidden></div>
       <nav id="days" class="days" aria-label="Pick a day"></nav>
       <p id="day-note" class="day-note" hidden></p>
       <p id="unsaved" class="unsaved" role="status" hidden><span id="unsaved-text"></span><button type="button" id="save-now" class="btn small" hidden>Save now</button></p>
@@ -212,7 +213,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       </section>
       <section id="people-card" class="card" aria-labelledby="people-h" hidden>
         <h2 id="people-h">People</h2>
-        <p class="note">Only your phone sees this. A real name replaces the name someone picked, with its initials, everywhere on the page.</p>
+        <p class="note">Only your phone can change these. A real name replaces the name someone picked, with its initials, everywhere on the page.</p>
         <table class="people"><tbody id="people-rows"></tbody></table>
         <form id="add-player-form" class="add-player"><input id="add-player" autocomplete="off" placeholder="Add a player, full name" aria-label="Add a player, full name"><button type="submit" class="btn small">Add</button></form>
       </section>
@@ -293,6 +294,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let busy = false;
   let bookForm = null;                        // { slot, venue, start, minutes } while the Booked picker is open
   let paidForm = null;                        // { slot, price, players: Set } while the Booked and paid panel is open
+  const peopleDraft = new Map();              // real names typed on the People screen and not saved yet, by person id
   // Kevin's phone key (30 Oct 2026): set once from a #admin= link, kept on this phone only, sent as a
   // header. The Worker decides; the page only hides what this phone may not do.
   const adminMatch = /[#&]admin=([A-Za-z0-9_-]{16,128})/.exec(location.hash);
@@ -389,7 +391,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const el = document.activeElement;
     if (!el || el === document.body || !el.dataset) return null;
     if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
-    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'paidOpen', 'paidPlayer', 'retry', 'rename']) {
+    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName']) {
       if (el.dataset[k]) return '[data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()) + '="' + CSS.escape(el.dataset[k]) + '"]';
     }
     return el.id ? '#' + CSS.escape(el.id) : null;
@@ -462,6 +464,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     renderGrid();
     renderToggles();
     renderPeople();
+    renderEarlier();
     renderUnsaved();
   }
 
@@ -597,7 +600,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const where = (S.venueInfo[b.venue] || {}).short || b.venue || '?';
     const when = [b.start, b.minutes ? b.minutes + ' min' : ''].filter(Boolean).join(', ');
     const courts = b.courts > 1 ? ', ' + b.courts + ' courts' : '';
-    const undo = b.paid && !isAdmin() ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
+    const started = b.paid && b.paid.splitwise.state && b.paid.splitwise.state !== 'failed';
+    const undo = b.paid && (!isAdmin() || started) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
     let html = `<p class="booked-line"><span>&#10003; Booked by ${esc(who)}: ${esc(where)}${when ? ' ' + esc(when) : ''}${esc(courts)}</span>
         ${undo}</p>`;
     if (b.paid) html += paidLine(slot, b);
@@ -624,7 +628,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const retry = st === 'failed' && isAdmin() ? ` <button type="button" class="btn small" data-retry="${esc(slot + '|' + k)}"${busy ? ' disabled' : ''}>Retry</button>` : '';
       return `<span class="${cls}">${label}: ${esc(STEP_WORD[k][st] || st)}</span>${retry}`;
     };
-    const change = isAdmin() && (!pd.splitwise.state || pd.splitwise.state === 'failed') && !(paidForm && paidForm.slot === slot)
+    const change = isAdmin() && S.booked[slot] && (!pd.splitwise.state || pd.splitwise.state === 'failed') && !(paidForm && paidForm.slot === slot)
       ? ` <button type="button" class="btn small" data-paid-open="${esc(slot)}"${busy ? ' disabled' : ''}>Change</button>` : '';
     return `<p class="paid-line"><span>Paid ${esc(money(pd.price))}, ${names.length} playing (${esc(names.map(initials).join(' '))})${esc(each)}.</span> ${step('splitwise', 'Splitwise')} ${step('texts', 'Texts')}${change}</p>`;
   }
@@ -665,10 +669,19 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (card.hidden) return;
     $('people-rows').innerHTML = S.people.map((p) => `<tr>
         <td>${esc(p.nick || p.name)}</td>
-        <td><input value="${esc(p.nick ? p.name : '')}" placeholder="Real name" aria-label="Real name for ${esc(p.nick || p.name)}" data-real-name="${esc(p.id)}"></td>
+        <td><input value="${esc(peopleDraft.has(p.id) ? peopleDraft.get(p.id) : (p.nick ? p.name : ''))}" placeholder="Real name" aria-label="Real name for ${esc(p.nick || p.name)}" data-real-name="${esc(p.id)}"></td>
         <td aria-hidden="true">${esc(initials(p.name))}</td>
         <td><button type="button" class="btn small" data-rename="${esc(p.id)}"${busy ? ' disabled' : ''}>Save</button></td>
       </tr>`).join('');
+  }
+
+  // Kevin's phone only: paid bookings from earlier days the robot has not finished, with Retry.
+  function renderEarlier() {
+    const box = $('earlier');
+    const list = isAdmin() ? (S.earlier || []) : [];
+    box.hidden = !list.length;
+    if (!list.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<h2>Earlier bookings</h2>' + list.map((e) => `<div class="item"><p><strong>${esc(e.day)}, ${esc(e.venue)} ${esc(e.start || '')}</strong></p>${paidLine(e.slot, { paid: e.paid })}</div>`).join('');
   }
 
   // The Booked picker: where, from when (on the hour or the half hour) and for how long. The venue's
@@ -893,8 +906,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const r = await api(path, body);
       if (r.data && r.data.days) applyNewest(r); else await load();
       if (done) toast(done);
+      return true;
     } catch (e) {
       toast(e.message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -961,7 +976,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (t.dataset.retry) { const [d, hh, step] = t.dataset.retry.split('|'); postAndApply('/api/admin', { action: 'retry', slot: d + '|' + hh, step }, 'The robot will try again within 15 minutes.'); }
     else if (t.dataset.rename) {
       const input = document.querySelector('[data-real-name="' + CSS.escape(t.dataset.rename) + '"]');
-      postAndApply('/api/admin', { action: 'name', id: Number(t.dataset.rename), real_name: input ? input.value.trim() : '' }, 'Name saved.');
+      const id = Number(t.dataset.rename);
+      postAndApply('/api/admin', { action: 'name', id, real_name: input ? input.value.trim() : '' }, 'Name saved.').then((ok) => { if (ok) { peopleDraft.delete(id); renderPeople(); } });
     }
     else if (t.dataset.goto) gotoSlot(t.dataset.goto);
     else if (t.id === 'switch') switchPerson();
@@ -987,9 +1003,13 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const price = Number(new FormData(form).get('price'));
     if (!(price > 0)) { toast('Enter what you paid, in pounds.'); return; }
     if (!paidForm.players.size) { toast('Pick who is playing.'); return; }
-    postAndApply('/api/admin', { action: 'paid', slot: form.dataset.paidForm, price, players: [...paidForm.players] }, 'Saved. Splitwise and the texts follow within 15 minutes.');
+    const slot = form.dataset.paidForm;
+    postAndApply('/api/admin', { action: 'paid', slot, price, players: [...paidForm.players] }, 'Saved. Splitwise and the texts follow within 15 minutes.').then((ok) => {
+      if (ok && paidForm && paidForm.slot === slot) { paidForm = null; keepFocus(renderGrid); }
+    });
   });
   document.addEventListener('input', (ev) => {
+    if (ev.target.dataset && ev.target.dataset.realName) peopleDraft.set(Number(ev.target.dataset.realName), ev.target.value);
     if (ev.target.dataset && ev.target.dataset.paidPrice && paidForm) {
       paidForm.price = ev.target.value;
       const n = paidForm.players.size;
@@ -1005,10 +1025,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (name.length < 2) { toast('Type their full name first.'); input.focus(); return; }
     setBusy(true);
     try {
-      await api('/api/person', { name });
+      const known = new Set(S.people.map((p) => p.id));
+      const r = await api('/api/person', { name });
       input.value = '';
       await load();
-      toast(name + ' added.');
+      toast(known.has(r.data.id) ? (r.data.realName || r.data.name) + ' is already on the list.' : name + ' added.');
     } catch (e) {
       toast(e.message);
     } finally {

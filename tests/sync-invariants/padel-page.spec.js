@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
 // The phone key the mock Worker accepts (Kevin's phone, 30 Oct 2026): a request carrying it gets admin: true.
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [] } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
@@ -85,7 +85,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     );
     const named = (p) => (store.realNames.has(p.id) ? { ...p, realName: store.realNames.get(p.id) } : p);
     const everyone = (store.gone ? [other, ...extras] : [person, other, ...extras]).concat(store.added);
-    return computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now });
+    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier };
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -102,6 +102,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       store.adminBodies.push(body);
       if (body.action === 'name') { if (body.real_name) store.realNames.set(body.id, body.real_name); else store.realNames.delete(body.id); }
       if (body.action === 'paid') Object.assign(store.booked.find((b) => b.slot === body.slot), { price_pence: Math.round(body.price * 100), players: JSON.stringify(body.players), paid_at: new Date().toISOString() });
+      if (body.action === 'retry') { const e = earlier.find((x) => x.slot === body.slot); if (e) e.paid[body.step] = { state: null, at: null, note: null }; }
       return reply(route, 200, { ...state(), admin: true });
     }
     if (path === '/api/person') {                                        // adding a player by name
@@ -675,10 +676,43 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await form.locator('input[name="price"]').fill('36');
       await expect(form.locator('.note')).toContainText('4 playing, £9.00 each.');
       await form.locator('button[type="submit"]').click();
+      await expect(row.locator('[data-paid-form]')).toHaveCount(0);       // the panel closes once it is saved
       await expect(row.locator('.paid-line')).toContainText('Paid £36.00, 4 playing (TB TC TD TA), £9.00 each.');
       await expect(row.locator('.paid-line')).toContainText('Splitwise: waiting');
       await expect(row.locator('.paid-line')).toContainText('Texts: waiting');
       expect(store.adminBodies).toEqual([{ action: 'paid', slot: `${tomorrow}|19`, price: 36, players: [2, 3, 4, 1] }]);
+    });
+
+    test('names typed on the People screen survive a redraw; saving one keeps the others (review of PR #858)', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await page.locator('[data-real-name="3"]').fill('Test Cathy');
+      await page.locator('[data-real-name="2"]').fill('Test Robin');
+      await page.locator('[data-rename="2"]').click();
+      await expect(page.locator('[data-real-name="2"]')).toHaveValue('Test Robin');
+      await expect(page.locator('[data-real-name="3"]')).toHaveValue('Test Cathy');   // not saved, not lost
+    });
+
+    test('Kevin\'s phone lists last night\'s unfinished booking with Retry; once the robot has started there is no Undo (review of PR #858)', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      const yesterday = new Date(Date.parse(`${londonDates(Date.now())[0]}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+      const store = await mockPadel(page, {
+        siClosedFrom: 7,
+        booked: [bookedRow(tomorrow, { price_pence: 3600, players: '[1,2]', paid_at: new Date().toISOString(), splitwise_state: 'claimed' })],
+        earlier: [{ slot: `${yesterday}|20`, day: 'Earlier day', venue: 'Cambridge', start: '20:00', minutes: 60, paid: { price: 3000, players: [1, 2], at: 'x', splitwise: { state: 'failed', at: 'x', note: 'n' }, texts: { state: null, at: null, note: null } } }],
+      });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      const earlier = page.locator('#earlier');
+      await expect(earlier).toContainText('Earlier day, Cambridge 20:00');
+      await expect(earlier).toContainText("Splitwise: couldn't add");
+      await earlier.locator('[data-retry]').click();
+      expect(store.adminBodies).toEqual([{ action: 'retry', slot: `${yesterday}|20`, step: 'splitwise' }]);
+      await page.locator(`[data-day="${tomorrow}"]`).click();
+      await expect(page.locator('#row-19 .paid-line')).toContainText('Splitwise: adding now');
+      await expect(page.locator('#row-19 [data-unbook]')).toHaveCount(0);
+      await expect(page.locator('#row-19 [data-paid-open]')).toHaveCount(0);
     });
 
     test('a paid booking shows its status to everyone, with no Undo except on Kevin\'s phone', async ({ page }) => {
