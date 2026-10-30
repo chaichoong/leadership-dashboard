@@ -84,5 +84,16 @@ PROCESS:
 - If Kevin sent no messages today (only the automatic morning brief), write nothing, log "quiet day" and stop.
 - Otherwise extract, in Kevin's plain words where possible: (a) DECISIONS and rulings — each becomes a dated entry in "00 AI Context/Decisions/YYYY-MM-DD <short title>.md" following the existing files' format there, and if it changes how future work is done, also update Claude memory at /Users/kevinbrittain/.claude/projects/-Users-kevinbrittain-Projects-leadership-dashboard/memory/ (one-fact files + a MEMORY.md pointer line, matching the existing format); (b) COMMITMENTS (who said they'd do what) — check each has an Airtable task if it needs one (Tasks table tblqB8b22hKBL4PF1, base appnqjDpqDniH3IRl, PAT at ~/.config/od/airtable_pat, never print it); (c) CONCERNS Kevin voiced — noted for the next morning's brief context; (d) CORRECTIONS — if Kevin corrected a fact, fix it in the brain (00 AI Context) immediately.
 - Write a short day log to "00 AI Context/CEO Conversations/YYYY-MM-DD Slack.md" (create the folder if missing): 5-15 lines, what was discussed, what was decided, what was extracted where.
+- **Every Decisions file you write declares whether it touches the estate.** Put `estate:` in its
+  frontmatter: `estate: none` when the ruling changes NONE of the six things CLAUDE.md says
+  ESTATE.md must carry (routing, autonomy levels, the money rule, where Kevin decides, the
+  workforce shape, the clocks), and name the one it does touch otherwise — then absorb it into
+  `~/.claude/agents/ESTATE.md` and bump its `As at` date in this same run, as CLAUDE.md requires.
+  Without the declaration `scripts/agent-estate-drift.py` judges the ruling on its words, and a
+  tenancy, padel or wardrobe ruling that merely says "agent", "Roy", "register" or "approval"
+  reads as unabsorbed. On 30 Oct 2026 this sweep's four 29 Oct files turned the 06:25 estate-drift
+  job red at 06:55 with nothing estate-related in them (finding 20261030-ceo-agent-1131), and a
+  check that is red every morning is a check nobody reads. Declare it honestly: `estate: none` on
+  a ruling that does move routing hides exactly what the check exists to catch.
 - The precedent rule is sacred: a ruling stated once is a standing rule — never leave one un-recorded.
 - UK English, plain language, no em dashes. Do not message Kevin; this runs silently. If the transcript endpoint fails, retry once, then log the failure to the same folder so the main session sees it.

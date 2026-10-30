@@ -206,7 +206,10 @@ describe('which way the drift runs', () => {
     expect(staged.code).toBe(0);
     expect(staged.out).toContain('queue-fixer');
     expect(staged.out).toMatch(/sync-scheduled-tasks\.py --push/);
-    expect(staged.out).toMatch(/once this has MERGED/);
+    // The exemption moves the refusal off the commit; it does not excuse the push. The gate
+    // (tests/scheduled-tasks-tracked.test.js) runs where nothing is staged, so it still wants
+    // the two copies in sync, and the message has to say so or it reads as "no push needed".
+    expect(staged.out).toMatch(/GATE needs it too/);
     execFileSync('git', ['checkout', '--', '.'], { cwd: repo });
     execFileSync('git', ['reset', '-q'], { cwd: repo });
   });

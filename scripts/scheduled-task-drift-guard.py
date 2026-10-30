@@ -37,10 +37,19 @@ them is the incident above:
   modified file in a checkout the brief said not to disturb.
 
 So a routine whose REVIEWED copy is staged in this very commit is let through,
-with the `--push` it owes after the merge printed as a reminder. THE LIMIT: if
-BOTH copies were edited, the staged mirror lets the live edit through this one
-commit. It is caught on the next one, because by then the mirror is committed
-rather than staged and the drift reads as live-ahead again.
+with the `--push` it owes printed as a reminder. That exemption moves the refusal
+off the commit; it does NOT excuse the push, because the gate wants the copies in
+sync as well — `tests/scheduled-tasks-tracked.test.js` runs in the pre-push gate
+and in `fixer-merge.py`, where nothing is staged and the direction cannot be read.
+For daily-ops the chain is tighter still: `tests/daily-ops-restructure.test.js`
+requires the mirror to be the `docs/daily-ops-routine.md` body verbatim, so the
+doc is the reviewed original, the mirror is generated from it, and `--push` puts
+it live. What this exemption buys is a commit that is not blocked while that
+sequence is being carried out.
+
+THE LIMIT: if BOTH copies were edited, the staged mirror lets the live edit through
+this one commit. It is caught on the next one, because by then the mirror is
+committed rather than staged and the drift reads as live-ahead again.
 
 Exit 0 when in sync, when the only drift is a reviewed copy staged here, when
 there is no live directory (another machine, CI), or when the check itself cannot
@@ -128,9 +137,10 @@ def main():
             for _status, name in sorted(set(exempt)):
                 print("OK  %s — the reviewed copy is changing in this commit, so "
                       "the live copy is the stale one." % name, file=sys.stderr)
-            print("    Run `python3 scripts/sync-scheduled-tasks.py --push` once this "
-                  "has MERGED, so the live routine matches what was reviewed.",
-                  file=sys.stderr)
+            print("    Run `python3 scripts/sync-scheduled-tasks.py --push` so the live "
+                  "routine matches what was reviewed. The GATE needs it too: "
+                  "tests/scheduled-tasks-tracked.test.js runs where nothing is staged, so it "
+                  "cannot see the direction this commit can.", file=sys.stderr)
             return 0
 
     print("", file=sys.stderr)
