@@ -233,7 +233,7 @@ export function makeLedger(file = join(LOG_DIR, 'texts.jsonl')) {
 }
 
 export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now = Date.now, log = (l) => process.stdout.write(`${l}\n`),
-  key = readKey(), players = readPlayers(), textOne = texted, ledger = makeLedger() } = {}) {
+  key = readKey(), players = readPlayers(), textOne = texted, ledger = makeLedger(), logDir = LOG_DIR } = {}) {
   if (!key) { log(`FAILED: padel-paid: no robot key at ${KEY_FILE}`); return 1; }
   const headers = { 'X-Robot-Key': key, 'Content-Type': 'application/json' };
   const get = await fetchImpl(PAID_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
@@ -261,7 +261,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
       }
     }
     if (b.splitwise.state === null) {
-      const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now });
+      const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir });
       if (r) problems.push(`${b.slot} Splitwise: ${r}`);
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {
       if (!textStart(now())) continue;                              // texts wait for the morning
@@ -273,7 +273,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
   return 0;
 }
 
-async function splitwiseStep(b, { players, kevinSw, ab, mark, now }) {
+async function splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir }) {
   const gid = players.splitwise_group.id;
   const ids = b.players.map((p) => players.players[String(p.id)] && players.players[String(p.id)].splitwise_id);
   const group = (await swJson(`${SW}/api/v3.0/get_group/${gid}`, ab))?.group;
@@ -299,11 +299,11 @@ async function splitwiseStep(b, { players, kevinSw, ab, mark, now }) {
     return `the entry already in Splitwise disagrees: ${c.why}`;
   }
   const plan = buildPlan(b, gid, members, ids);
-  mkdirSync(LOG_DIR, { recursive: true });
+  mkdirSync(logDir, { recursive: true });
   const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
-  const planFile = join(LOG_DIR, `plan-${stamp}.json`);
+  const planFile = join(logDir, `plan-${stamp}.json`);
   writeFileSync(planFile, JSON.stringify(plan, null, 1));
-  const shot = join(LOG_DIR, `splitwise-${stamp}.png`);
+  const shot = join(logDir, `splitwise-${stamp}.png`);
   const r = await ab(['commit', '--plan', planFile, '--padel-slot', b.slot, '--padel-paid-at', b.paidAt, '--shot', shot]);
   if (r.code !== 0) {
     await mark(b, 'splitwise', 'failed', 'the robot could not save it: check Splitwise before Retry');

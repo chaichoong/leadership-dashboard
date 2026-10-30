@@ -85,9 +85,10 @@ const go = (w, s, extra = {}) => {
   const lines = [];
   const sent = [];
   const ledger = extra.ledger || makeLedger(join(tmp(), 'texts.jsonl'));
+  const logDir = tmp();                                   // plans and screenshots never land in the robot's real log folder
   return {
     lines, sent, ledger,
-    run: () => runOnce({ fetchImpl: w.fetchImpl, ab: s.ab, now: () => NOON, log: (l) => lines.push(l), key: 'robot-key-test', players: PLAYERS, ledger,
+    run: () => runOnce({ fetchImpl: w.fetchImpl, ab: s.ab, now: () => NOON, log: (l) => lines.push(l), key: 'robot-key-test', players: PLAYERS, ledger, logDir,
       textOne: async (number, text) => { sent.push({ number, text }); return (extra.textOk || (() => ({ ok: true, via: 'iMessage' })))(number); },
       ...extra.opts }),
   };
