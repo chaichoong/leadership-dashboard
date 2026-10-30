@@ -50,6 +50,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // voteDelayMs: a number, or a function of the request number (0, 1, ...).
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
+// The phone key the mock Worker accepts (Kevin's phone, 30 Oct 2026): a request carrying it gets admin: true.
+const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
 async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
@@ -58,7 +60,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
   // crowdAt 'HH': six more people, and all eight (Ann too) on tomorrow at that hour: a second court's crowd.
   const PEOPLE = ['Test Cat', 'Test Dan', 'Test Eve', 'Test Fay', 'Test Gus', 'Test Hal'].map((name, i) => ({ id: i + 3, name, venues: ['si', 'pdl', 'pp'], savedAt: null }));
   const extras = crowdAt ? PEOPLE : readyAt ? PEOPLE.slice(0, 2) : [];
-  const store = { votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  const store = { votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   if (readyAt) {
     const slot = `${londonDates(Date.now())[1]}|${readyAt}`;
     for (const pid of [2, 3, 4]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
@@ -81,7 +83,9 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       { readAt: at, goodAt: { si: at, pdl: at }, venues: { si, pdl: {} } },
       { fetchedAt: at, goodAt: at, days: {} },
     );
-    return computeState({ people: store.gone ? [other, ...extras] : [person, other, ...extras], votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now });
+    const named = (p) => (store.realNames.has(p.id) ? { ...p, realName: store.realNames.get(p.id) } : p);
+    const everyone = (store.gone ? [other, ...extras] : [person, other, ...extras]).concat(store.added);
+    return computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now });
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -89,15 +93,30 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     const path = new URL(req.url()).pathname;
     if (store.offline) return route.abort('internetdisconnected');      // no signal at all
     store.headers.push(req.headers());
-    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, state()); }
-    if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false });
+    const admin = req.headers()['x-admin-key'] === ADMIN_KEY;
+    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, { ...state(), admin }); }
+    if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false, admin });
+    if (path === '/api/admin') {                                         // the Worker's admin route, as far as the page uses it
+      if (!admin) return reply(route, 401, { error: "Only Kevin's phone can do that" });
+      const body = req.postDataJSON();
+      store.adminBodies.push(body);
+      if (body.action === 'name') { if (body.real_name) store.realNames.set(body.id, body.real_name); else store.realNames.delete(body.id); }
+      if (body.action === 'paid') Object.assign(store.booked.find((b) => b.slot === body.slot), { price_pence: Math.round(body.price * 100), players: JSON.stringify(body.players), paid_at: new Date().toISOString() });
+      return reply(route, 200, { ...state(), admin: true });
+    }
+    if (path === '/api/person') {                                        // adding a player by name
+      const body = req.postDataJSON();
+      const p = { id: 100 + store.added.length, name: body.name, venues: ['si', 'pdl', 'pp', 'cu'], savedAt: null };
+      store.added.push(p);
+      return reply(route, 200, p);
+    }
     if (path === '/api/booked') {                                        // the Worker's rule: a detail left out keeps its stored value
       const body = req.postDataJSON();
       store.bookedBodies.push(body);
       const was = store.booked.find((b) => b.slot === body.slot) || {};
       store.booked = store.booked.filter((b) => b.slot !== body.slot);
       if (body.booked === true) store.booked.push({ slot: body.slot, person_id: body.person_id, venue: body.venue, start: body.start ?? was.start ?? null, minutes: body.minutes ?? was.minutes ?? null, courts: body.courts ?? was.courts ?? 1 });
-      return reply(route, 200, state());
+      return reply(route, 200, { ...state(), admin });
     }
     if (path === '/api/vote') {
       const body = req.postDataJSON();
@@ -124,7 +143,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       if (status === 'applied-500') { apply(); return reply(route, 500, { error: 'boom after the write' }); }
       if (status && status !== 200) return reply(route, status, { error: status === 429 ? 'slow down' : 'boom' });
       apply();
-      return reply(route, 200, state());
+      return reply(route, 200, { ...state(), admin });
     }
     return reply(route, 404, { error: 'Not found' });
   });
@@ -608,6 +627,69 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
     await expect(row.locator('.booked-line')).toContainText('Booked by Test Bob: Cambridge 19:30, 90 min');
     await expect(row.locator('[data-book-form]')).toHaveCount(0);
     expect(store.bookedBodies).toEqual([]);
+  });
+
+  test.describe("Kevin's phone: People and Booked and paid (Kevin, 30 Oct 2026)", () => {
+    const bookedRow = (tomorrow, extra = {}) => ({ slot: `${tomorrow}|19`, person_id: 2, venue: 'si', start: '19:00', minutes: 60, courts: 1, ...extra });
+    test('a phone without the key sees no People screen and no Booked and paid button', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, booked: [bookedRow(tomorrow)] });
+      await openAsTestAnn(page);
+      await expect(page.locator('#row-19 .booked-line')).toBeVisible();
+      await expect(page.locator('#people-card')).toBeHidden();
+      await expect(page.locator('[data-paid-open]')).toHaveCount(0);
+    });
+
+    test('a #admin= link keeps the key on this phone, drops it from the address bar, and opens the People screen; a real name replaces the nickname and its initials', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
+      await page.goto(PAGE + '#admin=' + ADMIN_KEY);
+      await expect(page.locator('#people-card')).toBeVisible();
+      expect(new URL(page.url()).hash).toBe('');
+      expect(await page.evaluate(() => localStorage.getItem('padel.admin'))).toBe(ADMIN_KEY);
+      expect(store.headers.some((h) => h['x-admin-key'] === ADMIN_KEY)).toBe(true);
+      await page.locator('[data-real-name="2"]').fill('Test Robin');
+      await page.locator('[data-rename="2"]').click();
+      await expect(page.locator('[data-real-name="2"]')).toHaveValue('Test Robin');   // redrawn from the reply, which carries the real name
+      expect(store.adminBodies).toEqual([{ action: 'name', id: 2, real_name: 'Test Robin' }]);
+      await page.locator(`[data-day="${londonDates(Date.now())[1]}"]`).click();
+      await expect(page.locator('#row-19 .initials')).toContainText('TR');
+      // Adding a player by hand.
+      await page.locator('#add-player').fill('Test Carl');
+      await page.locator('#add-player-form button').click();
+      await expect(page.locator('#people-rows')).toContainText('Test Carl');
+    });
+
+    test('Booked and paid: the players who said they were in are ticked, the price splits, and Save sends it', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      const store = await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, readyAt: '19', booked: [bookedRow(tomorrow)] });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${tomorrow}"]`).click();
+      const row = page.locator('#row-19');
+      await row.locator('[data-paid-open]').click();
+      const form = row.locator('[data-paid-form]');
+      // Bob, Cat and Dan said they were in at 19:00 (Ann has not ticked); Bob booked it.
+      await expect(form.locator('[data-paid-player][aria-pressed="true"]')).toHaveText(['Test Bob', 'Test Cat', 'Test Dan']);
+      await form.locator('[data-paid-player="1"]').click();             // add Ann
+      await form.locator('input[name="price"]').fill('36');
+      await expect(form.locator('.note')).toContainText('4 playing, £9.00 each.');
+      await form.locator('button[type="submit"]').click();
+      await expect(row.locator('.paid-line')).toContainText('Paid £36.00, 4 playing (TB TC TD TA), £9.00 each.');
+      await expect(row.locator('.paid-line')).toContainText('Splitwise: waiting');
+      await expect(row.locator('.paid-line')).toContainText('Texts: waiting');
+      expect(store.adminBodies).toEqual([{ action: 'paid', slot: `${tomorrow}|19`, price: 36, players: [2, 3, 4, 1] }]);
+    });
+
+    test('a paid booking shows its status to everyone, with no Undo except on Kevin\'s phone', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      await mockPadel(page, { siClosedFrom: 7, booked: [bookedRow(tomorrow, { price_pence: 3600, players: '[1,2]', paid_at: new Date().toISOString(), splitwise_state: 'done', texts_state: 'failed', texts_note: 'Messages refused' })] });
+      await openAsTestAnn(page);
+      const row = page.locator('#row-19');
+      await expect(row.locator('.paid-line')).toContainText('Paid £36.00, 2 playing (TA TB), £18.00 each. Splitwise: added Texts: couldn\'t send');
+      await expect(row.locator('[data-unbook]')).toHaveCount(0);
+      await expect(row.locator('[data-retry]')).toHaveCount(0);
+    });
   });
 
   test.describe('no code (Kevin, 27 Oct 2026)', () => {

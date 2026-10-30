@@ -14,6 +14,9 @@
 #                tr -d '\n' < ~/.config/od/padel_robot_key | npx wrangler secret put ROBOT_KEY -c workers/padel/wrangler.toml
 #   RELAY_KEY  - the apple-inbound Slack relay key. Mac copy: ~/.config/od/slack_relay_key
 #                tr -d '\n' < ~/.config/od/slack_relay_key | npx wrangler secret put RELAY_KEY -c workers/padel/wrangler.toml
+#   ADMIN_KEY  - Kevin's phone key (30 Oct 2026): People screen, Booked and paid, changing a paid booking.
+#                Mac copy: ~/.config/od/padel_admin_key; his phone holds it from a #admin= link (clipboard).
+#                tr -d '\n' < ~/.config/od/padel_admin_key | npx wrangler secret put ADMIN_KEY -c workers/padel/wrangler.toml
 # (tr drops the file's trailing newline: every key is compared byte for byte.)
 # Both are in scripts/key-register.py (COPY_OF_AT), so a key replace reaches this Worker too.
 #

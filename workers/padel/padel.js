@@ -19,6 +19,14 @@
 //        A booking carries its start ("19:30"), length in minutes and courts (1, or 2 when the group
 //        booked a second court); a day with a booking shows no other ready hour (Kevin, 29 Oct 2026).
 //   POST /api/refresh                       -> state + { refreshed }  "Check now" (Pulse only)
+//   POST /api/admin   (X-Admin-Key)         -> state   Kevin's phone only (Kevin, 30 Oct 2026):
+//        { action: 'name', id, real_name }            a player's real name (shown with its initials everywhere)
+//        { action: 'paid', slot, price, players }     Booked and paid: the total in pounds and who is playing
+//        { action: 'unpaid', slot }                   take the price off again (before the robot has sent it)
+//        { action: 'retry', slot, step }              let the robot try a failed Splitwise entry or texts again
+//   GET  /api/robot/paid  (X-Robot-Key)     -> { ok, bookings }   paid bookings with a step still to do
+//   POST /api/robot/paid  (X-Robot-Key)     -> { ok, changed }    { slot, step, state, note }: claimed, then
+//        done or failed; a step is claimed once and never again unless Kevin taps Retry.
 // The page itself is a static asset in ./public, served without this Worker (wrangler.toml
 // run_worker_first = ["/api/*"]); its headers live in public/_headers.
 //
@@ -44,7 +52,8 @@
 // Workers). D1 holds everything; see schema.sql.
 //
 // Bindings: DB (D1), RELAY (service binding to apple-inbound's /slack-relay), WRITE_LIMIT
-//           (ratelimit, optional). Secrets: ROBOT_KEY, RELAY_KEY.
+//           (ratelimit, optional). Secrets: ROBOT_KEY, RELAY_KEY, ADMIN_KEY (Kevin's phone: the only
+//           device that may rename people, record Booked and paid, or change a paid booking).
 //
 // RATE LIMIT: every /api request, before any key check, counts one hit in D1's `rate` table under
 // "<client>|<minute>" and the 61st in a minute is refused (429). The ratelimit binding is kept, but
@@ -52,7 +61,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-29.2';
+export const VERSION = '2026-10-30.1';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -81,6 +90,9 @@ export const ALERT_AT = 4;
 const MAX_PEOPLE = 40;
 const MAX_BODY = 16 * 1024;
 const MAX_COURTS_BODY = 64 * 1024;
+export const MAX_PRICE_POUNDS = 1000;              // a court booking above this is a typo
+export const PAID_STEPS = ['splitwise', 'texts'];  // what the Mac robot does for a paid booking, in this order
+export const PAID_KEEP_DAYS = 7;                   // a paid booking the robot has not finished is kept this long
 // Latin letters only (A-Z, a-z and the Latin-1 letters), spaces, hyphens and straight apostrophes.
 const NAME_RE = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/;
 const NAME_LETTER_RE = /[A-Za-zÀ-ÖØ-öø-ÿ]/g;
@@ -437,7 +449,13 @@ export function assembleAvailability(matchi, pulse) {
 export function computeState({ people, votes, booked, availability, dates, nowMs, cfg = venueConfig() }) {
   const today = dates[0];
   const inWindow = new Set(dates);
-  const ppl = people.map((p) => ({ id: p.id, name: p.name, venues: Array.isArray(p.venues) ? p.venues : splitVenues(p.venues), savedAt: p.savedAt ?? null }));
+  // A real name Kevin set replaces the name a player gave themselves everywhere (Kevin, 30 Oct 2026);
+  // the name they chose stays as `nick` for Kevin's People screen.
+  const ppl = people.map((p) => {
+    const out = { id: p.id, name: p.realName || p.name, venues: Array.isArray(p.venues) ? p.venues : splitVenues(p.venues), savedAt: p.savedAt ?? null };
+    if (p.realName) out.nick = p.name;
+    return out;
+  });
   const byId = new Map(ppl.map((p) => [p.id, p]));
   const voteMap = {};
   for (const v of votes) {
@@ -454,6 +472,7 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
     const m = SLOT_RE.exec(b.slot);
     if (!m || !inWindow.has(m[1])) continue;
     bookedMap[b.slot] = { person_id: b.person_id ?? null, venue: b.venue ?? null, start: b.start || null, minutes: b.minutes || null, courts: b.courts || 1 };
+    if (b.paid_at) bookedMap[b.slot].paid = paidOf(b);
     bookedAt[b.slot] = Date.parse(b.created_at || '');
     bookedDays.add(m[1]);
   }
@@ -545,6 +564,13 @@ export function computeState({ people, votes, booked, availability, dates, nowMs
   };
 }
 
+// A booking's Booked and paid record: the total, who is playing, and where the robot's two steps stand.
+const parseIds = (raw) => { try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a.filter((x) => Number.isInteger(x) && x > 0) : []; } catch { return []; } };
+export function paidOf(b) {
+  const step = (k) => ({ state: b[`${k}_state`] || null, at: b[`${k}_at`] || null, note: b[`${k}_note`] || null });
+  return { price: b.price_pence ?? null, players: parseIds(b.players), at: b.paid_at, splitwise: step('splitwise'), texts: step('texts') };
+}
+
 // The ready slots that still need their one DM.
 export function decideAlerts(state, alreadyAlerted) {
   const done = alreadyAlerted instanceof Set ? alreadyAlerted : new Set(alreadyAlerted || []);
@@ -591,15 +617,21 @@ export function alertText(r, cfg, pageUrl, nowMs) {
 export const foldName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ── D1 access, behind one small object so tests can swap in a Map-backed copy ──
-const toPerson = (r) => ({ id: r.id, name: r.name, venues: splitVenues(r.venues), savedAt: r.votes_at || null });
+const toPerson = (r) => {
+  const p = { id: r.id, name: r.name, venues: splitVenues(r.venues), savedAt: r.votes_at || null };
+  if (r.real_name) p.realName = r.real_name;
+  return p;
+};
+const PEOPLE_COLS = 'id, name, venues, votes_at, real_name';
+const BOOKED_COLS = 'slot, person_id, venue, start, minutes, courts, created_at, price_pence, players, paid_at, splitwise_state, splitwise_at, splitwise_note, texts_state, texts_at, texts_note';
 export function makeRepo(db) {
   return {
     async listPeople() {
-      const r = await db.prepare('SELECT id, name, venues, votes_at FROM people ORDER BY name COLLATE NOCASE').all();
+      const r = await db.prepare(`SELECT ${PEOPLE_COLS} FROM people ORDER BY name COLLATE NOCASE`).all();
       return (r.results || []).map(toPerson);
     },
     async getPerson(id) {
-      const r = await db.prepare('SELECT id, name, venues, votes_at FROM people WHERE id = ?').bind(id).first();
+      const r = await db.prepare(`SELECT ${PEOPLE_COLS} FROM people WHERE id = ?`).bind(id).first();
       return r ? toPerson(r) : null;
     },
     async countPeople() {
@@ -608,8 +640,12 @@ export function makeRepo(db) {
     },
     async addPerson(name, nowIso) {
       await db.prepare('INSERT INTO people (name, venues, created_at) VALUES (?1, ?2, ?3) ON CONFLICT(name) DO NOTHING').bind(name, VENUES.join(','), nowIso).run();
-      const r = await db.prepare('SELECT id, name, venues, votes_at FROM people WHERE name = ? COLLATE NOCASE').bind(name).first();
+      const r = await db.prepare(`SELECT ${PEOPLE_COLS} FROM people WHERE name = ? COLLATE NOCASE`).bind(name).first();
       return r ? toPerson(r) : null;
+    },
+    async setRealName(id, realName) {
+      const r = await db.prepare('UPDATE people SET real_name = ? WHERE id = ?').bind(realName, id).run();
+      return (r.meta?.changes || 0) === 1;
     },
     async setVenues(id, venues) {
       const r = await db.prepare('UPDATE people SET venues = ? WHERE id = ?').bind(venues.join(','), id).run();
@@ -631,7 +667,37 @@ export function makeRepo(db) {
       ]);
     },
     async listBooked(fromDate) {
-      const r = await db.prepare('SELECT slot, person_id, venue, start, minutes, courts, created_at FROM booked WHERE slot >= ?').bind(fromDate).all();
+      const r = await db.prepare(`SELECT ${BOOKED_COLS} FROM booked WHERE slot >= ?`).bind(fromDate).all();
+      return r.results || [];
+    },
+    async getBooked(slot) {
+      return (await db.prepare(`SELECT ${BOOKED_COLS} FROM booked WHERE slot = ?`).bind(slot).first()) || null;
+    },
+    // Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it
+    // failed), so a price or player change can never race an entry already made.
+    async setPaid(slot, pricePence, players, nowIso) {
+      const r = await db.prepare(`UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
+        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND (splitwise_state IS NULL OR splitwise_state = 'failed')`)
+        .bind(slot, pricePence, JSON.stringify(players), nowIso).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    async clearPaid(slot) {
+      const r = await db.prepare(`UPDATE booked SET price_pence = NULL, players = NULL, paid_at = NULL, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
+        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ? AND paid_at IS NOT NULL AND (splitwise_state IS NULL OR splitwise_state = 'failed')`).bind(slot).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    // The robot's steps: claimed from nothing, then done or failed from claimed; Retry clears a failed one.
+    async markStep(slot, step, state, note, nowIso) {
+      if (!PAID_STEPS.includes(step)) return false;
+      const from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
+      const to = state === 'retry' ? null : state;
+      const r = await db.prepare(`UPDATE booked SET ${step}_state = ?2, ${step}_at = ?3, ${step}_note = ?4 WHERE slot = ?1 AND paid_at IS NOT NULL AND ${from}`)
+        .bind(slot, to, to ? nowIso : null, to ? note : null).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    async listPaidPending(fromDate) {
+      const r = await db.prepare(`SELECT ${BOOKED_COLS} FROM booked WHERE slot >= ? AND paid_at IS NOT NULL
+        AND NOT (COALESCE(splitwise_state, '') = 'done' AND COALESCE(texts_state, '') = 'done') ORDER BY slot`).bind(fromDate).all();
       return r.results || [];
     },
     // A detail left out (an older page, or "Booked 2nd court" sending only courts) keeps its stored value.
@@ -680,10 +746,13 @@ export function makeRepo(db) {
         .bind(String(nowMs), new Date(nowMs).toISOString(), nowMs - guardMs).run();
       return (r.meta?.changes || 0) === 1;
     },
+    // A paid booking stays until the robot has done both steps (or a week has passed), so a court paid
+    // for late in the evening still reaches Splitwise after midnight.
     async prune(today) {
       await db.batch([
         db.prepare('DELETE FROM votes WHERE slot < ?').bind(today),
-        db.prepare('DELETE FROM booked WHERE slot < ?').bind(today),
+        db.prepare(`DELETE FROM booked WHERE slot < ?1 AND (paid_at IS NULL OR slot < ?2
+          OR (COALESCE(splitwise_state, '') = 'done' AND COALESCE(texts_state, '') = 'done'))`).bind(today, addDays(today, -PAID_KEEP_DAYS)),
         db.prepare('DELETE FROM alerts WHERE slot < ?').bind(today),
       ]);
     },
@@ -965,6 +1034,79 @@ export function cleanBooking(body, slot) {
   return out;
 }
 
+// Booked and paid: a price in pounds (to the penny) and 1 to 16 distinct players who are on the list.
+export function cleanPaid(body, people) {
+  const price = Number(body.price);
+  if (!Number.isFinite(price) || price <= 0 || price > MAX_PRICE_POUNDS) return { error: `The price is a number of pounds, up to ${MAX_PRICE_POUNDS}` };
+  if (!Array.isArray(body.players) || !body.players.length || body.players.length > 16) return { error: 'Pick who is playing (1 to 16 people)' };
+  const ids = [...new Set(body.players.map(intId))];
+  if (ids.some((id) => !id) || ids.length !== body.players.length) return { error: 'Each player is picked once, from the list' };
+  const known = new Set(people.map((p) => p.id));
+  if (ids.some((id) => !known.has(id))) return { error: 'One of those players is not on the list' };
+  return { pricePence: Math.round(price * 100), players: ids };
+}
+export const isAdmin = (request, env) => keyOk(request.headers.get('X-Admin-Key'), env.ADMIN_KEY);
+
+async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
+  if (body.action === 'name') {
+    const id = intId(body.id);
+    if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
+    let realName = null;
+    if (String(body.real_name ?? '').trim()) {
+      const clean = cleanName(body.real_name);
+      if (clean.error) return fail(clean.error, 400);
+      realName = clean.name;
+    }
+    await repo.setRealName(id, realName);
+  } else if (['paid', 'unpaid', 'retry'].includes(body.action)) {
+    const clean = cleanSlots([body.slot], dates);
+    if (clean.error || !clean.slots.length) return fail(clean.error || 'That hour has passed', 400);
+    const slot = clean.slots[0];
+    const b = await repo.getBooked(slot);
+    if (!b || !b.venue || !b.start || !b.minutes) return fail('Mark the hour as booked first, with its venue, start and length', 409);
+    if (body.action === 'paid') {
+      const paid = cleanPaid(body, await repo.listPeople());
+      if (paid.error) return fail(paid.error, 400);
+      if (!(await repo.setPaid(slot, paid.pricePence, paid.players, nowIso))) return fail('This booking is already with the robot or in Splitwise. Change it in Splitwise.', 409);
+    } else if (body.action === 'unpaid') {
+      if (!(await repo.clearPaid(slot))) return fail('This booking is already with the robot or in Splitwise. Change it in Splitwise.', 409);
+    } else if (!PAID_STEPS.includes(body.step) || !(await repo.markStep(slot, body.step, 'retry', null, nowIso))) {
+      return fail('Only a step that failed can be tried again', 409);
+    }
+  } else {
+    return fail('Unknown action', 400);
+  }
+  return json({ ...(await loadState(env, repo, nowMs)), admin: true });
+}
+
+// The Mac robot's view of a paid booking: everything it needs for the Splitwise entry and the texts.
+async function handleRobotPaid(request, env, repo, nowMs) {
+  if (!keyOk(request.headers.get('X-Robot-Key'), env.ROBOT_KEY)) return fail('Robot key needed', 401);
+  const nowIso = new Date(nowMs).toISOString();
+  if (request.method === 'GET') {
+    const cfg = venueConfig(env);
+    const people = new Map((await repo.listPeople()).map((p) => [p.id, p]));
+    const rows = await repo.listPaidPending(addDays(londonDates(nowMs)[0], -PAID_KEEP_DAYS));
+    const bookings = rows.map((b) => {
+      const [, date] = SLOT_RE.exec(b.slot);
+      const paid = paidOf(b);
+      return {
+        slot: b.slot, date, day: dayLabel(date), venue: { code: b.venue, short: cfg[b.venue]?.short || b.venue, label: cfg[b.venue]?.label || b.venue },
+        start: b.start, minutes: b.minutes, pricePence: paid.price, splitwise: paid.splitwise, texts: paid.texts,
+        players: paid.players.map((id) => { const p = people.get(id); return p ? { id, name: p.realName || p.name, nick: p.name } : { id, name: null }; }),
+      };
+    });
+    return json({ ok: true, bookings });
+  }
+  if (request.method !== 'POST') return fail('Not found', 404);
+  const parsed = await readBody(request);
+  if (parsed.error) return fail(parsed.error, parsed.status);
+  const { slot, step, state } = parsed.body;
+  if (typeof slot !== 'string' || !SLOT_RE.test(slot) || !PAID_STEPS.includes(step) || !['claimed', 'done', 'failed'].includes(state)) return fail('slot, step and state are needed', 400);
+  const note = typeof parsed.body.note === 'string' ? parsed.body.note.slice(0, 200) : null;
+  return json({ ok: true, changed: await repo.markStep(slot, step, state, note, nowIso) });
+}
+
 async function loadState(env, repo, nowMs) {
   const dates = londonDates(nowMs);
   const [{ pulse, availability }, people, votes, booked] = await Promise.all([
@@ -1072,13 +1214,15 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     if (hits > RATE_LIMIT) return fail('slow down', 429);
     if (path === '/api/health' && request.method === 'GET') return json({ ok: true, version: VERSION });
     if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
+    if (path === '/api/robot/paid') return await handleRobotPaid(request, env, repo, nowMs);
+    const admin = isAdmin(request, env);
 
     if (path === '/api/state' && request.method === 'GET') {
       const state = await loadState(env, repo, nowMs);
       if (state.availability.stale && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {
         ctx.waitUntil(refreshAndAlert(env, repo, nowMs, fetchImpl, clock, sleep));
       }
-      return json(state);
+      return json({ ...state, admin });
     }
     if (request.method !== 'POST') return fail('Not found', 404);
     const dates = londonDates(nowMs);
@@ -1093,12 +1237,17 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       const state = await loadState(env, repo, now);
       // The alert check runs in waitUntil: a caller going away cannot stop it between claim and reply.
       ctx.waitUntil(alertSafely(state, env, repo, now, sleep));
-      return json({ ...state, refreshed });
+      return json({ ...state, refreshed, admin });
     }
 
     const parsed = await readBody(request);
     if (parsed.error) return fail(parsed.error, parsed.status);
     const body = parsed.body;
+
+    if (path === '/api/admin') {
+      if (!admin) return fail("Only Kevin's phone can do that", 401);
+      return await handleAdmin(body, env, repo, nowMs, dates, nowIso);
+    }
 
     if (path === '/api/person') {
       if (body.id !== undefined) {
@@ -1112,8 +1261,9 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       const clean = cleanName(body.name);
       if (clean.error) return fail(clean.error, 400);
       const people = await repo.listPeople();
+      // The name a player gave themselves, or the real name Kevin set: either finds the same person.
       const fold = foldName(clean.name);
-      const found = people.find((p) => foldName(p.name) === fold);
+      const found = people.find((p) => foldName(p.name) === fold || (p.realName && foldName(p.realName) === fold));
       if (found) return json(found);
       if (people.length >= MAX_PEOPLE) return fail('The group list is full. Ask Kevin.', 409);
       const person = await repo.addPerson(clean.name, nowIso);
@@ -1136,13 +1286,15 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       const state = await loadState(env, repo, nowMs);
       // The save answers at once; the DM (up to 20 s on the relay) goes in the background.
       ctx.waitUntil(alertSafely(state, env, repo, nowMs, sleep));
-      return json(state);
+      return json({ ...state, admin });
     }
 
     if (path === '/api/booked') {
       const clean = cleanSlots([body.slot], dates);
       if (clean.error || !clean.slots.length) return fail(clean.error || 'That hour has passed', 400);
       const slot = clean.slots[0];
+      // A paid booking is Kevin's to change: anyone else's Undo or re-mark would orphan its Splitwise entry.
+      if (!admin && (await repo.getBooked(slot))?.paid_at) return fail("This booking is paid. Only Kevin's phone can change it.", 409);
       if (body.booked === false) {
         await repo.clearBooked(slot);
       } else if (body.booked === true) {
@@ -1155,7 +1307,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       } else {
         return fail('booked must be true or false', 400);
       }
-      return json(await loadState(env, repo, nowMs));
+      return json({ ...(await loadState(env, repo, nowMs)), admin });
     }
     return fail('Not found', 404);
   } catch (e) {
