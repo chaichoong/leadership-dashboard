@@ -200,6 +200,12 @@ describe('a normal run', () => {
     // A reply with no days at all is a broken feed: that still fails.
     const t = stubs({ page: livePage, uni: (u) => (u.pathname.endsWith('/anonymous') ? uniOk(u) : new Response('[]', { status: 200 })) });
     expect(await t.go()).toBe(1);
+    // Padel rows with no slots in the 14 days: every day "day not in the reply", nothing good elsewhere,
+    // so it is a broken feed, not a closure, and the run fails.
+    const empty = [{ id: 'USCAPADWO02', locations: [{ locationNameToDisplay: 'Padel Tennis Court 1', slots: [] }, { locationNameToDisplay: 'Padel Tennis Court 2', slots: [] }] }];
+    const e = stubs({ page: livePage, uni: (u) => (u.pathname.endsWith('/anonymous') ? uniOk(u) : new Response(JSON.stringify(empty), { status: 200 })) });
+    expect(await e.go()).toBe(1);
+    expect(e.lines[0]).toMatch(/Cambridge Uni errored on every day that should be open \(day not in the reply\)/);
   });
 
   it('readUni: a connection dropped while the reply is read is a network fault, not a broken page', async () => {

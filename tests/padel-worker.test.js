@@ -212,6 +212,11 @@ describe('parseGladstone (the University feed, read live on 29 Oct 2026)', () =>
     } });
     // Five hours in a row: the cap, 180.
     expect(day(['07', '08', '09', '10', '11'].map((h) => slot(`2026-11-03T${h}:00:00Z`)))['starts']['07:00'].max).toBe(180);
+    // Half-hour slots at 19:00 and 20:00 with nothing at 19:30 do not follow on: 30 minutes each.
+    expect(day([slot('2026-11-03T19:00:00Z', 30), slot('2026-11-03T20:00:00Z', 30)])['starts']['19:00']).toEqual({ courts: 1, min: 30, max: 30 });
+    // A slot of more than 180 minutes (or one ending a day later) is an unreadable reply, never a 240-minute booking.
+    expect(day([slot('2026-11-03T07:00:00Z', 240)])).toEqual({ status: 'error', reason: 'unexpected shape' });
+    expect(day([slot('2026-11-03T07:00:00Z', 1500)])).toEqual({ status: 'error', reason: 'unexpected shape' });
     // Half-hour slots: three in a row is 90 minutes, not 180.
     expect(day([slot('2026-11-03T19:00:00Z', 30), slot('2026-11-03T19:30:00Z', 30), slot('2026-11-03T20:00:00Z', 30)])['starts']['19:00']).toEqual({ courts: 1, min: 30, max: 90 });
     // 18:40 London: the 19:00 slot closed for online booking at 18:30, the 20:00 slot has not.

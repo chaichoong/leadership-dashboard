@@ -330,7 +330,9 @@ export function parseGladstone(json, dates, nowMs) {
       for (const s of loc.slots) {
         const start = Date.parse(s && s.startTime);
         const len = Math.round((Date.parse(s && s.endTime) - start) / 60000);
-        if (!Number.isFinite(start) || !(len > 0) || typeof s.status !== 'string') return bad('unexpected shape');
+        // A slot of more than RUN_CAP_MIN minutes is not a court hire: an unreadable reply, never a
+        // length the Worker's own check would refuse (which would cost St Ives and PDL their update).
+        if (!Number.isFinite(start) || !(len > 0 && len <= RUN_CAP_MIN) || typeof s.status !== 'string') return bad('unexpected shape');
         if (!slots.some((x) => x.start === start)) slots.push({ ...s, start, len });
       }
       slots.sort((a, b) => a.start - b.start);
