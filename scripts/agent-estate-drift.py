@@ -288,6 +288,24 @@ def _squash(text):
     return " ".join((text or "").split())
 
 
+# `estate: none` in a ruling's own YAML frontmatter: the writer stating it touches
+# none of the six estate things. Only `none` counts, so `estate: routing` or a
+# missing key is judged on the words as before, and the key is read only from the
+# frontmatter block at the top of the file — the phrase in prose decides nothing.
+NO_ESTATE_RE = re.compile(r"^estate:\s*none\s*$", re.I | re.M)
+
+
+def declares_no_estate(body):
+    """True when the file's own frontmatter says it touches no estate thing."""
+    text = body or ""
+    if not text.startswith("---"):
+        return False
+    end = text.find("\n---", 3)
+    if end == -1:
+        return False
+    return bool(NO_ESTATE_RE.search(text[3:end]))
+
+
 def rulings_after(stamp, decisions_dir, estate_text=""):
     """Decisions files that the estate page has not absorbed.
 
@@ -317,6 +335,17 @@ def rulings_after(stamp, decisions_dir, estate_text=""):
             with open(p) as f:
                 body = f.read(6000)
         except OSError:
+            continue
+        # A ruling may declare, in its own frontmatter, that it touches none of the
+        # six things CLAUDE.md says ESTATE.md must carry (finding 20261030-ceo-agent-1131).
+        # ESTATE_WORDS is a word match, so a tenancy or a wardrobe ruling written up by
+        # an AGENT, or mentioning Roy, fires on it: on 30 Oct 2026 the 06:52 memory
+        # sweep wrote four 29 Oct Decisions files and the 06:55 re-run read "4 rulings
+        # behind", none of which changed routing, autonomy, the money rule, where Kevin
+        # decides, the workforce shape or the clocks. Red every morning on rulings with
+        # no estate content teaches readers to ignore red. The declaration is the
+        # writer's, so it is never inferred here: a file without it is judged as before.
+        if declares_no_estate(body):
             continue
         if ESTATE_WORDS.search(name) or ESTATE_WORDS.search(body):
             out.append(name)
@@ -413,6 +442,13 @@ def selftest():
     assert not scan_text("4. Write nothing. A past date is the arrears signal, never something to advance.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
+    # `estate: none` is the writer's declaration, read only from the frontmatter.
+    assert declares_no_estate("---\nestate: none\n---\nRoy and the approval gate.\n")
+    assert declares_no_estate("---\ndate: 2026-10-29\nestate: None\n---\nAn agent wrote this.\n")
+    assert not declares_no_estate("---\nestate: routing\n---\nThe approval gate moves.\n")
+    assert not declares_no_estate("---\ndate: 2026-10-29\n---\nestate: none, but the gate moves.\n")
+    assert not declares_no_estate("The ruling says estate: none in its prose only.\n")
+    assert not declares_no_estate("---\nestate: none\n")        # unterminated block
     memory_selftest()
     print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6, 7; "
           "memory rule: CLAUDE.md and MEMORY.md live, topic history below a "

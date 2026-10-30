@@ -392,11 +392,11 @@ describe('a shared number is never enough to fold one task into another', () => 
       .toContain('tel:700900747');
     // A mobile written with a space reaches the strong set as its PIECES, so
     // each piece is exempt too (found on the live board of 14 Oct 2026: two
-    // SMS messages from one tenant, "07398 536055", would have been refused).
-    expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: [SMS] 07398 536055: hello'))
-      .toEqual(['num:07398', 'num:536055', 'tel:398536055']);
-    expect(one('INBOUND: [SMS] 07398 536055: the window in my second bedroom is stuck',
-      'INBOUND: [SMS] 07398 536055: Roy asked me to text you about the window').action)
+    // SMS messages from one tenant, "07700 900318", would have been refused).
+    expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: [SMS] 07700 900318: hello'))
+      .toEqual(['num:07700', 'num:900318', 'tel:700900318']);
+    expect(one('INBOUND: [SMS] 07700 900318: the window in my second bedroom is stuck',
+      'INBOUND: [SMS] 07700 900318: Roy asked me to text you about the window').action)
       .toBe('update');
     expect(one('INBOUND: Vectis Water account 1234567890 - arrears',
       'INBOUND: Marlstone Credit account 9234567890 - statement').action).toBe('create');
@@ -406,7 +406,7 @@ describe('a shared number is never enough to fold one task into another', () => 
     expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: UTR 0123456789 filing'))
       .toEqual([]);
     expect(runPy('mod._uk_phone_digits(arg)', 'UTR 0123456789')).toBe('');
-    expect(runPy('mod._uk_phone_digits(arg)', '+44 (0)7398 536055')).toBe('7398536055');
+    expect(runPy('mod._uk_phone_digits(arg)', '+44 (0)7700 900318')).toBe('7700900318');
     expect(one('INBOUND: Vectis Water account 0123456789 - meter reading needed',
       'COMPLIANCE: Pest control quote chase - 1406 Oldham Road, acct 0123456789').action)
       .toBe('create');
@@ -416,20 +416,20 @@ describe('a shared number is never enough to fold one task into another', () => 
     // The exemption is the only way past the bar, so it is spent only on a
     // number shaped like a UK phone number, in both names. Each of these is
     // how a signature block, a letterhead or a tenant actually writes one.
-    for (const n of ['07398 536055', '07398-536055', '07398536055',
-      '+44 (0)7398 536055', '(07398) 536055', '0044 7398 536055']) {
+    for (const n of ['07700 900318', '07700-900318', '07700900318',
+      '+44 (0)7700 900318', '(07700) 900318', '0044 7700 900318']) {
       expect(one(`INBOUND: SMS reply from ${n}`,
         `INBOUND: SMS from ${n} - unknown content`).action, n).toBe('update');
     }
     // Two spellings of the same number are still one thread.
-    expect(one('INBOUND: SMS reply from +44 (0)7398 536055',
-      'INBOUND: SMS from 07398 536055 - unknown content').action).toBe('update');
+    expect(one('INBOUND: SMS reply from +44 (0)7700 900318',
+      'INBOUND: SMS from 07700 900318 - unknown content').action).toBe('update');
     // A reference that happens to equal a run inside someone's mobile is NOT
     // that thread: the exemption needs the number in both names.
-    expect(one('COMPLIANCE: Vermguard invoice 536055 overdue',
-      'INBOUND: SMS reply from 07398 536055').action).toBe('create');
-    expect(one('COMPLIANCE: Vermguard quote 07398 accepted',
-      'INBOUND: SMS reply from 07398 536055').action).toBe('create');
+    expect(one('COMPLIANCE: Vermguard invoice 900318 overdue',
+      'INBOUND: SMS reply from 07700 900318').action).toBe('create');
+    expect(one('COMPLIANCE: Vermguard quote 07700 accepted',
+      'INBOUND: SMS reply from 07700 900318').action).toBe('create');
     // A number that follows the phone number is not part of it.
     expect(runPy('sorted(mod._phone_shaped_ids(arg))',
       'INBOUND: SMS reply from +447700900747 - 1406 Oldham Road'))
@@ -438,20 +438,20 @@ describe('a shared number is never enough to fold one task into another', () => 
 
   it('two different mobiles are two threads, even sharing a digit group', () => {
     // A spaced mobile reaches the strong set as its PIECES, so a shared
-    // 5-digit block ("07398") made two tenants one thread while the ids were
+    // 5-digit block ("07700") made two tenants one thread while the ids were
     // flattened across numbers. The queue has its own test against exactly
     // that ("two DIFFERENT phone numbers never merge on the words around
     // them"), written after two threads collapsed into one cluster.
-    expect(one('INBOUND: SMS reply from 07398 536055',
-      'INBOUND: SMS from 07398 112233 - unknown content').action).toBe('create');
-    expect(one('INBOUND: SMS reply from 07398 536055',
-      'INBOUND: SMS from 07700 536055 - unknown content').action).toBe('create');
+    expect(one('INBOUND: SMS reply from 07700 900318',
+      'INBOUND: SMS from 07700 900412 - unknown content').action).toBe('create');
+    expect(one('INBOUND: SMS reply from 07700 900318',
+      'INBOUND: SMS from 07701 900318 - unknown content').action).toBe('create');
     // Keyed on all TEN digits, not the nine dupe_signals compares, so a
     // mobile and a landline agreeing on their last nine stay two numbers.
-    expect(runPy('sorted(mod._phone_numbers(arg).keys())', 'INBOUND: SMS from 07398 536055'))
-      .toEqual(['7398536055']);
-    expect(one('INBOUND: SMS reply from 07398 536055',
-      'INBOUND: voicemail from 01398 536055 - unknown content').action).toBe('create');
+    expect(runPy('sorted(mod._phone_numbers(arg).keys())', 'INBOUND: SMS from 07700 900318'))
+      .toEqual(['7700900318']);
+    expect(one('INBOUND: SMS reply from 07700 900318',
+      'INBOUND: voicemail from 01700 900318 - unknown content').action).toBe('create');
   });
 
   it('the exemption is for a MESSAGE THREAD, not for anything phone-shaped', () => {
@@ -459,7 +459,7 @@ describe('a shared number is never enough to fold one task into another', () => 
     // a real area code), so no shape test separates it from "call 01406
     // 536055". An earlier draft read the word in FRONT of the number against
     // a list of reference labels, and review found that list both too broad
-    // and too narrow in one pass: "mobile no 07398 536055" was denied (losing
+    // and too narrow in one pass: "mobile no 07700 900318" was denied (losing
     // a real SMS thread, because "no" was on the list) while "a/c 01406
     // 536055" sailed through. So the test is on the MATTER: both names must
     // be about a message or a call.
@@ -469,10 +469,10 @@ describe('a shared number is never enough to fold one task into another', () => 
         .toBe('create');
     }
     // And a real thread keeps its fold however the number is introduced.
-    expect(one('INBOUND: SMS from tenant - mobile no 07398 536055',
-      'INBOUND: text from mobile no 07398 536055 - boiler leak').action).toBe('update');
+    expect(one('INBOUND: SMS from tenant - mobile no 07700 900318',
+      'INBOUND: text from mobile no 07700 900318 - boiler leak').action).toBe('update');
     expect(runPy('mod._about_a_message(arg)', 'COMPLIANCE: Pest control quote chase')).toBe(false);
-    expect(runPy('mod._about_a_message(arg)', 'INBOUND: [SMS] 07398 536055: hello')).toBe(true);
+    expect(runPy('mod._about_a_message(arg)', 'INBOUND: [SMS] 07700 900318: hello')).toBe(true);
     // A word that only SOMETIMES means a message never speaks for one: on
     // this board `missed` attaches to an instalment, an appointment or an
     // inspection, `ring` to a ring main circuit, `mobile` to a mobile home
@@ -525,8 +525,8 @@ describe('a shared number is never enough to fold one task into another', () => 
     // carries a non-breaking space or an en dash. This file already spells
     // out that character list for the same reason (DUPE_SPACES).
     for (const sep of [' ', '\u00a0', '\u2013', '\u2009', '.', '-']) {
-      expect(one(`INBOUND: SMS reply from 07398${sep}536055`,
-        `INBOUND: SMS from 07398${sep}536055 - unknown content`).action,
+      expect(one(`INBOUND: SMS reply from 07700${sep}900318`,
+        `INBOUND: SMS from 07700${sep}900318 - unknown content`).action,
         JSON.stringify(sep)).toBe('update');
     }
   });
@@ -785,11 +785,11 @@ describe('two subject slots are not a subject', () => {
     expect(one('Chase Acme invoice #10', 'Chase Acme invoice #9').action).toBe('update');
     // One SMS thread is one matter however differently the two names put it:
     // a shared strong id is identity and the qualifier guard stays silent.
-    expect(one('INBOUND: SMS from tenant - mobile no 07398 536055',
-      'INBOUND: text from mobile no 07398 536055 - boiler leak').action).toBe('update');
+    expect(one('INBOUND: SMS from tenant - mobile no 07700 900318',
+      'INBOUND: text from mobile no 07700 900318 - boiler leak').action).toBe('update');
     // Extra detail on ONE name is not a different matter.
-    expect(one('INBOUND: SMS reply from 07398 536055',
-      'INBOUND: SMS from 07398 536055 - unknown content').action).toBe('update');
+    expect(one('INBOUND: SMS reply from 07700 900318',
+      'INBOUND: SMS from 07700 900318 - unknown content').action).toBe('update');
   });
 
   it('the mirrors are untouched, so the Duplicates lane still SHOWS Kevin every pair', () => {

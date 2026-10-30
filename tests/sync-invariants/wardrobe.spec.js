@@ -9,7 +9,8 @@ const { MOCK_PAT, WEATHER_FIXTURE, localTodayISO, makeFixtures, setupMockAirtabl
 
 const WR = { name: 'fldG9hxGddp8ijUwW', type: 'fldnUA7o3eR62r1FW', colour: 'fldbA3Yql3NAjdUAq', swatch: 'fld44tZ76VsKRH0Db',
   usedFor: 'fldqINoZ665Tdmb0V', status: 'fld8Z9QI5pP97cymY', action: 'fldoYeCu7oAqgPZd8', layerRole: 'fld7VonuseNOhkCcw',
-  buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk', lastWorn: 'fldc0Wa3pND9EbAI2' };
+  buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk', lastWorn: 'fldc0Wa3pND9EbAI2',
+  prevWorn: 'fldqoYAnlsITO1GLt', wears: 'fldBDNIOVC0VFkQjR', washEvery: 'fldv8kF8yd4CXtB4u', inWashSince: 'fldfjRleBvHsIbJyl' };
 const OF = { name: 'fldLpZormElc2HJ3s', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o', season: 'fldz3FqdChXD0ZRK5',
   why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z', order: 'fldKIzCbsNESKdwd0' };
 const T_WR = 'tblxcSDis9Tl1dFge', T_OF = 'tblqGdFI6VUH1wUdq';
@@ -303,6 +304,179 @@ test.describe('Editing the wardrobe', () => {
   });
 });
 
+// Kevin, 29 Oct 2026: log what you actually wore, and every wear counts towards washing.
+test.describe('Wearing something else, and the wash', () => {
+  const field = (store, id, f) => store.db[T_WR].find(r => r.id === id).fields[f];
+  const dayBefore = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+
+  test('ticking the pieces saves today and one wear on exactly those, and the card says what you are wearing', async ({ page }) => {
+    const opts = { live: true };
+    const errors = await open(page, 'home', opts);
+    const today = localTodayISO();
+    await page.locator('#homeWear [data-wear-other]').click({ timeout: 20000 });
+    const form = page.locator('#homeWear [data-wear-otherform]');
+    // Starts from the best option (Out casual: tee, jumper, jeans, boots, plus the rain jacket and beanie).
+    await expect(form.locator('input[value="recKnit"]')).toBeChecked();
+    await expect(form.locator('input[value="recRain"]')).toBeChecked();
+    await form.locator('input[value="recKnit"]').uncheck();
+    await form.locator('input[value="recRoll"]').check();
+    await form.getByRole('button', { name: "Save what I'm wearing" }).click();
+    await expect(page.locator('#homeWear .wear-logged')).toContainText('Test black turtleneck');
+    expect(field(opts.store, 'recRoll', WR.lastWorn)).toBe(today);
+    expect(field(opts.store, 'recRoll', WR.prevWorn)).toBe('2026-10-20');
+    expect(field(opts.store, 'recRoll', WR.wears)).toBe(1);                 // a knit: 1 of 3
+    expect(field(opts.store, 'recRoll', WR.inWashSince)).toBeNull();
+    expect(field(opts.store, 'recTee', WR.wears)).toBe(1);                  // a tee: 1 of 1, so in the wash
+    expect(field(opts.store, 'recTee', WR.inWashSince)).toBe(today);
+    expect(field(opts.store, 'recRain', WR.lastWorn)).toBe(today);           // a jacket is stamped but never counted
+    expect(field(opts.store, 'recRain', WR.wears)).toBe(0);
+    expect(field(opts.store, 'recKnit', WR.lastWorn)).toBeUndefined();       // unticked: untouched
+    expect(opts.store.db[T_OF].some(r => r.fields[OF.lastWorn] === today)).toBe(false);   // a mix is not an outfit
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('changing your mind the same day moves the wear, never counts it twice', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    const today = localTodayISO();
+    const casual = page.locator('#homeWear .wear-opt', { hasText: 'Out casual' });
+    await casual.locator('[data-wear-option]').click({ timeout: 20000 });
+    await expect(casual.locator('.wear-btn-done')).toHaveText('Wearing today');
+    expect(field(opts.store, 'recTee', WR.inWashSince)).toBe(today);
+    await page.locator('#homeWear [data-wear-other]').click();
+    const form = page.locator('#homeWear [data-wear-otherform]');
+    await expect(form.locator('input[value="recTee"]')).toBeChecked();      // starts from today's log
+    await form.locator('input[value="recTee"]').uncheck();
+    await form.getByRole('button', { name: "Save what I'm wearing" }).click();
+    await expect(page.locator('#homeWear .wear-logged')).toBeVisible();
+    expect(field(opts.store, 'recTee', WR.lastWorn)).toBeNull();             // the wear came back off
+    expect(field(opts.store, 'recTee', WR.wears)).toBe(0);
+    expect(field(opts.store, 'recTee', WR.inWashSince)).toBeNull();
+    expect(field(opts.store, 'recKnit', WR.wears)).toBe(1);                  // still worn: still one wear, not two
+    expect(opts.store.db[T_OF].find(r => r.id === 'recO1').fields[OF.lastWorn]).toBe('2026-10-20');   // the outfit goes back
+  });
+
+  test('a re-log that fails half way (two batches of 10) is put back in full', async ({ page }) => {
+    let n = 0;
+    const opts = { live: true, fail: (method, table) => method === 'PATCH' && table === T_WR && ++n === 3 };   // press, batch 1 ok, batch 2 fails
+    await open(page, 'home', opts);
+    const today = localTodayISO();
+    await page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('[data-wear-option]').click({ timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-btn-done')).toBeVisible();
+    await page.locator('#homeWear [data-wear-other]').click();
+    const form = page.locator('#homeWear [data-wear-otherform]');
+    for (const id of ['recTee', 'recKnit', 'recJeans', 'recBoots', 'recRain', 'recBeanie']) await form.locator(`input[value="${id}"]`).uncheck();
+    for (const id of ['recRoll', 'recBlack', 'recChelsea', 'recSweat', 'recJog', 'recCoat']) await form.locator(`input[value="${id}"]`).check();
+    await form.getByRole('button', { name: "Save what I'm wearing" }).click();
+    await expect(page.locator('.toast, [role="alert"], [role="status"]').filter({ hasText: 'nothing changed' }).first()).toBeVisible();
+    expect(field(opts.store, 'recTee', WR.lastWorn)).toBe(today);            // the press stands
+    expect(field(opts.store, 'recTee', WR.inWashSince)).toBe(today);
+    for (const id of ['recRoll', 'recBlack', 'recChelsea', 'recSweat', 'recJog', 'recCoat']) {
+      expect(field(opts.store, id, WR.lastWorn) || null, id).toBe(id === 'recRoll' ? '2026-10-20' : null);   // none of the re-log stuck
+    }
+  });
+
+  test('re-saving today\'s outfit without one of its weather layers keeps it as today\'s outfit', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    const today = localTodayISO();
+    await page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('[data-wear-option]').click({ timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-btn-done')).toBeVisible();
+    await page.locator('#homeWear [data-wear-other]').click();
+    await page.locator('#homeWear [data-wear-otherform] input[value="recBeanie"]').uncheck();   // left the beanie at home
+    await page.locator('#homeWear [data-wear-otherform]').getByRole('button', { name: "Save what I'm wearing" }).click();
+    await expect(page.locator('#homeWear .wear-btn-done')).toHaveText('Wearing today');
+    const o1 = opts.store.db[T_OF].find(r => r.id === 'recO1').fields;
+    expect(o1[OF.lastWorn]).toBe(today);
+    expect(o1[OF.prevWorn]).toBe('2026-10-20');
+    expect(field(opts.store, 'recBeanie', WR.lastWorn)).toBeNull();
+  });
+
+  test('on a rain day, re-saving the pressed outfit with its boots in place of trainers keeps it as today\'s outfit', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    // Swap the casual outfit's boots for trainers in the store, so the rain (80%) puts the boots back on.
+    opts.store.db[T_WR].push(piece('recTrainers', 'Test white trainers', 'Shoes'));
+    opts.store.db[T_OF].find(r => r.id === 'recO1').fields[OF.items] = ['recTee', 'recKnit', 'recJeans', 'recTrainers'];
+    await page.reload();
+    const today = localTodayISO();
+    const casual = page.locator('#homeWear .wear-opt', { hasText: 'Out casual' });
+    await expect(casual).toContainText('Test tan boots', { timeout: 20000 });
+    await casual.locator('[data-wear-option]').click();
+    await expect(page.locator('#homeWear .wear-btn-done')).toBeVisible();
+    await page.locator('#homeWear [data-wear-other]').click();
+    await page.locator('#homeWear [data-wear-otherform]').getByRole('button', { name: "Save what I'm wearing" }).click();
+    await expect(page.locator('#homeWear .wear-btn-done')).toHaveText('Wearing today');
+    expect(opts.store.db[T_OF].find(r => r.id === 'recO1').fields[OF.lastWorn]).toBe(today);
+  });
+
+  test('on a phone the picker fits the card, never the page', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await open(page, 'home');
+    await page.locator('#homeWear [data-wear-other]').click({ timeout: 20000 });
+    await page.locator('#homeWear [data-wear-otherform]').screenshot({ path: process.env.WEAR_SHOT || 'test-results/wear-picker.png' });
+    const w = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, view: document.documentElement.clientWidth }));
+    expect(w.page).toBeLessThanOrEqual(w.view);
+  });
+
+  test('tonight\'s wash: before anything is logged it says how to fill it', async ({ page }) => {
+    await open(page, 'home');
+    await expect(page.locator('#homeWear .wear-wash')).toContainText("tonight's wash list appears here", { timeout: 20000 });
+  });
+
+  test('tonight\'s wash lists what reached its limit and what to hang back up, never jackets or shoes', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    await page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('[data-wear-option]').click({ timeout: 20000 });
+    const wash = page.locator('#homeWear .wear-wash');
+    const into = wash.locator('.wear-washcols > div', { has: page.locator('h4', { hasText: 'Into the wash tonight' }) });
+    const hang = wash.locator('.wear-washcols > div', { has: page.locator('h4', { hasText: 'Hang back up' }) });
+    await expect(into.locator('li')).toHaveText([/Test white tee.*back in your picks/]);      // a tee: 1 of 1
+    await expect(hang.locator('li')).toHaveText([/Test navy jeans.*1 of 5 wears/, /Test navy jumper.*1 of 3 wears/]);
+    for (const name of ['Test tan boots', 'Test quilted jacket', 'Test olive beanie']) await expect(wash).not.toContainText(name);
+    // The back-in-your-picks day is 2 days on.
+    const d = new Date(localTodayISO() + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 2);
+    await expect(into).toContainText(d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }));
+  });
+
+  test('2 days after it went in the wash, a piece is offered again with no press', async ({ page }) => {
+    const today = localTodayISO();
+    const wr = (since) => wardrobe().map(r => (r.id === 'recTee' ? { ...r, fields: { ...r.fields, [WR.wears]: 1, [WR.inWashSince]: since } } : r));
+    // Back from the wash 2 days on: offered again with no press.
+    await open(page, 'home', { fixtures: { wardrobe: wr(dayBefore(today, 2)) } });
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out casual' })).toContainText('Knit and denim', { timeout: 20000 });
+  });
+
+  test('in the wash yesterday: no casual outfit today, the Wardrobe page says so, and Washed clears it', async ({ page }) => {
+    const today = localTodayISO();
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    const tee = opts.store.db[T_WR].find(r => r.id === 'recTee');
+    Object.assign(tee.fields, { [WR.wears]: 1, [WR.inWashSince]: dayBefore(today, 1) });
+    await page.goto('/#home');
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out casual' })).toContainText('No outfit ready today', { timeout: 20000 });
+    await page.evaluate(() => switchTab('wardrobe'));
+    const row = page.locator('#wardrobePage tr', { hasText: 'Test white tee' });
+    await expect(row).toContainText('In the wash', { timeout: 20000 });
+    await row.locator('[data-wr-washed]').click();
+    await expect(row).toContainText('0 of 1 wear');
+    expect(tee.fields[WR.wears]).toBe(0);
+    expect(tee.fields[WR.inWashSince]).toBeNull();
+  });
+
+  test('a piece\'s own wash limit saves, and blank goes back to the usual', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'wardrobe', opts);
+    const input = page.locator('#wardrobePage [data-wr-washevery="recKnit"]');
+    await expect(input).toHaveAttribute('placeholder', '3', { timeout: 20000 });
+    await input.fill('2'); await input.press('Tab');
+    await expect.poll(() => field(opts.store, 'recKnit', WR.washEvery)).toBe(2);
+    await expect(page.locator('#wardrobePage tr', { hasText: 'Test navy jumper' })).toContainText('0 of 2 wears');
+    await page.locator('#wardrobePage [data-wr-washevery="recKnit"]').fill(''); await page.locator('#wardrobePage [data-wr-washevery="recKnit"]').press('Tab');
+    await expect.poll(() => field(opts.store, 'recKnit', WR.washEvery)).toBeNull();
+  });
+});
+
 test.describe('Today hour by hour', () => {
   test('the card shows 06:00 to 23:00 with feels-like °C, rain in mm and wind in mph, and never km/h', async ({ page }) => {
     const errors = await open(page, 'home');
@@ -322,6 +496,8 @@ test.describe('Today hour by hour', () => {
     await expect(row('Wind (mph)').last()).toHaveText('22');          // 23:00: 21.5
     await expect(page.locator('#homeWear .wear-chips')).toContainText('Wind 17 mph');
     await expect(page.locator('#homeWear .wear-chips')).toContainText('Sunset 16:12');
+    await expect(strip.locator('thead th', { hasText: '16:00' }).locator('.wear-sunset')).toHaveText('Sunset 16:12');   // the strip marks it too
+    await expect(strip.locator('.wear-sunset')).toHaveCount(1);
     await expect(page.locator('#homeWear')).not.toContainText('km/h');
     const now = new Date().getHours();
     if (now >= 6) await expect(strip.locator('thead th[aria-current="time"]')).toHaveText(String(now).padStart(2, '0') + ':00');

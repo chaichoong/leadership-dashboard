@@ -48,6 +48,33 @@
 .wear-hours .wear-now { background: var(--accent-soft); font-weight: var(--fw-bold); }
 .wear-hours .wear-wet { color: var(--info); font-weight: var(--fw-semibold); }
 .wear-hours .wear-windy { color: var(--warning); font-weight: var(--fw-semibold); }
+.wear-hours .wear-sunset { display: block; font-size: 10px; font-weight: var(--fw-semibold); color: var(--accent-gold); white-space: nowrap; }
+/* I'm wearing something else (Kevin, 29 Oct 2026) */
+/* Tonight's wash (Kevin, 29 Oct 2026) */
+.wear-wash { margin-top: var(--space-4); border-top: 1px solid var(--border-default); padding-top: var(--space-3); }
+.wear-wash h3 { margin: 0 0 var(--space-2); font-size: var(--fs-md); color: var(--text-primary); }
+.wear-washcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }
+.wear-wash h4 { margin: 0 0 var(--space-1); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+.wear-wash ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
+.wear-wash li { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--fs-sm); }
+.wear-wash small { color: var(--text-muted); }
+.wear-otherbar { margin: var(--space-3) 0 0; }
+.wear-logged { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); background: var(--success-bg); border: 1px solid var(--success-border); border-radius: var(--radius-md); color: var(--text-primary); }
+.wear-otherform { margin-top: var(--space-3); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+.wear-otherform h3 { margin: 0; font-size: var(--fs-md); color: var(--text-primary); }
+.wear-othergrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
+.wear-othergrid fieldset { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); margin: 0; min-width: 0; }
+.wear-othergrid legend { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; padding: 0 var(--space-1); }
+.wear-othergrid label { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--fs-sm); color: var(--text-primary); padding: 3px 0; word-break: break-word; }
+.wear-othergrid input { margin-top: 3px; flex: none; }
+.wear-othergrid small { color: var(--info); }
+.wear-otherform .wr-formbtns { position: sticky; bottom: 0; background: var(--bg-surface); padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }   /* Save stays in reach down a long list */
+.wear-otherform input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+/* Wash column on the Wardrobe page */
+.wr-wash { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); align-items: center; font-size: var(--fs-xs); color: var(--text-secondary); }
+.wr-washevery { display: inline-flex; gap: var(--space-1); align-items: center; }
+.wr-washevery input { width: 52px; font: inherit; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 4px; }
+.wr-washevery input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
 @media (max-width: 900px) { .wear-opts { grid-template-columns: 1fr; } .wear-opt-best { order: -1; } }   /* on a phone the recommended option comes first */
 
 /* ── Wardrobe page ── */
@@ -94,4 +121,4 @@
 .wr-form-inline .wear-note { flex-basis: 100%; }
 @media (max-width: 700px) { .wr-grid { grid-template-columns: 1fr; } .wr-acts { white-space: normal; } }
 @media (max-width: 700px) { .wr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media print { .wear-btn, .wear-src, .wr-tabs, .wr-form, .wr-bar { display: none; } }
+@media print { .wear-otherbar, .wear-otherform, .wear-btn, .wear-src, .wr-tabs, .wr-form, .wr-bar { display: none; } }

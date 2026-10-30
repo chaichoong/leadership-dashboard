@@ -18,7 +18,7 @@
     const WEATHER_MAX_AGE_MS = 15 * 60 * 1000;   // Open-Meteo's "current" moves every 15 minutes (Kevin, 29 Oct 2026: exact conditions)
     const HOUR_FROM = 6;            // the hourly strip runs 06:00 to 23:00 (Kevin, 28 Oct 2026)
     const WINDY_MPH = 15;           // the wind chip turns amber from here (was 25 km/h)
-    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, wxTriedAt: 0, wxTriedHour: null, shownHour: null, saving: false, view: 'own', form: null };   // form: null, 'add' or the id of the piece being removed
+    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, wxTriedAt: 0, wxTriedHour: null, shownHour: null, saving: false, view: 'own', form: null, other: false };   // form: null, 'add' or the id of the piece being removed; other: the I'm wearing something else picker is open
     const UNKNOWN_WX = { feelsNow: null, actualNow: null, feelsMin: null, feelsMax: null, rainChance: null, code: null };
 
     const signedIn = () => typeof PAT === 'string' && PAT.length > 0;
@@ -42,7 +42,9 @@
                         usedFor: getField(r, WR.usedFor) || [], status: getField(r, WR.status) || '',
                         action: getField(r, WR.action) || '', layerRole: getField(r, WR.layerRole) || '',
                         buyIn: getField(r, WR.buyIn) || '', cap: getField(r, WR.cap) || '', reason: getField(r, WR.reason) || '',
-                        lastWorn: getField(r, WR.lastWorn) || null,
+                        lastWorn: getField(r, WR.lastWorn) || null, prevWorn: getField(r, WR.prevWorn) || null,
+                        wears: getField(r, WR.wears) || 0, inWashSince: getField(r, WR.inWashSince) || null,
+                        washEvery: typeof getField(r, WR.washEvery) === 'number' ? getField(r, WR.washEvery) : null,
                     };
                 });
                 // List order = the Order field (Kevin's plan order), so "the first eligible outfit" is the one he
@@ -127,7 +129,7 @@
     function optionCard(pick, best) {
         const isBest = pick.option === best;
         if (!pick.outfit) {
-            return `<article class="wear-opt"><h3>${esc(pick.option)}</h3><p class="wear-note">No outfit ready for this season. Add one in the Outfits table.</p></article>`;
+            return `<article class="wear-opt"><h3>${esc(pick.option)}</h3><p class="wear-note">No outfit ready today: each one for this option has a piece in the wash or is out of season.</p></article>`;
         }
         const addedById = new Map(pick.added.map(a => [a.item.id, a]));
         const btn = pick.wornToday
@@ -151,12 +153,13 @@
         } catch (err) { console.error('[wardrobe] Unknown weather timezone:', wx.timezone, err); }
         return new Date().getHours();
     }
-    function hourStrip(hours, now) {
+    function hourStrip(hours, now, sunset) {
+        const sunHour = sunset ? Number(sunset.slice(0, 2)) : null;   // the column that holds sunset gets a gold label (Kevin, 29 Oct 2026)
         if (!hours || !hours.length) return '';
         const fmt1 = (v) => (v == null ? '–' : (Math.round(v * 10) / 10).toFixed(1));
         const cell = (h, body, extra) => `<td class="${h.hour < now ? 'wear-past' : h.hour === now ? 'wear-now' : ''}${extra || ''}">${body}</td>`;
         return `<div class="wear-hours" role="region" aria-label="Today hour by hour" tabindex="0"><table>
-            <thead><tr><th scope="row">Time</th>${hours.map(h => `<th scope="col" class="${h.hour < now ? 'wear-past' : h.hour === now ? 'wear-now' : ''}"${h.hour === now ? ' aria-current="time"' : ''}>${String(h.hour).padStart(2, '0')}:00</th>`).join('')}</tr></thead>
+            <thead><tr><th scope="row">Time</th>${hours.map(h => `<th scope="col" class="${h.hour < now ? 'wear-past' : h.hour === now ? 'wear-now' : ''}"${h.hour === now ? ' aria-current="time"' : ''}>${String(h.hour).padStart(2, '0')}:00${h.hour === sunHour ? `<span class="wear-sunset">Sunset ${esc(sunset)}</span>` : ''}</th>`).join('')}</tr></thead>
             <tbody>
                 <tr><th scope="row">Feels like</th>${hours.map(h => cell(h, h.feels == null ? '–' : Math.round(h.feels) + '°')).join('')}</tr>
                 <tr><th scope="row">Rain (mm)</th>${hours.map(h => cell(h, fmt1(h.rainMm), h.rainMm > 0 ? ' wear-wet' : '')).join('')}</tr>
@@ -167,6 +170,56 @@
     function currentPicks() {
         const wx = state.wx || UNKNOWN_WX;   // no weather: no layers, never a guess
         return P().pickOutfits(state.data.outfits, state.data.items, wx, new Date());
+    }
+
+    // "I'm wearing something else" (Kevin, 29 Oct 2026): tick the pieces actually on, starting from today's
+    // log or the best option. What it saves feeds the rotation and the wash count like Wearing this does.
+    const TYPE_ORDER = ['Tee', 'Shirt', 'Knit', 'Lounge', 'Trousers', 'Shorts', 'Jacket', 'Coat', 'Shoes', 'Accessory'];
+    function otherBlock(picks, best) {
+        const date = today();
+        const all = Object.values(state.data.items).filter(it => it.status === 'Own' || it.status === 'Bought');
+        const wornNow = all.filter(it => it.lastWorn === date);
+        const dis = state.saving ? ' disabled' : '';
+        if (!state.other) {
+            const pressed = picks.some(p => p.wornToday);
+            return wornNow.length && !pressed
+                ? `<p class="wear-logged" role="status"><b>Wearing today:</b> ${wornNow.map(it => esc(it.name)).join(', ')} <button type="button" class="wear-link" data-wear-other${dis}>Change</button></p>`
+                : `<p class="wear-otherbar"><button type="button" class="wear-btn" data-wear-other${dis}>I'm wearing something else</button></p>`;
+        }
+        const bestPick = picks.find(p => p.option === best);
+        const ticked = new Set((wornNow.length ? wornNow : (bestPick ? bestPick.items : [])).map(it => it.id));
+        const rank = (t) => { const i = TYPE_ORDER.indexOf(t); return i < 0 ? TYPE_ORDER.length : i; };
+        const types = [...new Set(all.map(it => it.type || 'Other'))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+        const box = (it) => {
+            const wash = P().inWash(it, date) ? ` <small>in the wash until ${esc(fmtDay(P().cleanOn(it)))}</small>` : '';
+            return `<label><input type="checkbox" name="piece" value="${esc(it.id)}"${ticked.has(it.id) ? ' checked' : ''}> <i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i> ${esc(it.name)}${wash}</label>`;
+        };
+        return `<form class="wear-otherform" data-wear-otherform aria-labelledby="wearOtherTitle">
+            <h3 id="wearOtherTitle">What are you wearing today?</h3>
+            <p class="wear-note">Tick everything you have on. It saves today against each piece, so the card rotates and knows what needs washing.</p>
+            <div class="wear-othergrid">${types.map(t => `<fieldset><legend>${esc(t)}</legend>${all.filter(it => (it.type || 'Other') === t).sort((a, b) => a.name.localeCompare(b.name)).map(box).join('')}</fieldset>`).join('')}</div>
+            <div class="wr-formbtns"><button type="submit" class="wear-btn wear-btn-primary"${dis}>${state.saving ? 'Saving…' : 'Save what I\'m wearing'}</button><button type="button" class="wear-btn" data-wear-othercancel${dis}>Cancel</button></div>
+        </form>`;
+    }
+
+    // Tonight's wash (Kevin, 29 Oct 2026): from what was logged today, what goes in the wash and what goes
+    // back on the hanger, so nothing is over-worn and the clothes keep rotating. Uncounted pieces (jackets,
+    // coats, shoes) are left off: they never need a nightly decision.
+    function washTonight() {
+        const date = today();
+        const worn = Object.values(state.data.items).filter(it => it.lastWorn === date && P().washLimit(it) > 0)
+            .sort((a, b) => a.name.localeCompare(b.name));
+        const head = '<h3 id="wearWashTitle">Tonight\'s wash</h3>';
+        if (!worn.length) {
+            return `<section class="wear-wash" aria-labelledby="wearWashTitle">${head}<p class="wear-note">Press Wearing this, or tick what you have on under I'm wearing something else, and tonight's wash list appears here.</p></section>`;
+        }
+        const wash = worn.filter(it => P().inWash(it, date));
+        const keep = worn.filter(it => !P().inWash(it, date));
+        const list = (items, line) => `<ul>${items.map(it => `<li><i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i><span class="wear-name">${esc(it.name)} <small>${esc(line(it))}</small></span></li>`).join('')}</ul>`;
+        return `<section class="wear-wash" aria-labelledby="wearWashTitle">${head}<div class="wear-washcols">
+            ${wash.length ? `<div><h4>Into the wash tonight</h4>${list(wash, it => 'back in your picks ' + fmtDay(P().cleanOn(it)))}</div>` : ''}
+            ${keep.length ? `<div><h4>Hang back up</h4>${list(keep, it => `${P().wearsNow(it, date)} of ${P().washLimit(it)} wears`)}</div>` : ''}
+        </div></section>`;
     }
 
     function renderHomeCard() {
@@ -189,7 +242,7 @@
                     ${wx.wind != null ? `<span class="wear-chip${wx.wind >= WINDY_MPH ? ' wear-chip-wind' : ''}">Wind ${Math.round(wx.wind)} mph</span>` : ''}
                     ${wx.sunset ? `<span class="wear-chip wear-chip-sun">Sunset ${esc(wx.sunset)}</span>` : ''}
                 </div></div>` : ''}
-        </div>${wx ? hourStrip(wx.hours, placeHour(wx)) : ''}`;
+        </div>${wx ? hourStrip(wx.hours, placeHour(wx), wx.sunset) : ''}`;
         state.shownHour = wx ? placeHour(wx) : null;   // followTheHour redraws when the clock moves past it
         if (state.dataError) {
             el.innerHTML = head + `<p class="wear-error">${esc(state.dataError)} Press Refresh in the Wardrobe page's bar to try again.</p>`;
@@ -204,10 +257,13 @@
         const locate = wx && !wx.mine && navigator.geolocation ? '<button type="button" class="wear-link" data-wear-locate>Use my location</button>' : '';
         el.innerHTML = head + stale + why
             + `<div class="wear-opts">${picks.map(p => optionCard(p, best)).join('')}</div>`
+            + otherBlock(picks, best)
+            + washTonight()
             + `<p class="wear-src">Weather from Open-Meteo for ${esc(place)}. ${locate}<button type="button" class="wear-link" data-wear-open>Open your wardrobe</button></p>`;
     }
 
-    async function patchRecords(table, records) {
+    // landed (optional) collects the ids of each batch Airtable accepted, so an undo touches only those.
+    async function patchRecords(table, records, landed) {
         for (let i = 0; i < records.length; i += 10) {
             const body = JSON.stringify({ records: records.slice(i, i + 10) });
             let resp;
@@ -218,6 +274,7 @@
                 await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
             }
             if (!resp.ok) throw new Error('save failed: ' + resp.status);
+            if (landed) records.slice(i, i + 10).forEach(r => landed.push(r.id));
         }
     }
 
@@ -270,6 +327,15 @@
         return runEdit([{ doIt: () => patchRecords(TABLES.wardrobe, [{ id, fields: after }]), undo: () => patchRecords(TABLES.wardrobe, [{ id, fields: before }]) }], okMsg);
     }
 
+    // Save some of a piece's fields; the undo puts back what the page last read for the same fields.
+    function setFields(id, fields, okMsg) {
+        const it = state.data && state.data.items[id];
+        if (!it) return;
+        const keyOf = Object.fromEntries(Object.entries(WR).map(([k, v]) => [v, k]));
+        const before = Object.fromEntries(Object.keys(fields).map(f => [f, it[keyOf[f]] == null ? null : it[keyOf[f]]]));
+        return runEdit([{ doIt: () => patchRecords(TABLES.wardrobe, [{ id, fields }]), undo: () => patchRecords(TABLES.wardrobe, [{ id, fields: before }]) }], okMsg);
+    }
+
     // Add a piece. With "Replaces", the new piece takes the old one's place in every outfit it was in, and the
     // old one moves to Get rid of: that is how a new piece reaches today's picks.
     function addPiece(f) {
@@ -304,37 +370,56 @@
     // and keeps its old date in Previous worn. An outfit worn today stays on the card all day, so there is
     // no same-day switch to undo. A failure undoes the writes already made, and the message says plainly
     // if that undo failed.
-    async function wear(option) {
-        if (state.saving || !state.data) return;
-        const pick = currentPicks().find(p => p.option === option);
-        if (!pick || !pick.outfit) return;
-        const date = today();
-        const chosen = pick.outfit;
-        const steps = [
-            { table: TABLES.wardrobe,
-              doIt: pick.items.map(it => ({ id: it.id, fields: { [WR.lastWorn]: date } })),
-              undo: pick.items.map(it => ({ id: it.id, fields: { [WR.lastWorn]: it.lastWorn || null } })),
-              local: () => pick.items.forEach(it => { it.lastWorn = date; }), unlocal: (snap) => pick.items.forEach((it, i) => { it.lastWorn = snap[i]; }),
-              snap: pick.items.map(it => it.lastWorn) },
-            { table: TABLES.outfits,
-              doIt: [{ id: chosen.id, fields: { [OF.lastWorn]: date, [OF.prevWorn]: chosen.lastWorn === date ? (chosen.prevWorn || null) : (chosen.lastWorn || null) } }],
-              undo: [{ id: chosen.id, fields: { [OF.lastWorn]: chosen.lastWorn || null, [OF.prevWorn]: chosen.prevWorn || null } }],
-              local: () => { chosen.prevWorn = chosen.lastWorn === date ? chosen.prevWorn : chosen.lastWorn; chosen.lastWorn = date; },
-              unlocal: (snap) => { chosen.lastWorn = snap[0]; chosen.prevWorn = snap[1]; }, snap: [chosen.lastWorn, chosen.prevWorn] },
-        ].filter(st => st.doIt.length);
+    // Wearing this, or "I'm wearing something else": today's date and one wear go on exactly these pieces.
+    // A piece logged earlier today but not in this set has its wear taken back, and an outfit pressed
+    // earlier today goes back to its last date, so changing your mind never counts twice (Kevin, 29 Oct 2026).
+    const WEAR_KEYS = { lastWorn: 'lastWorn', prevWorn: 'prevWorn', wears: 'wears', inWashSince: 'inWashSince' };
+    function wearSteps(ids, chosen, date) {
+        const items = state.data.items;
+        const itemChanges = [];
+        Object.values(items).forEach(it => {
+            const f = ids.includes(it.id) ? P().wearFields(it, date) : P().unwearFields(it, date);
+            if (f) itemChanges.push({ it, f });
+        });
+        const outfitChanges = state.data.outfits.filter(o => o.lastWorn === date && o !== chosen)
+            .map(o => ({ o, f: { lastWorn: o.prevWorn || null, prevWorn: null } }));
+        if (chosen && chosen.lastWorn !== date) outfitChanges.push({ o: chosen, f: { lastWorn: date, prevWorn: chosen.lastWorn || null } });
+        const pick = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj[k] == null ? null : obj[k]]));
+        const step = (table, changes) => {
+            const keys = table === TABLES.wardrobe ? Object.keys(WEAR_KEYS) : ['lastWorn', 'prevWorn'];
+            const map = table === TABLES.wardrobe ? WR : OF;
+            const snap = changes.map(c => pick(c.it || c.o, keys));
+            const toFields = (vals) => Object.fromEntries(keys.map(k => [map[k], vals[k] == null ? null : vals[k]]));
+            return { table, doIt: changes.map(c => ({ id: (c.it || c.o).id, fields: toFields(c.f) })),
+                undo: changes.map((c, i) => ({ id: (c.it || c.o).id, fields: toFields(snap[i]) })),
+                local: () => changes.forEach(c => Object.assign(c.it || c.o, c.f)),
+                unlocal: () => changes.forEach((c, i) => Object.assign(c.it || c.o, snap[i])) };
+        };
+        return [step(TABLES.wardrobe, itemChanges), step(TABLES.outfits, outfitChanges)].filter(st => st.doIt.length);
+    }
+    async function saveWorn(ids, chosen, okMsg) {
+        if (state.saving || !state.data) return false;
+        const steps = wearSteps(ids, chosen, today());
+        if (!steps.length) { state.other = false; renderHomeCard(); return true; }
         state.saving = true;
         steps.forEach(st => st.local());
         renderHomeCard();
         const done = [];
+        let ok = true;
         try {
-            for (const st of steps) { await patchRecords(st.table, st.doIt); done.push(st); }
-            showToast(`Saved: you're wearing ${chosen.name} today.`, { type: 'success' });
+            // A batch of 10 can land before the next one fails: each step records what landed, and only that is undone.
+            for (const st of steps) { st.landed = []; done.push(st); await patchRecords(st.table, st.doIt, st.landed); }
+            state.other = false;
+            showToast(okMsg, { type: 'success' });
         } catch (err) {
+            ok = false;
             console.error('[wardrobe] Could not save what you are wearing:', err);
-            steps.slice().reverse().forEach(st => st.unlocal(st.snap));
+            steps.slice().reverse().forEach(st => st.unlocal());
             let undone = true;
             for (const st of done.reverse()) {
-                try { await patchRecords(st.table, st.undo); } catch (e) { undone = false; console.error('[wardrobe] Could not undo a part-saved Wearing:', e); }
+                const back = st.undo.filter(r => st.landed.includes(r.id));
+                if (!back.length) continue;
+                try { await patchRecords(st.table, back); } catch (e) { undone = false; console.error('[wardrobe] Could not undo a part-saved Wearing:', e); }
             }
             showToast(undone ? 'That did not save, so nothing changed. Try again in a moment.'
                 : 'Only part of that saved. Press Refresh on the Wardrobe page to see what Airtable holds.', { type: 'error', duration: 8000 });
@@ -343,6 +428,13 @@
             renderHomeCard();
             renderWardrobePage();
         }
+        return ok;
+    }
+    function wear(option) {
+        if (state.saving || !state.data) return;
+        const pick = currentPicks().find(p => p.option === option);
+        if (!pick || !pick.outfit) return;
+        saveWorn(pick.items.map(it => it.id), pick.outfit, `Saved: you're wearing ${pick.outfit.name} today.`);
     }
 
     // ── Wardrobe page ──
@@ -396,6 +488,17 @@
         </form></td></tr>`;
     }
 
+    // Wash column (Kevin, 29 Oct 2026): where the piece is in its cycle, and its own limit to change.
+    function washCell(i, dis) {
+        const date = today();
+        const limit = P().washLimit(i);
+        const where = limit === 0 ? 'Not counted'
+            : P().inWash(i, date) ? `<span class="wr-pill wr-pill-new">In the wash</span> clean ${esc(fmtDay(P().cleanOn(i)))}`
+            : `${P().wearsNow(i, date)} of ${limit} wear${limit === 1 ? '' : 's'}`;
+        const def = P().RULES.WASH_DEFAULT[i.type] || 0;
+        return `<div class="wr-wash">${where}<label class="wr-washevery">Every <input type="number" min="0" max="30" step="1" inputmode="numeric" data-wr-washevery="${esc(i.id)}" value="${i.washEvery == null ? '' : i.washEvery}" placeholder="${def}" aria-label="Wears before washing ${esc(i.name)} (blank = ${def}, 0 = never)"${dis}></label></div>`;
+    }
+
     function renderWardrobePage() {
         const el = document.getElementById('wardrobePage');
         if (!el) return;
@@ -421,11 +524,11 @@
             </div>
             ${state.view === 'own' ? (state.form === 'add' ? addForm(rows.own) : `<div class="wr-bar"><button type="button" class="wear-btn wear-btn-primary" data-wr-add${dis}>Add a piece</button></div>`) : ''}
             <div class="wr-tabs" role="tablist" aria-label="Wardrobe lists">${tab('own', 'Current clothes', rows.own.length)}${tab('add', 'Recommended additions', rows.add.length)}${tab('out', 'Get rid of', rows.out.length)}</div>
-            ${table('own', ['Piece', 'Type', 'Colour', 'Used for', 'Last worn', '<span class="wr-sr">Actions</span>'], rows.own.map(i => `<tr>
+            ${table('own', ['Piece', 'Type', 'Colour', 'Used for', 'Last worn', 'Wash', '<span class="wr-sr">Actions</span>'], rows.own.map(i => `<tr>
                 <td class="wr-name">${esc(i.name)}${i.status === 'Bought' ? ' <span class="wr-pill wr-pill-new">New</span>' : ''}</td><td>${esc(i.type)}</td>
                 <td><i class="wear-sw" style="background:${swatch(i.swatch)}" aria-hidden="true"></i> ${esc(i.colour)}</td>
-                <td>${(i.usedFor || []).map(u => `<span class="wr-pill">${esc(u)}</span>`).join(' ')}</td><td>${esc(fmtDay(i.lastWorn))}</td>
-                <td class="wr-acts">${i.status === 'Bought' ? btn('data-wr-arrived', i.id, 'Arrived') : ''}${btn('data-wr-remove', i.id, 'Remove')}</td></tr>
+                <td>${(i.usedFor || []).map(u => `<span class="wr-pill">${esc(u)}</span>`).join(' ')}</td><td>${esc(fmtDay(i.lastWorn))}</td><td>${washCell(i, dis)}</td>
+                <td class="wr-acts">${i.status === 'Bought' ? btn('data-wr-arrived', i.id, 'Arrived') : ''}${P().inWash(i, today()) || P().wearsNow(i, today()) > 0 ? btn('data-wr-washed', i.id, 'Washed') : ''}${btn('data-wr-remove', i.id, 'Remove')}</td></tr>
                 ${state.form === i.id ? removeForm(i) : ''}`).join(''), 'Nothing marked as owned yet.')}
             ${table('add', ['Piece', 'Why', 'Completes', 'Buy in', 'Cap', '<span class="wr-sr">Actions</span>'], rows.add.map(i => `<tr>
                 <td class="wr-name">${esc(i.name)}</td><td>${esc(i.reason)}</td><td>${i.completes} outfit${i.completes === 1 ? '' : 's'}</td><td>${esc(i.buyIn || 'Any time')}</td><td>${esc(i.cap)}</td>
@@ -479,6 +582,16 @@
             const w = e.target.closest('[data-wear-option]');
             if (w) { wear(w.getAttribute('data-wear-option')); return; }
             if (e.target.closest('[data-wear-open]')) { if (typeof switchTab === 'function') switchTab(TAB); return; }
+            if (e.target.closest('[data-wear-other]') && !state.saving && state.data) {
+                state.other = true; renderHomeCard();
+                const f = document.querySelector('#homeWear [data-wear-otherform] input'); if (f) f.focus();
+                return;
+            }
+            if (e.target.closest('[data-wear-othercancel]') && !state.saving) {
+                state.other = false; renderHomeCard();
+                const b = document.querySelector('#homeWear [data-wear-other]'); if (b) b.focus();
+                return;
+            }
             if (e.target.closest('[data-wear-locate]') && navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(() => loadWeather(true).then(renderHomeCard),
                     () => showToast('Location is off for this site, so the card stays on Cambridge weather.', { type: 'info' }));
@@ -489,13 +602,54 @@
             if (e.target.closest('[data-wr-add]')) { state.form = 'add'; renderWardrobePage(); focusIn('[data-wr-addform] input[name="name"]'); return; }
             if (e.target.closest('[data-wr-cancel]')) { closeForm(); return; }
             if ((id = pick('data-wr-remove'))) { state.form = id; renderWardrobePage(); focusIn('[data-wr-removeform] select'); return; }
+            if ((id = pick('data-wr-washed'))) {
+                setFields(id, { [WR.wears]: 0, [WR.inWashSince]: null }, `${state.data.items[id].name} is clean again.`);
+                return;
+            }
             if ((id = pick('data-wr-arrived'))) { setStatus(id, { [WR.status]: 'Own' }, `Marked ${state.data.items[id].name} as arrived.`); return; }
             if ((id = pick('data-wr-bought'))) { setStatus(id, { [WR.status]: 'Bought' }, `${state.data.items[id].name} moved to your clothes as new.`); return; }
             if ((id = pick('data-wr-keep'))) { setStatus(id, { [WR.status]: 'Own', [WR.action]: null, [WR.reason]: null }, `Kept ${state.data.items[id].name}. It is back in your clothes.`); return; }
             const v = e.target.closest('[data-wr-view]');
             if (v) { state.form = null; state.view = v.getAttribute('data-wr-view'); renderWardrobePage(); const t = document.getElementById('wrTab-' + state.view); if (t) t.focus(); }
         });
+        // A piece's own wash limit: blank = its type's default, 0 = never counted.
+        document.addEventListener('change', (e) => {
+            const inp = e.target.closest && e.target.closest('[data-wr-washevery]');
+            if (!inp || state.saving || !state.data) return;
+            const id = inp.getAttribute('data-wr-washevery');
+            const it = state.data.items[id];
+            const raw = inp.value.trim();
+            const v = raw === '' ? null : Number(raw);
+            if (v != null && !(Number.isInteger(v) && v >= 0 && v <= 30)) {
+                showToast('Use a whole number from 0 to 30, or leave it blank for the usual.', { type: 'error' });
+                renderWardrobePage();
+                return;
+            }
+            if (!it || v === it.washEvery) return;
+            setFields(id, { [WR.washEvery]: v }, v == null ? `${it.name} is back to the usual wash limit.`
+                : v === 0 ? `${it.name} is no longer counted for washing.` : `${it.name} now goes in the wash every ${v} wear${v === 1 ? '' : 's'}.`);
+        });
         document.addEventListener('submit', (e) => {
+            const other = e.target.closest('[data-wear-otherform]');
+            if (other) {
+                e.preventDefault();
+                if (state.saving) return;
+                const ids = new FormData(other).getAll('piece').map(String);
+                if (!ids.length) { showToast('Tick at least one piece you are wearing.', { type: 'info' }); return; }
+                // An outfit counts as worn when all its own pieces are ticked and nothing else but weather layers:
+                // today's pressed one first, so a later change in the weather never un-presses it.
+                const items = state.data.items;
+                // Rain swaps an outfit's shoes for leather boots, so ticked boots stand in for its shoes.
+                const bootsOn = ids.some(id => items[id] && items[id].type === 'Shoes' && /^Leather boots/.test(items[id].layerRole || ''));
+                const met = (id) => ids.includes(id) || (bootsOn && items[id] && items[id].type === 'Shoes');
+                const fits = (o) => o.itemIds.length && o.itemIds.every(met)
+                    && ids.every(id => o.itemIds.includes(id) || (items[id] && items[id].layerRole));
+                const same = state.data.outfits.find(o => o.lastWorn === today() && fits(o))
+                    || (currentPicks().find(p => p.outfit && fits(p.outfit)) || {}).outfit;
+                saveWorn(ids, same || null, `Saved what you're wearing today: ${ids.length} piece${ids.length === 1 ? '' : 's'}.`)
+                    .then(ok => { if (ok) { const b = document.querySelector('#homeWear [data-wear-other]'); if (b) b.focus(); } });
+                return;
+            }
             const add = e.target.closest('[data-wr-addform]');
             const rm = e.target.closest('[data-wr-removeform]');
             if (!add && !rm) return;
@@ -514,6 +668,11 @@
             }
         });
         // Escape closes an open form.
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape' || !state.other || state.saving || !(e.target.closest && e.target.closest('[data-wear-otherform]'))) return;
+            state.other = false; renderHomeCard();
+            const b = document.querySelector('#homeWear [data-wear-other]'); if (b) b.focus();
+        });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.form && !state.saving && e.target.closest && e.target.closest('.wr-form')) closeForm(); });
         // Arrow keys move between the Wardrobe tabs (roving tabindex).
         document.addEventListener('keydown', (e) => {
@@ -553,6 +712,7 @@
             const hour = placeHour(state.wx);
             const due = Date.now() - state.wxTriedAt >= WEATHER_MAX_AGE_MS || hour !== state.wxTriedHour;
             if (hour === state.shownHour && !due) return;
+            if (state.other) return;   // never redraw over half-ticked boxes; the next minute tries again
             (due ? loadWeather(true) : Promise.resolve()).then(() => {
                 const card = document.getElementById('homeWear');
                 if (state.saving || !card) return;   // the save redraws the card itself
