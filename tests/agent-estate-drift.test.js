@@ -284,6 +284,44 @@ describe('agent-estate-drift', () => {
     expect(r.json.rulings_behind).toEqual([]);
   });
 
+  // Finding 20261030-ceo-agent-1131. ESTATE_WORDS is a word match, so a tenancy, padel or
+  // wardrobe ruling written up by an AGENT, or one that mentions Roy, fires on it. On
+  // 30 Oct 2026 the 06:52 memory sweep wrote four 29 Oct Decisions files and the 06:55
+  // re-run read "4 rulings behind"; none of them changed routing, autonomy, the money rule,
+  // where Kevin decides, the workforce shape or the clocks, which is CLAUDE.md's test for
+  // an ESTATE.md entry. Red every morning on rulings with no estate content is what trains
+  // a reader to ignore red.
+  it('a ruling that declares estate: none is not behind, and one without it still fires', () => {
+    const e = estate({ stamp: '2026-10-28' });
+    const four = ['2026-10-29 Late-signed AST start date.md', '2026-10-29 UC tenant internal move.md',
+      '2026-10-29 Padel bookings.md', '2026-10-29 What to wear.md'];
+    // Each one fires on ESTATE_WORDS today: "agent", "Roy", "approval", "register".
+    for (const f of four) {
+      writeFileSync(join(e.brain, 'Decisions', f),
+        '---\ndate: 2026-10-29\nestate: none\n---\n# ruling\nThe agent asked Roy; it is on the register and went to approval.\n');
+    }
+    const r = run(e);
+    expect(r.code, JSON.stringify(r.json && r.json.rulings_behind)).toBe(0);
+    expect(r.json.rulings_behind).toEqual([]);
+    // CONTROL, and the back-test: the same words with no declaration still fire, so the
+    // declaration is what decides it and the check has not simply stopped working.
+    writeFileSync(join(e.brain, 'Decisions', '2026-10-29 Approval gate change.md'),
+      '---\ndate: 2026-10-29\n---\n# gate\nAgents now route differently.\n');
+    const after = run(e);
+    expect(after.code).toBe(1);
+    expect(after.json.rulings_behind).toEqual(['2026-10-29 Approval gate change.md']);
+  });
+
+  it('estate: none in a ruling\'s PROSE declares nothing', () => {
+    // The declaration is frontmatter, so a sentence quoting it cannot wave a ruling through.
+    const e = estate({ stamp: '2026-10-28' });
+    writeFileSync(join(e.brain, 'Decisions', '2026-10-29 Approval gate change.md'),
+      '# gate\nAgents now route differently. This is not estate: none by any reading.\n');
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.rulings_behind).toEqual(['2026-10-29 Approval gate change.md']);
+  });
+
   it('BOUND: a ruling older than the 14 days is never re-raised', () => {
     // Without a floor the check would hand back the whole archive every morning.
     const e = estate({ stamp: '2026-09-15' });

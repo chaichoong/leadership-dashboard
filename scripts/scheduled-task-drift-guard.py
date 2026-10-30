@@ -21,9 +21,30 @@ The drift is cheap to fix and expensive to find. This guard moves the refusal to
 the session that MADE it, where the one command that cures it is obvious, instead
 of leaving it for whoever pushes next.
 
-Exit 0 when in sync, when there is no live directory (another machine, CI), or
-when the check itself cannot run. Exit 1, naming the routine and the command,
-when there is drift.
+WHICH WAY THE DRIFT RUNS (finding 20261026-queue-fixer-1088, fixed 30 Oct 2026)
+--------------------------------------------------------------------------------
+`--check` only says the two copies DIFFER. It cannot say which side moved, and
+until 30 Oct 2026 this guard blocked both directions the same way. Only one of
+them is the incident above:
+
+* **Live moved, the mirror is stale.** Unreviewed, and it reds every open pull
+  request. Block it.
+* **The mirror moved, live is stale.** That is a routine's instructions being
+  improved and sent for review BEFORE they go live, which is the right order.
+  Blocking it forced the only cure that existed — `--push` — which rewrites a
+  running routine with a change nobody has merged yet. On 26 Oct 2026 the fixer
+  could get through only by running `--pull` in the main checkout too, leaving a
+  modified file in a checkout the brief said not to disturb.
+
+So a routine whose REVIEWED copy is staged in this very commit is let through,
+with the `--push` it owes after the merge printed as a reminder. THE LIMIT: if
+BOTH copies were edited, the staged mirror lets the live edit through this one
+commit. It is caught on the next one, because by then the mirror is committed
+rather than staged and the drift reads as live-ahead again.
+
+Exit 0 when in sync, when the only drift is a reviewed copy staged here, when
+there is no live directory (another machine, CI), or when the check itself cannot
+run. Exit 1, naming the routine and the command, when there is drift.
 """
 
 import os
@@ -32,6 +53,47 @@ import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SYNC = os.path.join(HERE, "sync-scheduled-tasks.py")
+MIRROR = (".claude", "scheduled-tasks")
+FILENAME = "SKILL.md"
+
+
+# sync-scheduled-tasks.py --check reports three statuses, and they do NOT all run
+# the same way. Reading only DRIFTED let an UNTRACKED live routine through the
+# exemption below the first time this was written, which its own test caught.
+EXEMPTABLE = ("DRIFTED", "MISSING")   # the reviewed copy can be the one that moved
+ALWAYS_BLOCK = ("UNTRACKED",)         # live only, never reviewed: the original incident
+
+
+def reported(out):
+    """(status, routine) for every line sync-scheduled-tasks.py --check reported."""
+    rows = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] in EXEMPTABLE + ALWAYS_BLOCK:
+            rows.append((parts[0], parts[1]))
+    return rows
+
+
+def staged_mirror_routines():
+    """Routines whose REVIEWED copy this very commit is changing.
+
+    None means the index could not be read, and an unknown direction blocks:
+    the safe side is the behaviour this guard already had.
+    """
+    try:
+        r = subprocess.run(["git", "diff", "--cached", "--name-only"],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    names = set()
+    for line in (r.stdout or "").splitlines():
+        parts = line.strip().split("/")
+        if (len(parts) == 4 and (parts[0], parts[1]) == MIRROR
+                and parts[3] == FILENAME):
+            names.add(parts[2])
+    return names
 
 
 def main():
@@ -55,6 +117,21 @@ def main():
         return 0
 
     out = (r.stdout or "") + (r.stderr or "")
+
+    # Which way does it run? A routine whose reviewed copy is staged here is a
+    # change going FOR review, not one dodging it.
+    rows = reported(out)
+    staged = staged_mirror_routines()
+    if rows and staged is not None:
+        exempt = [r for r in rows if r[0] in EXEMPTABLE and r[1] in staged]
+        if len(exempt) == len(rows):
+            for _status, name in sorted(set(exempt)):
+                print("OK  %s — the reviewed copy is changing in this commit, so "
+                      "the live copy is the stale one." % name, file=sys.stderr)
+            print("    Run `python3 scripts/sync-scheduled-tasks.py --push` once this "
+                  "has MERGED, so the live routine matches what was reviewed.",
+                  file=sys.stderr)
+            return 0
 
     print("", file=sys.stderr)
     print("BLOCKED: a scheduled routine's instructions are not under review.",

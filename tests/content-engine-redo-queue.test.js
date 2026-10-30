@@ -32,8 +32,23 @@ const CE = resolve(__dirname, '../scripts/content-engine');
 // Every snippet starts with the night's redo-plan record pointed at an empty scratch path, so a test reads the
 // record only when it writes one (PLAN_RECORD below). Without it render read the LIVE record in ~/.config/od, and
 // once a real one inside 24 hours existed (20 Oct 2026) five of these tests failed on main.
-const NO_LIVE_PLAN = `import os as _os, tempfile as _tf, watch as _watch
+// The clock is pinned too, and that is the fix for a flake, not a convenience (finding
+// 20261028-agent-dispatch-1111). These tests hand resubmit_due a receipt mtime of
+// PINNED_NOW - k * 86400 while render.nights_parked counts LOCAL CALENDAR dates, so a UK
+// clock change inside those k days makes k x 24h land on a different local date for the hour
+// 23:00-00:00 UTC: on 27 Oct 2026 at 23:19 and 23:30 the 8-night and 10-night tests both read
+// one night short and failed, and 5 Apr 2027 23:30 reads one night long. The code is right;
+// the arithmetic that built the fixture was wrong. 14 Jan 2026 12:00 UTC is mid-GMT, with no
+// clock change within 20 days either side of anything these receipts reach. The REAL
+// nights_parked still runs — only its `now` is fixed — so a change to how it counts still
+// fails these tests.
+const PINNED_NOW = 1768392000; // 14 Jan 2026 12:00 UTC
+
+const NO_LIVE_PLAN = `import os as _os, tempfile as _tf, datetime as _dt, watch as _watch, render as _render
 _watch.REDO_PLAN_FILE = _os.path.join(_tf.mkdtemp(prefix="ce-redo-plan-"), "none.json")
+PINNED_NOW = ${PINNED_NOW}
+_np = _render.nights_parked
+_render.nights_parked = lambda m, now=None: _np(m, now or _dt.datetime.fromtimestamp(PINNED_NOW))
 `;
 
 function py(code) {
@@ -112,7 +127,7 @@ print(render.resubmit_due(2106, led, 0, card, {}))
 import json, time, render, watch
 ${RECEIPTS}
 led = json.loads('''${LEDGER}''')
-print(render.resubmit_due(2100, led, time.time(), {"verdict": "changes"}, {}))
+print(render.resubmit_due(2100, led, PINNED_NOW, {"verdict": "changes"}, {}))
 `);
     expect(out).toMatch(/first in the night's redo queue/);
     expect(out).toMatch(/tonight/);
@@ -126,7 +141,7 @@ print(render.resubmit_due(2100, led, time.time(), {"verdict": "changes"}, {}))
 import json, time, render, watch
 ${RECEIPTS}
 led = json.loads('''${LEDGER}''')
-print(render.resubmit_due(2100, led, time.time() - 8 * 86400, {"verdict": "changes"}, {}))
+print(render.resubmit_due(2100, led, PINNED_NOW - 8 * 86400, {"verdict": "changes"}, {}))
 `);
     expect(out).toMatch(/STILL has not rendered after 8 night/);
     expect(out).toMatch(/stuck, not waiting/);
@@ -219,10 +234,48 @@ ${RECEIPTS}
 ${PLAN_RECORD}
 led = json.loads('''${LEDGER}''')
 ${DRAINED}
-print(render.resubmit_due(2106, led, time.time() - 5 * 86400, {"verdict": "changes"}, {}))
+print(render.resubmit_due(2106, led, PINNED_NOW - 5 * 86400, {"verdict": "changes"}, {}))
 `);
     expect(out).toMatch(/2 of 3 sent-back days/);
     expect(out).not.toMatch(/stuck, not waiting/);
+  });
+
+  // Finding 20261021-queue-fixer-1026 (recurrence, 30 Oct 2026). The line that was meant to
+  // tell a jam from a queue fired on every normal wait: it compared nights_parked (every night
+  // the day spent FURTHER BACK in the queue) against place - 1 (the nights left from the FRONT),
+  // so a day that correctly waited its turn behind two days that both drained read as a jam. The
+  // night log of 29-30 Oct shows the queue shrinking 6, 5, 4 while the morning report said it
+  // was NOT draining.
+  it('a day waiting its turn is not reported as a queue that has stopped draining', () => {
+    const out = py(`
+import json, render, watch
+${RECEIPTS}
+${PLAN_RECORD}
+led = json.loads('''${LEDGER}''')
+print(render.resubmit_due(2112, led, PINNED_NOW - 4 * 86400, {"verdict": "changes"}, {}))
+`);
+    // It still says where the day sits and what that means — nothing is hidden.
+    expect(out).toMatch(/3 of 3 sent-back days/);
+    expect(out).toMatch(/one redo a night, longest-waiting first/);
+    // The nights parked stay on the line as a FACT, with what they actually measure.
+    expect(out).toMatch(/parked 4 night\(s\)/);
+    expect(out).toMatch(/waiting its turn further back/);
+    // The verdict the data cannot support is gone.
+    expect(out).not.toMatch(/NOT draining/);
+    expect(out).not.toMatch(/cannot be trusted/);
+  });
+
+  it('CONTROL: a day at the FRONT that has not rendered is still reported as stuck', () => {
+    // The jam signal is not removed, only moved to where it can be made honestly. If this
+    // ever stops saying stuck, the test above has taken the alarm away rather than fixed it.
+    const out = py(`
+import json, render, watch
+${RECEIPTS}
+led = json.loads('''${LEDGER}''')
+print(render.resubmit_due(2100, led, PINNED_NOW - 2 * 86400, {"verdict": "changes"}, {}))
+`);
+    expect(out).toMatch(/STILL has not rendered after 2 night\(s\)/);
+    expect(out).toMatch(/stuck, not waiting/);
   });
 
   it('BACK-TEST: with no recorded plan the same night reads it as stuck', () => {
@@ -237,7 +290,7 @@ led = json.loads('''${LEDGER}''')
 ${DRAINED}
 print(json.dumps({
   "place": render.redo_queue_place(2106, led),
-  "why": render.resubmit_due(2106, led, time.time() - 5 * 86400, {"verdict": "changes"}, {}),
+  "why": render.resubmit_due(2106, led, PINNED_NOW - 5 * 86400, {"verdict": "changes"}, {}),
 }))
 `);
     const { place, why } = JSON.parse(out);
@@ -300,7 +353,7 @@ describe('a refused clip that needs a person says so, and says for how long', ()
     const out = py(`
 import json, time, render
 led = json.loads('''${LED_2106}''')
-print(render.resubmit_due(2106, led, time.time() - 10 * 86400, {"verdict": "changes"}, {}))
+print(render.resubmit_due(2106, led, PINNED_NOW - 10 * 86400, {"verdict": "changes"}, {}))
 `);
     expect(out).toMatch(/dup\.insv failed to render/);
     expect(out).toMatch(/second long recording for episode 2106/);
@@ -318,7 +371,7 @@ print(render.resubmit_due(2106, led, time.time() - 10 * 86400, {"verdict": "chan
 import json, time, render
 led = json.loads('''${LED_2106}''')
 del led["dup.insv"]["requeued"]
-print(render.resubmit_due(2106, led, time.time() - 10 * 86400, {"verdict": "changes"}, {}))
+print(render.resubmit_due(2106, led, PINNED_NOW - 10 * 86400, {"verdict": "changes"}, {}))
 `);
     expect(out).toMatch(/the card goes back once that is put right/);
     expect(out).not.toMatch(/needs a ruling from Kevin/);

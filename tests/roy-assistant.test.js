@@ -140,9 +140,9 @@ describe('reading the request', () => {
     expect(r.forwarded.body).toBe('We can come Friday.');
   });
   it('a forwarded TEXT carries the conversation id, the phone and the contact', () => {
-    const body = 'Tell her Tuesday\\n\\n---------- Forwarded message ---------\\nFrom: SMS from Stacey Cole <sms@operationsdirector.co.uk>\\nSubject: [SMS] Stacey Cole: boiler again\\n\\nSMS from Stacey Cole\\nPhone: 07398 000111\\n\\nboiler again\\n---\\nGHL Conversation: conv98765';
+    const body = 'Tell her Tuesday\\n\\n---------- Forwarded message ---------\\nFrom: SMS from Stacey Cole <sms@operationsdirector.co.uk>\\nSubject: [SMS] Stacey Cole: boiler again\\n\\nSMS from Stacey Cole\\nPhone: 07700 900606\\n\\nboiler again\\n---\\nGHL Conversation: conv98765';
     const r = py(`print(json.dumps(ra.parse_request(msg("m1", "${body}", subject="Fwd: [SMS] Stacey Cole: boiler again"))))`);
-    expect(r.sms).toEqual({ conversation: 'conv98765', phone: '07398 000111', contact: 'Stacey Cole' });
+    expect(r.sms).toEqual({ conversation: 'conv98765', phone: '07700 900606', contact: 'Stacey Cole' });
   });
   it('no instruction line still becomes a request, and a reply to one of our notes follows it up', () => {
     const r = py(`print(json.dumps([ra.parse_request(msg("m1", FWD.split("\\n\\n", 1)[1])),

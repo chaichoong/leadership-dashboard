@@ -16,7 +16,7 @@
 // reads at call time for exactly this reason.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -143,5 +143,106 @@ describe('the scheduled-task drift guard', () => {
   it('the real pre-commit hook does not refuse when in sync', () => {
     const { out } = run(HOOK, inSync);
     expect(out).not.toMatch(/BLOCKED: a scheduled routine/);
+  });
+});
+
+// Finding 20261026-queue-fixer-1088. --check only says the copies DIFFER, and the guard
+// blocked both directions alike. A reviewed copy edited AHEAD of live is a routine's
+// instructions going for review before they go live, which is the right order; blocking it
+// left --push as the only cure, and that rewrites a running routine with an unmerged change.
+// On 26 Oct 2026 the fixer got through only by running --pull in the main checkout as well.
+//
+// These drive the REAL guard against a REAL git index in a scratch repo. core.bare is
+// asserted, because a bare scratch repo once sent a test's writes into this very checkout.
+describe('which way the drift runs', () => {
+  let repo;
+  let live;
+
+  // spawnSync, not execFileSync: the exempted path exits 0 and says why on STDERR,
+  // which execFileSync's return value drops.
+  function guardIn(cwd) {
+    const r = spawnSync('python3', [join(cwd, 'scripts', 'scheduled-task-drift-guard.py')], {
+      encoding: 'utf8', cwd, env: { ...process.env, SCHEDULED_TASKS_LIVE: live },
+    });
+    return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  }
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'drift-direction-'));
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    for (const f of ['scheduled-task-drift-guard.py', 'sync-scheduled-tasks.py']) {
+      cpSync(resolve(__dirname, '../scripts', f), join(repo, 'scripts', f));
+    }
+    cpSync(TRACKED, join(repo, '.claude', 'scheduled-tasks'), { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'T'], { cwd: repo });
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'base', '--no-verify'], { cwd: repo });
+    // The live copy is an exact mirror of that committed state.
+    live = join(repo, 'live');
+    cpSync(join(repo, '.claude', 'scheduled-tasks'), live, { recursive: true });
+  });
+
+  afterAll(() => {
+    if (repo) rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('CONTROL: the scratch repo is a real working tree, not bare', () => {
+    expect(execFileSync('git', ['config', '--get', 'core.bare'], { cwd: repo, encoding: 'utf8' }).trim())
+      .toBe('false');
+    expect(guardIn(repo).code).toBe(0);   // and it starts in sync
+  });
+
+  it('lets through a reviewed copy that this commit is changing, and names the --push it owes', () => {
+    const f = join(repo, '.claude', 'scheduled-tasks', 'queue-fixer', 'SKILL.md');
+    writeFileSync(f, '---\nname: queue-fixer\n---\nA reviewed improvement, not yet live.\n');
+    // CONTROL: unstaged, the direction is unknown, so it still blocks.
+    const unstaged = guardIn(repo);
+    expect(unstaged.code).toBe(1);
+    expect(unstaged.out).toMatch(/BLOCKED/);
+    execFileSync('git', ['add', '.claude/scheduled-tasks/queue-fixer/SKILL.md'], { cwd: repo });
+    const staged = guardIn(repo);
+    expect(staged.code).toBe(0);
+    expect(staged.out).toContain('queue-fixer');
+    expect(staged.out).toMatch(/sync-scheduled-tasks\.py --push/);
+    expect(staged.out).toMatch(/once this has MERGED/);
+    execFileSync('git', ['checkout', '--', '.'], { cwd: repo });
+    execFileSync('git', ['reset', '-q'], { cwd: repo });
+  });
+
+  it('still REFUSES an unmirrored live routine, whatever is staged', () => {
+    // The incident the guard exists for must survive the exemption. Here one routine's
+    // reviewed copy is staged AND a different routine was edited live only.
+    const f = join(repo, '.claude', 'scheduled-tasks', 'queue-fixer', 'SKILL.md');
+    writeFileSync(f, '---\nname: queue-fixer\n---\nA reviewed improvement.\n');
+    execFileSync('git', ['add', '.claude/scheduled-tasks/queue-fixer/SKILL.md'], { cwd: repo });
+    mkdirSync(join(live, 'never-reviewed-routine'), { recursive: true });
+    writeFileSync(join(live, 'never-reviewed-routine', 'SKILL.md'), 'Edited live, never mirrored.\n');
+    const r = guardIn(repo);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/BLOCKED/);
+    expect(r.out).toContain('never-reviewed-routine');
+    rmSync(join(live, 'never-reviewed-routine'), { recursive: true, force: true });
+    execFileSync('git', ['checkout', '--', '.'], { cwd: repo });
+    execFileSync('git', ['reset', '-q'], { cwd: repo });
+  });
+
+  it('BACK-TEST: with the staged-mirror check removed, the reviewed change is refused', () => {
+    // Break the only thing that fixes it. If this stops blocking, the test above has
+    // stopped proving anything.
+    const broken = join(repo, 'broken');
+    mkdirSync(join(broken, 'scripts'), { recursive: true });
+    cpSync(join(repo, 'scripts', 'sync-scheduled-tasks.py'), join(broken, 'scripts', 'sync-scheduled-tasks.py'));
+    const src = execFileSync('cat', [join(repo, 'scripts', 'scheduled-task-drift-guard.py')], { encoding: 'utf8' });
+    expect(src).toContain('staged = staged_mirror_routines()');
+    writeFileSync(join(broken, 'scripts', 'scheduled-task-drift-guard.py'),
+      src.replace('staged = staged_mirror_routines()', 'staged = None'));
+    cpSync(join(repo, '.claude'), join(broken, '.claude'), { recursive: true });
+    const f = join(broken, '.claude', 'scheduled-tasks', 'queue-fixer', 'SKILL.md');
+    writeFileSync(f, '---\nname: queue-fixer\n---\nA reviewed improvement.\n');
+    const r = guardIn(broken);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/BLOCKED/);
   });
 });
