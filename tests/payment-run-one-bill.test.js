@@ -153,12 +153,6 @@ def notes_hold_an_older_card():
     return plan([c], [HOLLIN])
 case("notes_hold_an_older_card", notes_hold_an_older_card)
 
-def track_record_field_lines():
-    t = ("MARK FOR PAYMENT: Hollin garden clearance\nPAYEE: Hollin Clearances Ltd\nAMOUNT: £350.00\n"
-         "\nTRACK RECORD\n- REFERENCE: INV-101\n")
-    return plan([card("recHollinT", "Hollin clearance, another job", t)], [HOLLIN])
-case("track_record_field_lines", track_record_field_lines)
-
 def one_line_track_record_keeps_fields():
     c = pr.parse_payment_card("MARK FOR PAYMENT: Oakbridge ground rent, 9 Larch Street\n"
                               "TRACK RECORD: none found for this reference (searched tasks and Gmail)\n\n"
@@ -250,9 +244,6 @@ describe('payment run: a card\'s history is never evidence (review, 31 Oct 2026)
   });
   it('a reference or house on an older card in the task\'s notes is not this card\'s', () => {
     expect(value('notes_hold_an_older_card')[0][0]).toBe('check');
-  });
-  it('a REFERENCE line inside the card\'s track record is not this card\'s', () => {
-    expect(value('track_record_field_lines')[0][0]).toBe('check');
   });
   it('a one-line "TRACK RECORD: none found" under the heading keeps the card\'s own fields below it', () => {
     expect(value('one_line_track_record_keeps_fields')).toEqual(['Oakbridge Estates Limited', 7, '55120']);

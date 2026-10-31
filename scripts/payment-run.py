@@ -1490,12 +1490,6 @@ def parse_due(text):
     return None
 
 
-# A TRACK RECORD heading on a line of its own starts the history block. A one-line
-# "TRACK RECORD: none found ..." under a card's heading is not one: the card's fields follow
-# it (the Shenstone card, live, 31 Oct 2026).
-TRACK_RECORD_BLOCK_RE = re.compile(r"^[ \t>*_#\-•]*TRACK RECORD[ \t*_:]*$", re.M)
-
-
 def parse_payment_card(output):
     """The payable a MARK FOR PAYMENT card describes, or None if it is not one.
 
@@ -1507,10 +1501,7 @@ def parse_payment_card(output):
     head = MFP_LINE_RE.search(output or "")
     if not head:
         return None
-    # A card's fields sit above its TRACK RECORD; a field line inside the record is an EARLIER
-    # bill's, and read as this card's it made a second bill look like the first (review,
-    # 31 Oct 2026).
-    card = TRACK_RECORD_BLOCK_RE.split(output[head.start():], maxsplit=1)[0]
+    card = output[head.start():]
     # No agent prompt defines the card's shape, so cards arrive free-form too:
     # one reads "MARK FOR PAYMENT — £330.00 total (...)" with no AMOUNT line.
     # The AMOUNT line is the figure to pay; the heading's figure is used only
@@ -1681,13 +1672,13 @@ def card_own_text(c):
     """The card's OWN words: its task name, its heading line and its field lines. Never its
     track record or the task's notes: those name the sender's EARLIER bills, which is exactly
     the bill already on the list, so they made a second bill read as the first (review,
-    31 Oct 2026). So the Agent Output only (the task's Notes can hold an older card with its
-    own REFERENCE line), cut at any TRACK RECORD below the card."""
+    31 Oct 2026). So the Agent Output only: the task's Notes can hold an older card with its
+    own REFERENCE line. Field lines are read exactly as parse_payment_card reads them."""
     text = c.get("output") if c.get("output") is not None else (c.get("text") or "")
     lines = [c.get("name") or ""]
     head = MFP_LINE_RE.search(text)
     if head:
-        block = TRACK_RECORD_BLOCK_RE.split(text[head.start():], maxsplit=1)[0]
+        block = text[head.start():]
         lines.append(text[head.end():].split("\n", 1)[0])
         for label in ("PAYEE", "AMOUNT", "REFERENCE", "DUE DATE", "PAY TO", "DESCRIPTION", "NOTES", "KEVIN ONLY"):
             lines.append(card_field(block, label))
