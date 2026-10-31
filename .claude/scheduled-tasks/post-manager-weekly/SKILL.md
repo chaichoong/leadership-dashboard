@@ -171,10 +171,32 @@ If PDFs are found, process each one through this pipeline:
    document and keep a list of the ones that returned non-zero.** Wait 2
    seconds between each email.
 
+   **Before each document, ask whether that document already went out, and
+   record each clean send the moment it exits 0:**
+
+   ```bash
+   # Skip a document an earlier pass already emailed (exit 3 = skip it).
+   python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/post-archive.py check \
+     --source "<the source PDF>" --document "<split-N>.pdf"
+
+   # The send exited 0: record it NOW, before the next one can fail.
+   python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/post-archive.py sent \
+     --source "<the source PDF>" --result "<split-N>.pdf=0"
+   ```
+
+   Carry the `--result` lines of the documents you skipped into step 6 as well,
+   so the archive counts every document of the source.
+
    Why (finding 20260929-phase-3-660): the old inline osascript launched Mail
    as a side effect, so on a freshly woken Mac the FIRST send died while Mail
    booted. Nothing checked the exit code and step 6 archived the PDF anyway,
    so the document read as handled with no email anywhere.
+
+   Why document by document (finding 20261027-agent-dispatch-1095): the whole
+   source used to be the only unit recorded, and only when EVERY document sent.
+   Three clean sends out of five were forgotten the moment the fourth failed,
+   and the next pass emailed all five again. The double emails of 23 and 25 Oct
+   2026 (five documents twice, visible in Gmail Sent) are the cost.
 
 6. Archive — ONE python3 call, never shell. `scripts/post-archive.py` holds the
    rule that used to live in this step, and it is the only way to archive:
@@ -191,7 +213,9 @@ If PDFs are found, process each one through this pipeline:
    result. It REFUSES (exit 2) and changes nothing otherwise, naming what failed:
    put that at the top of the report in step 7. It records the source as emailed
    BEFORE the move, so a source still sitting in the Post Inbox after a failed
-   move is never emailed a second time.
+   move is never emailed a second time. A refusal also keeps every clean send of
+   this pass, so the retry sends only what failed, and a document step 5 skipped
+   because an earlier pass had sent it is no longer a missing-result refusal.
 
    Why a script (finding 20261023-phase-3-1053, seen 23 and 24 Oct 2026): a
    destructive `mv`/`rm` is refused in an unattended run, so this step failed

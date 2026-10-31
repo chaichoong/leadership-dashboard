@@ -66,7 +66,67 @@ describe('post-archive, driven against a planted post tree', () => {
     expect(r.out).toContain('did not send: council_notice.pdf');
     expect(existsSync(p.source)).toBe(true);
     expect(readdirSync(p.split).length).toBe(2);
-    expect(existsSync(p.marker)).toBe(false);   // a refusal records nothing
+    // The refusal does not archive, and it does not mark the SOURCE emailed...
+    expect(run(['check', '--source', p.source, '--marker', p.marker]).code).toBe(0);
+    // ...but it keeps the one document that did send (finding 20261027-agent-dispatch-1095).
+    expect(JSON.parse(readFileSync(p.marker, 'utf8'))[Object.keys(
+      JSON.parse(readFileSync(p.marker, 'utf8')))[0]].sent)
+      .toEqual({ 'hmrc_letter.pdf': '2026-10-26' });
+  });
+
+  // Finding 20261027-agent-dispatch-1095, verified 27 Oct on task recDy2W56Qc8SJvxr: the
+  // ledger was written only when EVERY document sent, so 3 of 5 clean sends were forgotten
+  // and the next pass emailed all five again (the 23 and 25 Oct double emails). Back-tested
+  // by deleting the record_sent call in cmd_archive: the first two expects below fail.
+  it('a partial send is remembered document by document, so the retry re-sends only the failure', () => {
+    const p = plant();
+    run(['archive', ...p.base, '--result', 'hmrc_letter.pdf=0', '--result', 'council_notice.pdf=1']);
+    // The next pass asks per document before sending.
+    const done = run(['check', '--source', p.source, '--document', 'hmrc_letter.pdf',
+                      '--marker', p.marker]);
+    expect(done.code).toBe(3);
+    expect(done.out).toContain('ALREADY EMAILED document hmrc_letter.pdf');
+    expect(run(['check', '--source', p.source, '--document', 'council_notice.pdf',
+                '--marker', p.marker]).code).toBe(0);
+    // The whole source still reads as not emailed, and says which to skip.
+    const whole = run(['check', '--source', p.source, '--marker', p.marker]);
+    expect(whole.code).toBe(0);
+    expect(whole.out).toContain('must be skipped: hmrc_letter.pdf');
+    // The retry sends only council_notice.pdf and the source archives, counting both.
+    const r = run(['archive', ...p.base, '--result', 'council_notice.pdf=0']);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('after 2 clean send(s) (1 of them recorded by an earlier pass)');
+    expect(existsSync(join(p.processed, 'scan-2026-10-26.pdf'))).toBe(true);
+    expect(readdirSync(p.split)).toEqual([]);
+  });
+
+  it('sent records a clean send on its own, and refuses a non-zero one', () => {
+    const p = plant();
+    expect(run(['sent', '--source', p.source, '--result', 'hmrc_letter.pdf=0',
+                '--marker', p.marker, '--date', '2026-10-26']).code).toBe(0);
+    expect(run(['check', '--source', p.source, '--document', 'hmrc_letter.pdf',
+                '--marker', p.marker]).code).toBe(3);
+    const bad = run(['sent', '--source', p.source, '--result', 'council_notice.pdf=1',
+                     '--marker', p.marker]);
+    expect(bad.code).toBe(2);
+    expect(bad.out).toContain('nothing to record');
+    expect(run(['check', '--source', p.source, '--document', 'council_notice.pdf',
+                '--marker', p.marker]).code).toBe(0);
+  });
+
+  it('a marker from the older script still reads as emailed, so an upgrade re-emails nothing', () => {
+    const p = plant();
+    run(['archive', ...p.base,
+         '--result', 'hmrc_letter.pdf=0', '--result', 'council_notice.pdf=0']);
+    // The flat shape the previous version wrote: a date and a count, no `emailed` key.
+    const dg = Object.keys(JSON.parse(readFileSync(p.marker, 'utf8')))[0];
+    writeFileSync(p.marker, JSON.stringify(
+      { [dg]: { source: 'scan-2026-10-26.pdf', date: '2026-10-20', documents: 2 } }));
+    const again = join(p.home, 'same-content.pdf');
+    writeFileSync(again, '%PDF-1.4 two documents\n');
+    const c = run(['check', '--source', again, '--marker', p.marker]);
+    expect(c.code).toBe(3);
+    expect(c.out).toContain('ALREADY EMAILED');
   });
 
   it('REFUSES when a document in Split/ has no recorded send at all', () => {
