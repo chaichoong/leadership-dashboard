@@ -145,6 +145,27 @@ def history_names_other_house():
     return plan([card("recFernC", "Fernway call-out", t)], [a])
 case("history_names_other_house", history_names_other_house)
 
+def notes_hold_an_older_card():
+    out = "MARK FOR PAYMENT: Hollin garden clearance\nPAYEE: Hollin Clearances Ltd\nAMOUNT: £350.00\n"
+    notes = "[20 Oct 2026 — agent] earlier card:\nMARK FOR PAYMENT: Hollin\nREFERENCE: INV-101\nDESCRIPTION: Call-out, 9 Larch Street\n"
+    c = card("recHollinN", "Hollin clearance, another job", out)
+    c["output"], c["text"] = out, out + "\n" + notes
+    return plan([c], [HOLLIN])
+case("notes_hold_an_older_card", notes_hold_an_older_card)
+
+def track_record_field_lines():
+    t = ("MARK FOR PAYMENT: Hollin garden clearance\nPAYEE: Hollin Clearances Ltd\nAMOUNT: £350.00\n"
+         "\nTRACK RECORD\n- REFERENCE: INV-101\n")
+    return plan([card("recHollinT", "Hollin clearance, another job", t)], [HOLLIN])
+case("track_record_field_lines", track_record_field_lines)
+
+def one_line_track_record_keeps_fields():
+    c = pr.parse_payment_card("MARK FOR PAYMENT: Oakbridge ground rent, 9 Larch Street\n"
+                              "TRACK RECORD: none found for this reference (searched tasks and Gmail)\n\n"
+                              "PAYEE: Oakbridge Estates Limited\nAMOUNT: £7.00\nREFERENCE: 55120\n")
+    return [c["payee"], c["amount"], c["reference"]]
+case("one_line_track_record_keeps_fields", one_line_track_record_keeps_fields)
+
 def short_ref_inside_an_id():
     a = bill("recShort", "2026-10-20", 5, "Quillon Signs Ltd", Reference="104")
     t = "MARK FOR PAYMENT: Quillon sign\nPAYEE: Quillon Signs Ltd\nAMOUNT: £5.00\nNOTES: email #all/19a2f104bc0d1e2f\n"
@@ -226,6 +247,15 @@ describe('payment run: a card\'s history is never evidence (review, 31 Oct 2026)
   });
   it('a call-out at another house is listed even when the notes name the first house', () => {
     expect(value('history_names_other_house')[0][0]).toBe('check');
+  });
+  it('a reference or house on an older card in the task\'s notes is not this card\'s', () => {
+    expect(value('notes_hold_an_older_card')[0][0]).toBe('check');
+  });
+  it('a REFERENCE line inside the card\'s track record is not this card\'s', () => {
+    expect(value('track_record_field_lines')[0][0]).toBe('check');
+  });
+  it('a one-line "TRACK RECORD: none found" under the heading keeps the card\'s own fields below it', () => {
+    expect(value('one_line_track_record_keeps_fields')).toEqual(['Oakbridge Estates Limited', 7, '55120']);
   });
   it('a short reference inside a Gmail id is not the reference', () => {
     expect(value('short_ref_inside_an_id')[0][0]).not.toBe('fold');
