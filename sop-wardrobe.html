@@ -29,7 +29,7 @@ code { background: var(--bg-subtle); padding: .1rem .35rem; border-radius: var(-
 <header class="header"><div class="header-inner">
   <a href="index.html#wardrobe">&larr; Back to Wardrobe</a>
   <h1>Wardrobe</h1>
-  <p>The "What to wear today" card on My Dashboard, and the Wardrobe page. Version 1.4, 29 October 2026.</p>
+  <p>The "What to wear today" card on My Dashboard, and the Wardrobe page. Version 1.6, 31 October 2026.</p>
 </div></header>
 <main class="container">
   <section class="section">
@@ -38,7 +38,7 @@ code { background: var(--bg-subtle); padding: .1rem .35rem; border-radius: var(-
       <p>Each morning My Dashboard opens with today's day, date, place, the "feels like" temperature and the conditions, today hour by hour from 06:00 to 23:00 (feels-like °C, rain in mm, wind in mph; hours gone are faded, this hour is shaded, the sunset hour is labelled), the sunset time, a one-line reason, and three outfits: <b>Stay at home</b>, <b>Out casual</b> and <b>Out smart casual</b>.</p>
       <p>Left open, the card keeps up with the clock: the shaded hour moves on when the hour changes, and the weather is read again every new hour and at least every 15 minutes, so "Feels like now" is always this hour's.</p>
       <p>Press <b>Wearing this</b> on the one you put on. It saves today's date on that outfit and its clothes, so the card offers something else tomorrow.</p>
-      <p>Wearing something different? Press <b>I'm wearing something else</b> under the options, tick what you have on (it starts from the card's suggestion, or from what you logged earlier today) and save. Changing your mind the same day moves the wear; it is never counted twice.</p>
+      <p>Wearing something different? Press <b>I'm wearing something else</b> under the options, tick what you have on (type in <b>Search your clothes</b> to find a piece fast; ticks are kept while you search; it starts from the card's suggestion, or from what you logged earlier today) and save. Changing your mind the same day moves the wear; it is never counted twice.</p>
       <p>The Wardrobe page lists the clothes you own, the recommended additions and what to clear out.</p>
     </div>
   </section>
@@ -70,12 +70,16 @@ code { background: var(--bg-subtle); padding: .1rem .35rem; border-radius: var(-
       <table>
         <thead><tr><th>Type</th><th>Wears before washing</th></tr></thead>
         <tbody>
-          <tr><td>Tee, Shirt, Lounge</td><td>1</td></tr>
-          <tr><td>Knit</td><td>3</td></tr>
+          <tr><td>Tee and polo (next to the skin)</td><td>1</td></tr>
+          <tr><td>Shirt</td><td>2</td></tr>
+          <tr><td>Lounge (hoodies, sweatshirts, fleeces, joggers) and Knit</td><td>3</td></tr>
+          <tr><td>Sport and football kit (set on the piece)</td><td>1</td></tr>
+          <tr><td>Dressing gown (set on the piece)</td><td>7</td></tr>
           <tr><td>Trousers, Shorts</td><td>5</td></tr>
           <tr><td>Jacket, Coat, Shoes, Accessory</td><td>Not counted</td></tr>
         </tbody>
       </table>
+      <p><b>Twins:</b> identical pieces (your white tees, your white shirts) share a <b>Twin group</b> in Airtable. When one is in the wash, the card offers the outfit with a clean twin and Wearing logs the twin.</p>
       <p>At the bottom of the card, <b>Tonight's wash</b> works this out for you from what you logged today: <b>Into the wash tonight</b> (pieces that reached their limit, with the day they are back in your picks) and <b>Hang back up</b> (pieces still under their limit, for example "1 of 5 wears"). Jackets, coats and shoes are never listed.</p>
       <p>On the Wardrobe page the <b>Wash</b> column shows where each piece is, for example "2 of 3 wears", and its own limit to change (blank = the usual, 0 = never counted). <b>Washed</b> brings a piece back early. The card picks the outfit worn longest ago, counting its washable pieces worn in any mix you logged.</p>
     </div>

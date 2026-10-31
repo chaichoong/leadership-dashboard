@@ -45,6 +45,7 @@
                         lastWorn: getField(r, WR.lastWorn) || null, prevWorn: getField(r, WR.prevWorn) || null,
                         wears: getField(r, WR.wears) || 0, inWashSince: getField(r, WR.inWashSince) || null,
                         washEvery: typeof getField(r, WR.washEvery) === 'number' ? getField(r, WR.washEvery) : null,
+                        twinGroup: getField(r, WR.twinGroup) || '',
                     };
                 });
                 // List order = the Order field (Kevin's plan order), so "the first eligible outfit" is the one he
@@ -193,11 +194,13 @@
         const types = [...new Set(all.map(it => it.type || 'Other'))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
         const box = (it) => {
             const wash = P().inWash(it, date) ? ` <small>in the wash until ${esc(fmtDay(P().cleanOn(it)))}</small>` : '';
-            return `<label><input type="checkbox" name="piece" value="${esc(it.id)}"${ticked.has(it.id) ? ' checked' : ''}> <i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i> ${esc(it.name)}${wash}</label>`;
+            return `<label data-wear-name="${esc(it.name.toLowerCase())} ${esc((it.colour || '').toLowerCase())} ${esc((it.type || '').toLowerCase())}"><input type="checkbox" name="piece" value="${esc(it.id)}"${ticked.has(it.id) ? ' checked' : ''}> <i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i> ${esc(it.name)}${wash}</label>`;
         };
         return `<form class="wear-otherform" data-wear-otherform aria-labelledby="wearOtherTitle">
             <h3 id="wearOtherTitle">What are you wearing today?</h3>
             <p class="wear-note">Tick everything you have on. It saves today against each piece, so the card rotates and knows what needs washing.</p>
+            <label class="wear-othersearch">Search your clothes <input type="search" data-wear-othersearch placeholder="For example maroon, chinos, Nike" autocomplete="off"></label>
+            <p class="wear-note" data-wear-othernone hidden>Nothing matches. Clear the search to see everything.</p>
             <div class="wear-othergrid">${types.map(t => `<fieldset><legend>${esc(t)}</legend>${all.filter(it => (it.type || 'Other') === t).sort((a, b) => a.name.localeCompare(b.name)).map(box).join('')}</fieldset>`).join('')}</div>
             <div class="wr-formbtns"><button type="submit" class="wear-btn wear-btn-primary"${dis}>${state.saving ? 'Saving…' : 'Save what I\'m wearing'}</button><button type="button" class="wear-btn" data-wear-othercancel${dis}>Cancel</button></div>
         </form>`;
@@ -654,6 +657,23 @@
             if (v) { state.form = null; state.view = v.getAttribute('data-wr-view'); renderWardrobePage(); const t = document.getElementById('wrTab-' + state.view); if (t) t.focus(); }
         });
         // A piece's own wash limit: blank = its type's default, 0 = never counted.
+        // The picker's search box: show only the pieces whose name, colour or type match; ticks are kept.
+        document.addEventListener('input', (e) => {
+            const box = e.target.closest && e.target.closest('[data-wear-othersearch]');
+            if (!box) return;
+            const form = box.closest('[data-wear-otherform]');
+            const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+            let shown = 0;
+            form.querySelectorAll('.wear-othergrid fieldset').forEach(fs => {
+                let any = false;
+                fs.querySelectorAll('label[data-wear-name]').forEach(l => {
+                    const hit = words.every(w => l.getAttribute('data-wear-name').includes(w));
+                    l.hidden = !hit; if (hit) { any = true; shown += 1; }
+                });
+                fs.hidden = !any;
+            });
+            form.querySelector('[data-wear-othernone]').hidden = shown > 0;
+        });
         document.addEventListener('change', (e) => {
             const inp = e.target.closest && e.target.closest('[data-wr-washevery]');
             if (!inp || state.saving || !state.data) return;
@@ -682,9 +702,11 @@
                 const items = state.data.items;
                 // Rain swaps an outfit's shoes for leather boots, so ticked boots stand in for its shoes.
                 const bootsOn = ids.some(id => items[id] && items[id].type === 'Shoes' && /^Leather boots/.test(items[id].layerRole || ''));
-                const met = (id) => ids.includes(id) || (bootsOn && items[id] && items[id].type === 'Shoes');
+                // A ticked twin (the other white tee, say) stands in for the outfit's own piece.
+                const twin = (a, b) => items[a] && items[b] && items[a].twinGroup && items[a].twinGroup === items[b].twinGroup;
+                const met = (id) => ids.includes(id) || ids.some(t => twin(t, id)) || (bootsOn && items[id] && items[id].type === 'Shoes');
                 const fits = (o) => o.itemIds.length && o.itemIds.every(met)
-                    && ids.every(id => o.itemIds.includes(id) || (items[id] && items[id].layerRole));
+                    && ids.every(id => o.itemIds.includes(id) || o.itemIds.some(b => twin(b, id)) || (items[id] && items[id].layerRole));
                 const same = state.data.outfits.find(o => o.lastWorn === today() && fits(o))
                     || (currentPicks().find(p => p.outfit && fits(p.outfit)) || {}).outfit;
                 saveWorn(ids, same || null, `Saved what you're wearing today: ${ids.length} piece${ids.length === 1 ? '' : 's'}.`)
@@ -709,6 +731,16 @@
             }
         });
         // Escape closes an open form.
+        // In the search box, Enter only filters and Escape clears the search, never saving or closing the picker.
+        document.addEventListener('keydown', (e) => {
+            const box = e.target.closest && e.target.closest('[data-wear-othersearch]');
+            if (!box) return;
+            if (e.key === 'Enter') { e.preventDefault(); return; }
+            if (e.key === 'Escape' && box.value) {
+                e.preventDefault(); e.stopImmediatePropagation();
+                box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }, true);
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape' || !state.other || state.saving || !(e.target.closest && e.target.closest('[data-wear-otherform]'))) return;
             state.other = false; renderHomeCard();

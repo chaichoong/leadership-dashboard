@@ -10,7 +10,8 @@ const { MOCK_PAT, WEATHER_FIXTURE, localTodayISO, makeFixtures, setupMockAirtabl
 const WR = { name: 'fldG9hxGddp8ijUwW', type: 'fldnUA7o3eR62r1FW', colour: 'fldbA3Yql3NAjdUAq', swatch: 'fld44tZ76VsKRH0Db',
   usedFor: 'fldqINoZ665Tdmb0V', status: 'fld8Z9QI5pP97cymY', action: 'fldoYeCu7oAqgPZd8', layerRole: 'fld7VonuseNOhkCcw',
   buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk', lastWorn: 'fldc0Wa3pND9EbAI2',
-  prevWorn: 'fldqoYAnlsITO1GLt', wears: 'fldBDNIOVC0VFkQjR', washEvery: 'fldv8kF8yd4CXtB4u', inWashSince: 'fldfjRleBvHsIbJyl' };
+  prevWorn: 'fldqoYAnlsITO1GLt', wears: 'fldBDNIOVC0VFkQjR', washEvery: 'fldv8kF8yd4CXtB4u', inWashSince: 'fldfjRleBvHsIbJyl',
+  twinGroup: 'fldyJNcbQ1Ktgqho0' };
 const OF = { name: 'fldLpZormElc2HJ3s', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o', season: 'fldz3FqdChXD0ZRK5',
   why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z', order: 'fldKIzCbsNESKdwd0' };
 const T_WR = 'tblxcSDis9Tl1dFge', T_OF = 'tblqGdFI6VUH1wUdq';
@@ -437,6 +438,61 @@ test.describe('Wearing something else, and the wash', () => {
     // The back-in-your-picks day is 2 days on.
     const d = new Date(localTodayISO() + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 2);
     await expect(into).toContainText(d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }));
+  });
+
+  // Kevin, 31 Oct 2026: lounge pieces last 3 wears, so a sofa day hangs them back up.
+  test('a sofa day puts the sweatshirt and joggers on the hanger, not in the wash', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    await page.locator('#homeWear .wear-opt', { hasText: 'Stay at home' }).locator('[data-wear-option]').click({ timeout: 20000 });
+    const hang = page.locator('#homeWear .wear-washcols > div', { has: page.locator('h4', { hasText: 'Hang back up' }) });
+    await expect(hang.locator('li')).toHaveText([/Test grey sweatshirt.*1 of 3 wears/, /Test navy joggers.*1 of 3 wears/]);
+    await expect(page.locator('#homeWear .wear-wash')).not.toContainText('Into the wash tonight');
+    expect(field(opts.store, 'recSweat', WR.inWashSince)).toBeNull();
+  });
+
+  test('twins: with the white tee in the wash, the card offers the outfit with its clean twin, and Wearing logs the twin', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    const today = localTodayISO();
+    const tee = opts.store.db[T_WR].find(r => r.id === 'recTee');
+    Object.assign(tee.fields, { [WR.twinGroup]: 'white tee', [WR.wears]: 1, [WR.inWashSince]: dayBefore(today, 1) });
+    opts.store.db[T_WR].push(piece('recTee2', 'Test second white tee', 'Tee', { [WR.twinGroup]: 'white tee' }));
+    await page.reload();
+    const casual = page.locator('#homeWear .wear-opt', { hasText: 'Out casual' });
+    await expect(casual).toContainText('Knit and denim', { timeout: 20000 });
+    await expect(casual).toContainText('Test second white tee');
+    await expect(casual).not.toContainText('Test white tee');
+    await casual.locator('[data-wear-option]').click();
+    await expect(casual.locator('.wear-btn-done')).toHaveText('Wearing today');
+    expect(field(opts.store, 'recTee2', WR.lastWorn)).toBe(today);
+    expect(field(opts.store, 'recTee', WR.lastWorn)).toBeUndefined();
+  });
+
+  test('the picker\'s search box shows only matching pieces and keeps every tick', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    const today = localTodayISO();
+    await page.locator('#homeWear [data-wear-other]').click({ timeout: 20000 });
+    const form = page.locator('#homeWear [data-wear-otherform]');
+    await expect(form.locator('input[value="recTee"]')).toBeChecked();      // pre-ticked from the best option
+    const all = await form.locator('label[data-wear-name]').count();
+    await form.locator('[data-wear-othersearch]').fill('turtle');
+    await form.locator('[data-wear-othersearch]').press('Enter');           // Enter filters, never saves
+    await expect(form).toBeVisible();
+    expect(field(opts.store, 'recTee', WR.lastWorn)).toBeUndefined();
+    await expect(form.locator('label[data-wear-name]:visible')).toHaveText([/Test black turtleneck/]);
+    await form.locator('input[value="recRoll"]').check();
+    await form.locator('[data-wear-othersearch]').fill('zzz');
+    await expect(form.locator('[data-wear-othernone]')).toBeVisible();
+    await form.locator('[data-wear-othersearch]').press('Escape');          // Escape clears the search, never closes the picker
+    await expect(form).toBeVisible();
+    await expect(form.locator('[data-wear-othersearch]')).toHaveValue('');
+    await expect(form.locator('label[data-wear-name]:visible')).toHaveCount(all);
+    await form.getByRole('button', { name: "Save what I'm wearing" }).click();
+    await expect(page.locator('#homeWear .wear-logged')).toContainText('Test black turtleneck');
+    expect(field(opts.store, 'recRoll', WR.lastWorn)).toBe(today);
+    expect(field(opts.store, 'recTee', WR.lastWorn)).toBe(today);           // ticked before the search, still saved
   });
 
   test('2 days after it went in the wash, a piece is offered again with no press', async ({ page }) => {
