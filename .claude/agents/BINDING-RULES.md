@@ -79,6 +79,13 @@ These apply to every agent in this estate, in every lane, on every run. They are
   End Date is the date of the LAST payment. A new cost that replaces an old one retires the old one on
   the same card. After his approval, write each line with `python3 scripts/cost-record.py` and nothing
   else; it refuses anything he did not approve. A known end date is never left out.
+  (31 Oct 2026) Never write NOT FOUND in a cost line: a date the policy papers leave out is on the
+  first payment (`python3 scripts/cost-record.py payments --payee <who>`), and until it lands the task
+  stays open. Name a new cost so reconciliation finds its payments: the reference the BANK line carries
+  (finance agreement or direct debit), or for a card payment with none, the payee as the bank writes
+  it, first (AXA, Lemonade). A task where Kevin bought something, or whose card carries a RECORD NEW
+  COST line, closes only once the cost is written (`cost-record.py owed TASK` shows what is left) or
+  you say why none is owed (`complete --cost-not-written "<why>"`).
 - **SAY WHAT YOU DID NOT DO.** Close every report with what you could not do and why. A report
   that lists only successes cannot show what did not happen, and that absence is usually the
   thing worth knowing.

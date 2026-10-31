@@ -53,6 +53,9 @@ WHAT IT NEVER DOES
 USAGE
   cost-record.py show COST                                      the record and its comments (read only)
   cost-record.py ended [--grace 5]                              counted costs past their End Date (read only)
+  cost-record.py owed TASK                                      what the task's approved card still owes (read only)
+  cost-record.py payments --payee "lemonade" [--amount 37.58] [--days 120]
+                                                                payments to a payee, oldest first (read only)
   cost-record.py expected COST 16.36 --task T --why "..."       Expected Cost, on an approved line
   cost-record.py end COST 2027-06-28 --task T --why "..."       End Date (or none), on an approved line
   cost-record.py inactive COST --task T --why "..."             Payment Status Inactive, on an approved line
@@ -69,7 +72,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -236,6 +239,57 @@ def new_problem(task, spec):
             "for him to approve (one tap)")
 
 
+# WHAT A CARD STILL OWES THE COSTS TABLE (Kevin, 31 Oct 2026). Four new insurance policies bought in October never
+# became a cost, so their payments reached reconciliation with nothing to match. Two cards were approved carrying
+# "RECORD NEW COST: ... | due NOT FOUND | first NOT FOUND | ends NOT FOUND", a line this door cannot write; and on
+# the Lemonade policy Kevin bought in the robot's window, no line was ever put on a card and the task closed. Of the
+# 6 tasks closed after a cleared purchase step, 3 had no cost. agent-dispatch.py `complete` asks this before it
+# closes a task: a line nothing has written, or a purchase with no line, keeps the task open until it is written or
+# the agent says why on the record. The dates a policy's papers leave out are on its first payment (`payments`).
+# A purchase step cleared because it was done. A step Kevin said he cannot take, or one a new submission
+# superseded, clears the same wall and buys nothing (agent-dispatch.py KEVIN_CANT_NOTE and the "superseded:" note;
+# tests/agent-dispatch-cost-owed.test.js holds the two texts together).
+KEVIN_CANT_TEXT = "Kevin cannot take this step:"
+PURCHASE_CLEARED_RE = re.compile(r"^\[[^\]\n]*\]\s*BLOCKER CLEARED\s*\(KEVIN purchase\):(?!\s*(?:superseded:|"
+                                 + re.escape(KEVIN_CANT_TEXT) + r"))", re.M)
+
+
+def owed_new_costs(task_id, output, notes, live_costs, ledger_rows):
+    """What this task's approved card still owes the Costs table, one sentence each; [] when nothing.
+
+    A RECORD NEW COST line is answered when a cost in payment has its name AND its amount (`live_costs` holds
+    (name, Expected Cost) for ACTIVE costs only: a retired policy, or last year's still being paid at another
+    price, is not this one, and `new` refuses its name), or this task's ledger shows the create (the row may have
+    been renamed or ended since). A line that is not the six-part shape can never be written, so it
+    is owed until a dated line replaces it on a fresh card. A cleared KEVIN purchase step on the task's OWN Notes
+    line (the `[stamp — who]` form, never a track-record quote of another task) with no line at all is owed too."""
+    # Airtable holds Expected Cost as a number, sometimes with a stray third decimal: compare it to the penny.
+    live = {(name_key(n), amount(f"{float(e):.2f}") if isinstance(e, (int, float)) else amount(e))
+            for n, e in live_costs if squash(n)}
+    made = {name_key(x.get("name")) for x in ledger_rows if x.get("kind") == "create" and x.get("task") == task_id}
+    owed, lines = [], 0
+    for m in NEW_RE.finditer(tr.approved_original(output)):
+        lines += 1
+        body = squash(m.group("body"))
+        parts = body.split("|")
+        key, price = name_key(parts[0]), amount(parts[1]) if len(parts) > 1 else None
+        if key in made or (price is not None and (key, price) in live):
+            continue
+        if parse_new_line(body) is None:
+            owed.append(f"'RECORD NEW COST: {body}' cannot be written: its amount, frequency, due day, first payment "
+                        "or end is not a real value. Read the missing dates off the first payment in the bank "
+                        "(cost-record.py payments --payee <who it is paid to>) and resubmit THIS task with the dated "
+                        "line; until that payment lands, complete --keep-open")
+        else:
+            owed.append(f"'RECORD NEW COST: {body}' was approved and is not in the Costs table: write it with "
+                        f"cost-record.py new ... --task {task_id}")
+    if not lines and PURCHASE_CLEARED_RE.search(str(notes or "")):
+        owed.append("Kevin bought something on this task (his purchase step cleared) and no RECORD NEW COST line was "
+                    "approved: put the new cost on a card for him (amount, due day, first payment and end from the "
+                    "policy papers, or the first payment in the bank), or say why there is none")
+    return owed
+
+
 def is_active(fields):
     """MIRRORS isCostActive in js/shared.js: Inactive unticked and Payment Status In Payment or Overdue."""
     return not fields.get(COST_INACTIVE) and rc.sel(fields.get(COST_PAY_STATUS)) in ACTIVE_STATUSES
@@ -314,6 +368,56 @@ def cmd_ended(a):
     found = ended_costs(rows, rc.today_london(), a.grace)
     return {"activeCosts": active, "graceDays": a.grace, "ended": found,
             "monthlyStillCounted": float(sum(Decimal(str(x["expectedCost"] or 0)) for x in found))}
+
+
+def cmd_owed(a):
+    task = tr.load_task(a.task)
+    f = task.get("fields") or {}
+    rows = rc.fetch_all(T_COSTS, {"fields[]": [COST_NAME, COST_EXPECTED, COST_PAY_STATUS, COST_INACTIVE]})
+    live = [((r.get("fields") or {}).get(COST_NAME), (r.get("fields") or {}).get(COST_EXPECTED))
+            for r in rows if is_active(r.get("fields") or {})]
+    if not live:
+        raise RuntimeError(f"control failed: {len(rows)} costs read and none in payment, so nothing can be said "
+                           "about what this card owes the table")
+    return {"task": task["id"], "owed": owed_new_costs(task["id"], f.get(tr.TK["agentOutput"]),
+                                                      f.get(tr.TK["notes"]), live, read_ledger())}
+
+
+# Transactions (js/config.js TABLES.transactions, F.txDescription / F.txVendor / F.txDate / F.txAmount / F.txCost).
+T_TRANSACTIONS = "tbln0gzhCAorFc3zB"
+TX_NAME, TX_VENDOR, TX_DATE = "fldsbuAJCTsXHug4C", "fld0Xr8sboQ0ekJQJ", "fldoyQ6Rr9cHp3bgQ"
+TX_AMOUNT, TX_COSTS = "fldN01r1hp7UQjgtm", "fldGkpkVqSeiGvUGL"
+TX_AUTH_DATE = "fldjEocfBnQSQ7tFr"   # **Auth Date: the day a card payment was taken, a day or two before it posts
+PAYEE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .&-]{1,40}$")
+# A card line names the day it was taken: "CARD PAYMENT TO LEMONADE INSURANCE ON 29-10-2026" posted on the 30th.
+TAKEN_ON_RE = re.compile(r"\bON (\d{2})-(\d{2})-(\d{4})\b")
+
+
+def cmd_payments(a):
+    """Read only: money paid out to a payee, oldest first. A policy's papers often leave out the instalment dates
+    (RightSure's say "9 monthly instalments" and no day); the first payment in the bank is the date to use."""
+    payee = squash(a.payee)
+    if not PAYEE_RE.match(payee):
+        raise Refused("--payee must be plain words from the bank line, like 'lemonade' or 'premium credit'")
+    since = (rc.today_london() - timedelta(days=a.days)).isoformat()
+    formula = (f"AND(IS_AFTER({{**Date}}, '{since}'), {{**GBP}} < 0, "
+               f"FIND(LOWER('{payee}'), LOWER({{*Name}} & ' ' & {{*Vendor}} & '')))")
+    want = amount(a.amount) if a.amount else None
+    out = []
+    for r in rc.fetch_all(T_TRANSACTIONS, {"filterByFormula": formula,
+                                           "fields[]": [TX_NAME, TX_DATE, TX_AUTH_DATE, TX_AMOUNT, TX_COSTS]}):
+        g = r.get("fields") or {}
+        paid = abs(Decimal(str(g.get(TX_AMOUNT) or 0))).quantize(Decimal("0.01"))
+        if want and abs(paid - want) > want * Decimal("0.10"):
+            continue
+        taken = TAKEN_ON_RE.search(str(g.get(TX_NAME) or ""))
+        when = day(f"{taken.group(3)}-{taken.group(2)}-{taken.group(1)}") if taken else None
+        out.append({"transaction": r["id"], "date": when or g.get(TX_AUTH_DATE) or g.get(TX_DATE),
+                    "amount": float(paid),
+                    "bankLine": squash(g.get(TX_NAME))[:120], "costIds": g.get(TX_COSTS) or []})
+    out.sort(key=lambda x: x["date"] or "")
+    return {"payee": payee, "since": since, "payments": out,
+            "first": ({"date": out[0]["date"], "dueDay": int(out[0]["date"][8:10])} if out and out[0]["date"] else None)}
 
 
 def cmd_expected(a):
@@ -517,6 +621,12 @@ def main(argv=None):
     s.add_argument("cost")
     n = sub.add_parser("ended")
     n.add_argument("--grace", type=int, default=ENDED_GRACE_DAYS)
+    o = sub.add_parser("owed")
+    o.add_argument("task")
+    p = sub.add_parser("payments")
+    p.add_argument("--payee", required=True)
+    p.add_argument("--amount")
+    p.add_argument("--days", type=int, default=120)
 
     def write(name, *positional):
         p = sub.add_parser(name)
@@ -548,8 +658,8 @@ def main(argv=None):
         print(json.dumps({"refused": "--why needs the reason in a sentence"}))
         return 2
     try:
-        out = {"show": cmd_show, "ended": cmd_ended, "expected": cmd_expected, "end": cmd_end,
-               "inactive": cmd_inactive, "new": cmd_new}[a.cmd](a)
+        out = {"show": cmd_show, "ended": cmd_ended, "owed": cmd_owed, "payments": cmd_payments,
+               "expected": cmd_expected, "end": cmd_end, "inactive": cmd_inactive, "new": cmd_new}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2

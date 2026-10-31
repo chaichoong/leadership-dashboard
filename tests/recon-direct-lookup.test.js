@@ -254,3 +254,155 @@ describe('runReconciliationMatching with the direct layer', () => {
     expect(r.direct).toEqual(['address']);
   });
 });
+
+// A NEW INSURANCE COST CATCHES ITS FIRST PAYMENT (Kevin, 31 Oct 2026): "so the reconciliation
+// process can pick up what it is from the cost-related information and learn". Two shapes reached
+// him blank in October: a Premium Credit renewal that kept its old reference (history tied it to the
+// ENDED policy's cost), and AXA card payments, which carry no policy number, for a cost created that
+// week. Shapes from the live rows; names, references and amounts invented.
+describe('a new cost catches its first payment', () => {
+  const F = () => ctx.F;
+  const tx = (id, desc, vendor, amount, extra = {}) => ({ id, fields: { [F().txDescription]: desc, [F().txVendor]: vendor, [F().txAmount]: amount, [F().txReportAmount]: amount, [F().txDate]: '2026-10-14', ...extra } });
+  const cost = (id, name, prop, expected, status, txCount) => ({ id, fields: {
+    [F().costName]: name, [F().costProperty]: [prop], [F().costExpected]: expected, [F().costPayStatus]: status,
+    [F().costBusiness]: ['bizRE'], [F().costCategory]: ['catCogs'], [F().costSubCategory]: ['subInsurance'], [F().costTxCount]: txCount,
+  } });
+  const addCosts = (...rows) => ctx.set('allCosts', [...ctx.get('allCosts'), ...rows]);
+  const run = (txs, id) => { ctx.set('allTransactions', txs); return ctx.runReconciliationMatching().find(x => x.txId === id); };
+  const AXA = 'Fin: AXA INSURANCE,1 CIVIC DRIVE,IPSWICH -- Fin: AXA INSURANCE';
+  // The lesson Kevin's own coding taught: an AXA payment as Operational Supplies, with no cost.
+  const axaHistory = () => tx('hAxa', AXA, 'Fin: AXA INSURANCE', -14.16, { [F().txReconciled]: true, [F().txSubCategory]: ['subOps'], [F().txCategory]: ['catCogs'], [F().txBusiness]: ['bizRE'] });
+
+  it('a renewal that keeps its reference finds the new cost, not the ended one', () => {
+    addCosts(cost('cPclOld', 'Premium Credit - 30 Sample - REF 04ZZ000001/010/101', P.dalham, 41.69, 'Inactive', 10),
+      cost('cPclNew', 'Premium Credit - 30 Sample - REF 04ZZ000001/011 (D600000XYZ)', P.dalham, 31.27, 'Overdue', 0));
+    const paidOld = tx('hPcl', 'DIRECT DEBIT PAYMENT TO PREMIUM CREDIT LTD REF 04ZZ000001/010/110, MANDATE NO 0206 -- PREMIUM CREDIT LTD', 'PREMIUM CREDIT LTD', -41.69,
+      { [F().txReconciled]: true, [F().txCost]: ['cPclOld'], [F().txSubCategory]: ['subInsurance'], [F().txCategory]: ['catCogs'], [F().txBusiness]: ['bizRE'] });
+    const r = run([paidOld, tx('tPcl', 'DIRECT DEBIT PAYMENT TO PREMIUM CREDIT LTD REF 04ZZ000001/011/102, MANDATE NO 0206 -- PREMIUM CREDIT LTD', 'PREMIUM CREDIT LTD', -31.27)], 'tPcl');
+    expect(r.costId).toBe('cPclNew');
+    expect(r.propertyId).toBe(P.dalham);
+    expect(r.direct).toEqual(['cost ref']);
+  });
+
+  it('a reference two LIVE costs have shared still defers to history (control: Close Brothers)', () => {
+    const refIndex = { '80000069': new Set(['cSwA', 'cSwB']) };
+    expect(ctx.matchCostDirect('DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 80000069, MANDATE NO 0207', -45.3, idx, refIndex)).toBe('');
+  });
+
+  it('a card-paid policy finds its new cost by payee and amount, over the wrong lesson', () => {
+    addCosts(cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'Overdue', 0));
+    const r = run([axaHistory(), tx('tAxa', AXA, 'Fin: AXA INSURANCE', -44.7)], 'tAxa');
+    expect(r.costId).toBe('cAxaNew');
+    expect(r.subCatId).toBe('subInsurance');   // not the learned Operational Supplies
+    expect(r.propertyId).toBe(P.elm42);
+    expect(r.direct).toEqual(['new cost']);
+    // Even under a knowledge-base rule with the suppression list loaded, Kevin sees a first payment once.
+    ctx.get('_autoSuppressSet = new Set()');
+    const kb = { ...r, matchType: 'Knowledge Base', score: 10 };
+    expect(ctx.isAutoApprovable({ ...kb, direct: ['cost ref'] })).toBe(true);   // CONTROL
+    expect(ctx.isAutoApprovable(kb)).toBe(false);
+  });
+
+  it('claims nothing when the amount does not fit, the payee is not named, or the money is incoming', () => {
+    addCosts(cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'Overdue', 0));
+    expect(run([axaHistory(), tx('tA', AXA, 'Fin: AXA INSURANCE', -90)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'CARD PAYMENT TO TESCO STORES 2041', 'TESCO STORES', -44.7)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'AXA INSURANCE REFUND', 'AXA INSURANCE', 44.7)], 'tC').costId).toBe('');
+  });
+
+  it('two new costs a payment could belong to: neither (a blank beats a wrong cost)', () => {
+    addCosts(cost('cAxa1', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'Overdue', 0),
+      cost('cAxa2', 'AXA Landlord Insurance - DI LAN 9900002 - 5 Dalham Place', P.dalham, 44.5, 'Overdue', 0));
+    expect(run([tx('tAxa', AXA, 'Fin: AXA INSURANCE', -44.7)], 'tAxa').costId).toBe('');
+  });
+
+  it('a cost already paid is left to its history, never claimed by payee', () => {
+    addCosts(cost('cAxaPaid', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'In Payment', 3));
+    expect(run([tx('tAxa', AXA, 'Fin: AXA INSURANCE', -44.7)], 'tAxa').costId).toBe('');
+  });
+
+  it('reads who a cost is paid to from its name, and a run-together web address names a payee', () => {
+    expect(ctx.costPayeeWords('AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place')).toEqual(['axa']);
+    expect(ctx.costPayeeWords('Close Brothers Premium Finance (Swinton Property Owners)')).toEqual(['close', 'brothers']);
+    expect(ctx.costPayeeWords('Premium Credit - 30 Sample - REF 04ZZ000001/011')).toEqual([]);
+    expect(ctx.costPayeeWords('Lemonade Home Insurance - LP0000001 - 1 Sample Street')).toEqual(['lemonade']);
+    addCosts(cost('cBed', 'Bedford Insurance - initial payment - 1 Sample Street', P.elm42, 23.1, 'Overdue', 0));
+    expect(run([tx('tBed', 'Fin: WWW.BEDFORDINSURANCE.C,CHESSINGTON -- WWW.BEDFORDINSURANCE.C', 'WWW.BEDFORDINSURANCE.C', -23.1)], 'tBed').costId).toBe('cBed');
+  });
+});
+
+// The independent review of the change above (31 Oct 2026) found each of these.
+describe('a new cost claims only what is surely its own', () => {
+  const F = () => ctx.F;
+  const tx = (id, desc, vendor, amount, extra = {}) => ({ id, fields: { [F().txDescription]: desc, [F().txVendor]: vendor, [F().txAmount]: amount, [F().txReportAmount]: amount, [F().txDate]: '2026-10-14', ...extra } });
+  const cost = (id, name, prop, expected, status, txCount) => ({ id, fields: {
+    [F().costName]: name, [F().costProperty]: [prop], [F().costExpected]: expected, [F().costPayStatus]: status,
+    [F().costBusiness]: ['bizRE'], [F().costCategory]: ['catCogs'], [F().costSubCategory]: ['subInsurance'], [F().costTxCount]: txCount,
+  } });
+  const addCosts = (...rows) => ctx.set('allCosts', [...ctx.get('allCosts'), ...rows]);
+  const run = (txs, id) => { ctx.set('allTransactions', txs); return ctx.runReconciliationMatching().find(x => x.txId === id); };
+  const LEM = 'CARD PAYMENT TO LEMONADE INSURANCE ON 29-10-2026 -- LEMONADE INSURANCE';
+
+  it('a learned rule pointing at last year\'s ended cost does not stop the new one being found', () => {
+    addCosts(cost('cLemOld', 'Lemonade Home Insurance - LP0000000 - 1 Sample Street', P.elm42, 36.1, 'Inactive', 12),
+      cost('cLemNew', 'Lemonade Home Insurance - LP0000001 - 1 Sample Street', P.elm42, 37.58, 'Overdue', 0));
+    ctx.localStorage.setItem('recon_rules', JSON.stringify([{ vendorKey: 'lemonade insurance', costId: 'cLemOld', costLabel: 'old', subCatId: 'subInsurance', categoryId: 'catCogs', businessId: 'bizRE', confidence: 5 }]));
+    const r = run([tx('tLem', LEM, 'LEMONADE INSURANCE', -37.58)], 'tLem');
+    expect(r.costId).toBe('cLemNew');
+  });
+
+  it('a payee word is a whole word on the bank line: "protect" is not PROTECTION, "apple" not APPLEGREEN', () => {
+    addCosts(cost('cHp', 'Home Protect - L00/0000000 - 1 Sample Street', P.elm42, 20, 'Overdue', 0),
+      cost('cAp', 'Apple iCloud - 1 Sample Street', P.elm42, 8.99, 'Overdue', 0));
+    expect(run([tx('tA', 'DIRECT DEBIT PAYMENT TO LEGAL AND GENERAL PROTECTION', 'LEGAL AND GENERAL', -20)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'CARD PAYMENT TO APPLEGREEN 2041', 'APPLEGREEN', -8.99)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'DIRECT DEBIT PAYMENT TO HOMEPROTECT LTD', 'PROTECT', -20)], 'tC').costId).toBe('cHp');  // CONTROL
+  });
+
+  it('every payee word must be on the bank line: British Gas is not British Airways, West Suffolk not West Drayton', () => {
+    addCosts(cost('cBg', 'British Gas - 12 Sample Street', P.elm42, 120, 'Overdue', 0),
+      cost('cWs', 'West Suffolk Council - council tax - 5 Dalham Place', P.dalham, 150, 'Overdue', 0));
+    expect(run([tx('tA', 'CARD PAYMENT TO BRITISH AIRWAYS ON 12-10-2026', 'BRITISH AIRWAYS', -118)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'BILL PAYMENT TO HORTON ROAD WEST DRAYTON', 'WEST DRAYTON', -150)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'DIRECT DEBIT PAYMENT TO BRITISH GAS REF 8500000001', 'BRITISH GAS', -120)], 'tC').costId).toBe('cBg');  // CONTROL
+  });
+
+  it('a phone wallet is not a payee: "(VIA APPLE PAY)" never claims an Apple cost', () => {
+    addCosts(cost('cIcloud', 'Apple - iCloud 2TB', P.elm42, 8.99, 'Overdue', 0));
+    expect(run([tx('tA', 'CARD PAYMENT TO COSTA COFFEE (VIA APPLE PAY), ON 12-10-2026', 'COSTA COFFEE', -8.6)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'CARD PAYMENT TO TESCO VIA GOOGLE PAY', 'TESCO', -8.99)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'CARD PAYMENT TO APPLE.COM/BILL ON 12-10-2026', 'APPLE.COM/BILL', -8.99)], 'tC').costId).toBe('cIcloud');  // CONTROL
+  });
+
+  it('a paid rival counts even when the bank never prints its second word ("Swinton RPP" paid as CLOSE-SWINTON)', () => {
+    // A payee the fixture's own Swinton costs cannot stand in for.
+    addCosts(cost('cZuRpp', 'Zurich RPP - Ref 7700000001', P.dalham, 45.3, 'In Payment', 8),
+      cost('cZuNew', 'Zurich - Policy 999', P.elm42, 45, 'Overdue', 0));
+    expect(run([tx('tZu', 'DIRECT DEBIT PAYMENT TO CLOSE-ZURICH, MANDATE NO 0207', 'CLOSE-ZURICH', -45.3)], 'tZu').costId).toBe('');
+    // CONTROL: with no rival, the new cost is found on the same line.
+    ctx.set('allCosts', ctx.get('allCosts').filter(c => c.id !== 'cZuRpp'));
+    expect(run([tx('tZu', 'DIRECT DEBIT PAYMENT TO CLOSE-ZURICH, MANDATE NO 0207', 'CLOSE-ZURICH', -45.3)], 'tZu').costId).toBe('cZuNew');
+  });
+
+  it('a paid cost from the same payee at the same amount is a rival: no claim', () => {
+    addCosts(cost('cAxaPaid', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.6, 'In Payment', 5),
+      cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900002 - 5 Dalham Place', P.dalham, 44.68, 'Overdue', 0));
+    expect(run([tx('tAxa', 'Fin: AXA INSURANCE,1 CIVIC DRIVE,IPSWICH', 'Fin: AXA INSURANCE', -44.7)], 'tAxa').costId).toBe('');
+  });
+
+  it('reads the payee past words that name no one ("Aviva Policy Number ...")', () => {
+    expect(ctx.costPayeeWords('AVIVA HT75DCE Car Insurance | Policy number 723566644')).toEqual(['aviva']);
+    expect(ctx.costPayeeWords('Aviva Policy Number 723566644')).toEqual(['aviva']);
+  });
+
+  it('a Paused cost in the reference\'s history still disagrees; only an ended one stands aside', () => {
+    addCosts(cost('cPaused', 'Swinton - Policy OLD - Ref 77000001', P.dalham, 40, 'Paused', 6),
+      cost('cLive', 'Swinton - Policy NEW - Ref 77000001', P.dalham, 40, 'In Payment', 0));
+    idx = ctx.buildDirectIndex();
+    expect(ctx.matchCostDirect('DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 77000001', -40, idx, { '77000001': new Set(['cPaused']) })).toBe('');
+    addCosts(cost('cEnded', 'Swinton - Policy OLDER - Ref 77000002', P.dalham, 40, 'Inactive', 6),
+      cost('cLive2', 'Swinton - Policy NEWER - Ref 77000002', P.dalham, 40, 'In Payment', 0));
+    idx = ctx.buildDirectIndex();
+    expect(ctx.matchCostDirect('DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 77000002', -40, idx, { '77000002': new Set(['cEnded']) })).toBe('cLive2');
+  });
+});

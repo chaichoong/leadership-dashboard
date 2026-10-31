@@ -999,16 +999,72 @@
         // "Kent Reliance - 13CP - 70000135" → 70000135 identifies that cost, with no
         // history needed. A token naming two active costs identifies neither.
         const costRefs = {};  // token → Set(costId)
+        // Ended costs (Inactive), for matchCostDirect's history check. A Paused cost is not ended.
+        const endedCostIds = new Set();
+        // Every active cost by who it is paid to, for matchUnpaidCostByPayee. A paid one is
+        // there as a rival: it stops a new cost claiming a payment that could be its own.
+        const payeeCosts = [];  // { id, payee: [words], expected, unpaid }
         (allCosts || []).forEach(c => {
+            if (getField(c, F.costInactive) || getPaymentStatusName(getField(c, F.costPayStatus)) === 'Inactive') endedCostIds.add(c.id);
             if (!isCostActive(c)) return;
             extractRefTokens(getField(c, F.costName)).forEach(tok => {
                 if (!costRefs[tok]) costRefs[tok] = new Set();
                 costRefs[tok].add(c.id);
             });
+            const expected = Math.abs(Number(getField(c, F.costExpected)) || 0);
+            const payee = costPayeeWords(getField(c, F.costName));
+            if (expected && payee.length) {
+                payeeCosts.push({ id: c.id, payee, expected, unpaid: !(Number(getField(c, F.costTxCount)) > 0) });
+            }
         });
 
-        return { props, tenancies, costRefs, unitById };
+        return { props, tenancies, costRefs, endedCostIds, payeeCosts, unitById };
     }
+
+    // Who a cost is paid to, as the bank line would write it: the first two telling
+    // words of its name before the first " - " or "(". "AXA Landlord Insurance - DI LAN
+    // 9204784 - 57A West Street" gives [axa]; "Close Brothers Premium Finance (Swinton
+    // Property Owners)" gives [close, brothers]. A word every insurer's line carries
+    // names no one, and a cost named only in such words ("Premium Credit - ...") gives
+    // [] and is left to its reference.
+    const COST_PAYEE_GENERIC = new Set(['insurance', 'insurer', 'landlord', 'landlords', 'home', 'house',
+        'buildings', 'contents', 'car', 'motor', 'van', 'policy', 'cover', 'premium', 'credit', 'finance',
+        'the', 'and', 'ltd', 'limited', 'plc', 'services', 'bank', 'payment', 'direct', 'debit', 'card',
+        'monthly', 'annual', 'fee', 'plan', 'number', 'ref', 'reference', 'account', 'group', 'retail',
+        'loan', 'repayment', 'repayments']);
+    function costPayeeWords(name) {
+        const head = String(name || '').split(/\s+-\s+|\(/)[0].toLowerCase();
+        return head.split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !/\d/.test(w) && !COST_PAYEE_GENERIC.has(w)).slice(0, 2);
+    }
+
+    // The first payment on a NEW cost (31 Oct 2026). A cost is found by a reference in its
+    // name that the bank line repeats, or by a payment Kevin linked before. A policy paid by
+    // card has neither: "Fin: AXA INSURANCE,1 CIVIC DRIVE,IPSWICH" carries no policy number,
+    // and a cost created that week has no history. So its first payment reached Kevin blank,
+    // and what he typed became the lesson: both October AXA payments were coded Operational
+    // Supplies at 6 Chedburgh Place. Here an active cost nothing has paid yet claims an
+    // outgoing payment whose bank line names every word of its payee and sits within
+    // COST_MATCH_TOLERANCE of its Expected Cost. Every active cost that fits counts as a rival,
+    // paid or not: exactly one, unpaid, or nothing ("British Gas" is not British Airways). A
+    // blank costs a moment of triage, a wrong cost misattributes money. Once he approves it,
+    // history takes over.
+    function matchUnpaidCostByPayee(desc, vendor, amount, index) {
+        if (!(Number(amount) < 0) || !index || !(index.payeeCosts || []).length) return '';
+        const abs = Math.abs(Number(amount));
+        // A phone wallet is how a card was used, never who was paid: "COSTA COFFEE (VIA APPLE PAY)".
+        const line = `${vendor || ''} ${desc || ''}`.replace(/\b(?:via\s+)?(?:apple|google)\s+pay\b/gi, ' ');
+        const words = line.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+        const set = new Set(words);
+        // A web address runs the payee into one word ("WWW.BEDFORDINSURANCE.C"): only there may
+        // a word be the start of one. Anywhere else "protect" is not PROTECTION, nor "apple" APPLEGREEN.
+        const named = w => set.has(w) || (w.length >= 5 && words.some((t, i) => i > 0 && words[i - 1] === 'www' && t.startsWith(w)));
+        // Rivals are found on the first payee word, since the bank may never print a second ("Swinton RPP"
+        // is paid as CLOSE-SWINTON); the one left must have every word on the line, and be unpaid.
+        const hits = index.payeeCosts.filter(c => named(c.payee[0]) && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
+        return hits.length === 1 && hits[0].unpaid && hits[0].payee.every(named) ? hits[0].id : '';
+    }
+    window.costPayeeWords = costPayeeWords;
+    window.matchUnpaidCostByPayee = matchUnpaidCostByPayee;
 
     // Which properties does this descriptor name? Returns an array of propertyIds.
     // Evidence, strongest first: the short code as a token (28CP), the number followed
@@ -1124,8 +1180,13 @@
             }
             if (!ids || ids.size !== 1) return;
             const id = ids.values().next().value;
+            // History disagrees → not an identifier. An ENDED cost no longer disagrees: a renewal
+            // keeps its reference (Premium Credit 04AFFW8521/010 became
+            // /011 on 3 Oct 2026), and the history that ties it to the ENDED policy's cost
+            // kept every payment of the new one blank (31 Oct 2026).
             const seen = refIndex && refIndex[tok];
-            if (seen && (seen.size > 1 || !seen.has(id))) return; // history disagrees → not an identifier
+            const live = seen ? [...seen].filter(c => c === id || !(index.endedCostIds && index.endedCostIds.has(c))) : [];
+            if (seen && (live.length > 1 || (live.length === 1 && live[0] !== id))) return;
             if (hits.indexOf(id) === -1) hits.push(id);
         });
         return hits.length === 1 ? hits[0] : '';
@@ -1138,8 +1199,15 @@
     function applyDirectMatches(result, index, refIndex, costLookup, tenancyLookup, tenantLookup, compositePatterns, compositeKeys) {
         const evidence = [];
 
-        // ── Cost by account number ──
-        const costId = matchCostDirect(result.txDesc, result.txAmount, index, refIndex);
+        // ── Cost by account number, else a new cost by its payee ──
+        let costId = matchCostDirect(result.txDesc, result.txAmount, index, refIndex);
+        let costEvidence = 'cost ref';
+        // A learned cost that has since ended (a knowledge-base rule or history pointing at last
+        // year's policy) is no cost at all, so it must not stop the new one being found.
+        if (!costId && !(result.costId && costLookup[result.costId])) {
+            costId = matchUnpaidCostByPayee(result.txDesc, result.txVendor, result.txAmount, index);
+            costEvidence = 'new cost';
+        }
         if (costId && costLookup[costId]) {
             const cost = costLookup[costId];
             result.costId = costId;
@@ -1156,7 +1224,7 @@
             if (catId) { result.categoryId = catId; result.categoryName = getCatName(catId); }
             if (subId) { result.subCatId = subId; result.subCatName = getSubCatName(subId); }
             if (propId) result.propertyId = propId;
-            evidence.push('cost ref');
+            evidence.push(costEvidence);
         }
 
         // ── Tenancy by tenant name (+ property / unit / rent to split siblings) ──
@@ -2228,6 +2296,7 @@
         if (!r || r.status !== 'suggestion') return false;
         if (r.txAmount >= 0) return false;        // outgoing only — never incoming/rent
         if (r.tenancyId) return false;            // never anything linked to a tenancy
+        if ((r.direct || []).includes('new cost')) return false; // a new cost's first payment: Kevin sees it once
         if (!r.categoryId || !r.subCatId) return false; // complete categorisation required
         if ((r.score || 0) < AUTO_MIN_SCORE) return false;
         if (!(_autoSuppressSet instanceof Set)) return false; // suppression list not loaded/unreadable — fail closed

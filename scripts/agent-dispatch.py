@@ -5600,6 +5600,11 @@ def cmd_submit(args):
     cert_owed = task_fields_owe_certificate(args.task, tf)
     if cert_owed:
         files_itself = False
+    # Nor is a card that still owes the Costs table (31 Oct 2026): it goes to the queue, where the
+    # approval writes the cost and `complete` checks it was written.
+    cost_owed = task_owes_cost(args.task, {"agentOutput": output, "notes": tf.get(AF["notes"])})
+    if cost_owed:
+        files_itself = False
     if files_itself:
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
         note = (f"[{stamp} — agent-dispatch] FILED, not queued: "
@@ -5643,6 +5648,7 @@ def cmd_submit(args):
         # redirect) with the certificate unfiled. It goes to the queue as a card.
         level = dict(level, level=AUTONOMY_APPROVE,
                      why="a certificate arrived on this task and is not filed yet")
+    level = demote_for_cost(level, cost_owed)
     if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
@@ -8052,6 +8058,39 @@ def task_fields_owe_certificate(task_id, tf):
         "notes": tf.get(AF["notes"]), "attachments": tf.get(AF["attachments"]) or []})
 
 
+COST_NOT_WRITTEN_MARK = "COST NOT WRITTEN:"
+
+
+def task_owes_cost(task_id, t, fetch_costs=None):
+    """What the task's approved card still owes the Costs table (cost-record.py's owed_new_costs), [] when
+    nothing. `t` is a task_view. The table is read only when the card carries a cost line or the task holds a
+    cleared purchase step, so an ordinary close costs nothing; an unreadable table reads as owed, never clear."""
+    cr = _cost_record()
+    if not cr.NEW_RE.search(str(t.get("agentOutput") or "")) and \
+            not cr.PURCHASE_CLEARED_RE.search(str(t.get("notes") or "")):
+        return []
+    try:
+        rows = (fetch_costs or (lambda: query_records(
+            COSTS_TABLE, fields=[cr.COST_NAME, cr.COST_EXPECTED, cr.COST_PAY_STATUS, cr.COST_INACTIVE])))()
+    except Exception as exc:                              # noqa: BLE001
+        return [f"the Costs table could not be read to check the card's cost lines ({str(exc)[:120]})"]
+    live = [((r.get("fields") or {}).get(cr.COST_NAME), (r.get("fields") or {}).get(cr.COST_EXPECTED))
+            for r in rows if cr.is_active(r.get("fields") or {})]
+    if not live:
+        return [f"{len(rows)} costs read and none in payment, so the card's cost lines cannot be checked"]
+    return cr.owed_new_costs(task_id, t.get("agentOutput"), t.get("notes"), live, cr.read_ledger())
+
+
+def demote_for_cost(level, cost_owed):
+    """A Level A carry-out that would end the task Completed while its card owes the Costs table becomes a card
+    (31 Oct 2026), as the certificate gate does for an unfiled certificate; Roy's lane and a quote request are
+    carried out, not closed."""
+    if cost_owed and level.get("level") == AUTONOMY_ACT and level.get("carry") != "roy" \
+            and level.get("rule") != "quote-request":
+        return dict(level, level=AUTONOMY_APPROVE, why="the card owes the Costs table a cost line")
+    return level
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
@@ -8121,8 +8160,9 @@ def cmd_complete(args):
     # change, so this cannot be blocked on a base edit. CARRIED_OUT_MARK is the
     # machine-readable half — verify re-reads the LIVE record for it, never
     # trusting what the run claimed.
-    if args.keep_open and (getattr(args, "no_certificate", "") or "").strip():
-        sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate closes a task, "
+    if args.keep_open and ((getattr(args, "no_certificate", "") or "").strip()
+                           or (getattr(args, "cost_not_written", "") or "").strip()):
+        sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate and --cost-not-written close a task, "
                  "and --keep-open leaves it open. Use one. The reason would be dropped.")
     if args.keep_open:
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
@@ -8234,6 +8274,30 @@ def cmd_complete(args):
             "       in fact done, prove it first:\n"
             f"         python3 scripts/agent-dispatch.py unblock {args.task} "
             "--evidence \"<what you saw that proves it>\"")
+
+    # THE COST-LINE GATE (Kevin, 31 Oct 2026), after the blocker gate: a purchase Kevin still owes is
+    # his step first, and the cost is written once he has bought. Four insurance policies bought in October never became
+    # a cost: two cards were approved with "due NOT FOUND" in the cost line, which cost-record.py cannot
+    # write, and the Lemonade policy was bought on a task that closed with no cost line at all, so its
+    # payments came to Kevin in reconciliation with nothing to match. A task closes only once each
+    # approved RECORD NEW COST line is in the Costs table, and a task where Kevin bought something
+    # carries one, or the agent says on the record why not. The rule is cost-record.py's owed_new_costs.
+    cost_skip = " ".join(str(getattr(args, "cost_not_written", "") or "").split())
+    if cost_skip:
+        sign_note = ((sign_note + "\n\n") if sign_note else "") + (
+            f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] {COST_NOT_WRITTEN_MARK} {cost_skip[:600]}")
+    else:
+        owed = task_owes_cost(args.task, t)
+        if owed:
+            sys.exit(
+                f"ERROR: refusing to complete {args.task}: its card still owes the Costs table.\n"
+                + "".join(f"       - {x}\n" for x in owed)
+                + "       Check it any time with: python3 scripts/cost-record.py owed "
+                f"{args.task}\n"
+                "       If no cost is owed (a one-off purchase, or the cost was written on another\n"
+                "       task as rec...), say so on the record:\n"
+                f"         python3 scripts/agent-dispatch.py complete {args.task} "
+                "--cost-not-written \"<why>\"")
 
     # Written with the close, never before it: a refused close leaves no mark.
     evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
@@ -13219,6 +13283,9 @@ def main():
     c.add_argument("--diary-not-written", default="", metavar="REASON",
                    help="an approved diary card calendar-write.py did not write: say why; "
                         "recorded in Notes")
+    c.add_argument("--cost-not-written", default="", metavar="REASON",
+                   help="the card's RECORD NEW COST line, or a purchase on this task, needs no new cost "
+                        "(a one-off, or written on another task): say why; recorded in Notes")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
