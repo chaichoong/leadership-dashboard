@@ -246,14 +246,20 @@ def new_problem(task, spec):
 # 6 tasks closed after a cleared purchase step, 3 had no cost. agent-dispatch.py `complete` asks this before it
 # closes a task: a line nothing has written, or a purchase with no line, keeps the task open until it is written or
 # the agent says why on the record. The dates a policy's papers leave out are on its first payment (`payments`).
-PURCHASE_CLEARED_RE = re.compile(r"^\[[^\]\n]*\]\s*BLOCKER CLEARED\s*\(KEVIN purchase\):", re.M)
+# A purchase step cleared because it was done. A step Kevin said he cannot take, or one a new submission
+# superseded, clears the same wall and buys nothing (agent-dispatch.py KEVIN_CANT_NOTE and the "superseded:" note;
+# tests/agent-dispatch-cost-owed.test.js holds the two texts together).
+KEVIN_CANT_TEXT = "Kevin cannot take this step:"
+PURCHASE_CLEARED_RE = re.compile(r"^\[[^\]\n]*\]\s*BLOCKER CLEARED\s*\(KEVIN purchase\):(?!\s*(?:superseded:|"
+                                 + re.escape(KEVIN_CANT_TEXT) + r"))", re.M)
 
 
 def owed_new_costs(task_id, output, notes, cost_names, ledger_rows):
     """What this task's approved card still owes the Costs table, one sentence each; [] when nothing.
 
-    A RECORD NEW COST line is answered when a cost of that name is in the table, or this task's ledger shows the
-    create (the row may have been renamed since). A line that is not the six-part shape can never be written, so it
+    A RECORD NEW COST line is answered when a cost of that name is in payment (`cost_names` holds ACTIVE costs
+    only: a retired policy of the same name is not this one, and `new` refuses its name), or this task's ledger
+    shows the create (the row may have been renamed or ended since). A line that is not the six-part shape can never be written, so it
     is owed until a dated line replaces it on a fresh card. A cleared KEVIN purchase step on the task's OWN Notes
     line (the `[stamp — who]` form, never a track-record quote of another task) with no line at all is owed too."""
     names = {name_key(n) for n in cost_names if squash(n)}
@@ -267,8 +273,8 @@ def owed_new_costs(task_id, output, notes, cost_names, ledger_rows):
         if parse_new_line(body) is None:
             owed.append(f"'RECORD NEW COST: {body}' cannot be written: its amount, frequency, due day, first payment "
                         "or end is not a real value. Read the missing dates off the first payment in the bank "
-                        "(cost-record.py payments --payee <who it is paid to>) and put the dated line on a fresh "
-                        "card for Kevin; keep the task open (complete --keep-open) until it is written")
+                        "(cost-record.py payments --payee <who it is paid to>) and resubmit THIS task with the dated "
+                        "line; until that payment lands, complete --keep-open")
         else:
             owed.append(f"'RECORD NEW COST: {body}' was approved and is not in the Costs table: write it with "
                         f"cost-record.py new ... --task {task_id}")
@@ -362,10 +368,11 @@ def cmd_ended(a):
 def cmd_owed(a):
     task = tr.load_task(a.task)
     f = task.get("fields") or {}
-    names = [(r.get("fields") or {}).get(COST_NAME) for r in rc.fetch_all(T_COSTS, {"fields[]": [COST_NAME]})]
+    rows = rc.fetch_all(T_COSTS, {"fields[]": [COST_NAME, COST_PAY_STATUS, COST_INACTIVE]})
+    names = [(r.get("fields") or {}).get(COST_NAME) for r in rows if is_active(r.get("fields") or {})]
     if not names:
-        raise RuntimeError("control failed: the Costs table read returned no rows, so nothing can be said about "
-                           "what this card owes it")
+        raise RuntimeError(f"control failed: {len(rows)} costs read and none in payment, so nothing can be said "
+                           "about what this card owes the table")
     return {"task": task["id"], "owed": owed_new_costs(task["id"], f.get(tr.TK["agentOutput"]),
                                                       f.get(tr.TK["notes"]), names, read_ledger())}
 

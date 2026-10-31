@@ -330,3 +330,54 @@ describe('a new cost catches its first payment', () => {
     expect(run([tx('tBed', 'Fin: WWW.BEDFORDINSURANCE.C,CHESSINGTON -- WWW.BEDFORDINSURANCE.C', 'WWW.BEDFORDINSURANCE.C', -23.1)], 'tBed').costId).toBe('cBed');
   });
 });
+
+// The independent review of the change above (31 Oct 2026) found each of these.
+describe('a new cost claims only what is surely its own', () => {
+  const F = () => ctx.F;
+  const tx = (id, desc, vendor, amount, extra = {}) => ({ id, fields: { [F().txDescription]: desc, [F().txVendor]: vendor, [F().txAmount]: amount, [F().txReportAmount]: amount, [F().txDate]: '2026-10-14', ...extra } });
+  const cost = (id, name, prop, expected, status, txCount) => ({ id, fields: {
+    [F().costName]: name, [F().costProperty]: [prop], [F().costExpected]: expected, [F().costPayStatus]: status,
+    [F().costBusiness]: ['bizRE'], [F().costCategory]: ['catCogs'], [F().costSubCategory]: ['subInsurance'], [F().costTxCount]: txCount,
+  } });
+  const addCosts = (...rows) => ctx.set('allCosts', [...ctx.get('allCosts'), ...rows]);
+  const run = (txs, id) => { ctx.set('allTransactions', txs); return ctx.runReconciliationMatching().find(x => x.txId === id); };
+  const LEM = 'CARD PAYMENT TO LEMONADE INSURANCE ON 29-10-2026 -- LEMONADE INSURANCE';
+
+  it('a learned rule pointing at last year\'s ended cost does not stop the new one being found', () => {
+    addCosts(cost('cLemOld', 'Lemonade Home Insurance - LP0000000 - 1 Sample Street', P.elm42, 36.1, 'Inactive', 12),
+      cost('cLemNew', 'Lemonade Home Insurance - LP0000001 - 1 Sample Street', P.elm42, 37.58, 'Overdue', 0));
+    ctx.localStorage.setItem('recon_rules', JSON.stringify([{ vendorKey: 'lemonade insurance', costId: 'cLemOld', costLabel: 'old', subCatId: 'subInsurance', categoryId: 'catCogs', businessId: 'bizRE', confidence: 5 }]));
+    const r = run([tx('tLem', LEM, 'LEMONADE INSURANCE', -37.58)], 'tLem');
+    expect(r.costId).toBe('cLemNew');
+  });
+
+  it('a payee word is a whole word on the bank line: "protect" is not PROTECTION, "apple" not APPLEGREEN', () => {
+    addCosts(cost('cHp', 'Home Protect - L00/0000000 - 1 Sample Street', P.elm42, 20, 'Overdue', 0),
+      cost('cAp', 'Apple iCloud - 1 Sample Street', P.elm42, 8.99, 'Overdue', 0));
+    expect(run([tx('tA', 'DIRECT DEBIT PAYMENT TO LEGAL AND GENERAL PROTECTION', 'LEGAL AND GENERAL', -20)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'CARD PAYMENT TO APPLEGREEN 2041', 'APPLEGREEN', -8.99)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'DIRECT DEBIT PAYMENT TO HOMEPROTECT LTD', 'PROTECT', -20)], 'tC').costId).toBe('cHp');  // CONTROL
+  });
+
+  it('a paid cost from the same payee at the same amount is a rival: no claim', () => {
+    addCosts(cost('cAxaPaid', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.6, 'In Payment', 5),
+      cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900002 - 5 Dalham Place', P.dalham, 44.68, 'Overdue', 0));
+    expect(run([tx('tAxa', 'Fin: AXA INSURANCE,1 CIVIC DRIVE,IPSWICH', 'Fin: AXA INSURANCE', -44.7)], 'tAxa').costId).toBe('');
+  });
+
+  it('reads the payee past words that name no one ("Aviva Policy Number ...")', () => {
+    expect(ctx.costPayeeWords('AVIVA HT75DCE Car Insurance | Policy number 723566644')).toEqual(['aviva']);
+    expect(ctx.costPayeeWords('Aviva Policy Number 723566644')).toEqual(['aviva']);
+  });
+
+  it('a Paused cost in the reference\'s history still disagrees; only an ended one stands aside', () => {
+    addCosts(cost('cPaused', 'Swinton - Policy OLD - Ref 77000001', P.dalham, 40, 'Paused', 6),
+      cost('cLive', 'Swinton - Policy NEW - Ref 77000001', P.dalham, 40, 'In Payment', 0));
+    idx = ctx.buildDirectIndex();
+    expect(ctx.matchCostDirect('DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 77000001', -40, idx, { '77000001': new Set(['cPaused']) })).toBe('');
+    addCosts(cost('cEnded', 'Swinton - Policy OLDER - Ref 77000002', P.dalham, 40, 'Inactive', 6),
+      cost('cLive2', 'Swinton - Policy NEWER - Ref 77000002', P.dalham, 40, 'In Payment', 0));
+    idx = ctx.buildDirectIndex();
+    expect(ctx.matchCostDirect('DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 77000002', -40, idx, { '77000002': new Set(['cEnded']) })).toBe('cLive2');
+  });
+});

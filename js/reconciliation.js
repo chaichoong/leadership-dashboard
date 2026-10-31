@@ -999,24 +999,26 @@
         // "Kent Reliance - 13CP - 70000135" → 70000135 identifies that cost, with no
         // history needed. A token naming two active costs identifies neither.
         const costRefs = {};  // token → Set(costId)
-        const activeCostIds = new Set();
-        // Active costs nothing has paid yet, for matchUnpaidCostByPayee.
-        const unpaidCosts = [];  // { id, payee: [words], expected }
+        // Ended costs (Inactive), for matchCostDirect's history check. A Paused cost is not ended.
+        const endedCostIds = new Set();
+        // Every active cost by who it is paid to, for matchUnpaidCostByPayee. A paid one is
+        // there as a rival: it stops a new cost claiming a payment that could be its own.
+        const payeeCosts = [];  // { id, payee: [words], expected, unpaid }
         (allCosts || []).forEach(c => {
+            if (getField(c, F.costInactive) || getPaymentStatusName(getField(c, F.costPayStatus)) === 'Inactive') endedCostIds.add(c.id);
             if (!isCostActive(c)) return;
-            activeCostIds.add(c.id);
             extractRefTokens(getField(c, F.costName)).forEach(tok => {
                 if (!costRefs[tok]) costRefs[tok] = new Set();
                 costRefs[tok].add(c.id);
             });
             const expected = Math.abs(Number(getField(c, F.costExpected)) || 0);
             const payee = costPayeeWords(getField(c, F.costName));
-            if (!(Number(getField(c, F.costTxCount)) > 0) && expected && payee.length) {
-                unpaidCosts.push({ id: c.id, payee, expected });
+            if (expected && payee.length) {
+                payeeCosts.push({ id: c.id, payee, expected, unpaid: !(Number(getField(c, F.costTxCount)) > 0) });
             }
         });
 
-        return { props, tenancies, costRefs, activeCostIds, unpaidCosts, unitById };
+        return { props, tenancies, costRefs, endedCostIds, payeeCosts, unitById };
     }
 
     // Who a cost is paid to, as the bank line would write it: the first two telling
@@ -1028,7 +1030,8 @@
     const COST_PAYEE_GENERIC = new Set(['insurance', 'insurer', 'landlord', 'landlords', 'home', 'house',
         'buildings', 'contents', 'car', 'motor', 'van', 'policy', 'cover', 'premium', 'credit', 'finance',
         'the', 'and', 'ltd', 'limited', 'plc', 'services', 'bank', 'payment', 'direct', 'debit', 'card',
-        'monthly', 'annual', 'fee', 'plan']);
+        'monthly', 'annual', 'fee', 'plan', 'number', 'ref', 'reference', 'account', 'group', 'retail',
+        'loan', 'repayment', 'repayments']);
     function costPayeeWords(name) {
         const head = String(name || '').split(/\s+-\s+|\(/)[0].toLowerCase();
         return head.split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !/\d/.test(w) && !COST_PAYEE_GENERIC.has(w)).slice(0, 2);
@@ -1040,19 +1043,22 @@
     // and a cost created that week has no history. So its first payment reached Kevin blank,
     // and what he typed became the lesson: both October AXA payments were coded Operational
     // Supplies at 6 Chedburgh Place. Here an active cost nothing has paid yet claims an
-    // outgoing payment that names its payee and sits within COST_MATCH_TOLERANCE of its
-    // Expected Cost. Exactly one such cost, or nothing: a blank costs a moment of triage, a
-    // wrong cost misattributes money. Once he approves it, history takes over.
+    // outgoing payment whose bank line names its payee (the first word, whole) and sits within
+    // COST_MATCH_TOLERANCE of its Expected Cost. Every active cost that fits counts, paid or
+    // not, and the second payee word only chooses between them: exactly one, and it unpaid,
+    // or nothing. A blank costs a moment of triage, a wrong cost misattributes money. Once he
+    // approves it, history takes over.
     function matchUnpaidCostByPayee(desc, vendor, amount, index) {
-        if (!(Number(amount) < 0) || !index || !(index.unpaidCosts || []).length) return '';
+        if (!(Number(amount) < 0) || !index || !(index.payeeCosts || []).length) return '';
         const abs = Math.abs(Number(amount));
         const words = String(`${vendor || ''} ${desc || ''}`).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
         const set = new Set(words);
-        // A run-together web address ("WWW.BEDFORDINSURANCE.C") still names a payee of 5+ letters.
-        const named = w => set.has(w) || (w.length >= 5 && words.some(t => t.startsWith(w)));
-        const hits = index.unpaidCosts.filter(c => c.payee.every(named)
-            && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
-        return hits.length === 1 ? hits[0].id : '';
+        // A web address runs the payee into one word ("WWW.BEDFORDINSURANCE.C"): only there may
+        // a word be the start of one. Anywhere else "protect" is not PROTECTION, nor "apple" APPLEGREEN.
+        const named = w => set.has(w) || (w.length >= 5 && words.some((t, i) => i > 0 && words[i - 1] === 'www' && t.startsWith(w)));
+        let hits = index.payeeCosts.filter(c => named(c.payee[0]) && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
+        if (hits.length > 1) hits = hits.filter(c => c.payee.every(named));
+        return hits.length === 1 && hits[0].unpaid ? hits[0].id : '';
     }
     window.costPayeeWords = costPayeeWords;
     window.matchUnpaidCostByPayee = matchUnpaidCostByPayee;
@@ -1171,12 +1177,12 @@
             }
             if (!ids || ids.size !== 1) return;
             const id = ids.values().next().value;
-            // History disagrees → not an identifier. Only a cost still in payment counts as
-            // disagreeing: a renewal keeps its reference (Premium Credit 04AFFW8521/010 became
+            // History disagrees → not an identifier. An ENDED cost no longer disagrees: a renewal
+            // keeps its reference (Premium Credit 04AFFW8521/010 became
             // /011 on 3 Oct 2026), and the history that ties it to the ENDED policy's cost
             // kept every payment of the new one blank (31 Oct 2026).
             const seen = refIndex && refIndex[tok];
-            const live = seen ? [...seen].filter(c => c === id || !index.activeCostIds || index.activeCostIds.has(c)) : [];
+            const live = seen ? [...seen].filter(c => c === id || !(index.endedCostIds && index.endedCostIds.has(c))) : [];
             if (seen && (live.length > 1 || (live.length === 1 && live[0] !== id))) return;
             if (hits.indexOf(id) === -1) hits.push(id);
         });
@@ -1193,7 +1199,9 @@
         // ── Cost by account number, else a new cost by its payee ──
         let costId = matchCostDirect(result.txDesc, result.txAmount, index, refIndex);
         let costEvidence = 'cost ref';
-        if (!costId && !result.costId) {
+        // A learned cost that has since ended (a knowledge-base rule or history pointing at last
+        // year's policy) is no cost at all, so it must not stop the new one being found.
+        if (!costId && !(result.costId && costLookup[result.costId])) {
             costId = matchUnpaidCostByPayee(result.txDesc, result.txVendor, result.txAmount, index);
             costEvidence = 'new cost';
         }

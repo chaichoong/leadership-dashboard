@@ -250,7 +250,8 @@ a = run(m.cmd_complete, {"task": "t1", "keep_open": False, "note": None})
 k = run(m.cmd_complete, {"task": "t1", "keep_open": True, "note": "saved the quote"})
 thin = run(m.cmd_unblock, {"task": "t1", "evidence": "done"})
 u = run(m.cmd_unblock, {"task": "t1", "evidence": "Policy RS-1234 schedule email from RightSure, 25 Sep 14:02, in Gmail."})
-b = run(m.cmd_complete, {"task": "t1", "keep_open": False, "note": None})
+b = run(m.cmd_complete, {"task": "t1", "keep_open": False, "note": None,
+                         "cost_not_written": "the policy's cost is on its own card"})  # the cost-line gate, 31 Oct 2026
 f = TASKS["t1"]["fields"]
 print(json.dumps({"a": a["err"], "k": k["err"], "thin": thin["err"], "u": u["err"], "b": b["err"],
                   "status": f[AF["status"]], "outcome": f[AF["approvalOutcome"]], "approvedAt": f[AF["approvedAt"]]}))`);

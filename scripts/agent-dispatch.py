@@ -5602,7 +5602,8 @@ def cmd_submit(args):
         files_itself = False
     # Nor is a card that still owes the Costs table (31 Oct 2026): it goes to the queue, where the
     # approval writes the cost and `complete` checks it was written.
-    if files_itself and task_owes_cost(args.task, {"agentOutput": output, "notes": tf.get(AF["notes"])}):
+    cost_owed = task_owes_cost(args.task, {"agentOutput": output, "notes": tf.get(AF["notes"])})
+    if cost_owed:
         files_itself = False
     if files_itself:
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
@@ -5647,6 +5648,7 @@ def cmd_submit(args):
         # redirect) with the certificate unfiled. It goes to the queue as a card.
         level = dict(level, level=AUTONOMY_APPROVE,
                      why="a certificate arrived on this task and is not filed yet")
+    level = demote_for_cost(level, cost_owed)
     if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
@@ -8068,13 +8070,24 @@ def task_owes_cost(task_id, t, fetch_costs=None):
             not cr.PURCHASE_CLEARED_RE.search(str(t.get("notes") or "")):
         return []
     try:
-        rows = (fetch_costs or (lambda: query_records(COSTS_TABLE, fields=[cr.COST_NAME])))()
+        rows = (fetch_costs or (lambda: query_records(
+            COSTS_TABLE, fields=[cr.COST_NAME, cr.COST_PAY_STATUS, cr.COST_INACTIVE])))()
     except Exception as exc:                              # noqa: BLE001
         return [f"the Costs table could not be read to check the card's cost lines ({str(exc)[:120]})"]
-    if not rows:
-        return ["the Costs table read returned no rows, so the card's cost lines cannot be checked"]
-    names = [(r.get("fields") or {}).get(cr.COST_NAME) for r in rows]
+    names = [(r.get("fields") or {}).get(cr.COST_NAME) for r in rows if cr.is_active(r.get("fields") or {})]
+    if not names:
+        return [f"{len(rows)} costs read and none in payment, so the card's cost lines cannot be checked"]
     return cr.owed_new_costs(task_id, t.get("agentOutput"), t.get("notes"), names, cr.read_ledger())
+
+
+def demote_for_cost(level, cost_owed):
+    """A Level A carry-out that would end the task Completed while its card owes the Costs table becomes a card
+    (31 Oct 2026), as the certificate gate does for an unfiled certificate; Roy's lane and a quote request are
+    carried out, not closed."""
+    if cost_owed and level.get("level") == AUTONOMY_ACT and level.get("carry") != "roy" \
+            and level.get("rule") != "quote-request":
+        return dict(level, level=AUTONOMY_APPROVE, why="the card owes the Costs table a cost line")
+    return level
 
 
 def cmd_complete(args):
@@ -8240,7 +8253,29 @@ def cmd_complete(args):
                 f"         python3 scripts/agent-dispatch.py complete {args.task} "
                 "--no-certificate \"<it is a quote / an invoice only / a photo>\"")
 
-    # THE COST-LINE GATE (Kevin, 31 Oct 2026). Four insurance policies bought in October never became
+    # THE BLOCKER GATE (Kevin, 25 Sep 2026). A task whose agent hit a wall is
+    # not done because the wall was reported. Only the fix, or proof that the
+    # step Kevin owed has happened, clears it. See THE BLOCKER LOOP below.
+    b = task_blocker(t["notes"])
+    if b:
+        # An agent that tries to close an approved task on a KEVIN wall has done its part:
+        # only his step is left, so the card goes back to his lane now (7 Oct 2026), and the
+        # task rests until he says it is done.
+        surfaced = surface_your_step(args.task, b, t) if b["kind"] == "KEVIN" else {}
+        if surfaced:
+            ledger_append(args.task, "parked")
+        sys.exit(
+            f"ERROR: refusing to complete {args.task}: it is blocked "
+            f"({b['kind']} {b['subject']}: {b['why'][:160]}).\n"
+            f"       Fix: {blocker_fix_text(b)}\n"
+            + ("       It is back in Kevin's approval queue as Your step.\n" if surfaced else "")
+            + "       The task wakes by itself when the cause is fixed. If the job is\n"
+            "       in fact done, prove it first:\n"
+            f"         python3 scripts/agent-dispatch.py unblock {args.task} "
+            "--evidence \"<what you saw that proves it>\"")
+
+    # THE COST-LINE GATE (Kevin, 31 Oct 2026), after the blocker gate: a purchase Kevin still owes is
+    # his step first, and the cost is written once he has bought. Four insurance policies bought in October never became
     # a cost: two cards were approved with "due NOT FOUND" in the cost line, which cost-record.py cannot
     # write, and the Lemonade policy was bought on a task that closed with no cost line at all, so its
     # payments came to Kevin in reconciliation with nothing to match. A task closes only once each
@@ -8262,27 +8297,6 @@ def cmd_complete(args):
                 "       task as rec...), say so on the record:\n"
                 f"         python3 scripts/agent-dispatch.py complete {args.task} "
                 "--cost-not-written \"<why>\"")
-
-    # THE BLOCKER GATE (Kevin, 25 Sep 2026). A task whose agent hit a wall is
-    # not done because the wall was reported. Only the fix, or proof that the
-    # step Kevin owed has happened, clears it. See THE BLOCKER LOOP below.
-    b = task_blocker(t["notes"])
-    if b:
-        # An agent that tries to close an approved task on a KEVIN wall has done its part:
-        # only his step is left, so the card goes back to his lane now (7 Oct 2026), and the
-        # task rests until he says it is done.
-        surfaced = surface_your_step(args.task, b, t) if b["kind"] == "KEVIN" else {}
-        if surfaced:
-            ledger_append(args.task, "parked")
-        sys.exit(
-            f"ERROR: refusing to complete {args.task}: it is blocked "
-            f"({b['kind']} {b['subject']}: {b['why'][:160]}).\n"
-            f"       Fix: {blocker_fix_text(b)}\n"
-            + ("       It is back in Kevin's approval queue as Your step.\n" if surfaced else "")
-            + "       The task wakes by itself when the cause is fixed. If the job is\n"
-            "       in fact done, prove it first:\n"
-            f"         python3 scripts/agent-dispatch.py unblock {args.task} "
-            "--evidence \"<what you saw that proves it>\"")
 
     # Written with the close, never before it: a refused close leaves no mark.
     evidence = " ".join(str(getattr(args, "evidence", "") or "").split())

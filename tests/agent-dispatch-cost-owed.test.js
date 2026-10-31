@@ -75,6 +75,20 @@ describe('what an approved card still owes the Costs table', () => {
     expect(owed('CLOSE PROPOSAL: already handled', `TRACK RECORD\n${QUOTED_PURCHASE}`)).toEqual([]);
   });
 
+  it('a purchase step Kevin could not take, or one a new submission superseded, bought nothing', () => {
+    const cant = "[1 Oct 2026 09:00 — Kevin] BLOCKER CLEARED (KEVIN purchase): Kevin cannot take this step: not this month. Sent back to you.";
+    const superseded = '[1 Oct 2026 09:00 — agent-dispatch] BLOCKER CLEARED (KEVIN purchase): superseded: a new submission replaced the work that met this wall.';
+    expect(owed('A fresh quote card.', cant)).toEqual([]);
+    expect(owed('A fresh quote card.', superseded)).toEqual([]);
+    expect(owed('A fresh quote card.', `${superseded}\n\n${OWN_PURCHASE}`)).toHaveLength(1);  // CONTROL: a real purchase later
+  });
+
+  it('the declined-step text is the dispatcher\'s own (the two files cannot drift apart)', () => {
+    const d = py(DISPATCH, 'print(json.dumps(m.KEVIN_CANT_NOTE))');
+    const c = py(DOOR, 'print(json.dumps(m.KEVIN_CANT_TEXT))');
+    expect(c).toBe(d);
+  });
+
   it('a cost line quoted in the track record is not an approved line', () => {
     expect(owed(`CLOSE PROPOSAL: already handled\n- 29 Oct 2026 — agent: FIXED COST: ${UNDATED}`)).toEqual([]);
   });
@@ -98,7 +112,11 @@ def costs(table, formula=None, fields=None, max_records=None):
     reads.append(table)
     if ${readFails ? 'True' : 'False'}: raise RuntimeError("Airtable GET 503")
     cr = m._cost_record()
-    return [{"id": "recCost%010d" % i, "fields": {cr.COST_NAME: n}} for i, n in enumerate(${JSON.stringify(names)})]
+    rows = []
+    for i, n in enumerate(${JSON.stringify(names)}):
+        name, status = (n, "In Payment") if isinstance(n, str) else n
+        rows.append({"id": "recCost%010d" % i, "fields": {cr.COST_NAME: name, cr.COST_PAY_STATUS: {"name": status}}})
+    return rows
 m.query_records = costs
 try:
     with contextlib.redirect_stdout(io.StringIO()):
@@ -131,9 +149,31 @@ except SystemExit as e:
     expect(r.notes).toMatch(/COST NOT WRITTEN: one-off purchase, no recurring cost/);
   });
 
+  it('a retired policy of the same name does not answer the line (new would refuse that name)', () => {
+    const name = 'Example Cover - REF 99AA000001 - 1 Sample Street';
+    expect(complete({ output: DATED, names: [[name, 'Inactive'], 'Some other cost'] }).exit).toMatch(/still owes the Costs table/);
+    expect(complete({ output: DATED, names: [name] }).status).toBe('Completed');   // CONTROL: in payment
+  });
+
+  it('a wall Kevin still owes is answered before the cost (his purchase comes first)', () => {
+    const open = "[29 Oct 2026 09:00 — agent] BLOCKER OPEN (KEVIN purchase): Kevin buys the policy. Fix: Kevin does it. [since 2026-10-29T09:00:00Z]";
+    const r = complete({ output: `THE ASK: approve the cost line.\n${DATED}`, notes: open, names: ['Some other cost'] });
+    expect(r.exit).toMatch(/it is blocked \(KEVIN purchase/);
+    expect(r.exit).not.toMatch(/still owes the Costs table/);
+  });
+
   it('an unreadable Costs table refuses, never clears', () => {
     const r = complete({ output: `THE ASK: approve the cost line.\n${DATED}`, readFails: true });
     expect(r.exit).toMatch(/could not be read/);
+  });
+
+  it('a Level A close that would end the task with a cost owed becomes a card', () => {
+    const r = py(DISPATCH, `
+act = {"level": m.AUTONOMY_ACT, "category": "close"}
+print(json.dumps([m.demote_for_cost(act, ["owed"])["level"] == m.AUTONOMY_APPROVE,
+                  m.demote_for_cost(act, [])["level"] == m.AUTONOMY_ACT,
+                  m.demote_for_cost(dict(act, carry="roy"), ["owed"])["level"] == m.AUTONOMY_ACT]))`);
+    expect(r).toEqual([true, true, true]);
   });
 
   it('an ordinary task with no cost line and no purchase closes without reading the Costs table', () => {
