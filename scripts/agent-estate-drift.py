@@ -190,6 +190,12 @@ RETIRED = [
      "Level A is the two closes, the information-only report and PASS TO ROY; a diary entry is a card"),
     (r"a valid CALENDAR output typed Admin, and a", "2026-10-18",
      "a valid CALENDAR output typed Admin is a card, carried out by calendar-write.py on approval"),
+    # The Knowledge Base Manager (Meetings) agent and its 22:45 job (Kevin, 14 Oct 2026;
+    # Decisions/2026-10-14). Fires on wording that says the job still runs, never on the name.
+    (r"(?i)feed-brain (stays|is|remains) (on|live|running)|(nightly|22:45) (feed-brain|Brain Feeder)",
+     "2026-10-14",
+     "the Knowledge Base Manager (Meetings) agent and its 22:45 feed-brain job are retired; "
+     "file a meeting by hand with /feed-brain"),
 ]
 
 # A line that is describing the old rule, not stating it.
@@ -449,6 +455,11 @@ def selftest():
     assert not declares_no_estate("---\ndate: 2026-10-29\n---\nestate: none, but the gate moves.\n")
     assert not declares_no_estate("The ruling says estate: none in its prose only.\n")
     assert not declares_no_estate("---\nestate: none\n")        # unterminated block
+    # feed-brain retired (14 Oct 2026): wording that says the job still runs fires;
+    # the by-hand route does not.
+    assert scan_text("feed-brain stays on.", "x")
+    assert scan_text("The nightly feed-brain job writes Meetings notes.", "x")
+    assert not scan_text("Kevin can file a meeting by hand with /feed-brain.", "x")
     memory_selftest()
     print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6, 7; "
           "memory rule: CLAUDE.md and MEMORY.md live, topic history below a "
