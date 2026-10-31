@@ -1619,6 +1619,99 @@ def card_twin(c, records):
     return None, None
 
 
+# ── One bill, one row (Kevin, 31 Oct 2026) ────────────────────────────────
+# One £6 ground rent bill came in on two approved cards. card_twin saw the
+# twin, the second row went on as "CHECK: this may be the same bill", and the
+# only way off the list was Mark Paid, so both rows ended up Paid for one
+# payment. Kevin: "We need to try and avoid duplications hitting that list...
+# the same payee, the same invoice details, and the same amount."
+#
+# same_bill folds a new card or email into the open row only on EVIDENCE that
+# the invoice details agree: the same reference on both, the one reference
+# there is written in the other's own words, or (no reference on either) the
+# same house named on both. A shared payee and amount alone is not proof: a
+# contractor charges the same call-out fee at two houses. Those still go on as
+# CHECK rows, and the page flags them for Kevin's Duplicate button.
+
+TWIN_STOP = PAYEE_STOP | {"inbound", "follow", "chase", "reminder", "ground", "rent", "arrears",
+                          "bill", "demand", "charge", "charges", "fees", "from", "with",
+                          "labour", "invoices", "forwards"}
+STREET_RE = re.compile(r"\b(\d{1,4}[a-z]?)\s+([a-z]+)\s+(?:street|st|road|rd|place|avenue|ave|terrace|"
+                       r"park|lane|close|drive|way|crescent|grove|gardens|court|buildings|row|square|"
+                       r"walk|hill|view|mews)\b")
+
+
+def twin_words(payee):
+    """Payee words that say WHO, without payee_tokens' fallback: a card named
+    after its task ("INBOUND: pay ... ground rent") must not match another on
+    its lane words."""
+    if not payee or "@" in str(payee):
+        return set()
+    return {w for w in re.findall(r"[a-z]{4,}", str(payee).lower()) if w not in TWIN_STOP}
+
+
+def house_places(text):
+    return {"%s %s" % m for m in STREET_RE.findall(str(text or "").lower())}
+
+
+def same_bill(row_fields, other, other_text=""):
+    """True when `other` (a card or a scanned email: payee, amount, reference)
+    is the bill the open row already holds. See the block comment above."""
+    amount = row_fields.get("Amount")
+    if amount is None or other.get("amount") is None:
+        return False
+    if abs(abs(float(amount)) - abs(float(other["amount"]))) >= 0.005:
+        return False
+    if not twin_words(row_fields.get("Payee")) & twin_words(other.get("payee")):
+        return False
+    row_text = " ".join(str(row_fields.get(k) or "") for k in ("Payee", "Description", "Reference"))
+    new_text = " ".join(str(x or "") for x in (other.get("payee"), other.get("description"),
+                                                other.get("reference"), other_text))
+    p_row, p_new = house_places(row_text), house_places(new_text)
+    if p_row and p_new and not p_row & p_new:
+        return False
+    r_row, r_new = norm_ref(row_fields.get("Reference")), norm_ref(other.get("reference"))
+    if r_row and r_new:
+        return r_row == r_new
+    if r_row:
+        return r_row in norm_ref(new_text)
+    if r_new:
+        return r_new in norm_ref(row_text)
+    return bool(p_row & p_new)
+
+
+def open_twin(records, other, other_text=""):
+    """The open row `other` is the same bill as, or None."""
+    for r in records:
+        if status_of(r) in ("Unpaid", "") and same_bill(r["fields"], other, other_text):
+            return r
+    return None
+
+
+# Kevin's "Done, here is the proof" on a Your step payment card, as the half-hourly
+# sweep records it in the task's Notes when it clears the wall (agent-dispatch.py
+# wake_blocked). The card told him "Press Pay, then write Done on this card", so a
+# Done there IS the payment (Kevin, 31 Oct 2026: "when their approval card has
+# marked it as paid ... it automatically removes it from the list").
+KEVIN_PAID_RE = re.compile(r"^\[(\d{1,2} [A-Z][a-z]{2} \d{4})[^\]\n]*— Kevin\] BLOCKER CLEARED "
+                           r"\(KEVIN (?:payment|purchase)\): Kevin says the step is done", re.M)
+
+
+def kevin_paid_on(c):
+    """ISO day Kevin pressed Done on this card's payment step, or None. Only a
+    Done on or after the card's approval counts: an earlier wall on the same
+    task was a different step."""
+    days = []
+    for m in KEVIN_PAID_RE.finditer(c.get("text") or ""):
+        try:
+            day = datetime.strptime(m.group(1), "%d %b %Y").date().isoformat()
+        except ValueError:
+            continue
+        if not c.get("approved") or day >= c["approved"]:
+            days.append(day)
+    return max(days) if days else None
+
+
 def approved_payment_cards():
     """Every task carrying a MARK FOR PAYMENT card that Kevin really approved.
 
@@ -1660,6 +1753,11 @@ def plan_tasks(cards, records, by_amount, today):
       check_paid   add it, and its description names a payment since the card
                    that may already be this bill
       link         an open row already is this bill (strong or reference twin)
+      fold         an open row is this bill on same_bill's evidence: not added, and
+                   the open row's description says a second card points at it
+      done         Kevin pressed Done on this card's payment step: its open row
+                   is marked Paid (detail is (row, iso day))
+      done_new     the same, before any row existed: added already Paid
       paid         a Paid row already is this bill
       wait         not yet the Friday before it is due
       listed       its own row exists
@@ -1681,13 +1779,30 @@ def plan_tasks(cards, records, by_amount, today):
         # task: a row Kevin dismisses in two seconds beats an approved bill that
         # silently never appears (the skill's own rule since 18 Sep 2026).
         card["payee"] = card.get("payee") or re.split(r"\s+[-–—]\s+", c["name"])[0].strip()
+        paid_on = kevin_paid_on(c)
         key = "task:%s" % c["id"]
         if key in by_key:
-            plan.append(("listed", c, by_key[key]["id"]))
+            row = by_key[key]
+            if paid_on and status_of(row) in ("Unpaid", ""):
+                plan.append(("done", c, (row, paid_on)))
+            else:
+                plan.append(("listed", c, row["id"]))
             continue
         twin, how = card_twin(c, records)
         if twin is not None and how in ("strong", "reference"):
-            plan.append(("paid" if status_of(twin) == "Paid" else "link", c, twin))
+            if status_of(twin) == "Paid":
+                plan.append(("paid", c, twin))
+            else:
+                plan.append(("done", c, (twin, paid_on)) if paid_on else ("link", c, twin))
+            continue
+        same = open_twin(records, card, c["name"] + "\n" + c.get("text", ""))
+        if same is not None:
+            plan.append(("done", c, (same, paid_on)) if paid_on else ("fold", c, same))
+            continue
+        if paid_on:
+            # Paid on the card before it ever reached the list: one Paid row, so the
+            # bank line has its bill (payments-came-through-the-list) and nothing is owed.
+            plan.append(("done_new", c, paid_on))
             continue
         if card.get("dueDate") and today < listing_date(card["dueDate"]):
             plan.append(("wait", c, listing_date(card["dueDate"]).isoformat()))
@@ -1767,14 +1882,34 @@ def run_tasks(records, transactions, apply, today):
             creates.append({"fields": task_row_fields(
                 c, today, twin=detail if action == "check" else None,
                 maybe_paid=detail if action == "check_paid" else None)})
-        elif action == "link":
-            print("  ALREADY LISTED       %s | as row %s (the same bill)" % (label, detail["id"]))
+        elif action in ("link", "fold"):
+            print("  ALREADY LISTED       %s | as row %s (the same bill%s)" % (
+                label, detail["id"], ", same invoice details" if action == "fold" else ""))
             if c["id"] not in (detail["fields"].get("Notes") or ""):
                 fields = {"Notes": append_note(detail, "Also Kevin's approved payment card, "
                                                        "task %s." % c["id"])}
                 if card.get("dueDate") and not detail["fields"].get("Due Date"):
                     fields["Due Date"] = card["dueDate"]
+                if action == "fold":
+                    # The page shows the description, not the notes: if these were ever
+                    # two bills, this line is where Kevin sees it.
+                    fields["Description"] = ("%s Second card for this bill: %s (task %s)." % (
+                        detail["fields"].get("Description") or "", c["name"][:90], c["id"])).strip()
                 updates.append({"id": detail["id"], "fields": fields})
+        elif action == "done":
+            row, day = detail
+            print("  PAID ON THE CARD     %s | row %s (Kevin pressed Done on %s)" % (label, row["id"], day))
+            updates.append({"id": row["id"], "fields": {
+                "Status": "Paid", "Paid Date": day,
+                "Notes": append_note(row, "Marked paid: Kevin pressed Done on his Your step payment "
+                                          "card on %s (task %s)." % (day, c["id"]))}})
+        elif action == "done_new":
+            print("  PAID ON THE CARD     %s | added as Paid (Kevin pressed Done on %s)" % (label, detail))
+            fields = task_row_fields(c, today)
+            fields.update({"Status": "Paid", "Paid Date": detail})
+            fields["Notes"] += (" Kevin pressed Done on his Your step payment card on %s, before the "
+                                "card reached the list, so it was added already paid." % detail)
+            creates.append({"fields": fields})
         elif action == "paid":
             print("  ALREADY PAID         %s | row %s" % (label, detail["id"]))
         elif action == "wait":
@@ -1783,6 +1918,10 @@ def run_tasks(records, transactions, apply, today):
             print("  on the list          %s | row %s" % (label, detail))
         else:
             print("  %-20s %s | %s" % (action.upper(), label, detail))
+    # One write per row per run: two cards folding into one row would each build its
+    # Notes from the same reading. The second is picked up on the next run.
+    seen_ids = set()
+    updates = [u for u in updates if not (u["id"] in seen_ids or seen_ids.add(u["id"]))]
     if apply:
         if creates:
             airtable_write(T_INVOICES, "POST", creates, "add payment-card rows")
@@ -1905,7 +2044,7 @@ def cmd_write(args):
             by_payee.setdefault(payee, []).append(fields.get("Pay To Details"))
 
     run_date = (parse_asof(args.run_date) or datetime.now(LONDON)).date().isoformat()
-    creates, updates, flagged = [], [], []
+    creates, updates, flagged, duplicates = [], [], [], []
     for item in items:
         mid = item.get("messageId")
         if not mid:
@@ -1923,14 +2062,28 @@ def cmd_write(args):
             # duplicate bug), the first is updated and the rest are left for
             # `cleanse` to remove — this command never deletes.
             updates.append({"id": by_msg[mid][0]["id"], "fields": fields})
-        else:
-            creates.append({"fields": fields})
+            continue
+        twin = open_twin(existing, item)
+        if twin is not None:
+            # The same bill is already owed on the list, from a card or another
+            # mailbox (Kevin, 31 Oct 2026). Kept as a Duplicate row so its message
+            # id holds and next Friday's scan does not add it again.
+            fields[WRITABLE["status"]] = "Duplicate"
+            fields[WRITABLE["notes"]] = append_note({}, "Same bill as row %s (%s £%.2f), already on the "
+                                                        "list: kept off it as a duplicate." % (
+                twin["id"], twin["fields"].get("Payee") or "", float(twin["fields"].get("Amount") or 0)))
+            duplicates.append({"id": twin["id"], "fields": {"Notes": append_note(
+                twin, "The same bill arrived again in email %s; kept off the list as a duplicate." % mid)}})
+        creates.append({"fields": fields})
 
     if creates:
         airtable_write(T_INVOICES, "POST", creates, "create payment-run rows")
-    if updates:
-        airtable_write(T_INVOICES, "PATCH", updates, "update payment-run rows")
+    seen_ids = {u["id"] for u in updates}
+    duplicates = [d for d in duplicates if not (d["id"] in seen_ids or seen_ids.add(d["id"]))]
+    if updates or duplicates:
+        airtable_write(T_INVOICES, "PATCH", updates + duplicates, "update payment-run rows")
     print(json.dumps({"created": len(creates), "updated": len(updates),
+                      "keptOffAsDuplicate": sum(1 for c in creates if c["fields"].get("Status") == "Duplicate"),
                       "runDate": run_date,
                       "bankDetailsChanged": flagged}, indent=2))
 

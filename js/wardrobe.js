@@ -174,10 +174,11 @@
 
     // "I'm wearing something else" (Kevin, 29 Oct 2026): tick the pieces actually on, starting from today's
     // log or the best option. What it saves feeds the rotation and the wash count like Wearing this does.
-    const TYPE_ORDER = ['Tee', 'Shirt', 'Knit', 'Lounge', 'Trousers', 'Shorts', 'Jacket', 'Coat', 'Shoes', 'Accessory'];
+    const TYPE_ORDER = ['Tee', 'Shirt', 'Knit', 'Lounge', 'Trousers', 'Shorts', 'Jacket', 'Coat', 'Shoes', 'Accessory', 'Pyjamas'];
     function otherBlock(picks, best) {
         const date = today();
-        const all = Object.values(state.data.items).filter(it => it.status === 'Own' || it.status === 'Bought');
+        // Pyjamas have their own block below: the day's log never touches them.
+        const all = Object.values(state.data.items).filter(it => (it.status === 'Own' || it.status === 'Bought') && !P().isNightwear(it));
         const wornNow = all.filter(it => it.lastWorn === date);
         const dis = state.saving ? ' disabled' : '';
         if (!state.other) {
@@ -202,12 +203,42 @@
         </form>`;
     }
 
+    // Tonight's pyjamas (Kevin, 31 Oct 2026): which pair to wear tonight, which night of its wash cycle
+    // tonight is, and when it goes in the wash; the other clean pairs to switch to, and the pairs in the
+    // wash with the day each is back. Hidden when no pyjamas are owned.
+    const weekday = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long' });
+    function pyjamasBlock() {
+        const date = today();
+        const pairs = Object.values(state.data.items).filter(it => (it.status === 'Own' || it.status === 'Bought') && P().isNightwear(it))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        if (!pairs.length) return '';
+        const dis = state.saving ? ' disabled' : '';
+        const head = '<h3 id="wearPjTitle">Tonight\'s pyjamas</h3>';
+        const washing = pairs.filter(it => P().inWash(it, date));
+        const washLine = washing.length ? `<p class="wear-note">In the wash: ${washing.map(it => `${esc(it.name)} (back ${esc(fmtDay(P().cleanOn(it)))})`).join(', ')}.</p>` : '';
+        const plan = P().pickPyjamas(state.data.items, new Date());
+        if (!plan) return `<section class="wear-pj" aria-labelledby="wearPjTitle">${head}<p class="wear-note">Every pair is in the wash tonight.</p>${washLine}</section>`;
+        const it = plan.item;
+        const when = plan.limit === 0 ? 'Not counted for washing.'
+            : plan.washAfter === date ? `Night ${plan.night} of ${plan.limit}, the last: into the wash ${plan.wornTonight ? 'in the morning' : 'tomorrow morning'}.`
+            : `Night ${plan.night} of ${plan.limit}. Into the wash after ${esc(weekday(plan.washAfter))} night.`;
+        const btn = plan.wornTonight
+            ? '<button type="button" class="wear-btn wear-btn-done" disabled>Wearing tonight</button>'
+            : `<button type="button" class="wear-btn wear-btn-primary" data-wear-pyjamas="${esc(it.id)}"${dis}>Wearing these tonight</button>`;
+        const others = pairs.filter(p => p !== it && !P().inWash(p, date));
+        const swap = others.length ? `<p class="wear-note">Or another pair: ${others.map(p => `<button type="button" class="wear-link" data-wear-pyjamas="${esc(p.id)}"${dis}>${esc(p.name)}</button>`).join(' ')}</p>` : '';
+        return `<section class="wear-pj" aria-labelledby="wearPjTitle">${head}
+            <ul><li><i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i><span class="wear-name">${esc(it.name)} <small>${when}</small></span></li></ul>
+            ${btn}${swap}${washLine}</section>`;
+    }
+
     // Tonight's wash (Kevin, 29 Oct 2026): from what was logged today, what goes in the wash and what goes
     // back on the hanger, so nothing is over-worn and the clothes keep rotating. Uncounted pieces (jackets,
-    // coats, shoes) are left off: they never need a nightly decision.
+    // coats, shoes) are left off: they never need a nightly decision. Pyjamas are left off too: their own
+    // block says when they go in the wash.
     function washTonight() {
         const date = today();
-        const worn = Object.values(state.data.items).filter(it => it.lastWorn === date && P().washLimit(it) > 0)
+        const worn = Object.values(state.data.items).filter(it => it.lastWorn === date && P().washLimit(it) > 0 && !P().isNightwear(it))
             .sort((a, b) => a.name.localeCompare(b.name));
         const head = '<h3 id="wearWashTitle">Tonight\'s wash</h3>';
         if (!worn.length) {
@@ -258,6 +289,7 @@
         el.innerHTML = head + stale + why
             + `<div class="wear-opts">${picks.map(p => optionCard(p, best)).join('')}</div>`
             + otherBlock(picks, best)
+            + pyjamasBlock()
             + washTonight()
             + `<p class="wear-src">Weather from Open-Meteo for ${esc(place)}. ${locate}<button type="button" class="wear-link" data-wear-open>Open your wardrobe</button></p>`;
     }
@@ -374,16 +406,19 @@
     // A piece logged earlier today but not in this set has its wear taken back, and an outfit pressed
     // earlier today goes back to its last date, so changing your mind never counts twice (Kevin, 29 Oct 2026).
     const WEAR_KEYS = { lastWorn: 'lastWorn', prevWorn: 'prevWorn', wears: 'wears', inWashSince: 'inWashSince' };
-    function wearSteps(ids, chosen, date) {
+    // night: the pyjamas log, which touches only pyjamas and no outfit; the day log never touches pyjamas,
+    // so pressing Wearing this after logging tonight's pair never takes the pair's night back.
+    function wearSteps(ids, chosen, date, night) {
         const items = state.data.items;
         const itemChanges = [];
         Object.values(items).forEach(it => {
+            if (P().isNightwear(it) !== !!night) return;
             const f = ids.includes(it.id) ? P().wearFields(it, date) : P().unwearFields(it, date);
             if (f) itemChanges.push({ it, f });
         });
-        const outfitChanges = state.data.outfits.filter(o => o.lastWorn === date && o !== chosen)
+        const outfitChanges = night ? [] : state.data.outfits.filter(o => o.lastWorn === date && o !== chosen)
             .map(o => ({ o, f: { lastWorn: o.prevWorn || null, prevWorn: null } }));
-        if (chosen && chosen.lastWorn !== date) outfitChanges.push({ o: chosen, f: { lastWorn: date, prevWorn: chosen.lastWorn || null } });
+        if (!night && chosen && chosen.lastWorn !== date) outfitChanges.push({ o: chosen, f: { lastWorn: date, prevWorn: chosen.lastWorn || null } });
         const pick = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj[k] == null ? null : obj[k]]));
         const step = (table, changes) => {
             const keys = table === TABLES.wardrobe ? Object.keys(WEAR_KEYS) : ['lastWorn', 'prevWorn'];
@@ -397,9 +432,9 @@
         };
         return [step(TABLES.wardrobe, itemChanges), step(TABLES.outfits, outfitChanges)].filter(st => st.doIt.length);
     }
-    async function saveWorn(ids, chosen, okMsg) {
+    async function saveWorn(ids, chosen, okMsg, night) {
         if (state.saving || !state.data) return false;
-        const steps = wearSteps(ids, chosen, today());
+        const steps = wearSteps(ids, chosen, today(), night);
         if (!steps.length) { state.other = false; renderHomeCard(); return true; }
         state.saving = true;
         steps.forEach(st => st.local());
@@ -454,7 +489,7 @@
         return isNaN(d) ? 'Not yet' : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });   // DD/MM/YYYY, the app's standard
     }
 
-    const TYPES = ['Tee', 'Shirt', 'Knit', 'Trousers', 'Shorts', 'Jacket', 'Coat', 'Shoes', 'Lounge', 'Accessory'];
+    const TYPES = ['Tee', 'Shirt', 'Knit', 'Trousers', 'Shorts', 'Jacket', 'Coat', 'Shoes', 'Lounge', 'Pyjamas', 'Accessory'];
     const USES = ['Home', 'Work', 'Day out', 'Evening', 'Site visits'];
     const ACTIONS = ['Sell', 'Donate', 'Recycle', 'Site drawer'];
 
@@ -494,7 +529,7 @@
         const limit = P().washLimit(i);
         const where = limit === 0 ? 'Not counted'
             : P().inWash(i, date) ? `<span class="wr-pill wr-pill-new">In the wash</span> clean ${esc(fmtDay(P().cleanOn(i)))}`
-            : `${P().wearsNow(i, date)} of ${limit} wear${limit === 1 ? '' : 's'}`;
+            : `${P().wearsNow(i, date)} of ${limit} ${P().isNightwear(i) ? 'night' : 'wear'}${limit === 1 ? '' : 's'}`;
         const def = P().RULES.WASH_DEFAULT[i.type] || 0;
         return `<div class="wr-wash">${where}<label class="wr-washevery">Every <input type="number" min="0" max="30" step="1" inputmode="numeric" data-wr-washevery="${esc(i.id)}" value="${i.washEvery == null ? '' : i.washEvery}" placeholder="${def}" aria-label="Wears before washing ${esc(i.name)} (blank = ${def}, 0 = never)"${dis}></label></div>`;
     }
@@ -582,6 +617,12 @@
             const w = e.target.closest('[data-wear-option]');
             if (w) { wear(w.getAttribute('data-wear-option')); return; }
             if (e.target.closest('[data-wear-open]')) { if (typeof switchTab === 'function') switchTab(TAB); return; }
+            const pj = e.target.closest('[data-wear-pyjamas]');
+            if (pj && !pj.disabled && state.data) {
+                const it = state.data.items[pj.getAttribute('data-wear-pyjamas')];
+                if (it) saveWorn([it.id], null, `Saved: ${it.name} tonight.`, true);
+                return;
+            }
             if (e.target.closest('[data-wear-other]') && !state.saving && state.data) {
                 state.other = true; renderHomeCard();
                 const f = document.querySelector('#homeWear [data-wear-otherform] input'); if (f) f.focus();
