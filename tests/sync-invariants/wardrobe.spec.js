@@ -556,7 +556,10 @@ test.describe('Today hour by hour', () => {
     await expect(strip.locator('.wear-sunset')).toHaveCount(1);
     await expect(page.locator('#homeWear')).not.toContainText('km/h');
     const now = new Date().getHours();
-    if (now >= 6) await expect(strip.locator('thead th[aria-current="time"]')).toHaveText(String(now).padStart(2, '0') + ':00');
+    // Starts with the hour, not equals it: in the 16:00 hour the current-hour header also carries the fixture's
+    // "Sunset 16:12" marker, so an exact match failed every day from 16:00 to 16:59 and blocked every merge then
+    // (merge-pr.py on PR 868, 31 Oct 2026, 16:20).
+    if (now >= 6) await expect(strip.locator('thead th[aria-current="time"]')).toHaveText(new RegExp('^' + String(now).padStart(2, '0') + ':00'));
     expect(realErrors(errors)).toEqual([]);
   });
 
