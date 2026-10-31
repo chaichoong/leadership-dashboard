@@ -2087,6 +2087,15 @@
             }
         }
 
+        // A bill this payment pays leaves the Payment Run (Kevin, 31 Oct 2026). Not
+        // awaited: the row's own toast reports it, and Approve stays quick. Matched on
+        // this row's own amount: a split portion's local record still carries the whole
+        // bank amount (parent) or the automation's equal share (child).
+        if (localTx && typeof window.settlePaymentRunForTransactions === 'function') {
+            const asApproved = { id: localTx.id, fields: { ...localTx.fields, [F.txReportAmount]: Number(r.txAmount) || 0 } };
+            window.settlePaymentRunForTransactions([asApproved]).catch(e => console.error('[recon] Payment Run clear failed:', e));
+        }
+
         // Re-run CFV sidebar badge count so cleared CFVs disappear immediately.
         // Uses the shared rule in js/cfv.js — this used to carry its own copy that
         // also suppressed CONFIRMED CFVs on a stale dismissal key (drift-080).
@@ -2735,10 +2744,7 @@
             isOutflow, // label only — see the note where it is derived
             mode: 'equal',
             equalCount: 2,
-            customRows: [
-                { amount: '', subCatId: '', businessId: '', tenancyId: '', unitId: '', costId: '' },
-                { amount: '', subCatId: '', businessId: '', tenancyId: '', unitId: '', costId: '' },
-            ],
+            customRows: [newSplitRow(), newSplitRow()],
         };
         renderSplitModalBody();
     }
@@ -2770,6 +2776,33 @@
     // Zero carries no direction, so it takes no sign — an empty Custom tab
     // showing "Total: -£0.00" reads as a debt that is not there.
     function splitFmt(n) { return (Math.abs(Number(n) || 0) < 0.005 ? '' : splitSign()) + fmt(n); }
+
+    // One custom portion. No tenancy here (Kevin, 31 Oct 2026): a portion is set
+    // to its tenancy on its own row in the main table after the split.
+    function newSplitRow() { return { amount: '', categoryId: '', subCatId: '', businessId: '' }; }
+
+    // The Total / Left to allocate line. Drawn on its own so typing an amount
+    // only redraws this, never the inputs: redrawing the whole body on every
+    // key and re-selecting the field made each key replace the last (Kevin,
+    // 31 Oct 2026: "it keeps overwriting itself").
+    function splitTotalsHtml(st) {
+        const total = st.customRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const remaining = st.totalRaw - total;
+        // `remaining` is an allocation GAP, not a direction of money, so it
+        // deliberately does NOT take the transaction's sign — "-£100
+        // remaining" on an expense that is £100 UNDER-allocated reads as
+        // the opposite of what it means. The word carries the direction and
+        // fmt() supplies the magnitude. It also fixes a quieter fault: over-
+        // allocating used to read "Remaining: £100.00", identical to being
+        // £100 short, with only the colour to tell them apart.
+        const balanced = Math.abs(remaining) < 0.005;
+        const overAllocated = remaining < -0.005;
+        const remLabel = balanced ? 'Balanced' : overAllocated ? 'Over by' : 'Left to allocate';
+        const remColor = balanced ? 'var(--success)' : overAllocated ? 'var(--danger)' : 'var(--text-secondary)';
+        return `<span style="color:var(--text-muted)">Total: <strong style="color:${splitColour()};white-space:nowrap">${splitFmt(total)}</strong></span>
+                        &nbsp;·&nbsp;
+                        <span style="color:${remColor};white-space:nowrap">${remLabel}${balanced ? '' : `: <strong>${fmt(remaining)}</strong>`}</span>`;
+    }
 
     function renderSplitModalBody() {
         const st = window._splitState; if (!st) return;
@@ -2808,27 +2841,14 @@
                             <input type="number" step="0.01" value="${row.amount === '' ? '' : row.amount}" oninput="splitOnCustomAmountChange(${i}, this.value)" placeholder="0.00" class="od-inline-input" style="text-align:right;min-width:0">
                         </div>
                     </td>
+                    <td style="padding:4px 6px">${buildCatDropdown('split-cat-' + i, row.categoryId)}</td>
                     <td style="padding:4px 6px">${buildSubCatDropdown('split-subcat-' + i, row.subCatId)}</td>
                     <td style="padding:4px 6px">${buildBusinessDropdown('split-business-' + i, row.businessId)}</td>
-                    <td style="padding:4px 6px">${buildTenancyDropdown('split-tenancy-' + i, row.tenancyId)}</td>
                     <td style="padding:4px 6px;text-align:center;width:32px">
                         <button onclick="splitRemoveCustomRow(${i})" title="Remove this portion" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;padding:0 4px">&times;</button>
                     </td>
                 </tr>
             `).join('');
-            const total = st.customRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-            const remaining = st.totalRaw - total;
-            // `remaining` is an allocation GAP, not a direction of money, so it
-            // deliberately does NOT take the transaction's sign — "-£100
-            // remaining" on an expense that is £100 UNDER-allocated reads as
-            // the opposite of what it means. The word carries the direction and
-            // fmt() supplies the magnitude. It also fixes a quieter fault: over-
-            // allocating used to read "Remaining: £100.00", identical to being
-            // £100 short, with only the colour to tell them apart.
-            const balanced = Math.abs(remaining) < 0.005;
-            const overAllocated = remaining < -0.005;
-            const remLabel = balanced ? 'Balanced' : overAllocated ? 'Over by' : 'Left to allocate';
-            const remColor = balanced ? 'var(--success)' : overAllocated ? 'var(--danger)' : 'var(--text-secondary)';
             body.innerHTML = `
                 <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
                     Enter each portion's amount and pre-categorise. The original record gets the first portion's amount + categories;
@@ -2837,15 +2857,16 @@
                     <br>
                     Type each portion as a plain positive number. Every portion is
                     <strong style="color:${splitColour()}">${st.isOutflow ? 'money out' : 'money in'}</strong>, the same direction as the original.
+                    Set each portion's tenancy on its own row after the split.
                 </p>
                 <table class="od-table">
                     <thead>
                         <tr>
                             <th>#</th>
                             <th style="min-width:110px">Amount</th>
+                            <th>Category</th>
                             <th>Sub-Category</th>
                             <th>Business</th>
-                            <th>Tenancy</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -2853,42 +2874,34 @@
                 </table>
                 <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
                     <button onclick="splitAddCustomRow()" class="od-btn od-btn-outline">+ Add Portion</button>
-                    <div style="font-size:12px">
-                        <span style="color:var(--text-muted)">Total: <strong style="color:${splitColour()};white-space:nowrap">${splitFmt(total)}</strong></span>
-                        &nbsp;·&nbsp;
-                        <span style="color:${remColor};white-space:nowrap">${remLabel}${balanced ? '' : `: <strong>${fmt(remaining)}</strong>`}</span>
-                    </div>
+                    <div id="splitTotals" style="font-size:12px">${splitTotalsHtml(st)}</div>
                 </div>
             `;
-            // Wire up each row's Sub-Cat select to write back to state on change
+            // Wire each row's dropdowns to write back to state on change
             // (built-in dropdowns don't auto-bind to splitState).
             st.customRows.forEach((_, i) => {
-                const wire = (selId, key) => {
-                    const el = document.getElementById(selId);
-                    if (el) el.onchange = () => { st.customRows[i][key] = resolveDropdownId(selId); };
+                // Same rule as the main table: a personal category or sub-category on a
+                // portion means that portion is Personal money. Written straight into
+                // splitState AND the input, because this modal only re-renders when a
+                // portion is added or removed — a state-only write would not show on screen.
+                const personalRule = () => {
+                    const row = st.customRows[i];
+                    if (!isPersonalCoaName(getCatName(row.categoryId)) && !isPersonalCoaName(getSubCatName(row.subCatId))) return;
+                    const bizEl = document.getElementById('split-business-' + i);
+                    if (!bizEl) return;
+                    const dl = document.getElementById(bizEl.getAttribute('list'));
+                    const opt = dl ? [...dl.options].find(o => o.getAttribute('data-id') === REC.bizPersonal) : null;
+                    if (!opt) return;
+                    bizEl.value = opt.value;
+                    row.businessId = REC.bizPersonal;
                 };
-                wire('split-subcat-' + i, 'subCatId');
+                const wire = (selId, key, after) => {
+                    const el = document.getElementById(selId);
+                    if (el) el.onchange = () => { st.customRows[i][key] = resolveDropdownId(selId); if (after) after(); };
+                };
+                wire('split-cat-' + i, 'categoryId', personalRule);
+                wire('split-subcat-' + i, 'subCatId', personalRule);
                 wire('split-business-' + i, 'businessId');
-                wire('split-tenancy-' + i, 'tenancyId');
-                // Same rule as the main table: a personal sub-category on a portion
-                // means that portion is Personal money. Written straight into
-                // splitState AND the input, because this modal only re-renders on
-                // amount changes — a state-only write would not show on screen.
-                const subEl = document.getElementById('split-subcat-' + i);
-                if (subEl) {
-                    const prev = subEl.onchange;
-                    subEl.onchange = () => {
-                        if (prev) prev();
-                        if (!isPersonalCoaName(getSubCatName(st.customRows[i].subCatId))) return;
-                        const bizEl = document.getElementById('split-business-' + i);
-                        if (!bizEl) return;
-                        const dl = document.getElementById(bizEl.getAttribute('list'));
-                        const opt = dl ? [...dl.options].find(o => o.getAttribute('data-id') === REC.bizPersonal) : null;
-                        if (!opt) return;
-                        bizEl.value = opt.value;
-                        st.customRows[i].businessId = REC.bizPersonal;
-                    };
-                }
             });
         }
         // Save button enabled-state hint
@@ -2927,17 +2940,16 @@
     function splitOnCustomAmountChange(i, v) {
         const st = window._splitState; if (!st) return;
         st.customRows[i].amount = v === '' ? '' : Number(v);
-        // Re-render only the totals row to avoid trashing the user's focus
-        renderSplitModalBody();
-        // Restore focus to the input the user was typing in
-        const inp = document.querySelectorAll('#splitCustomRow-' + i + ' input[type="number"]')[0];
-        if (inp) { inp.focus(); inp.select(); }
+        // Only the totals and Save move: the input keeps what is being typed.
+        const totals = document.getElementById('splitTotals');
+        if (totals) totals.innerHTML = splitTotalsHtml(st);
+        updateSplitSaveButton();
     }
     window.splitOnCustomAmountChange = splitOnCustomAmountChange;
 
     function splitAddCustomRow() {
         const st = window._splitState; if (!st) return;
-        st.customRows.push({ amount: '', subCatId: '', businessId: '', tenancyId: '', unitId: '', costId: '' });
+        st.customRows.push(newSplitRow());
         renderSplitModalBody();
     }
     window.splitAddCustomRow = splitAddCustomRow;
@@ -2982,8 +2994,7 @@
             }
             portionAmounts = st.customRows.map(row => Number(row.amount));
             portionCats = st.customRows.map(row => ({
-                subCatId: row.subCatId, businessId: row.businessId,
-                tenancyId: row.tenancyId, unitId: row.unitId, costId: row.costId,
+                categoryId: row.categoryId, subCatId: row.subCatId, businessId: row.businessId,
             }));
         }
 
@@ -3021,11 +3032,9 @@
             if (st.mode === 'custom') {
                 srcFields[F.txSplitOverride] = portionAmounts[0] * amountSign;
                 const c0 = portionCats[0];
+                if (c0.categoryId) srcFields[F.txCategory]    = [c0.categoryId];
                 if (c0.subCatId)   srcFields[F.txSubCategory] = [c0.subCatId];
                 if (c0.businessId) srcFields[F.txBusiness]    = [c0.businessId];
-                if (c0.tenancyId)  srcFields[F.txTenancy]     = [c0.tenancyId];
-                if (c0.unitId)     srcFields[F.txUnit]        = [c0.unitId];
-                if (c0.costId)     srcFields[F.txCost]        = [c0.costId];
             }
             await patchTx(tx.id, srcFields);
 
@@ -3053,12 +3062,15 @@
                 const childPatches = children.map((child, k) => {
                     const portionIdx = k + 1; // children are portions 2..N
                     const c = portionCats[portionIdx];
-                    const fields = { [F.txSplitOverride]: portionAmounts[portionIdx] * amountSign };
+                    // The automation copies every parent field onto each child, the
+                    // parent's tenancy included. Cleared here, as in equal mode, so a
+                    // child carries no tenancy it was never given (its row shows none).
+                    const fields = { [F.txSplitOverride]: portionAmounts[portionIdx] * amountSign,
+                        [F.txTenancy]: [], [F.txUnit]: [] };
+                    if (F.txTenant) fields[F.txTenant] = [];
+                    if (c.categoryId) fields[F.txCategory]    = [c.categoryId];
                     if (c.subCatId)   fields[F.txSubCategory] = [c.subCatId];
                     if (c.businessId) fields[F.txBusiness]    = [c.businessId];
-                    if (c.tenancyId)  fields[F.txTenancy]     = [c.tenancyId];
-                    if (c.unitId)     fields[F.txUnit]        = [c.unitId];
-                    if (c.costId)     fields[F.txCost]        = [c.costId];
                     return patchTx(child.id, fields);
                 });
                 await Promise.all(childPatches);
@@ -3099,11 +3111,9 @@
             if (st.mode === 'custom') {
                 tx.fields[F.txSplitOverride] = portionAmounts[0] * amountSign;
                 const c0 = portionCats[0];
+                if (c0.categoryId) tx.fields[F.txCategory]    = [{ id: c0.categoryId }];
                 if (c0.subCatId)   tx.fields[F.txSubCategory] = [{ id: c0.subCatId }];
                 if (c0.businessId) tx.fields[F.txBusiness]    = [{ id: c0.businessId }];
-                if (c0.tenancyId)  tx.fields[F.txTenancy]     = [{ id: c0.tenancyId }];
-                if (c0.unitId)     tx.fields[F.txUnit]        = [{ id: c0.unitId }];
-                if (c0.costId)     tx.fields[F.txCost]        = [{ id: c0.costId }];
             } else {
                 // Equal mode: mirror the per-row clears + Split Override we PATCHed above
                 tx.fields[F.txReconciled] = false;
@@ -3116,13 +3126,11 @@
                 if (!allTransactions.find(t => t.id === child.id)) {
                     allTransactions.push(child);
                 }
-                if (st.mode === 'equal') {
-                    if (!child.fields) child.fields = {};
-                    child.fields[F.txReconciled] = false;
-                    child.fields[F.txTenancy] = [];
-                    child.fields[F.txUnit] = [];
-                    if (F.txTenant) child.fields[F.txTenant] = [];
-                }
+                if (!child.fields) child.fields = {};
+                if (st.mode === 'equal') child.fields[F.txReconciled] = false;
+                child.fields[F.txTenancy] = [];
+                child.fields[F.txUnit] = [];
+                if (F.txTenant) child.fields[F.txTenant] = [];
             });
 
             // ── Step 5: Build the new _reconResults rows ──
@@ -3133,12 +3141,11 @@
             const portion0 = st.mode === 'custom' ? {
                 ...r,
                 txAmount: sourceTxAmount,
+                categoryId: portionCats[0].categoryId || r.categoryId,
+                categoryName: portionCats[0].categoryId ? getCatName(portionCats[0].categoryId) : r.categoryName,
                 subCatId: portionCats[0].subCatId || r.subCatId,
                 subCatName: portionCats[0].subCatId ? getSubCatName(portionCats[0].subCatId) : r.subCatName,
                 businessId: portionCats[0].businessId || r.businessId,
-                tenancyId: portionCats[0].tenancyId || r.tenancyId,
-                unitId: portionCats[0].unitId || r.unitId,
-                costId: portionCats[0].costId || r.costId,
                 matchType: `Split 1/${N} (custom)`,
                 score: 0,
             } : {
@@ -3163,15 +3170,16 @@
                 const portionIdx = k + 1;
                 const portionAmt = portionAmounts[portionIdx] * (sourceRaw === 0 ? 1 : (Number(getField(tx, F.txAmount)) >= 0 ? 1 : -1));
                 const cats = st.mode === 'custom' ? {
-                    categoryId: '', categoryName: '',
+                    categoryId: portionCats[portionIdx].categoryId || '',
+                    categoryName: portionCats[portionIdx].categoryId ? getCatName(portionCats[portionIdx].categoryId) : '',
                     subCatId: portionCats[portionIdx].subCatId || '',
                     subCatName: portionCats[portionIdx].subCatId ? getSubCatName(portionCats[portionIdx].subCatId) : '',
                     businessId: portionCats[portionIdx].businessId || '', businessName: '',
                     tenantName: '', tenantId: '',
-                    tenancyLabel: '', tenancyId: portionCats[portionIdx].tenancyId || '',
-                    unitName: '', unitId: portionCats[portionIdx].unitId || '',
+                    tenancyLabel: '', tenancyId: '',
+                    unitName: '', unitId: '',
                     propertyId: '',
-                    costLabel: '', costId: portionCats[portionIdx].costId || '',
+                    costLabel: '', costId: '',
                 } : {
                     // Equal mode: keep parent's category/sub-cat/business/cost
                     // (those usually apply to every portion) but CLEAR the

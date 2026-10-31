@@ -357,6 +357,8 @@
 
         // Cross-reference with Airtable transactions for AI matching
         const txMatches = matchInvoicesToTransactions(sourceData, allTransactions);
+        // Same payee, same amount, nothing saying they differ: flagged on both rows.
+        const twins = findPaymentRunTwins(sourceData);
 
         // Filter by search text
         const filterText = (document.getElementById('invFilterText')?.value || '').toLowerCase().trim();
@@ -409,6 +411,10 @@
             if (isNew) {
                 badge += ' <span class="inv-badge" style="background:var(--success-bg);color:var(--success);border:1px solid var(--success)">NEW</span>';
             }
+            const twinOf = twins.get(inv.recordId) || [];
+            const twinHtml = twinOf.length
+                ? `<div class="inv-twin" style="margin-top:4px;font-size:11px;font-weight:600;color:var(--warning);white-space:normal">Possible duplicate of ${twinOf.map(t => `${escHtml(t.payee || '')} (${escHtml(fmtInvDate(t.dueDate || t.emailDate))})`).join(', ')}: same payee and amount</div>`
+                : '';
 
             const displayAmt = inv.amount;
             const displayPayee = (inv.payee || '').trim();
@@ -471,7 +477,8 @@
 
             // Action column — recordId is an Airtable record ID (safe); the
             // Gmail URL is resolved inside the click wrapper, never inlined.
-            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaidClick('${inv.recordId}',this)" title="Mark as paid — updates Airtable (the Gmail label step is off since 30 Sep 2026: GMAIL_SCRIPT_URL is empty)">Mark Paid</button>`;
+            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaidClick('${inv.recordId}',this)" title="Mark as paid — updates Airtable (the Gmail label step is off since 30 Sep 2026: GMAIL_SCRIPT_URL is empty)">Mark Paid</button>`
+                + `<button class="inv-dup-btn od-btn od-btn-secondary od-btn-sm" onclick="event.stopPropagation(); markInvoiceDuplicateClick('${inv.recordId}',this)" title="Take this row off the list as a duplicate. It is not marked paid." style="margin-top:4px;width:100%">Duplicate</button>`;
 
             // The bank details Kevin actually types into his banking app. Shown
             // in full rather than behind a click: the whole brief was "one place
@@ -493,7 +500,7 @@
             return `<tr data-record-id="${inv.recordId}"${isSelected ? ' class="inv-row-selected"' : ''}>
                 <td style="text-align:center;width:32px">${checkboxHtml}</td>
                 <td style="text-align:center;color:var(--text-muted);font-size:11px;font-weight:600">${idx + 1}</td>
-                <td style="white-space:nowrap;min-width:120px">${dateCell}${gmailLinkHtml}<br>${badge}</td>
+                <td style="white-space:nowrap;min-width:120px">${dateCell}${gmailLinkHtml}<br>${badge}${twinHtml}</td>
                 <td style="max-width:180px">${payeeHtml}</td>
                 <td style="max-width:260px">${descHtml}</td>
                 <td style="white-space:nowrap;max-width:130px">${refHtml}</td>
@@ -673,7 +680,15 @@
                             }
                             const dupes = [...seen.values()].filter(n => n > 1).length;
                             if (dupes) return { status: 'fail', detail: `${dupes} Gmail message${dupes === 1 ? '' : 's'} appear on more than one row — the upsert key is not holding` };
-                            return { status: 'pass', detail: `${seen.size} rows, ${seen.size} distinct Gmail messages — no duplicates` };
+                            // The same bill from two routes (two cards, or a card and its email)
+                            // has two different keys, so the key check above cannot see it.
+                            const twinRows = [...findPaymentRunTwins((airtableInvoices || []).filter(i => i.status !== 'Paid')).keys()]
+                                .map(id => airtableInvoices.find(i => i.recordId === id)).filter(Boolean);
+                            if (twinRows.length) {
+                                const names = [...new Set(twinRows.map(i => `${i.payee} ${fmt(Math.abs(i.amount))}`))].join(', ');
+                                return { status: 'warn', detail: `Possible duplicates on the list: ${names}. Press Duplicate on the extra row.` };
+                            }
+                            return { status: 'pass', detail: `${seen.size} rows, ${seen.size} distinct Gmail messages, and no two rows share a payee and amount` };
                         }
                     },
                     {
@@ -704,6 +719,214 @@
             markTabSynced('invoices');
         }
     }
+
+    // ── Possible duplicates (Kevin, 31 Oct 2026) ──
+    // "It should be quite easy to locate them if they're the same payee, the same
+    // invoice details, and the same amount." Two open rows are flagged when the
+    // amount agrees to the penny, the payees share a telling word, and nothing
+    // says they are different bills: two references that differ, or two different
+    // house addresses. The page only SHOWS the pair; Kevin removes one with the
+    // Duplicate button. scripts/payment-run.py folds a new row into an open one
+    // on a stricter test (the reference must agree), because folding hides a row.
+    const TWIN_STOP = new Set(['limited', 'the', 'and', 'group', 'services', 'service', 'company',
+        'council', 'energy', 'water', 'invoice', 'payment', 'properties', 'property', 'city', 'county',
+        'borough', 'district', 'management', 'maintenance', 'solutions', 'holdings', 'partnership',
+        'trading', 'contractors', 'lettings', 'estates', 'homes', 'building',
+        // A card named after its task carries these on every row ("INBOUND: pay ... ground rent").
+        'inbound', 'follow', 'chase', 'reminder', 'ground', 'rent', 'arrears', 'bill', 'demand',
+        'charge', 'charges', 'fee', 'fees', 'from', 'with', 'labour', 'invoices', 'forwards']);
+    const STREET_RE = /\b(\d{1,4}[a-z]?)\s+([a-z]+)\s+(?:street|st|road|rd|place|avenue|ave|terrace|park|lane|close|drive|way|crescent|grove|gardens|court|buildings|row|square|walk|hill|view|mews)\b/g;
+    function twinWords(payee) {
+        if (!payee || String(payee).includes('@')) return new Set();
+        return new Set((String(payee).toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !TWIN_STOP.has(w)));
+    }
+    function normRef(ref) { return String(ref || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+    function places(inv) {
+        const text = [inv.payee, inv.desc, inv.ref].join(' ').toLowerCase();
+        return new Set([...text.matchAll(STREET_RE)].map(m => m[1] + ' ' + m[2]));
+    }
+    function possibleTwin(a, b) {
+        if (a.amount === null || a.amount === undefined || b.amount === null || b.amount === undefined) return false;
+        if (Math.abs(Math.abs(Number(a.amount)) - Math.abs(Number(b.amount))) >= 0.005) return false;
+        const wa = twinWords(a.payee), wb = twinWords(b.payee);
+        if (![...wa].some(w => wb.has(w))) return false;
+        const ra = normRef(a.ref), rb = normRef(b.ref);
+        if (ra && rb && ra !== rb) return false;
+        const pa = places(a), pb = places(b);
+        if (pa.size && pb.size && ![...pa].some(p => pb.has(p))) return false;
+        return true;
+    }
+    // recordId -> the other open rows it may duplicate.
+    function findPaymentRunTwins(rows) {
+        const twins = new Map();
+        for (let i = 0; i < rows.length; i++) {
+            for (let j = i + 1; j < rows.length; j++) {
+                if (!possibleTwin(rows[i], rows[j])) continue;
+                [[rows[i], rows[j]], [rows[j], rows[i]]].forEach(([x, y]) => {
+                    if (!twins.has(x.recordId)) twins.set(x.recordId, []);
+                    twins.get(x.recordId).push(y);
+                });
+            }
+        }
+        return twins;
+    }
+    window.findPaymentRunTwins = findPaymentRunTwins;
+
+    function noteLine(text) {
+        const stamp = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        return `[${stamp} — Payment Run page] ${text}`;
+    }
+    function withNote(existing, line) { return ((existing || '').trim() ? existing.trim() + '\n' : '') + line; }
+
+    // ── Duplicate: take a row off the list without calling it paid ──
+    // Status "Duplicate" (Kevin, 31 Oct 2026: marking a duplicate Paid "technically
+    // isn't true"). Reversible in Airtable by setting the status back to Unpaid.
+    async function markInvoiceDuplicateClick(recordId, btn) {
+        const inv = airtableInvoices.find(i => i.recordId === recordId);
+        if (!inv) return;
+        const twin = (findPaymentRunTwins(airtableInvoices.filter(i => i.status !== 'Paid')).get(recordId) || [])[0];
+        const what = `${inv.payee || 'this row'}${inv.amount !== null ? ' ' + fmt(Math.abs(inv.amount)) : ''}`;
+        if (!confirm(`Take ${what} off the Payment Run as a duplicate?\n\nIt is NOT marked paid.${twin ? `\nThe row it repeats stays on the list: ${twin.payee || ''} ${twin.amount !== null ? fmt(Math.abs(twin.amount)) : ''}.` : ''}`)) return;
+        if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
+        const line = noteLine('Taken off the list as a duplicate' + (twin ? ` of row ${twin.recordId} (${twin.payee || ''} ${twin.amount !== null ? fmt(Math.abs(twin.amount)) : ''})` : '') + '. Not paid.');
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                // typecast: the Status option "Duplicate" is created on first use.
+                body: JSON.stringify({ fields: { [INV.status]: 'Duplicate', [INV.notes]: withNote(inv.notes, line) }, typecast: true }),
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()));
+            airtableInvoices = airtableInvoices.filter(i => i.recordId !== recordId);
+            invSelectedIds.delete(recordId);
+            updateInvoicesSidebarBadge();
+            renderInvoiceTab();
+            showToast(`Removed ${what} as a duplicate. It is not marked paid.`, { type: 'success' });
+        } catch (e) {
+            console.error('Mark as duplicate failed:', e);
+            showToast('Could not remove the duplicate: ' + (e.message || 'unknown error'), { type: 'error', duration: 8000 });
+            if (btn) { btn.disabled = false; btn.textContent = 'Duplicate'; }
+        }
+    }
+    window.markInvoiceDuplicateClick = markInvoiceDuplicateClick;
+
+    // ── A payment reconciled in the reconciliation tab clears its row (Kevin, 31 Oct 2026) ──
+    // Called by reconciliation.js after a money-out transaction is approved. A row
+    // matches when the amount agrees to the penny, the bank line names the payee
+    // (a whole word, or a shared start of five letters or more, as the daily job's
+    // memo_names_payee reads it, because banks cut names short), and the payment is
+    // no more than 3 days before the bill reached the list. It acts only when
+    // exactly ONE open row matches, so a payment that could be either of two bills
+    // is left for Kevin. Returns the rows it marked paid.
+    function bankLineNamesPayee(inv, tx) {
+        const words = new Set((String(getField(tx, F.txVendor) || '') + ' ' + String(getField(tx, F.txDescription) || ''))
+            .toLowerCase().match(/[a-z]{4,}/g) || []);
+        return [...twinWords(inv.payee)].some(t => [...words].some(w => {
+            const [short, long] = t.length <= w.length ? [t, w] : [w, t];
+            return t === w || (short.length >= 5 && short.length >= 0.7 * long.length && long.startsWith(short));
+        }));
+    }
+    function paymentPaysRow(inv, tx) {
+        const paid = Math.abs(Number(getField(tx, F.txReportAmount)) || Number(getField(tx, F.txAmount)) || 0);
+        if (inv.amount === null || inv.amount === undefined || Math.abs(paid - Math.abs(Number(inv.amount))) >= 0.005) return false;
+        const day = String(getField(tx, F.txDate) || '').slice(0, 10);
+        if (inv.emailDate && day) {
+            const floor = new Date(inv.emailDate + 'T12:00:00Z');
+            floor.setUTCDate(floor.getUTCDate() - 3);
+            if (day < floor.toISOString().slice(0, 10)) return false;
+        }
+        return bankLineNamesPayee(inv, tx);
+    }
+    // Rows marked Paid in the last 60 days. A payment one of them already holds is not free to
+    // pay another bill, and a payment that looks like one marked paid by hand or on its card
+    // (no payment linked yet) is probably THAT bill's (review, 31 Oct 2026: the open twin was
+    // otherwise cleared with the paid one's money). Read again at most once a minute.
+    let recentPaid = { at: 0, rows: [] };
+    async function recentPaidRows() {
+        if (Date.now() - recentPaid.at < 60000) return recentPaid.rows;
+        const rows = [];
+        let pageOffset = null;
+        do {
+            const params = new URLSearchParams({
+                filterByFormula: "AND({Status}='Paid', IS_AFTER({Paid Date}, DATEADD(TODAY(), -60, 'days')))",
+                returnFieldsByFieldId: 'true',
+            });
+            if (pageOffset) params.set('offset', pageOffset);
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`, { headers: { 'Authorization': 'Bearer ' + PAT } });
+            if (!resp.ok) throw new Error('paid rows read failed: HTTP ' + resp.status);
+            const data = await resp.json();
+            (data.records || []).forEach(r => rows.push({
+                recordId: r.id, payee: r.fields[INV.payee] || '', amount: r.fields[INV.amount] ?? null,
+                paidDate: r.fields[INV.paidDate] || '', matchedTx: r.fields[INV.matchedTx] || [],
+            }));
+            pageOffset = data.offset || null;
+        } while (pageOffset);
+        recentPaid = { at: Date.now(), rows };
+        return rows;
+    }
+    const daysApart = (a, b) => Math.abs((new Date(a + 'T12:00:00Z') - new Date(b + 'T12:00:00Z')) / 86400000);
+
+    async function settlePaymentRunNow(txs) {
+        if (!PAT || !txs || !txs.length) return [];
+        const outflows = txs.filter(tx => (Number(getField(tx, F.txReportAmount)) || Number(getField(tx, F.txAmount)) || 0) < 0);
+        if (!outflows.length) return [];
+        if (!invoiceRefreshedAt) await fetchInvoicesFromAirtable();
+        // Unread means unchecked: nothing is cleared on a guess.
+        let paid;
+        try { paid = await recentPaidRows(); } catch (e) {
+            console.error('[payment run] Could not read the paid rows, so no row is cleared:', e);
+            return [];
+        }
+        const settled = [];
+        for (const tx of outflows) {
+            if (paid.some(p => (p.matchedTx || []).includes(tx.id))) continue;   // already pays a bill
+            const day = String(getField(tx, F.txDate) || '').slice(0, 10);
+            const handPaid = paid.some(p => !(p.matchedTx || []).length && p.paidDate && day && daysApart(p.paidDate, day) <= 7
+                && paymentPaysRow({ payee: p.payee, amount: p.amount, emailDate: null }, tx));
+            if (handPaid) continue;
+            const open = airtableInvoices.filter(i => i.status !== 'Paid' && !i.matchRejected
+                && !settled.some(s => s.recordId === i.recordId));
+            const hits = open.filter(inv => paymentPaysRow(inv, tx));
+            if (hits.length !== 1) continue;
+            const inv = hits[0];
+            const fields = {
+                [INV.status]: 'Paid',
+                [INV.paidDate]: String(getField(tx, F.txDate) || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+                [INV.matchedTx]: [tx.id],
+                [INV.notes]: withNote(inv.notes, noteLine(`Marked paid when its payment (${tx.id}) was reconciled.`)),
+            };
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${inv.recordId}?returnFieldsByFieldId=true`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields }),
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                inv.status = 'Paid';
+                settled.push(inv);
+            } catch (e) {
+                console.error('[payment run] Could not clear the row for a reconciled payment:', e);
+                showToast(`The payment reconciled, but its Payment Run row (${inv.payee}) could not be cleared: ${e.message}`, { type: 'error', duration: 8000 });
+            }
+        }
+        if (settled.length) {
+            airtableInvoices = airtableInvoices.filter(i => i.status !== 'Paid');
+            updateInvoicesSidebarBadge();
+            const tab = document.getElementById('tab-invoices');
+            if (tab && tab.classList.contains('active')) renderInvoiceTab();
+            showToast(`Cleared from the Payment Run: ${settled.map(s => `${s.payee} ${fmt(Math.abs(s.amount))}`).join(', ')}`, { type: 'success', duration: 6000 });
+        }
+        return settled;
+    }
+    // One at a time: Approve All calls this once per row, and two payments must
+    // never both claim the same open row. The inner function has its own name:
+    // a global function and a window property of one name are the same binding.
+    let settleChain = Promise.resolve();
+    window.settlePaymentRunForTransactions = (txs) => {
+        const run = settleChain.then(() => settlePaymentRunNow(txs));
+        settleChain = run.catch(() => []);   // one failure must not stop every later call
+        return run;
+    };
 
     // ── Match invoices to Airtable transactions ──
     function matchInvoicesToTransactions(invoices, transactions) {

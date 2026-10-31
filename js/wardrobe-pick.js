@@ -12,6 +12,9 @@
 // Washing (Kevin, 29 Oct 2026): each day a piece is worn adds one wear. At its limit (by Type, or its
 // own Wash every; 0 = never counted) it goes in the wash and is not offered for 2 days, then counts as
 // clean again on its own. The outfit worn longest ago, judged by its washable pieces too, comes first.
+//
+// Pyjamas (Kevin, 31 Oct 2026): their own Type, 3 nights to a wash, picked for tonight on their own and
+// never part of the day's outfits or its "I'm wearing something else" log.
 (function (root) {
     'use strict';
 
@@ -22,7 +25,7 @@
     const COAT_BELOW = 10;
     const BEANIE_AT = 6;
     const SCARF_AT = 4;
-    const WASH_DEFAULT = { Tee: 1, Shirt: 1, Lounge: 1, Knit: 3, Trousers: 5, Shorts: 5 };   // anything else is never counted
+    const WASH_DEFAULT = { Tee: 1, Shirt: 1, Lounge: 1, Knit: 3, Trousers: 5, Shorts: 5, Pyjamas: 3 };   // anything else is never counted
     const CLEAN_AFTER_DAYS = 2;
 
     // WMO weather codes (Open-Meteo) in plain words.
@@ -88,6 +91,28 @@
         }, o.lastWorn || '');
     }
     function isOuter(item) { return !!item && (item.type === 'Jacket' || item.type === 'Coat'); }
+    function isNightwear(item) { return !!item && item.type === 'Pyjamas'; }
+
+    // Tonight's pyjamas: the pair already logged tonight; else the pair part-way through its nights
+    // (worn since its last wash), so one pair is finished before the next is started; else the clean
+    // pair worn longest ago, ties by name. null when no owned pair is out of the wash.
+    // night = which night of its cycle tonight is; washAfter = the last night before it goes in the wash.
+    function pickPyjamas(itemsById, date) {
+        const today = isoDay(date);
+        const pairs = Object.values(itemsById).filter(it => owned(it) && isNightwear(it));
+        const plan = (item, wornTonight) => {
+            const limit = washLimit(item);
+            const night = wearsNow(item, today) + (wornTonight ? 0 : 1);
+            return { item, wornTonight, night, limit, washAfter: limit > 0 ? addDays(today, Math.max(0, limit - night)) : null };
+        };
+        const tonight = pairs.find(it => it.lastWorn === today);
+        if (tonight) return plan(tonight, true);
+        const clean = pairs.filter(it => !inWash(it, today));
+        if (!clean.length) return null;
+        const byName = (a, b) => a.name.localeCompare(b.name);
+        const going = clean.filter(it => wearsNow(it, today) > 0).sort((a, b) => (b.lastWorn || '').localeCompare(a.lastWorn || '') || byName(a, b))[0];
+        return plan(going || clean.slice().sort((a, b) => (a.lastWorn || '').localeCompare(b.lastWorn || '') || byName(a, b))[0], false);
+    }
 
     function byRole(itemsById, role, prefer, today) {
         const all = Object.values(itemsById).filter(it => owned(it) && it.layerRole === role && !(today && inWash(it, today)));
@@ -189,7 +214,7 @@
     }
 
     const api = { OPTIONS, describeCode, seasonOf, isoDay, chooseBase, applyWeather, reasonFor, pickOutfits, bestOption,
-        washLimit, cleanOn, inWash, wearsNow, wearFields, unwearFields,
+        washLimit, cleanOn, inWash, wearsNow, wearFields, unwearFields, isNightwear, pickPyjamas, addDays,
         RULES: { RAIN_PCT, JACKET_BELOW, COAT_BELOW, BEANIE_AT, SCARF_AT, WASH_DEFAULT, CLEAN_AFTER_DAYS } };
     root.WardrobePick = api;
 })(typeof window !== 'undefined' ? window : globalThis);
