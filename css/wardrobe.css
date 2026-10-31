@@ -69,6 +69,10 @@
 .wear-logged { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); background: var(--success-bg); border: 1px solid var(--success-border); border-radius: var(--radius-md); color: var(--text-primary); }
 .wear-otherform { margin-top: var(--space-3); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 .wear-otherform h3 { margin: 0; font-size: var(--fs-md); color: var(--text-primary); }
+.wear-othersearch { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary); max-width: 360px; }
+.wear-othersearch input { font: inherit; font-weight: var(--fw-regular); color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 7px 10px; }
+.wear-othersearch input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.wear-othergrid label[hidden], .wear-othergrid fieldset[hidden] { display: none; }
 .wear-othergrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
 .wear-othergrid fieldset { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); margin: 0; min-width: 0; }
 .wear-othergrid legend { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; padding: 0 var(--space-1); }

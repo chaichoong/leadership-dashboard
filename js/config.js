@@ -28,7 +28,7 @@
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.45', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         // Wardrobe (Leadership, 27 Oct 2026): clothes, spring buys and the clear-out. Its "What to wear today" card sits at the top of My Dashboard.
-        { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.10', sopFile: 'sop-wardrobe.html',           sopVer: '1.9', standalone: 'index.html#wardrobe' },
+        { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.10', sopFile: 'sop-wardrobe.html',           sopVer: '1.11', standalone: 'index.html#wardrobe' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
@@ -553,7 +553,8 @@
         layerRole: 'fld7VonuseNOhkCcw', buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk',
         lastWorn: 'fldc0Wa3pND9EbAI2', notes: 'fldZZULHcZYAFLEEl',
         // The wash cycle (Kevin, 29 Oct 2026): js/wardrobe-pick.js holds the rules.
-        prevWorn: 'fldqoYAnlsITO1GLt', wears: 'fldBDNIOVC0VFkQjR', washEvery: 'fldv8kF8yd4CXtB4u', inWashSince: 'fldfjRleBvHsIbJyl' };
+        prevWorn: 'fldqoYAnlsITO1GLt', wears: 'fldBDNIOVC0VFkQjR', washEvery: 'fldv8kF8yd4CXtB4u', inWashSince: 'fldfjRleBvHsIbJyl',
+        twinGroup: 'fldyJNcbQ1Ktgqho0' };   // identical pieces stand in for each other in the wash (31 Oct 2026)
     const OF = { name: 'fldLpZormElc2HJ3s', planId: 'fldFgSJztt3TCKoEp', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o',
         season: 'fldz3FqdChXD0ZRK5', why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z',
         order: 'fldKIzCbsNESKdwd0' };

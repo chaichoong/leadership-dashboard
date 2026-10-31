@@ -25,7 +25,9 @@
     const COAT_BELOW = 10;
     const BEANIE_AT = 6;
     const SCARF_AT = 4;
-    const WASH_DEFAULT = { Tee: 1, Shirt: 1, Lounge: 1, Knit: 3, Trousers: 5, Shorts: 5, Pyjamas: 3 };   // anything else is never counted
+    // Kevin, 31 Oct 2026: lounge pieces (hoodies, sweatshirts, joggers) go over a tee, so 3 wears, not 1; shirts 2.
+    // Sport kit and the dressing gown carry their own Wash every (1 and 7) on the piece.
+    const WASH_DEFAULT = { Tee: 1, Shirt: 2, Lounge: 3, Knit: 3, Trousers: 5, Shorts: 5, Pyjamas: 3 };   // anything else is never counted
     const CLEAN_AFTER_DAYS = 2;
 
     // WMO weather codes (Open-Meteo) in plain words.
@@ -84,11 +86,24 @@
             inWashSince: item.inWashSince === today ? null : (item.inWashSince || null) };
     }
     // When the outfit was last worn, counting a washable piece worn in some other mix.
+    // A twin worn counts as this piece worn, so the same look is not offered two days running.
     function freshness(o, itemsById) {
         return o.itemIds.reduce((m, id) => {
             const it = itemsById[id];
-            return it && washLimit(it) > 0 && (it.lastWorn || '') > m ? it.lastWorn : m;
+            if (!it || washLimit(it) <= 0) return m;
+            return twins(itemsById, it).concat(it).reduce((mm, t) => ((t.lastWorn || '') > mm ? t.lastWorn : mm), m);
         }, o.lastWorn || '');
+    }
+    // Twins (Kevin, 31 Oct 2026): pieces sharing a Twin group are identical, so an outfit's piece is
+    // stood in for by a twin: the piece itself if clean, else a clean twin. For the outfit worn today
+    // (wornToday) the one worn today comes first, so the card shows what is on. null when none is clean.
+    function twins(itemsById, it) {
+        const group = it && it.twinGroup ? Object.values(itemsById).filter(o => owned(o) && o.twinGroup === it.twinGroup) : [];
+        return owned(it) ? [it, ...group.filter(o => o !== it)] : group;
+    }
+    function standIn(itemsById, id, today, wornToday) {
+        const all = twins(itemsById, itemsById[id]);
+        return (wornToday && all.find(o => o.lastWorn === today)) || all.find(o => !inWash(o, today)) || null;
     }
     function isOuter(item) { return !!item && (item.type === 'Jacket' || item.type === 'Coat'); }
     function isNightwear(item) { return !!item && item.type === 'Pyjamas'; }
@@ -128,10 +143,10 @@
         const eligible = outfits
             .map((o, i) => ({ o, i }))
             .filter(({ o }) => o.option === option && (o.season === 'All' || o.season === season)
-                && o.itemIds.length > 0 && o.itemIds.every(id => owned(itemsById[id])));
+                && o.itemIds.length > 0 && o.itemIds.every(id => twins(itemsById, itemsById[id]).length > 0));
         const wornToday = eligible.find(({ o }) => o.lastWorn === today);
         if (wornToday) return wornToday.o;
-        const clean = eligible.filter(({ o }) => !o.itemIds.some(id => inWash(itemsById[id], today)));
+        const clean = eligible.filter(({ o }) => o.itemIds.every(id => standIn(itemsById, id, today)));
         if (!clean.length) return null;
         clean.forEach(e => { e.f = freshness(e.o, itemsById); });
         clean.sort((a, b) => {
@@ -142,7 +157,7 @@
     }
 
     function applyWeather(base, itemsById, option, wx, today) {
-        const items = base.itemIds.map(id => itemsById[id]);
+        const items = base.itemIds.map(id => (today && standIn(itemsById, id, today, base.lastWorn === today)) || itemsById[id]);
         const added = [];
         if (option === 'Stay at home') return { items, added };
         const known = (v) => typeof v === 'number' && isFinite(v);
@@ -214,7 +229,7 @@
     }
 
     const api = { OPTIONS, describeCode, seasonOf, isoDay, chooseBase, applyWeather, reasonFor, pickOutfits, bestOption,
-        washLimit, cleanOn, inWash, wearsNow, wearFields, unwearFields, isNightwear, pickPyjamas, addDays,
+        washLimit, cleanOn, inWash, wearsNow, wearFields, unwearFields, isNightwear, pickPyjamas, addDays, standIn,
         RULES: { RAIN_PCT, JACKET_BELOW, COAT_BELOW, BEANIE_AT, SCARF_AT, WASH_DEFAULT, CLEAN_AFTER_DAYS } };
     root.WardrobePick = api;
 })(typeof window !== 'undefined' ? window : globalThis);

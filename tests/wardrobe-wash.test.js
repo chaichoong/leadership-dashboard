@@ -121,3 +121,71 @@ describe('the picks', () => {
         expect(pick.items.map(i => i.id)).not.toContain('scarfA');
     });
 });
+
+// Kevin, 31 Oct 2026: lounge pieces go over a tee, so they last 3 wears; shirts 2. Tees stay at 1.
+describe('limits that match how pieces are worn', () => {
+    it('lounge 3, shirt 2, tee 1; a piece\'s own Wash every still wins', () => {
+        expect(P.washLimit(item('a', 'Lounge'))).toBe(3);
+        expect(P.washLimit(item('a', 'Shirt'))).toBe(2);
+        expect(P.washLimit(item('a', 'Tee'))).toBe(1);
+        expect(P.washLimit(item('a', 'Lounge', { washEvery: 1 }))).toBe(1);   // sport kit
+        expect(P.washLimit(item('a', 'Lounge', { washEvery: 7 }))).toBe(7);   // the dressing gown
+    });
+    it('a sweatshirt worn once is not in the wash; the third wear sends it', () => {
+        const sweat = item('s', 'Lounge', { wears: 0 });
+        expect(P.wearFields(sweat, TODAY).inWashSince).toBeNull();
+        expect(P.wearFields({ ...sweat, wears: 2 }, TODAY).inWashSince).toBe(TODAY);
+    });
+});
+
+// Twins (Kevin, 31 Oct 2026): identical pieces stand in for each other while one is in the wash.
+describe('twins', () => {
+    const ITEMS = Object.fromEntries([
+        item('teeA', 'Tee', { twinGroup: 'white tee', inWashSince: '2026-10-28' }), item('teeB', 'Tee', { twinGroup: 'white tee' }),
+        item('jeans', 'Trousers'), item('trainers', 'Shoes'), item('solo', 'Tee', { inWashSince: '2026-10-28' }),
+    ].map(i => [i.id, i]));
+    const OUTFITS = [outfit('A', 'Out casual', ['teeA', 'jeans', 'trainers']), outfit('S', 'Out casual', ['solo', 'jeans', 'trainers'])];
+
+    it('keep an outfit on offer when its piece is in the wash but a twin is clean, and wear the twin', () => {
+        const pick = P.pickOutfits(OUTFITS, ITEMS, { feelsMin: 15, rainChance: 0 }, D).find(p => p.option === 'Out casual');
+        expect(pick.outfit.id).toBe('A');
+        expect(pick.items.map(i => i.id)).toEqual(['teeB', 'jeans', 'trainers']);
+    });
+    it('drop the outfit when every twin is in the wash', () => {
+        const both = { ...ITEMS, teeB: { ...ITEMS.teeB, inWashSince: '2026-10-28' } };
+        expect(P.chooseBase([OUTFITS[0]], both, 'Out casual', D)).toBeNull();
+    });
+    it('for the outfit worn today, show the twin worn today, even after it went in the wash', () => {
+        const worn = { ...ITEMS, teeB: { ...ITEMS.teeB, lastWorn: TODAY, inWashSince: TODAY } };
+        expect(P.standIn(worn, 'teeA', TODAY, true).id).toBe('teeB');
+        expect(P.standIn(worn, 'teeA', TODAY, false)).toBeNull();   // any other outfit: both are in the wash
+    });
+    it('never stand in a piece with no twin group', () => {
+        expect(P.standIn(ITEMS, 'solo', TODAY)).toBeNull();
+    });
+});
+
+// Review fixes (31 Oct 2026): only the outfit worn today shows a piece worn today; every other option
+// gets a clean piece or twin, and a twin's wear counts towards how recently a look was worn.
+describe('twins and today\'s dirty pieces', () => {
+    const base = () => Object.fromEntries([
+        item('teeA', 'Tee', { twinGroup: 'white tee', lastWorn: TODAY, wears: 1, inWashSince: TODAY }), item('teeB', 'Tee', { twinGroup: 'white tee' }),
+        item('jeans', 'Trousers'), item('trainers', 'Shoes'), item('joggers', 'Lounge'), item('solo', 'Tee', { lastWorn: TODAY, wears: 1, inWashSince: TODAY }),
+    ].map(i => [i.id, i]));
+    it('another option never shows the tee worn today and now in the wash: it gets the clean twin', () => {
+        const outfits = [outfit('A', 'Out casual', ['teeA', 'jeans', 'trainers'], TODAY), outfit('H', 'Stay at home', ['teeA', 'joggers'])];
+        const picks = P.pickOutfits(outfits, base(), { feelsMin: 15, rainChance: 0 }, D);
+        expect(picks.find(p => p.option === 'Out casual').items.map(i => i.id)).toContain('teeA');     // what is on today
+        expect(picks.find(p => p.option === 'Stay at home').items.map(i => i.id)).toEqual(['teeB', 'joggers']);
+    });
+    it('with no twin, another option using today\'s dirty tee is not offered', () => {
+        const outfits = [outfit('A', 'Out casual', ['solo', 'jeans', 'trainers'], TODAY), outfit('H', 'Stay at home', ['solo', 'joggers'])];
+        expect(P.pickOutfits(outfits, base(), { feelsMin: 15, rainChance: 0 }, D).find(p => p.option === 'Stay at home').outfit).toBeNull();
+    });
+    it('a twin worn yesterday makes the look count as worn yesterday', () => {
+        const items = { ...base(), teeA: item('teeA', 'Tee', { twinGroup: 'white tee' }), teeB: item('teeB', 'Tee', { twinGroup: 'white tee', lastWorn: '2026-10-28' }),
+            navy: item('navy', 'Tee') };
+        const outfits = [outfit('A', 'Out casual', ['teeA', 'jeans', 'trainers']), outfit('N', 'Out casual', ['navy', 'jeans', 'trainers'])];
+        expect(P.chooseBase(outfits, items, 'Out casual', D).id).toBe('N');
+    });
+});
