@@ -359,6 +359,21 @@ describe('a new cost claims only what is surely its own', () => {
     expect(run([tx('tC', 'DIRECT DEBIT PAYMENT TO HOMEPROTECT LTD', 'PROTECT', -20)], 'tC').costId).toBe('cHp');  // CONTROL
   });
 
+  it('every payee word must be on the bank line: British Gas is not British Airways, West Suffolk not West Drayton', () => {
+    addCosts(cost('cBg', 'British Gas - 12 Sample Street', P.elm42, 120, 'Overdue', 0),
+      cost('cWs', 'West Suffolk Council - council tax - 5 Dalham Place', P.dalham, 150, 'Overdue', 0));
+    expect(run([tx('tA', 'CARD PAYMENT TO BRITISH AIRWAYS ON 12-10-2026', 'BRITISH AIRWAYS', -118)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'BILL PAYMENT TO HORTON ROAD WEST DRAYTON', 'WEST DRAYTON', -150)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'DIRECT DEBIT PAYMENT TO BRITISH GAS REF 8500000001', 'BRITISH GAS', -120)], 'tC').costId).toBe('cBg');  // CONTROL
+  });
+
+  it('a phone wallet is not a payee: "(VIA APPLE PAY)" never claims an Apple cost', () => {
+    addCosts(cost('cIcloud', 'Apple - iCloud 2TB', P.elm42, 8.99, 'Overdue', 0));
+    expect(run([tx('tA', 'CARD PAYMENT TO COSTA COFFEE (VIA APPLE PAY), ON 12-10-2026', 'COSTA COFFEE', -8.6)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'CARD PAYMENT TO TESCO VIA GOOGLE PAY', 'TESCO', -8.99)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'CARD PAYMENT TO APPLE.COM/BILL ON 12-10-2026', 'APPLE.COM/BILL', -8.99)], 'tC').costId).toBe('cIcloud');  // CONTROL
+  });
+
   it('a paid cost from the same payee at the same amount is a rival: no claim', () => {
     addCosts(cost('cAxaPaid', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.6, 'In Payment', 5),
       cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900002 - 5 Dalham Place', P.dalham, 44.68, 'Overdue', 0));

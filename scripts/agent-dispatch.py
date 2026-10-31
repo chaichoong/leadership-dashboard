@@ -8071,13 +8071,14 @@ def task_owes_cost(task_id, t, fetch_costs=None):
         return []
     try:
         rows = (fetch_costs or (lambda: query_records(
-            COSTS_TABLE, fields=[cr.COST_NAME, cr.COST_PAY_STATUS, cr.COST_INACTIVE])))()
+            COSTS_TABLE, fields=[cr.COST_NAME, cr.COST_EXPECTED, cr.COST_PAY_STATUS, cr.COST_INACTIVE])))()
     except Exception as exc:                              # noqa: BLE001
         return [f"the Costs table could not be read to check the card's cost lines ({str(exc)[:120]})"]
-    names = [(r.get("fields") or {}).get(cr.COST_NAME) for r in rows if cr.is_active(r.get("fields") or {})]
-    if not names:
+    live = [((r.get("fields") or {}).get(cr.COST_NAME), (r.get("fields") or {}).get(cr.COST_EXPECTED))
+            for r in rows if cr.is_active(r.get("fields") or {})]
+    if not live:
         return [f"{len(rows)} costs read and none in payment, so the card's cost lines cannot be checked"]
-    return cr.owed_new_costs(task_id, t.get("agentOutput"), t.get("notes"), names, cr.read_ledger())
+    return cr.owed_new_costs(task_id, t.get("agentOutput"), t.get("notes"), live, cr.read_ledger())
 
 
 def demote_for_cost(level, cost_owed):

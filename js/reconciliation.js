@@ -1043,21 +1043,22 @@
     // and a cost created that week has no history. So its first payment reached Kevin blank,
     // and what he typed became the lesson: both October AXA payments were coded Operational
     // Supplies at 6 Chedburgh Place. Here an active cost nothing has paid yet claims an
-    // outgoing payment whose bank line names its payee (the first word, whole) and sits within
+    // outgoing payment whose bank line names every word of its payee and sits within
     // COST_MATCH_TOLERANCE of its Expected Cost. Every active cost that fits counts, paid or
-    // not, and the second payee word only chooses between them: exactly one, and it unpaid,
-    // or nothing. A blank costs a moment of triage, a wrong cost misattributes money. Once he
-    // approves it, history takes over.
+    // not: exactly one, and it unpaid, or nothing ("British Gas" is not British Airways). A
+    // blank costs a moment of triage, a wrong cost misattributes money. Once he approves it,
+    // history takes over.
     function matchUnpaidCostByPayee(desc, vendor, amount, index) {
         if (!(Number(amount) < 0) || !index || !(index.payeeCosts || []).length) return '';
         const abs = Math.abs(Number(amount));
-        const words = String(`${vendor || ''} ${desc || ''}`).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+        // A phone wallet is how a card was used, never who was paid: "COSTA COFFEE (VIA APPLE PAY)".
+        const line = `${vendor || ''} ${desc || ''}`.replace(/\b(?:via\s+)?(?:apple|google)\s+pay\b/gi, ' ');
+        const words = line.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
         const set = new Set(words);
         // A web address runs the payee into one word ("WWW.BEDFORDINSURANCE.C"): only there may
         // a word be the start of one. Anywhere else "protect" is not PROTECTION, nor "apple" APPLEGREEN.
         const named = w => set.has(w) || (w.length >= 5 && words.some((t, i) => i > 0 && words[i - 1] === 'www' && t.startsWith(w)));
-        let hits = index.payeeCosts.filter(c => named(c.payee[0]) && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
-        if (hits.length > 1) hits = hits.filter(c => c.payee.every(named));
+        const hits = index.payeeCosts.filter(c => c.payee.every(named) && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
         return hits.length === 1 && hits[0].unpaid ? hits[0].id : '';
     }
     window.costPayeeWords = costPayeeWords;

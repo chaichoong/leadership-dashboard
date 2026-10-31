@@ -42,17 +42,17 @@ print(json.dumps(m.owed_new_costs(${JSON.stringify(TASK)}, ${JSON.stringify(outp
 
 describe('what an approved card still owes the Costs table', () => {
   it('a dated line already in the Costs table owes nothing (control)', () => {
-    expect(owed(`THE ASK: approve the cost line.\n${DATED}`, '', ['Example Cover - REF 99AA000001 - 1 Sample Street'])).toEqual([]);
+    expect(owed(`THE ASK: approve the cost line.\n${DATED}`, '', [['Example Cover - REF 99AA000001 - 1 Sample Street', 10.29]])).toEqual([]);
   });
 
   it('a dated line nobody wrote is owed', () => {
-    const r = owed(`THE ASK: approve the cost line.\n${DATED}`, '', ['Some other cost']);
+    const r = owed(`THE ASK: approve the cost line.\n${DATED}`, '', [['Some other cost', 5]]);
     expect(r).toHaveLength(1);
     expect(r[0]).toMatch(/was approved and is not in the Costs table/);
   });
 
   it('a line with NOT FOUND dates can never be written, so it is owed and points at the first payment', () => {
-    const r = owed(`THE ASK: approve the cost line.\n${UNDATED}`, '', ['Some other cost']);
+    const r = owed(`THE ASK: approve the cost line.\n${UNDATED}`, '', [['Some other cost', 5]]);
     expect(r).toHaveLength(1);
     expect(r[0]).toMatch(/cannot be written/);
     expect(r[0]).toMatch(/cost-record\.py payments --payee/);
@@ -60,9 +60,14 @@ describe('what an approved card still owes the Costs table', () => {
 
   it('a cost this task created and someone renamed since is still answered by the ledger', () => {
     const ledger = [{ kind: 'create', task: TASK, name: 'Example Cover - REF 99AA000001 - 1 Sample Street', cost: 'recCostRenamed001' }];
-    expect(owed(DATED, '', ['Example Cover (renamed by hand)'], ledger)).toEqual([]);
+    expect(owed(DATED, '', [['Example Cover (renamed by hand)', 10.29]], ledger)).toEqual([]);
     // Another task's create is not this card's answer.
-    expect(owed(DATED, '', ['Example Cover (renamed by hand)'], [{ ...ledger[0], task: 'recTaskSomeoneElse' }])).toHaveLength(1);
+    expect(owed(DATED, '', [['Example Cover (renamed by hand)', 10.29]], [{ ...ledger[0], task: 'recTaskSomeoneElse' }])).toHaveLength(1);
+  });
+
+  it('last year\'s policy of the same name, still in payment at its old price, does not answer the renewal', () => {
+    expect(owed(DATED, '', [['Example Cover - REF 99AA000001 - 1 Sample Street', 9.5]])).toHaveLength(1);
+    expect(owed(DATED, '', [['Example Cover - REF 99AA000001 - 1 Sample Street', 9.5], ['Example Cover - REF 99AA000001 - 1 Sample Street', 10.29]])).toEqual([]);   // CONTROL: the renewal is written
   });
 
   it('a cleared purchase step on the task itself, with no cost line, is owed', () => {
@@ -114,8 +119,9 @@ def costs(table, formula=None, fields=None, max_records=None):
     cr = m._cost_record()
     rows = []
     for i, n in enumerate(${JSON.stringify(names)}):
-        name, status = (n, "In Payment") if isinstance(n, str) else n
-        rows.append({"id": "recCost%010d" % i, "fields": {cr.COST_NAME: name, cr.COST_PAY_STATUS: {"name": status}}})
+        name, status, price = (n, "In Payment", 10.29) if isinstance(n, str) else (list(n) + [10.29])[:3]
+        rows.append({"id": "recCost%010d" % i, "fields": {cr.COST_NAME: name, cr.COST_PAY_STATUS: {"name": status},
+                                                       cr.COST_EXPECTED: price}})
     return rows
 m.query_records = costs
 try:

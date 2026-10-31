@@ -254,21 +254,24 @@ PURCHASE_CLEARED_RE = re.compile(r"^\[[^\]\n]*\]\s*BLOCKER CLEARED\s*\(KEVIN pur
                                  + re.escape(KEVIN_CANT_TEXT) + r"))", re.M)
 
 
-def owed_new_costs(task_id, output, notes, cost_names, ledger_rows):
+def owed_new_costs(task_id, output, notes, live_costs, ledger_rows):
     """What this task's approved card still owes the Costs table, one sentence each; [] when nothing.
 
-    A RECORD NEW COST line is answered when a cost of that name is in payment (`cost_names` holds ACTIVE costs
-    only: a retired policy of the same name is not this one, and `new` refuses its name), or this task's ledger
-    shows the create (the row may have been renamed or ended since). A line that is not the six-part shape can never be written, so it
+    A RECORD NEW COST line is answered when a cost in payment has its name AND its amount (`live_costs` holds
+    (name, Expected Cost) for ACTIVE costs only: a retired policy, or last year's still being paid at another
+    price, is not this one, and `new` refuses its name), or this task's ledger shows the create (the row may have
+    been renamed or ended since). A line that is not the six-part shape can never be written, so it
     is owed until a dated line replaces it on a fresh card. A cleared KEVIN purchase step on the task's OWN Notes
     line (the `[stamp — who]` form, never a track-record quote of another task) with no line at all is owed too."""
-    names = {name_key(n) for n in cost_names if squash(n)}
+    live = {(name_key(n), amount(e)) for n, e in live_costs if squash(n)}
     made = {name_key(x.get("name")) for x in ledger_rows if x.get("kind") == "create" and x.get("task") == task_id}
     owed, lines = [], 0
     for m in NEW_RE.finditer(tr.approved_original(output)):
         lines += 1
         body = squash(m.group("body"))
-        if name_key(body.split("|")[0]) in names | made:
+        parts = body.split("|")
+        key, price = name_key(parts[0]), amount(parts[1]) if len(parts) > 1 else None
+        if key in made or (price is not None and (key, price) in live):
             continue
         if parse_new_line(body) is None:
             owed.append(f"'RECORD NEW COST: {body}' cannot be written: its amount, frequency, due day, first payment "
@@ -368,13 +371,14 @@ def cmd_ended(a):
 def cmd_owed(a):
     task = tr.load_task(a.task)
     f = task.get("fields") or {}
-    rows = rc.fetch_all(T_COSTS, {"fields[]": [COST_NAME, COST_PAY_STATUS, COST_INACTIVE]})
-    names = [(r.get("fields") or {}).get(COST_NAME) for r in rows if is_active(r.get("fields") or {})]
-    if not names:
+    rows = rc.fetch_all(T_COSTS, {"fields[]": [COST_NAME, COST_EXPECTED, COST_PAY_STATUS, COST_INACTIVE]})
+    live = [((r.get("fields") or {}).get(COST_NAME), (r.get("fields") or {}).get(COST_EXPECTED))
+            for r in rows if is_active(r.get("fields") or {})]
+    if not live:
         raise RuntimeError(f"control failed: {len(rows)} costs read and none in payment, so nothing can be said "
                            "about what this card owes the table")
     return {"task": task["id"], "owed": owed_new_costs(task["id"], f.get(tr.TK["agentOutput"]),
-                                                      f.get(tr.TK["notes"]), names, read_ledger())}
+                                                      f.get(tr.TK["notes"]), live, read_ledger())}
 
 
 # Transactions (js/config.js TABLES.transactions, F.txDescription / F.txVendor / F.txDate / F.txAmount / F.txCost).
