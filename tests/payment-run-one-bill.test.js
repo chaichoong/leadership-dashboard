@@ -57,10 +57,14 @@ def card(i="recSecond", name="INBOUND: Oakbridge ground rent arrears GBP 7.00 - 
     return {"id": i, "name": name, "created": created, "approved": approved,
             "card": pr.parse_payment_card(text), "refused": "", "text": text}
 
+def show(d):
+    if isinstance(d, dict):
+        return d["id"]
+    if isinstance(d, tuple):
+        return [x["id"] if isinstance(x, dict) else x for x in d]
+    return d
 def plan(cards, rows, today="2026-10-23"):
-    return [(a, (d["id"] if isinstance(d, dict) else
-                 [d[0]["id"], d[1]] if isinstance(d, tuple) else d)) for a, _c, d in
-            pr.plan_tasks(cards, rows, {}, D(today))]
+    return [(a, show(d)) for a, _c, d in pr.plan_tasks(cards, rows, {}, D(today))]
 
 case("second_card_folds", lambda: plan([card()], [first]))
 
@@ -125,6 +129,41 @@ case("paid_row_stays_listed", lambda: plan([card(text=SECOND + DONE)], [listed_r
 case("done_before_listing_adds_paid", lambda: plan([card(text=SECOND + DONE)], []))
 case("done_folds_into_twin_as_paid", lambda: plan([card(text=SECOND + DONE)], [first]))
 
+# Review, 31 Oct 2026: a card's notes name the sender's EARLIER bills, which is exactly the
+# bill already on the list. Only the card's own lines are evidence.
+HOLLIN = bill("recHollinA", "2026-10-20", 350, "Hollin Clearances Ltd", Reference="INV-101")
+def history_names_earlier_bill():
+    t = ("MARK FOR PAYMENT: Hollin garden clearance\nPAYEE: Hollin Clearances Ltd\nAMOUNT: £350.00\n"
+         "\nTRACK RECORD\n- 20 Oct 2026: Hollin invoiced INV-101 £350, on the list\n")
+    return plan([card("recHollinB", "Hollin clearance, second job", t)], [HOLLIN])
+case("history_names_earlier_bill", history_names_earlier_bill)
+
+def history_names_other_house():
+    a = bill("recFernA", "2026-10-20", 90, "Fernway Plumbing Ltd", Description="Call-out, 9 Larch Street")
+    t = ("MARK FOR PAYMENT: Fernway call-out, 12 Cedar Place\nPAYEE: Fernway Plumbing Ltd\nAMOUNT: £90.00\n"
+         "\nLast paid: call-out at 9 Larch Street\n")
+    return plan([card("recFernC", "Fernway call-out", t)], [a])
+case("history_names_other_house", history_names_other_house)
+
+def short_ref_inside_an_id():
+    a = bill("recShort", "2026-10-20", 5, "Quillon Signs Ltd", Reference="104")
+    t = "MARK FOR PAYMENT: Quillon sign\nPAYEE: Quillon Signs Ltd\nAMOUNT: £5.00\nNOTES: email #all/19a2f104bc0d1e2f\n"
+    return plan([card("recShortB", "Quillon sign", t)], [a])
+case("short_ref_inside_an_id", short_ref_inside_an_id)
+
+def done_new_flags_weak_twin():
+    import io, contextlib
+    weak = bill("recWeakNet", "2026-10-02", 20, "Larkspur Ltd")
+    t = "MARK FOR PAYMENT: Larkspur broadband\nPAYEE: Larkspur Ltd\nAMOUNT: £20.00\n" + DONE
+    captured = []
+    pr.approved_payment_cards = lambda: [card("recNetPaid", "Larkspur broadband", t)]
+    pr.airtable_write = lambda tb, m, recs, what: captured.append((m, recs))
+    with contextlib.redirect_stdout(io.StringIO()):
+        pr.run_tasks([weak], [], True, D("2026-11-01"))
+    return [(m, [(r.get("id"), r["fields"].get("Status"), r["fields"].get("Description", "")[:40]) for r in recs])
+            for m, recs in captured]
+case("done_new_flags_weak_twin", done_new_flags_weak_twin)
+
 def email_twin_kept_off():
     import io, contextlib, tempfile, os
     captured = []
@@ -181,6 +220,18 @@ describe('payment run: one bill, one row', () => {
   });
 });
 
+describe('payment run: a card\'s history is never evidence (review, 31 Oct 2026)', () => {
+  it('a second bill whose track record names the first bill\'s reference is listed, not folded', () => {
+    expect(value('history_names_earlier_bill')[0][0]).toBe('check');
+  });
+  it('a call-out at another house is listed even when the notes name the first house', () => {
+    expect(value('history_names_other_house')[0][0]).toBe('check');
+  });
+  it('a short reference inside a Gmail id is not the reference', () => {
+    expect(value('short_ref_inside_an_id')[0][0]).not.toBe('fold');
+  });
+});
+
 describe('payment run: Done on a Your step payment card clears the row', () => {
   it('Kevin\'s Done marks the card\'s own row paid, on the day he pressed it', () => {
     expect(value('done_marks_listed_row_paid')).toEqual([['done', ['recListed', '2026-10-31']]]);
@@ -201,7 +252,12 @@ describe('payment run: Done on a Your step payment card clears the row', () => {
     expect(value('paid_row_stays_listed')[0][0]).toBe('listed');
   });
   it('paid on the card before it reached the list: added once, already Paid', () => {
-    expect(value('done_before_listing_adds_paid')).toEqual([['done_new', '2026-10-31']]);
+    expect(value('done_before_listing_adds_paid')).toEqual([['done_new', ['2026-10-31', null]]]);
+  });
+  it('paid on the card with a look-alike row still owed: the look-alike is told to check, never left silent', () => {
+    const writes = value('done_new_flags_weak_twin');
+    expect(writes.find(w => w[0] === 'POST')[1][0][1]).toBe('Paid');
+    expect(writes.find(w => w[0] === 'PATCH')[1]).toEqual([['recWeakNet', null, 'CHECK: a card for the same payee and amo']]);
   });
   it('paid on a second card for a bill already owed: the owed row is marked Paid', () => {
     expect(value('done_folds_into_twin_as_paid')).toEqual([['done', ['recFirst', '2026-10-31']]]);

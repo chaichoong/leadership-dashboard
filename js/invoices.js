@@ -837,13 +837,53 @@
         }
         return bankLineNamesPayee(inv, tx);
     }
+    // Rows marked Paid in the last 60 days. A payment one of them already holds is not free to
+    // pay another bill, and a payment that looks like one marked paid by hand or on its card
+    // (no payment linked yet) is probably THAT bill's (review, 31 Oct 2026: the open twin was
+    // otherwise cleared with the paid one's money). Read again at most once a minute.
+    let recentPaid = { at: 0, rows: [] };
+    async function recentPaidRows() {
+        if (Date.now() - recentPaid.at < 60000) return recentPaid.rows;
+        const rows = [];
+        let pageOffset = null;
+        do {
+            const params = new URLSearchParams({
+                filterByFormula: "AND({Status}='Paid', IS_AFTER({Paid Date}, DATEADD(TODAY(), -60, 'days')))",
+                returnFieldsByFieldId: 'true',
+            });
+            if (pageOffset) params.set('offset', pageOffset);
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`, { headers: { 'Authorization': 'Bearer ' + PAT } });
+            if (!resp.ok) throw new Error('paid rows read failed: HTTP ' + resp.status);
+            const data = await resp.json();
+            (data.records || []).forEach(r => rows.push({
+                recordId: r.id, payee: r.fields[INV.payee] || '', amount: r.fields[INV.amount] ?? null,
+                paidDate: r.fields[INV.paidDate] || '', matchedTx: r.fields[INV.matchedTx] || [],
+            }));
+            pageOffset = data.offset || null;
+        } while (pageOffset);
+        recentPaid = { at: Date.now(), rows };
+        return rows;
+    }
+    const daysApart = (a, b) => Math.abs((new Date(a + 'T12:00:00Z') - new Date(b + 'T12:00:00Z')) / 86400000);
+
     async function settlePaymentRunNow(txs) {
         if (!PAT || !txs || !txs.length) return [];
         const outflows = txs.filter(tx => (Number(getField(tx, F.txReportAmount)) || Number(getField(tx, F.txAmount)) || 0) < 0);
         if (!outflows.length) return [];
         if (!invoiceRefreshedAt) await fetchInvoicesFromAirtable();
+        // Unread means unchecked: nothing is cleared on a guess.
+        let paid;
+        try { paid = await recentPaidRows(); } catch (e) {
+            console.error('[payment run] Could not read the paid rows, so no row is cleared:', e);
+            return [];
+        }
         const settled = [];
         for (const tx of outflows) {
+            if (paid.some(p => (p.matchedTx || []).includes(tx.id))) continue;   // already pays a bill
+            const day = String(getField(tx, F.txDate) || '').slice(0, 10);
+            const handPaid = paid.some(p => !(p.matchedTx || []).length && p.paidDate && day && daysApart(p.paidDate, day) <= 7
+                && paymentPaysRow({ payee: p.payee, amount: p.amount, emailDate: null }, tx));
+            if (handPaid) continue;
             const open = airtableInvoices.filter(i => i.status !== 'Paid' && !i.matchRejected
                 && !settled.some(s => s.recordId === i.recordId));
             const hits = open.filter(inv => paymentPaysRow(inv, tx));

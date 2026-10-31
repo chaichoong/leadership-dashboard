@@ -2088,9 +2088,12 @@
         }
 
         // A bill this payment pays leaves the Payment Run (Kevin, 31 Oct 2026). Not
-        // awaited: the row's own toast reports it, and Approve stays quick.
+        // awaited: the row's own toast reports it, and Approve stays quick. Matched on
+        // this row's own amount: a split portion's local record still carries the whole
+        // bank amount (parent) or the automation's equal share (child).
         if (localTx && typeof window.settlePaymentRunForTransactions === 'function') {
-            window.settlePaymentRunForTransactions([localTx]).catch(e => console.error('[recon] Payment Run clear failed:', e));
+            const asApproved = { id: localTx.id, fields: { ...localTx.fields, [F.txReportAmount]: Number(r.txAmount) || 0 } };
+            window.settlePaymentRunForTransactions([asApproved]).catch(e => console.error('[recon] Payment Run clear failed:', e));
         }
 
         // Re-run CFV sidebar badge count so cleared CFVs disappear immediately.

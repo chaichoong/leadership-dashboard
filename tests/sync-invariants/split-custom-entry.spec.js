@@ -20,6 +20,7 @@ const F_CATEGORY = 'fldFPmNixqHPQy4D6';
 const F_SUBCAT = 'fldMRjSVzZVYeHb0A';
 const F_SPLIT_OVERRIDE = 'fldQ37YsyR9r3EbkP';
 const F_TX_UNIT = 'fldJGIhSbgXNIEW4a';
+const F_REPORT_AMOUNT = 'fldot7iisZeL3WrdR';
 
 const FIXTURES = {
   businesses: [
@@ -130,5 +131,27 @@ test.describe('Split modal: custom amounts and the portion fields', () => {
     // The automation copies the parent's tenancy onto the child; the split clears it.
     expect(child[FIELDS.txTenancy]).toEqual([]);
     expect(child[F_TX_UNIT]).toEqual([]);
+  });
+});
+
+test.describe('Approving a split portion clears the Payment Run on the portion\'s amount', () => {
+  test.beforeEach(async ({ page }) => {
+    await loadDashboardWithFixtures(page, FIXTURES);
+    await page.waitForFunction(() => typeof window.approveRecon === 'function', { timeout: 15000 });
+  });
+
+  test('the portion amount, not the whole bank amount, is what the bill is matched on', async ({ page }) => {
+    // Review, 31 Oct 2026: after a split the parent's local Report Amount is still the whole
+    // £300, so a £100 portion would have cleared a £300 bill and left the £100 one owed.
+    const seen = await page.evaluate((reportField) => {
+      (0, eval)(`allTransactions = [{ id:'recPortion1', fields: { '${reportField}': -300, 'fldN01r1hp7UQjgtm': -300 } }]`);
+      window._reconResults = [{ txId: 'recPortion1', txDate: '2026-10-20', txVendor: 'Test Builders', txAccount: 'Santander',
+        txAmount: -100, status: 'unmatched', matchType: 'Split 1/2 (custom)' }];
+      window._reconOriginals = [{ status: 'unmatched' }];
+      const calls = [];
+      window.settlePaymentRunForTransactions = (txs) => { calls.push(txs.map(t => t.fields[reportField])); return Promise.resolve([]); };
+      return window.approveRecon(0).then(() => calls);
+    }, F_REPORT_AMOUNT);
+    expect(seen).toEqual([[-100]]);
   });
 });

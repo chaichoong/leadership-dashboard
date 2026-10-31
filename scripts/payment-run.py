@@ -1654,6 +1654,36 @@ def house_places(text):
     return {"%s %s" % m for m in STREET_RE.findall(str(text or "").lower())}
 
 
+def ref_tokens(text):
+    """Every reference-shaped run in `text`, normalised: letters and digits joined by - / or .,
+    and each pair of neighbouring runs joined too, so "GR 4471" still reads as GR-4471."""
+    runs = re.findall(r"[A-Za-z0-9]+(?:[-/.][A-Za-z0-9]+)*", str(text or ""))
+    return {norm_ref(r) for r in runs} | {norm_ref(a + b) for a, b in zip(runs, runs[1:])}
+
+
+def ref_named(ref, text):
+    """True when `ref` is written in `text` as a whole reference. A substring test read "104"
+    inside a Gmail id (review, 31 Oct 2026), so a reference under four characters never counts."""
+    r = norm_ref(ref)
+    return len(r) >= 4 and r in ref_tokens(text)
+
+
+def card_own_text(c):
+    """The card's OWN words: its task name, its heading line and its field lines. Never its
+    track record or the task's notes: those name the sender's EARLIER bills, which is exactly
+    the bill already on the list, so they made a second bill read as the first (review,
+    31 Oct 2026)."""
+    text = c.get("text") or ""
+    lines = [c.get("name") or ""]
+    head = MFP_LINE_RE.search(text)
+    if head:
+        block = text[head.start():]
+        lines.append(text[head.end():].split("\n", 1)[0])
+        for label in ("PAYEE", "AMOUNT", "REFERENCE", "DUE DATE", "PAY TO", "DESCRIPTION", "NOTES", "KEVIN ONLY"):
+            lines.append(card_field(block, label))
+    return "\n".join(x for x in lines if x)
+
+
 def same_bill(row_fields, other, other_text=""):
     """True when `other` (a card or a scanned email: payee, amount, reference)
     is the bill the open row already holds. See the block comment above."""
@@ -1674,9 +1704,9 @@ def same_bill(row_fields, other, other_text=""):
     if r_row and r_new:
         return r_row == r_new
     if r_row:
-        return r_row in norm_ref(new_text)
+        return ref_named(r_row, new_text)
     if r_new:
-        return r_new in norm_ref(row_text)
+        return ref_named(r_new, row_text)
     return bool(p_row & p_new)
 
 
@@ -1795,14 +1825,17 @@ def plan_tasks(cards, records, by_amount, today):
             else:
                 plan.append(("done", c, (twin, paid_on)) if paid_on else ("link", c, twin))
             continue
-        same = open_twin(records, card, c["name"] + "\n" + c.get("text", ""))
+        same = open_twin(records, card, card_own_text(c))
         if same is not None:
             plan.append(("done", c, (same, paid_on)) if paid_on else ("fold", c, same))
             continue
         if paid_on:
             # Paid on the card before it ever reached the list: one Paid row, so the
             # bank line has its bill (payments-came-through-the-list) and nothing is owed.
-            plan.append(("done_new", c, paid_on))
+            # A weak open twin (same payee and size, nothing more) may be the bill he just
+            # paid: it is told so, never left looking owed with no word (review, 31 Oct 2026).
+            weak = twin if twin is not None and status_of(twin) in ("Unpaid", "") else None
+            plan.append(("done_new", c, (paid_on, weak)))
             continue
         if card.get("dueDate") and today < listing_date(card["dueDate"]):
             plan.append(("wait", c, listing_date(card["dueDate"]).isoformat()))
@@ -1904,12 +1937,17 @@ def run_tasks(records, transactions, apply, today):
                 "Notes": append_note(row, "Marked paid: Kevin pressed Done on his Your step payment "
                                           "card on %s (task %s)." % (day, c["id"]))}})
         elif action == "done_new":
-            print("  PAID ON THE CARD     %s | added as Paid (Kevin pressed Done on %s)" % (label, detail))
+            day, weak = detail
+            print("  PAID ON THE CARD     %s | added as Paid (Kevin pressed Done on %s)" % (label, day))
             fields = task_row_fields(c, today)
-            fields.update({"Status": "Paid", "Paid Date": detail})
+            fields.update({"Status": "Paid", "Paid Date": day})
             fields["Notes"] += (" Kevin pressed Done on his Your step payment card on %s, before the "
-                                "card reached the list, so it was added already paid." % detail)
+                                "card reached the list, so it was added already paid." % day)
             creates.append({"fields": fields})
+            if weak is not None:
+                updates.append({"id": weak["id"], "fields": {"Description": (
+                    "CHECK: a card for the same payee and amount was paid on %s (task %s). If this is "
+                    "that bill, press Duplicate. %s" % (day, c["id"], weak["fields"].get("Description") or "")).strip()}})
         elif action == "paid":
             print("  ALREADY PAID         %s | row %s" % (label, detail["id"]))
         elif action == "wait":

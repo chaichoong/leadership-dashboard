@@ -40,7 +40,7 @@ const DIFF_REF = row('recRef1', { payee: 'Kestrel Fire Ltd', amount: 72, ref: '4
 const DIFF_REF2 = row('recRef2', { payee: 'Kestrel Fire Ltd', amount: 72, ref: '40012' });
 const PAYABLE = row('recPay', { payee: 'Hollin Clearances Ltd', amount: 350, ref: 'INV-9001', emailDate: daysAgo(2) });
 
-async function openPaymentRun(page, rows, patches) {
+async function openPaymentRun(page, rows, patches, paidRows = []) {
   await loadDashboard(page);
   await page.route('**/api.airtable.com/v0/**', async (route) => {
     const req = route.request();
@@ -50,7 +50,9 @@ async function openPaymentRun(page, rows, patches) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'x', fields: {} }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: rows }) });
+    // The paid-rows read (for payments already claimed) asks for Status = Paid.
+    const paidRead = decodeURIComponent(req.url()).includes("{Status}='Paid'");
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: paidRead ? paidRows : rows }) });
   });
   await page.evaluate(() => switchTab('invoices'));
   await page.evaluate(() => fetchInvoicesFromAirtable());
@@ -121,6 +123,24 @@ test.describe('Payment Run: a reconciled payment clears its row', () => {
     await page.evaluate((t) => window.settlePaymentRunForTransactions([t]), tx('recBank2', -90, 'FERNWAY PLUMBING', daysAgo(1)));
     // Money IN never pays a bill.
     await page.evaluate((t) => window.settlePaymentRunForTransactions([t]), tx('recBank3', 350, 'HOLLIN CLEARANCES', daysAgo(1)));
+    expect(patches).toHaveLength(0);
+  });
+
+  // Review, 31 Oct 2026: the open twin was cleared with money that already belonged to a paid bill.
+  const paidRow = (id, over) => ({ id, fields: { [F.payee]: over.payee, [F.amount]: over.amount, [F.status]: 'Paid',
+    [F.paidDate]: over.paidDate, ...(over.tx ? { [F.matchedTx]: [over.tx] } : {}) } });
+
+  test('a payment already linked to a paid bill never clears another row', async ({ page }) => {
+    const patches = [];
+    await openPaymentRun(page, [PAYABLE], patches, [paidRow('recOctPaid', { payee: 'Hollin Clearances Ltd', amount: 350, paidDate: daysAgo(3), tx: 'recBankPay' })]);
+    await page.evaluate((t) => window.settlePaymentRunForTransactions([t]), tx('recBankPay', -350, 'HOLLIN CLEARANCES', daysAgo(1)));
+    expect(patches).toHaveLength(0);
+  });
+
+  test('a payment that looks like a bill marked paid on its card (no payment linked yet) is left for that bill', async ({ page }) => {
+    const patches = [];
+    await openPaymentRun(page, [PAYABLE], patches, [paidRow('recCardPaid', { payee: 'Hollin Clearances Ltd', amount: 350, paidDate: daysAgo(2) })]);
+    await page.evaluate((t) => window.settlePaymentRunForTransactions([t]), tx('recBankPay', -350, 'HOLLIN CLEARANCES', daysAgo(1)));
     expect(patches).toHaveLength(0);
   });
 });
