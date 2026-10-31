@@ -44,7 +44,18 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE = os.environ.get("ALLOWANCE_STATE") or os.path.expanduser("~/knowledge-os/logs/allowance.json")
+LIVE_STATE = os.path.expanduser("~/knowledge-os/logs/allowance.json")
+STATE = os.environ.get("ALLOWANCE_STATE") or LIVE_STATE
+# The one alert that cannot be Claude-backed (finding 20261004-daily-ops-738, seen 4, 5 and
+# 6 Oct 2026). On 4 Oct every one of ten slot runs died on the weekly allowance and nothing
+# told Kevin, because every surface that could have told him shares the allowance it had just
+# run out of: the CEO brief, the huddle, the task-manager digest, all of them. This posts one
+# plain HTTP message through the apple-inbound Slack relay, which runs no model at all.
+RELAY_URL = os.environ.get("ALLOWANCE_RELAY_URL") or \
+    "https://apple-inbound.kevinbrittain.workers.dev/slack-relay"
+RELAY_KEY_PATH = os.environ.get("ALLOWANCE_RELAY_KEY") or \
+    os.path.expanduser("~/.config/od/slack_relay_key")
+ALERT_TO = ["kevin@runpreneur.org.uk"]
 SCHEDULE = os.path.join(HERE, "job-schedule.json")
 LAUNCHD_PREFIX = "com.kevinbrittain."
 LONDON = ZoneInfo("Europe/London")
@@ -185,7 +196,62 @@ def live_jobs():
 
 
 # ─── commands ─────────────────────────────────────────────────────────
-def cmd_mark(job, log, since_line=0, now=None, text=None):
+def post_relay(text, recipients=None, url=None, key_path=None):
+    """One plain POST to the Slack relay. No model, no Claude, no allowance."""
+    import urllib.error
+    import urllib.request
+    # A redirected state file means this is not the live estate (a test, a selftest, a dry
+    # run), so no message leaves the machine. Tests must never message Kevin, and proving
+    # that here is cheaper than remembering it at every call site.
+    if STATE != LIVE_STATE:
+        return {"sent": False, "detail": "state file is redirected, so this is not the live "
+                                         "estate: nothing sent"}
+    key_path = key_path or RELAY_KEY_PATH
+    if not os.path.exists(key_path):
+        return {"sent": False, "detail": "no relay key at %s" % key_path}
+    with open(key_path) as fh:
+        key = fh.read().strip()
+    payload = json.dumps({"recipients": recipients or ALERT_TO, "text": text}).encode()
+    req = urllib.request.Request(url or RELAY_URL, data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Relay-Key", key)
+    # Cloudflare answers Python's default User-Agent with 403 error 1010, so the worker is
+    # never reached and the failure reads as a broken relay (utilita-balance.py, 18 Sep 2026).
+    req.add_header("User-Agent", "od-allowance/1.0 (+scheduled job, Kevin's Mac)")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return {"sent": True, "status": resp.status}
+    except urllib.error.HTTPError as exc:
+        return {"sent": False, "detail": "relay HTTP %s" % exc.code}
+    except Exception as exc:                                  # noqa: BLE001 - never raise at Kevin
+        return {"sent": False, "detail": "%s: %s" % (type(exc).__name__, exc)}
+
+
+def alert_once(st, reset, now, poster=None):
+    """Tell Kevin, ONCE per exhaustion, that the allowance is out and when it returns.
+
+    Once per exhaustion means once per reset time: ten slots dying on the same wall send one
+    message, and a LATER reset (the wall moved) sends a new one. The state file carries the
+    reset already alerted on, so a crashed run cannot turn this into ten messages.
+    """
+    stamp = iso(reset)
+    if st.get("alerted_for") == stamp:
+        return {"alerted": False, "reason": "already alerted for this reset"}
+    when = reset.astimezone(LONDON).strftime("%a %d %b %H:%M")
+    res = (poster or post_relay)(
+        "The Claude allowance is out. Every AI agent is paused until %s London, when the "
+        "paused runs start again on their own. Nothing is broken and nothing needs you: this "
+        "message comes through the Slack relay because every other surface shares the "
+        "allowance that just ran out." % when)
+    if res.get("sent"):
+        st["alerted_for"] = stamp
+        st["alerted_at"] = iso(now)
+    else:
+        st["alert_failed"] = res.get("detail", "unknown")
+    return {"alerted": bool(res.get("sent")), "detail": res.get("detail", "")}
+
+
+def cmd_mark(job, log, since_line=0, now=None, text=None, poster=None):
     now = now or datetime.now(timezone.utc)
     text = text if text is not None else log_tail(log, since_line)
     hit, reset = find_limit(text, now)
@@ -204,8 +270,11 @@ def cmd_mark(job, log, since_line=0, now=None, text=None):
     st.setdefault("missed", [])
     if job and job not in NO_REPLAY and not any(m.get("job") == job and m.get("at", "")[:13] == iso(now)[:13] for m in st["missed"]):
         st["missed"].append({"job": job, "at": iso(now), "how": "died on the limit"})
+    # Tell Kevin before saving, so the alerted-for stamp lands in the same write as the pause.
+    alert = alert_once(st, reset, now, poster=poster)
     save_state(st)
-    return {"marked": True, "paused_until": st["paused_until"], "job": job, "note": note}
+    return {"marked": True, "paused_until": st["paused_until"], "job": job, "note": note,
+            "alerted": alert["alerted"], "alertDetail": alert.get("detail", "")}
 
 
 def cmd_check(job, now=None):
@@ -408,6 +477,50 @@ def selftest():
     ok(all(m["job"] != "handback-poll" for m in load_state().get("missed", [])), "handback-poll is never replayed")
     res = cmd_replay(dry_run=True, now=datetime(2026, 9, 12, 19, 0, tzinfo=timezone.utc), jobs={"handback-poll"})
     ok(res["replayed"] == [], "nothing to replay for the poll alone")
+
+    # 6. ONE non-Claude alert per exhaustion (finding 20261004-daily-ops-738). On 4 Oct 2026
+    # ten slot runs died on the weekly allowance and nothing told Kevin, because every surface
+    # that could have shares the allowance. Back-test by deleting the alert_once call in
+    # cmd_mark: the first check below reads 0 messages.
+    save_state({})
+    sent = []
+    def fake(text, **kw):
+        sent.append(text)
+        return {"sent": True, "status": 200}
+    limit = "You've hit your weekly limit · resets Oct 4 at 7pm (Europe/London)"
+    for n, job in enumerate(("task-manager", "inbound-triage", "ceo-agent", "prod-sweep-weekly")):
+        cmd_mark(job, None, now=datetime(2026, 10, 4, 9, n, tzinfo=timezone.utc), text=limit,
+                 poster=fake)
+    ok(len(sent) == 1, "four slots on one wall send ONE message, got %d" % len(sent))
+    ok("19:00" in sent[0], "the message names the reset time in London: %r" % sent[0])
+    ok("paused" in sent[0] and "nothing needs you" in sent[0],
+       "the message says the estate is paused and needs nothing: %r" % sent[0])
+    # The wall moved later: that is a new exhaustion, so Kevin hears once more.
+    cmd_mark("task-manager", None, now=datetime(2026, 10, 4, 10, 0, tzinfo=timezone.utc),
+             text="You've hit your weekly limit · resets Oct 5 at 7pm (Europe/London)",
+             poster=fake)
+    ok(len(sent) == 2, "a later reset is a new exhaustion: %d message(s)" % len(sent))
+    # A clean run says nothing at all.
+    cmd_mark("task-manager", None, now=datetime(2026, 10, 4, 11, 0, tzinfo=timezone.utc),
+             text="worked fine", poster=fake)
+    ok(len(sent) == 2, "a clean run sends no message: %d" % len(sent))
+    # A relay that refuses leaves the stamp unset, so the next run tries again rather than
+    # swallowing the one alert Kevin depends on.
+    save_state({})
+    refused = []
+    def broken(text, **kw):
+        refused.append(text)
+        return {"sent": False, "detail": "relay HTTP 502"}
+    out = cmd_mark("task-manager", None, now=datetime(2026, 10, 4, 9, 0, tzinfo=timezone.utc),
+                   text=limit, poster=broken)
+    ok(out["alerted"] is False and load_state().get("alert_failed") == "relay HTTP 502",
+       "a refused relay is recorded, not hidden: %r" % load_state())
+    cmd_mark("inbound-triage", None, now=datetime(2026, 10, 4, 9, 5, tzinfo=timezone.utc),
+             text=limit, poster=broken)
+    ok(len(refused) == 2, "the next run retries the alert: %d attempt(s)" % len(refused))
+    # Nothing leaves the machine while the state file is redirected, which it is here.
+    ok(post_relay("never sent")["sent"] is False,
+       "the live relay is shut while STATE is redirected")
     return {"checks": checks, "failed": []}
 
 
