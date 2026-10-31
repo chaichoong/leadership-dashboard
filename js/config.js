@@ -22,18 +22,18 @@
         // Home tab, shown as "My Dashboard" (Kevin, 19 Oct 2026): approvals, CEO brief, Leadership Dashboard, cash flow voids and Wealth in one scroll.
         // It replaced the Leadership Dashboard sidebar item; the 'overview' entry below is still the page it shows, and opens by link.
         { id: 'home',        name: 'My Dashboard',                   icon: '📊', pageVer: '1.17', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.155', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.156', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.84', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.198', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.45', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         // Wardrobe (Leadership, 27 Oct 2026): clothes, spring buys and the clear-out. Its "What to wear today" card sits at the top of My Dashboard.
-        { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.9', sopFile: 'sop-wardrobe.html',           sopVer: '1.9', standalone: 'index.html#wardrobe' },
+        { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.10', sopFile: 'sop-wardrobe.html',           sopVer: '1.9', standalone: 'index.html#wardrobe' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.9', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
+        { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.10', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.35', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
