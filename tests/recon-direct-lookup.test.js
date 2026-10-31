@@ -254,3 +254,79 @@ describe('runReconciliationMatching with the direct layer', () => {
     expect(r.direct).toEqual(['address']);
   });
 });
+
+// A NEW INSURANCE COST CATCHES ITS FIRST PAYMENT (Kevin, 31 Oct 2026): "so the reconciliation
+// process can pick up what it is from the cost-related information and learn". Two shapes reached
+// him blank in October: a Premium Credit renewal that kept its old reference (history tied it to the
+// ENDED policy's cost), and AXA card payments, which carry no policy number, for a cost created that
+// week. Shapes from the live rows; names, references and amounts invented.
+describe('a new cost catches its first payment', () => {
+  const F = () => ctx.F;
+  const tx = (id, desc, vendor, amount, extra = {}) => ({ id, fields: { [F().txDescription]: desc, [F().txVendor]: vendor, [F().txAmount]: amount, [F().txReportAmount]: amount, [F().txDate]: '2026-10-14', ...extra } });
+  const cost = (id, name, prop, expected, status, txCount) => ({ id, fields: {
+    [F().costName]: name, [F().costProperty]: [prop], [F().costExpected]: expected, [F().costPayStatus]: status,
+    [F().costBusiness]: ['bizRE'], [F().costCategory]: ['catCogs'], [F().costSubCategory]: ['subInsurance'], [F().costTxCount]: txCount,
+  } });
+  const addCosts = (...rows) => ctx.set('allCosts', [...ctx.get('allCosts'), ...rows]);
+  const run = (txs, id) => { ctx.set('allTransactions', txs); return ctx.runReconciliationMatching().find(x => x.txId === id); };
+  const AXA = 'Fin: AXA INSURANCE,1 CIVIC DRIVE,IPSWICH -- Fin: AXA INSURANCE';
+  // The lesson Kevin's own coding taught: an AXA payment as Operational Supplies, with no cost.
+  const axaHistory = () => tx('hAxa', AXA, 'Fin: AXA INSURANCE', -14.16, { [F().txReconciled]: true, [F().txSubCategory]: ['subOps'], [F().txCategory]: ['catCogs'], [F().txBusiness]: ['bizRE'] });
+
+  it('a renewal that keeps its reference finds the new cost, not the ended one', () => {
+    addCosts(cost('cPclOld', 'Premium Credit - 30 Sample - REF 04ZZ000001/010/101', P.dalham, 41.69, 'Inactive', 10),
+      cost('cPclNew', 'Premium Credit - 30 Sample - REF 04ZZ000001/011 (D600000XYZ)', P.dalham, 31.27, 'Overdue', 0));
+    const paidOld = tx('hPcl', 'DIRECT DEBIT PAYMENT TO PREMIUM CREDIT LTD REF 04ZZ000001/010/110, MANDATE NO 0206 -- PREMIUM CREDIT LTD', 'PREMIUM CREDIT LTD', -41.69,
+      { [F().txReconciled]: true, [F().txCost]: ['cPclOld'], [F().txSubCategory]: ['subInsurance'], [F().txCategory]: ['catCogs'], [F().txBusiness]: ['bizRE'] });
+    const r = run([paidOld, tx('tPcl', 'DIRECT DEBIT PAYMENT TO PREMIUM CREDIT LTD REF 04ZZ000001/011/102, MANDATE NO 0206 -- PREMIUM CREDIT LTD', 'PREMIUM CREDIT LTD', -31.27)], 'tPcl');
+    expect(r.costId).toBe('cPclNew');
+    expect(r.propertyId).toBe(P.dalham);
+    expect(r.direct).toEqual(['cost ref']);
+  });
+
+  it('a reference two LIVE costs have shared still defers to history (control: Close Brothers)', () => {
+    const refIndex = { '80000069': new Set(['cSwA', 'cSwB']) };
+    expect(ctx.matchCostDirect('DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 80000069, MANDATE NO 0207', -45.3, idx, refIndex)).toBe('');
+  });
+
+  it('a card-paid policy finds its new cost by payee and amount, over the wrong lesson', () => {
+    addCosts(cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'Overdue', 0));
+    const r = run([axaHistory(), tx('tAxa', AXA, 'Fin: AXA INSURANCE', -44.7)], 'tAxa');
+    expect(r.costId).toBe('cAxaNew');
+    expect(r.subCatId).toBe('subInsurance');   // not the learned Operational Supplies
+    expect(r.propertyId).toBe(P.elm42);
+    expect(r.direct).toEqual(['new cost']);
+    // Even under a knowledge-base rule with the suppression list loaded, Kevin sees a first payment once.
+    ctx.get('_autoSuppressSet = new Set()');
+    const kb = { ...r, matchType: 'Knowledge Base', score: 10 };
+    expect(ctx.isAutoApprovable({ ...kb, direct: ['cost ref'] })).toBe(true);   // CONTROL
+    expect(ctx.isAutoApprovable(kb)).toBe(false);
+  });
+
+  it('claims nothing when the amount does not fit, the payee is not named, or the money is incoming', () => {
+    addCosts(cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'Overdue', 0));
+    expect(run([axaHistory(), tx('tA', AXA, 'Fin: AXA INSURANCE', -90)], 'tA').costId).toBe('');
+    expect(run([tx('tB', 'CARD PAYMENT TO TESCO STORES 2041', 'TESCO STORES', -44.7)], 'tB').costId).toBe('');
+    expect(run([tx('tC', 'AXA INSURANCE REFUND', 'AXA INSURANCE', 44.7)], 'tC').costId).toBe('');
+  });
+
+  it('two new costs a payment could belong to: neither (a blank beats a wrong cost)', () => {
+    addCosts(cost('cAxa1', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'Overdue', 0),
+      cost('cAxa2', 'AXA Landlord Insurance - DI LAN 9900002 - 5 Dalham Place', P.dalham, 44.5, 'Overdue', 0));
+    expect(run([tx('tAxa', AXA, 'Fin: AXA INSURANCE', -44.7)], 'tAxa').costId).toBe('');
+  });
+
+  it('a cost already paid is left to its history, never claimed by payee', () => {
+    addCosts(cost('cAxaPaid', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.68, 'In Payment', 3));
+    expect(run([tx('tAxa', AXA, 'Fin: AXA INSURANCE', -44.7)], 'tAxa').costId).toBe('');
+  });
+
+  it('reads who a cost is paid to from its name, and a run-together web address names a payee', () => {
+    expect(ctx.costPayeeWords('AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place')).toEqual(['axa']);
+    expect(ctx.costPayeeWords('Close Brothers Premium Finance (Swinton Property Owners)')).toEqual(['close', 'brothers']);
+    expect(ctx.costPayeeWords('Premium Credit - 30 Sample - REF 04ZZ000001/011')).toEqual([]);
+    expect(ctx.costPayeeWords('Lemonade Home Insurance - LP0000001 - 1 Sample Street')).toEqual(['lemonade']);
+    addCosts(cost('cBed', 'Bedford Insurance - initial payment - 1 Sample Street', P.elm42, 23.1, 'Overdue', 0));
+    expect(run([tx('tBed', 'Fin: WWW.BEDFORDINSURANCE.C,CHESSINGTON -- WWW.BEDFORDINSURANCE.C', 'WWW.BEDFORDINSURANCE.C', -23.1)], 'tBed').costId).toBe('cBed');
+  });
+});
