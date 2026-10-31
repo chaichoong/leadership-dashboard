@@ -453,6 +453,25 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="wf-card">
       <div class="wf-header">
+        <div class="wf-num">1b</div>
+        <h3>Duplicate, and rows that clear themselves</h3>
+        <span class="wf-tag">31 Oct 2026</span>
+      </div>
+      <div class="wf-body">
+        <p>Under Mark Paid on every row. It takes the row off the list with Status <strong>Duplicate</strong>, never Paid, because a duplicate was never paid. A confirm box names the row it repeats. To bring a row back, set its Status to Unpaid in Airtable.</p>
+        <p>A row reads <strong>"Possible duplicate of ..."</strong> under its date when another row on the list has the same payee and amount and nothing says they are different bills (no different reference, no different house). The sync bar's "No invoice appears twice" check names them too.</p>
+        <h4>Rows leave the list on their own when</h4>
+        <ul>
+          <li>you press <strong>Done</strong> on a Your step card that asked you to pay that bill: the 06:30 job marks its row Paid the next morning;</li>
+          <li>you approve its payment in <strong>Reconciliation</strong>: the one open row with the same amount, whose payee the bank line names, is marked Paid with the payment linked, straight away. A payment already linked to a paid bill, or one that looks like a bill marked paid by hand in the last 60 days, clears nothing;</li>
+          <li>the daily bank match finds a payment naming the payee (unchanged).</li>
+        </ul>
+        <p>New duplicates are kept off: a second card for a bill already owed is folded into its row (the row's description says a second card points at it) when the card's own words carry the same reference, or the same house when neither has a reference. A second email for a bill already owed is written as a Duplicate row. Same payee and amount with nothing else agreeing is still listed, with a CHECK line, for you to judge.</p>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
         <div class="wf-num" style="background:var(--success)">2</div>
         <h3>&#10003; Approve</h3>
         <span class="wf-tag">On AI match suggestion row</span>
@@ -918,6 +937,13 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><th>Version</th><th>Date</th><th>Changes</th></tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>3.10</strong></td>
+            <td>31 Oct 2026</td>
+            <td>
+              <strong>Duplicates and rows that clear themselves.</strong> A Duplicate button takes a row off without calling it paid; rows with the same payee and amount are flagged as possible duplicates; a second card or email for a bill already owed is kept off the list on evidence (same reference, or same house); Done on a Your step payment card, or approving the payment in Reconciliation, marks the row Paid. Section 5, card 1b.
+            </td>
+          </tr>
           <tr>
             <td><strong>3.00</strong></td>
             <td>18 Sep 2026</td>
