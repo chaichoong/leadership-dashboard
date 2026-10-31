@@ -68,6 +68,7 @@ describe('what an approved card still owes the Costs table', () => {
   it('last year\'s policy of the same name, still in payment at its old price, does not answer the renewal', () => {
     expect(owed(DATED, '', [['Example Cover - REF 99AA000001 - 1 Sample Street', 9.5]])).toHaveLength(1);
     expect(owed(DATED, '', [['Example Cover - REF 99AA000001 - 1 Sample Street', 9.5], ['Example Cover - REF 99AA000001 - 1 Sample Street', 10.29]])).toEqual([]);   // CONTROL: the renewal is written
+    expect(owed(DATED, '', [['Example Cover - REF 99AA000001 - 1 Sample Street', 10.2899999]])).toEqual([]);  // a stray decimal is still the price
   });
 
   it('a cleared purchase step on the task itself, with no cost line, is owed', () => {

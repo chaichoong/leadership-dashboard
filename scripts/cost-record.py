@@ -263,7 +263,9 @@ def owed_new_costs(task_id, output, notes, live_costs, ledger_rows):
     been renamed or ended since). A line that is not the six-part shape can never be written, so it
     is owed until a dated line replaces it on a fresh card. A cleared KEVIN purchase step on the task's OWN Notes
     line (the `[stamp — who]` form, never a track-record quote of another task) with no line at all is owed too."""
-    live = {(name_key(n), amount(e)) for n, e in live_costs if squash(n)}
+    # Airtable holds Expected Cost as a number, sometimes with a stray third decimal: compare it to the penny.
+    live = {(name_key(n), amount(f"{float(e):.2f}") if isinstance(e, (int, float)) else amount(e))
+            for n, e in live_costs if squash(n)}
     made = {name_key(x.get("name")) for x in ledger_rows if x.get("kind") == "create" and x.get("task") == task_id}
     owed, lines = [], 0
     for m in NEW_RE.finditer(tr.approved_original(output)):

@@ -374,6 +374,16 @@ describe('a new cost claims only what is surely its own', () => {
     expect(run([tx('tC', 'CARD PAYMENT TO APPLE.COM/BILL ON 12-10-2026', 'APPLE.COM/BILL', -8.99)], 'tC').costId).toBe('cIcloud');  // CONTROL
   });
 
+  it('a paid rival counts even when the bank never prints its second word ("Swinton RPP" paid as CLOSE-SWINTON)', () => {
+    // A payee the fixture's own Swinton costs cannot stand in for.
+    addCosts(cost('cZuRpp', 'Zurich RPP - Ref 7700000001', P.dalham, 45.3, 'In Payment', 8),
+      cost('cZuNew', 'Zurich - Policy 999', P.elm42, 45, 'Overdue', 0));
+    expect(run([tx('tZu', 'DIRECT DEBIT PAYMENT TO CLOSE-ZURICH, MANDATE NO 0207', 'CLOSE-ZURICH', -45.3)], 'tZu').costId).toBe('');
+    // CONTROL: with no rival, the new cost is found on the same line.
+    ctx.set('allCosts', ctx.get('allCosts').filter(c => c.id !== 'cZuRpp'));
+    expect(run([tx('tZu', 'DIRECT DEBIT PAYMENT TO CLOSE-ZURICH, MANDATE NO 0207', 'CLOSE-ZURICH', -45.3)], 'tZu').costId).toBe('cZuNew');
+  });
+
   it('a paid cost from the same payee at the same amount is a rival: no claim', () => {
     addCosts(cost('cAxaPaid', 'AXA Landlord Insurance - DI LAN 9900001 - 42 Elmdon Place', P.elm42, 44.6, 'In Payment', 5),
       cost('cAxaNew', 'AXA Landlord Insurance - DI LAN 9900002 - 5 Dalham Place', P.dalham, 44.68, 'Overdue', 0));

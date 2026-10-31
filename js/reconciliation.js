@@ -1044,8 +1044,8 @@
     // and what he typed became the lesson: both October AXA payments were coded Operational
     // Supplies at 6 Chedburgh Place. Here an active cost nothing has paid yet claims an
     // outgoing payment whose bank line names every word of its payee and sits within
-    // COST_MATCH_TOLERANCE of its Expected Cost. Every active cost that fits counts, paid or
-    // not: exactly one, and it unpaid, or nothing ("British Gas" is not British Airways). A
+    // COST_MATCH_TOLERANCE of its Expected Cost. Every active cost that fits counts as a rival,
+    // paid or not: exactly one, unpaid, or nothing ("British Gas" is not British Airways). A
     // blank costs a moment of triage, a wrong cost misattributes money. Once he approves it,
     // history takes over.
     function matchUnpaidCostByPayee(desc, vendor, amount, index) {
@@ -1058,8 +1058,10 @@
         // A web address runs the payee into one word ("WWW.BEDFORDINSURANCE.C"): only there may
         // a word be the start of one. Anywhere else "protect" is not PROTECTION, nor "apple" APPLEGREEN.
         const named = w => set.has(w) || (w.length >= 5 && words.some((t, i) => i > 0 && words[i - 1] === 'www' && t.startsWith(w)));
-        const hits = index.payeeCosts.filter(c => c.payee.every(named) && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
-        return hits.length === 1 && hits[0].unpaid ? hits[0].id : '';
+        // Rivals are found on the first payee word, since the bank may never print a second ("Swinton RPP"
+        // is paid as CLOSE-SWINTON); the one left must have every word on the line, and be unpaid.
+        const hits = index.payeeCosts.filter(c => named(c.payee[0]) && Math.abs(abs - c.expected) / c.expected <= COST_MATCH_TOLERANCE);
+        return hits.length === 1 && hits[0].unpaid && hits[0].payee.every(named) ? hits[0].id : '';
     }
     window.costPayeeWords = costPayeeWords;
     window.matchUnpaidCostByPayee = matchUnpaidCostByPayee;
