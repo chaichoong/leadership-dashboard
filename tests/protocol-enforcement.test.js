@@ -7,8 +7,10 @@ import { fileURLToPath } from 'url';
 //
 // The tranche 3 interview put three rules in the brain that no agent could keep
 // by judgement alone, so they sit in the gates:
-//   1. a statutory certificate booked through Roy acts with no card up to its
-//      cap (gas safety and EPC £100, EICR and fire safety £200);
+//   1. a statutory certificate booked through Roy is an approval card EVERY
+//      time (Kevin deleted the price cap on 19 Oct 2026); the old figures
+//      (gas safety and EPC £100, EICR and fire safety £200) survive only as a
+//      warning line on that card when the quote is above them;
 //   2. the create gate refuses tasks about companies that no longer trade
 //      (legal mail excepted) and payment failures under £25 (rent excepted);
 //   3. one weekly follow-up lists every Roy repair unmoved for 7 days.
@@ -31,13 +33,17 @@ def level(name, output, desc=""):
     return [lv["level"], lv["category"]]
 def roy(what, amount):
     return f"PASS TO ROY: book {what}\\nSPEND: {amount}\\n**Carrying this out will involve:** Roy books it."
+def verdict(name, output, desc=""):
+    rec = {"id": "recTASK000000001", "fields": {m.AF["name"]: name, m.AF["description"]: desc, m.AF["notes"]: ""}}
+    lv = m.decision_level(output, "Admin", rec, fetch=lambda i: {})
+    return {"level": lv["level"], "why": lv["why"], "certificateWarning": lv["certificateWarning"]}
 ${snippet}
 `;
   return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }).trim().split('\n').pop());
 }
 
-describe('certificate bookings through Roy have their own no-card caps', () => {
-  it('acts under the cap for all four certificates and cards above it', () => {
+describe('every certificate booking through Roy is a card (Kevin, 19 Oct 2026)', () => {
+  it('cards all four certificates at any quote, and warns when the quote is above the usual price', () => {
     const out = py(`print(json.dumps({
   "eicr180": level("COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place", roy("the EICR", "£180")),
   "eicr250": level("COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place", roy("the EICR", "£250")),
@@ -49,12 +55,20 @@ describe('certificate bookings through Roy have their own no-card caps', () => {
   "notCompliance": level("MAINTENANCE: new kitchen - 5 Dalham Place", roy("the kitchen", "£180")),
   "veto": level("COMPLIANCE: GSC renewal due 2026-10-08 - 5 Dalham Place", roy("the gas safety check", "£90"), desc="mortgage lender requires this before sale"),
 }))`);
-    expect(out.eicr180).toEqual(['A', 'pass to Roy']);
-    expect(out.eicr250[0]).toBe('B');
-    expect(out.gsc90).toEqual(['A', 'pass to Roy']);
-    expect(out.gsc150[0]).toBe('B');
-    expect(out.epc95).toEqual(['A', 'pass to Roy']);
-    expect(out.fire190).toEqual(['A', 'pass to Roy']);
+    const warn = py(`print(json.dumps({
+  "under": verdict("COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place", roy("the EICR", "£180")),
+  "over": verdict("COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place", roy("the EICR", "£250")),
+}))`);
+    expect(warn.under.certificateWarning).toBe(null);
+    expect(warn.over.certificateWarning).toContain('above the usual £200');
+    expect(warn.over.why).toContain('above the usual £200');
+    // The price cap is gone: a booking under the old figure is a card too.
+    expect(out.eicr180).toEqual(['B', 'pass to Roy']);
+    expect(out.eicr250).toEqual(['B', 'pass to Roy']);
+    expect(out.gsc90).toEqual(['B', 'pass to Roy']);
+    expect(out.gsc150).toEqual(['B', 'pass to Roy']);
+    expect(out.epc95).toEqual(['B', 'pass to Roy']);
+    expect(out.fire190).toEqual(['B', 'pass to Roy']);
     expect(out.recurring[0]).toBe('B');
     expect(out.notCompliance[0]).toBe('B');
     // The Roy veto still reads the whole text: a sale or a mortgage is never a Level A booking.

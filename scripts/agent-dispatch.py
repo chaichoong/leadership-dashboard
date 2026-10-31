@@ -2139,21 +2139,28 @@ def roy_done_problem(body, task_rec, fetch):
                 "tenant note roy-assistant.py wrote for it")
     return ""
 
-# No-card caps per statutory certificate booked through Roy (Kevin's tranche 3
-# interview, 17 Sep 2026). A named exception to the £100 money rule for these
-# four certificates only; the brain file Knowledge/property-compliance-
-# requirements.md carries the ruling. certificate_type() reads the one type a
-# task name is about (defined with the dispatch-time grouping).
-CERT_SPEND_CAPS = {"GSC": 100, "EPC": 100, "EICR": 200, "FIRE": 200}
+# The usual price per statutory certificate booked through Roy. These were
+# no-card caps from Kevin's tranche 3 interview (17 Sep 2026) until he DELETED
+# the cap on 19 Oct 2026 (Decisions/2026-10-19 Delete the certificate booking
+# price cap; task rechCYXjNQawaZCi8). Every certificate booking is an approval
+# card now, whatever the quote. The four figures survive only as a warning line
+# ON that card, so a quote above the usual price is visible without blocking.
+# certificate_type() reads the one type a task name is about (defined with the
+# dispatch-time grouping).
+CERT_WARN_ABOVE = {"GSC": 100, "EPC": 100, "EICR": 200, "FIRE": 200}
 
 
-def certificate_booking_cap(name, output):
-    """The no-card cap for a PASS TO ROY certificate booking, or 0."""
+def certificate_warn_above(name, output):
+    """The usual price for a PASS TO ROY certificate booking, or 0.
+
+    A warning threshold, never a cap: it changes what the card SAYS, never
+    whether there is one (Kevin, 19 Oct 2026).
+    """
     if not PASS_TO_ROY_RE.match(output or ""):
         return 0
     if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX):
         return 0
-    return CERT_SPEND_CAPS.get(certificate_type(name), 0)
+    return CERT_WARN_ABOVE.get(certificate_type(name), 0)
 
 
 # ─── THE THREE NARROW LEVEL A SHAPES OF 17 SEP 2026 ─────────────────────
@@ -2303,17 +2310,26 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     notes = tf.get(AF["notes"], "") or ""
     amount, recurring = spend_declared(out)
     money = money_level(amount, recurring)
-    # A statutory certificate booked through Roy has its own no-card cap
-    # (Kevin, 17 Sep 2026): gas safety and EPC £100, EICR and fire safety
-    # £200. One-off only: recurring stays Kevin's at any amount.
-    cert_cap = certificate_booking_cap(name, out)
-    if money == "card" and cert_cap and amount is not None and amount <= cert_cap:
-        money = "inform"
+    # A statutory certificate booked through Roy used to have a no-card cap
+    # (Kevin, 17 Sep 2026). He deleted it on 19 Oct 2026: every certificate
+    # booking is an approval card whatever the quote, and the old figure is a
+    # warning line on that card when the quote is above it.
+    cert_warn = certificate_warn_above(name, out)
+    cert_warning = ""
+    if cert_warn and amount is not None and amount > cert_warn:
+        cert_warning = (f"quote £{amount:g} is above the usual £{cert_warn:g} for "
+                        f"{certificate_type(name)}")
     base = {"category": "other", "carry": "", "evidence": "", "money": money,
             "amount": amount, "recurring": recurring, "why": "",
-            "certificateCap": cert_cap or None}
+            "certificateWarnAbove": cert_warn or None,
+            "certificateWarning": cert_warning or None}
 
     def card(category, why):
+        # The deleted certificate price cap rides on every card as a warning
+        # line when the quote is above the usual price (Kevin, 19 Oct 2026),
+        # whichever rule raised the card.
+        if cert_warning and cert_warning not in (why or ""):
+            why = f"{why}; {cert_warning}" if why else cert_warning
         return {**base, "level": AUTONOMY_APPROVE, "category": category, "why": why}
 
     def act(category, carry, evidence, **extra):
@@ -2349,7 +2365,10 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     if money == "kevin":
         return card("spend", f"SPEND £{amount:,.2f} recurring: a recurring "
                              "commitment is always Kevin's, whatever the amount")
-    if money == "card":
+    if money == "card" and not cert_warn:
+        # A statutory certificate booking skips this one: it is already a card
+        # under Kevin's 19 Oct 2026 ruling, and the certificate card names the
+        # booking, the quote and the usual price rather than the money rule.
         return card("spend", f"SPEND £{amount:,.2f} is over the money rule "
                              f"(£{DECISION_MONEY['inform']}): a card with the figure")
 
@@ -2500,7 +2519,7 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                    "(Kevin, 17 Sep 2026)", rule="redirect", email=email)
 
     if (task_type == "Correspondence" and str(name).startswith(COMPLIANCE_TASK_PREFIX)
-            and certificate_type(name) in CERT_SPEND_CAPS):
+            and certificate_type(name) in CERT_WARN_ABOVE):
         try:
             mail = parse_email_output(out)
         except EmailFormatError:
@@ -2534,13 +2553,22 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
 
     if PASS_TO_ROY_RE.match(out):
         why = roy_match(name, desc, notes)
-        if not why and cert_cap:
-            # roy_match knows repairs and EICR but not gas safety, EPC or fire
-            # certificates; Kevin's 17 Sep ruling puts all four bookings with
-            # Roy. The same veto still applies to the whole text.
+        if cert_warn:
+            # Kevin deleted the certificate price cap on 19 Oct 2026: a
+            # statutory certificate booking is an approval card EVERY time,
+            # whatever the quote. The old figure rides on the card as a
+            # warning line when the quote is above it. The Roy veto still
+            # reads the whole text, and it owns the reason when it fires.
             everything = " ".join(str(t or "") for t in (name, desc, notes))
-            if not (ROY_EXCLUDE_RE.search(everything) or ROY_HOME_RE.search(everything)):
-                why = f"statutory {certificate_type(name)} booking (Kevin, 17 Sep 2026)"
+            if ROY_EXCLUDE_RE.search(everything) or ROY_HOME_RE.search(everything):
+                return card("pass to Roy",
+                            "a veto word is present (money, law, insurance, mortgage, "
+                            "sale, Kevin's own home), so this booking is not Roy's")
+            quote = f"SPEND £{amount:,.2f}. " if amount is not None else ""
+            ask = (f"{quote}Every certificate booking is an approval card whatever the "
+                   f"quote (Kevin, 19 Oct 2026). Roy books the cheapest of three for "
+                   f"the {certificate_type(name)} on your yes")
+            return card("pass to Roy", ask)
         if not why:
             return card("pass to Roy",
                         "the task NAME does not match the property lane, or a veto "

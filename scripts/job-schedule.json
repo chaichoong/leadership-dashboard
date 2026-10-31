@@ -252,6 +252,8 @@
   "retryWhenDeferred": true
  },
  "feed-brain": {
+  "enabled": false,
+  "retiredNote": "RETIRED 14 Oct 2026 (Kevin, task recvykQvThMAwMLRu): the Meetings table has had no new row since 17 Jul 2026 and every night since ended 'window empty'. launchd job unloaded, plist in ~/Library/LaunchAgents.parked/. Fields kept so the tests that guard the brain jobs still read them. Never re-enable to silence a missing-run alarm; /feed-brain files a meeting by hand.",
   "backgroundSafe": true,
   "backgroundSafeNote": "15 Oct 2026: may run in the guest lane while content-engine's render is a declared background phase (job-queue.py background). It gave up after 360 minutes behind the render on 14 AND 15 Oct 2026 and never ran either night. Light work: one Airtable read and, when there are meetings, one headless claude -p call writing notes into the brain vault (median 1 s over 50 runs). No render, no browser, nothing of the Content Engine's own state.",
   "guestMaxRuntimeMinutes": 20,
