@@ -420,6 +420,8 @@
             status,
             tenantName, tenantPhone, tenantEmail,
             tenantId: tenant ? tenant.id : null,
+            // No "Moved out" button: the letting agent keeps paying when the occupant leaves (Kevin, 6 Aug 2026).
+            agentManaged: !!tenant && /agent/i.test(moSel(getField(tenant, F.tenantPayType))),
             chaseStage, chaseStart,
             lastPaymentDate, lastPaymentAmount,
             autoDetected: false,
@@ -660,6 +662,12 @@
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escJs(entry.surname)}',this)">In Payment</button>
                     <button class="cfv-action-btn" style="border-color:var(--danger);color:var(--danger);margin-top:4px" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escJs(entry.surname)}',this)">Move to CFV</button>
                     <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                `;
+            }
+
+            if (!entry.agentManaged) {
+                actionsHtml += `
+                    <button class="cfv-action-btn" data-moved-out="${entry.tenancyId}" onclick="event.stopPropagation(); cfvMovedOut('${entry.tenancyId}','${escHtml(escJs(entry.surname))}')" style="margin-top:4px">Moved out</button>
                 `;
             }
 
@@ -984,6 +992,382 @@
         // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
         // A to flip back to Potential CFV when B's loadDashboard fired.)
         setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
+    }
+
+    // ── Moved out (Kevin, 31 Oct 2026) ──
+    // "When a cash flow void turns into a move-out, we can just click a button ... It updates everything
+    // accordingly, and the system is accurate once again." One confirmed click ends the tenancy the way the
+    // airtable-tenancy-ender skill does, behind its six-question gate. Every doubt shows in the box BEFORE anything
+    // is written and he settles it there (his call, 31 Oct: the box, not approval cards). Every read is fresh, by a
+    // list on RECORD_ID (a GET by id ignores the table in the URL), every write is read back, and a failed step stops
+    // the run and names itself. What it writes, in this order, so that a run stopped early leaves the row on the page
+    // and pressing the button again finishes the job (the plan is re-read, so a step already done reads as done):
+    //   1. the tenancy's open tasks: Cancelled, never deleted, each with a comment saying why.
+    //   2. the unit: Void, only when it reads Occupied (or blank) and no other live tenancy in the Tenancies table sits
+    //      on it. The unit's legacy link (Tenancies copy, a dead table whose rows still read "Live") does not count.
+    //   3. each tenant: this unit off Current Unit, and Former, unless they still have another live tenancy with us
+    //      (a tenant moving between our houses keeps that one, Kevin 29 Oct 2026; one on the same unit keeps the unit).
+    //   4. the tenancy: End Date = the move-out date, Payment Status cleared. It KEEPS its Rental Unit link as
+    //      history: the end date is what every page and robot reads as finished (isTenancyEnded, rent-check is_live).
+    //   5. one dated comment on the tenancy listing every change and every step skipped; if a step fails, a comment
+    //      saying where it stopped, what was done and what was not.
+    // Never offered on an agent-managed tenancy (buildCFVEntry), and refused if one gets here.
+    const MO_CLOSED_TASK = ['Completed', 'Cancelled'];
+    const MO_REC_RE = /^rec[A-Za-z0-9]{14}$/;
+
+    function moSel(v) { return v && typeof v === 'object' && !Array.isArray(v) ? String(v.name || '') : String(v || ''); }
+    function moIds(v) { return (Array.isArray(v) ? v : []).map(x => (x && typeof x === 'object') ? x.id : x).filter(Boolean); }
+    function moDay(v) {
+        const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+        return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+    }
+    function moIso(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+    function moLong(iso) {
+        const d = moDay(iso);
+        return d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : String(iso || '');
+    }
+    function moToday() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+    // Another tenancy still holds the unit or the tenant while it has no end date, or one AFTER today. An end date of
+    // today counts as gone: it is what this button writes for a tenant who left today, so two tenants leaving one
+    // unit on the same day must free it (independent review, 31 Oct 2026). isTenancyEnded keeps today's row on the
+    // page; this is only the gate's question, "is anyone else still here?".
+    function moLive(rec) { const end = moDay(rec.fields[F.tenEndDate]); return !end || end > moToday(); }
+
+    // Records by id from ONE table, read as a list so the table is proved. Ids come off link fields; anything that
+    // is not a record id never reaches the formula.
+    async function moRead(tableId, ids) {
+        const unique = [...new Set(ids)].filter(id => MO_REC_RE.test(id));
+        const out = [];
+        for (let i = 0; i < unique.length; i += 40) {
+            const part = unique.slice(i, i + 40).map(id => `RECORD_ID()='${id}'`);
+            out.push(...await airtableFetch(tableId, { filterByFormula: part.length === 1 ? part[0] : `OR(${part.join(',')})` }));
+        }
+        return out;
+    }
+
+    // Everything the button would do, read fresh. Refusals stop it; warnings are shown and he decides.
+    async function moBuildPlan(tenancyId) {
+        const [tenancy] = await moRead(TABLES.tenancies, [tenancyId]);
+        if (!tenancy) throw new Error('This tenancy is not in the Tenancies table.');
+        const tf = tenancy.fields;
+        const unitIds = moIds(tf[F.tenUnit]);
+        const tenantIds = moIds(tf[F.tenLinkedTenant]);
+        const [tenants, units, tasks] = await Promise.all([
+            moRead(TABLES.tenants, tenantIds),
+            moRead(TABLES.rentalUnits, unitIds),
+            moRead(TABLES.tasks, moIds(tf[F.tenTasks])),
+        ]);
+        // The other tenancies of each tenant and on each unit, in one read.
+        const otherIds = [...tenants.flatMap(t => moIds(t.fields[F.tenantTenancies])),
+                          ...units.flatMap(u => moIds(u.fields[F.unitTenancies]))].filter(id => id !== tenancyId);
+        const others = new Map((await moRead(TABLES.tenancies, otherIds)).map(r => [r.id, r]));
+        const liveOther = id => id !== tenancyId && others.has(id) && moLive(others.get(id));
+        const unreadOthers = new Set(otherIds.filter(id => MO_REC_RE.test(id))).size - others.size;
+        const refOf = id => String(others.get(id)?.fields[F.tenRef] || id);
+
+        const plan = {
+            tenancyId, ref: String(tf[F.tenRef] || tenancyId), status: moSel(tf[F.tenPayStatus]),
+            start: tf[F.tenStartDate] || '', refusals: [], warnings: [], tenants: [], units: [], tasks: [],
+        };
+        if (tf[F.tenEndDate]) plan.refusals.push(`This tenancy already has an end date (${moLong(tf[F.tenEndDate])}).`);
+        if (!tenantIds.length) plan.warnings.push('No tenant is linked to this tenancy, so no tenant record changes.');
+        if (!unitIds.length) plan.warnings.push('No rental unit is linked to this tenancy, so no unit changes.');
+        // A linked record that does not read back is a doubt, never a silent skip.
+        if (tenants.length !== new Set(tenantIds).size) plan.refusals.push('A tenant linked to this tenancy could not be read from Airtable.');
+        if (units.length !== new Set(unitIds).size) plan.refusals.push('The rental unit linked to this tenancy could not be read from Airtable.');
+        // An unread one would count as gone, which fails toward voiding the unit and marking the tenant Former.
+        if (unreadOthers) plan.refusals.push('Another tenancy linked to this tenant or unit could not be read from Airtable.');
+
+        for (const t of tenants) {
+            const name = String(t.fields[F.tenantName] || t.id);
+            if (/agent/i.test(moSel(t.fields[F.tenantPayType]))) {
+                plan.refusals.push(`${name} is a letting agent: the agent keeps paying when the occupant leaves, so this tenancy is never ended for a move-out.`);
+            }
+            const elsewhere = moIds(t.fields[F.tenantTenancies]).filter(liveOther);
+            const current = moIds(t.fields[F.tenantCurrentUnit]);
+            // A live tenancy of theirs on this same unit (an old record left open by a rent change) keeps the unit.
+            const keep = new Set(elsewhere.flatMap(id => moIds(others.get(id).fields[F.tenUnit])));
+            const after = elsewhere.length ? current.filter(u => !unitIds.includes(u) || keep.has(u)) : [];
+            plan.tenants.push({
+                id: t.id, name, former: !elsewhere.length, wasFormer: moSel(t.fields[F.tenantStatus]) === 'Former',
+                currentAfter: after, unlinks: current.length !== after.length, elsewhere: elsewhere.map(refOf),
+            });
+        }
+        for (const u of units) {
+            const name = String(u.fields[F.unitName] || u.id);
+            const live = moIds(u.fields[F.unitTenancies]).filter(liveOther);
+            // Only an Occupied (or blank) unit is voided: Rent Ready and Not Ready already say nobody lives there.
+            const status = moSel(u.fields[F.unitStatus]);
+            plan.units.push({ id: u.id, name, status, voidIt: !live.length && (!status || status === 'Occupied'), liveOthers: live.map(refOf) });
+            if (live.length) plan.warnings.push(`${name} stays as it is: ${live.map(refOf).join(', ')} is still live on it. If that tenant has gone too, end that tenancy separately.`);
+        }
+        plan.tasks = tasks.filter(t => !MO_CLOSED_TASK.includes(moSel(t.fields[TASK_FIELDS.status])))
+            .map(t => ({ id: t.id, name: String(t.fields[TASK_FIELDS.name] || t.id) }));
+        return plan;
+    }
+
+    // What the date changes: a date in the future or before the tenancy began is refused, and money paid in after
+    // it is shown (from the page's reconciled payments, so it lists what the page knows).
+    function moDateCheck(plan, iso) {
+        const day = moDay(iso);
+        if (!day) return { refusals: ['Pick the move-out date.'], warnings: [] };
+        const refusals = [];
+        if (day > moToday()) refusals.push('The move-out date cannot be in the future.');
+        const start = moDay(plan.start);
+        if (start && day < start) refusals.push(`The move-out date is before the tenancy began (${moLong(plan.start)}).`);
+        const txs = (typeof buildTxByTenancyIndex === 'function' ? buildTxByTenancyIndex().get(plan.tenancyId) : null) || [];
+        const after = txs.map(tx => ({ d: moDay(getField(tx, F.txDate)), amt: Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0 }))
+            .filter(p => p.d && p.d > day && p.amt > 0).sort((a, b) => a.d - b.d);
+        const warnings = after.map(p => `${fmt(p.amt)} came in on ${moLong(moIso(p.d))}, after the move-out date. Check whether it is owed back.`);
+        return { refusals, warnings };
+    }
+
+    // The part of a plan that decides the writes. Read again at Confirm: if it changed while the box was open,
+    // nothing is written.
+    function moSignature(plan) {
+        return JSON.stringify([plan.status, plan.start, plan.refusals, plan.tenants.map(t => [t.id, t.former, t.currentAfter]),
+                               plan.units.map(u => [u.id, u.voidIt]), plan.tasks.map(t => t.id)]);
+    }
+
+    function moChangeLines(plan, iso) {
+        const lines = [`Tenancy ${plan.ref}: end date ${moLong(iso)}, payment status cleared${plan.status ? ` (now ${plan.status})` : ''}.`];
+        for (const t of plan.tenants) {
+            if (t.former) lines.push(`${t.name}: ${t.wasFormer ? 'already Former' : 'marked Former'}${t.unlinks ? ', unlinked from the unit' : ''}.`);
+            else lines.push(`${t.name}: stays Active, still a tenant at ${t.elsewhere.join(', ')}${t.unlinks ? ', unlinked from this unit' : ''}.`);
+        }
+        for (const u of plan.units) {
+            if (u.voidIt) lines.push(`${u.name}: set to Void.`);
+            else if (u.liveOthers.length) lines.push(`${u.name}: left as it is (another live tenancy).`);
+            else lines.push(`${u.name}: already ${u.status}, left as it is.`);
+        }
+        lines.push(plan.tasks.length
+            ? `${plan.tasks.length} open task${plan.tasks.length === 1 ? '' : 's'} cancelled, each with a note: ${plan.tasks.map(t => t.name).join('; ')}.`
+            : 'No open tasks to cancel.');
+        return lines;
+    }
+
+    // A write or comment, retried while Airtable says 429 (five requests a second per base, shared with the robots),
+    // as airtableFetch does for reads. A busy moment must never stop a run halfway.
+    async function moSend(url, init) {
+        for (let attempt = 0; ; attempt++) {
+            const resp = await fetch(url, init);
+            if (resp.status !== 429 || attempt === 3) return resp;
+            await new Promise(r => setTimeout(r, Math.min(1000 * Math.pow(2, attempt), 8000)));
+        }
+    }
+
+    async function moPatch(tableId, id, fields) {
+        const resp = await moSend(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${id}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(`Airtable refused the change (${resp.status}${err.error?.message ? ': ' + err.error.message : ''})`);
+        }
+    }
+
+    // Read the record back and prove every field landed. null = blank; an array = exactly these linked ids.
+    async function moReadBack(tableId, id, want) {
+        const [rec] = await moRead(tableId, [id]);
+        if (!rec) throw new Error('it could not be read back');
+        for (const [fid, value] of Object.entries(want)) {
+            const got = rec.fields[fid];
+            const ok = value === null ? (got == null || got === '' || (Array.isArray(got) && !got.length))
+                : Array.isArray(value) ? JSON.stringify(moIds(got).sort()) === JSON.stringify([...value].sort())
+                : moSel(got) === value;
+            if (!ok) throw new Error('the change did not land when read back');
+        }
+    }
+
+    async function moComment(tableId, id, text) {
+        try {
+            const resp = await moSend(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${id}/comments`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text }),
+            });
+            return resp.ok;
+        } catch (e) {
+            console.warn('Moved out: comment not saved', e);
+            return false;
+        }
+    }
+
+    // The writes, in the order above. onStep(text, ok) reports each one. Throws at the first failed write, naming it,
+    // after leaving a comment on the tenancy that says where it stopped.
+    async function moRun(plan, iso, onStep) {
+        const today = moLong(moIso(moToday()));
+        const steps = [];   // { label, note, run }: what the box shows, what the tenancy comment says, the write
+        for (const task of plan.tasks) {
+            steps.push({ label: `Task cancelled: ${task.name}`, note: `Task cancelled: ${task.name} (${task.id}).`, run: async () => {
+                await moPatch(TABLES.tasks, task.id, { [TASK_FIELDS.status]: 'Cancelled' });
+                await moReadBack(TABLES.tasks, task.id, { [TASK_FIELDS.status]: 'Cancelled' });
+                const why = `Cancelled on ${today}: the tenant moved out on ${moLong(iso)} and tenancy ${plan.ref} was ended from the Cash Flow Voids page.`;
+                if (!await moComment(TABLES.tasks, task.id, why)) onStep(`The note on task "${task.name}" did not save. The task is cancelled.`, false);
+            } });
+        }
+        for (const u of plan.units.filter(u => u.voidIt)) {
+            steps.push({ label: `${u.name} set to Void`, note: `${u.name}: Void.`, run: async () => {
+                await moPatch(TABLES.rentalUnits, u.id, { [F.unitStatus]: 'Void' });
+                await moReadBack(TABLES.rentalUnits, u.id, { [F.unitStatus]: 'Void' });
+            } });
+        }
+        // Tenants who stay Active first: one marked Former hides the row (isTenantStatusFormer), so a joint tenancy
+        // stopped between two tenants must stop before that, while the button can still finish it.
+        for (const t of [...plan.tenants].sort((a, b) => Number(a.former) - Number(b.former))) {
+            const fields = {};
+            if (t.former && !t.wasFormer) fields[F.tenantStatus] = 'Former';
+            if (t.unlinks) fields[F.tenantCurrentUnit] = t.currentAfter;
+            if (!Object.keys(fields).length) continue;
+            steps.push({
+                label: `${t.name} ${t.former ? 'marked Former' : 'kept Active'}${t.unlinks ? ' and unlinked from the unit' : ''}`,
+                note: t.former ? `${t.name}: Former${t.unlinks ? ', unlinked from the unit' : ''}.`
+                    : `${t.name}: kept Active (still a tenant at ${t.elsewhere.join(', ')})${t.unlinks ? ', unlinked from this unit' : ''}.`,
+                run: async () => {
+                    await moPatch(TABLES.tenants, t.id, fields);
+                    await moReadBack(TABLES.tenants, t.id, fields);
+                },
+            });
+        }
+        steps.push({ label: `Tenancy ${plan.ref} ended`, note: `End date ${iso}, payment status cleared (was ${plan.status || 'blank'}).`, run: async () => {
+            await moPatch(TABLES.tenancies, plan.tenancyId, { [F.tenEndDate]: iso, [F.tenPayStatus]: null });
+            await moReadBack(TABLES.tenancies, plan.tenancyId, { [F.tenEndDate]: iso, [F.tenPayStatus]: null });
+        } });
+
+        const notes = [];
+        for (let i = 0; i < steps.length; i++) {
+            try {
+                await steps[i].run();
+            } catch (e) {
+                onStep(`${steps[i].label}: ${e.message}. Stopped here, nothing after this step was changed.`, false);
+                const trace = [`${today}: Moved out (${moLong(iso)}) STOPPED at "${steps[i].label}": ${e.message}.`,
+                               notes.length ? `Done before it: ${notes.join(' ')}` : 'Nothing was changed before it.',
+                               // The write itself may have landed with only its read-back failing: unconfirmed, not undone.
+                               `Not confirmed: ${steps[i].label}.`,
+                               ...(i + 1 < steps.length ? [`Not done: ${steps.slice(i + 1).map(s => s.label).join('; ')}.`] : []),
+                               'Press Moved out again while the row is listed, or finish these by hand.'];
+                if (!await moComment(TABLES.tenancies, plan.tenancyId, trace.join('\n'))) {
+                    onStep('The note on the tenancy saying where it stopped did not save either.', false);
+                }
+                throw e;
+            }
+            notes.push(steps[i].note);
+            onStep(steps[i].label, true);
+        }
+        const skipped = [
+            ...plan.tenants.filter(t => !(t.former && !t.wasFormer) && !t.unlinks).map(t => `${t.name}: no change needed.`),
+            ...plan.units.filter(u => !u.voidIt).map(u => u.liveOthers.length
+                ? `${u.name}: not voided, ${u.liveOthers.join(', ')} is still live on it.` : `${u.name}: already ${u.status}, left as it is.`),
+            ...(plan.units.length ? [] : ['No unit linked, so no unit changed.']),
+            ...(plan.tasks.length ? [] : ['No open tasks.']),
+        ];
+        const summary = [`${today}: moved out on ${moLong(iso)}, ended from the Cash Flow Voids page.`, ...notes, ...skipped];
+        if (!await moComment(TABLES.tenancies, plan.tenancyId, summary.join('\n'))) {
+            onStep('The summary comment on the tenancy did not save. Every change above went through.', false);
+        }
+    }
+
+    async function cfvMovedOut(tenancyId, surname) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:10001;display:flex;align-items:center;justify-content:center';
+        const panel = document.createElement('div');
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('aria-label', 'Moved out');
+        panel.id = 'cfvMovedOutBox';
+        panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:24px;max-width:520px;width:92%;max-height:85vh;overflow-y:auto';
+        const todayIso = moIso(moToday());
+        panel.innerHTML = `
+            <div style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:12px">Moved out: ${escHtml(surname)}</div>
+            <label style="display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px">Move-out date
+                <input type="date" id="cfvMoDate" value="${todayIso}" max="${todayIso}" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm)">
+            </label>
+            <div id="cfvMoBody" style="font-size:var(--fs-sm);color:var(--text-secondary)">Reading the tenancy, tenant, unit and tasks from Airtable…</div>
+            <div id="cfvMoProgress" style="font-size:var(--fs-sm);margin-top:12px"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+                <button id="cfvMoCancel" class="cfv-action-btn">Cancel</button>
+                <button id="cfvMoGo" class="cfv-action-btn" disabled style="background:var(--danger);color:var(--accent-on);border-color:var(--danger)">End tenancy</button>
+            </div>`;
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        const body = panel.querySelector('#cfvMoBody');
+        const dateInput = panel.querySelector('#cfvMoDate');
+        const progress = panel.querySelector('#cfvMoProgress');
+        const go = panel.querySelector('#cfvMoGo');
+        const cancel = panel.querySelector('#cfvMoCancel');
+        let running = false, finished = false;
+        const close = () => {
+            if (running) return;
+            overlay.remove();
+            if (finished) {
+                setTimeout(() => renderCFVTab(), 300);
+                // Same reason as the other actions: the IDB cache would put the old record back.
+                setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 1500);
+            }
+        };
+        cancel.onclick = close;
+        overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+        let plan;
+        try {
+            plan = await moBuildPlan(tenancyId);
+        } catch (e) {
+            body.innerHTML = `<div style="color:var(--danger)">Could not read the records: ${escHtml(e.message)}. Nothing was changed.</div>`;
+            return;
+        }
+        const list = (items, colour) => items.length
+            ? `<ul style="margin:6px 0 0 18px;padding:0;color:${colour}">${items.map(i => `<li style="margin-bottom:4px">${escHtml(i)}</li>`).join('')}</ul>` : '';
+        const render = () => {
+            const dated = moDateCheck(plan, dateInput.value);
+            const refusals = [...plan.refusals, ...dated.refusals];
+            const warnings = [...plan.warnings, ...dated.warnings];
+            body.innerHTML = (refusals.length
+                ? `<div style="font-weight:var(--fw-semibold);color:var(--danger)">Cannot end this tenancy</div>${list(refusals, 'var(--danger)')}`
+                : `<div style="font-weight:var(--fw-semibold);color:var(--text-primary)">What will change</div>${list(moChangeLines(plan, dateInput.value), 'var(--text-primary)')}
+                   <div style="margin-top:8px">A dated comment on the tenancy will list all of this.</div>`)
+                + (warnings.length ? `<div style="margin-top:12px;padding:8px 10px;background:var(--warning-bg);border-radius:var(--radius-md)">
+                       <div style="font-weight:var(--fw-semibold);color:var(--warning)">Check before you confirm</div>${list(warnings, 'var(--text-primary)')}</div>` : '');
+            go.disabled = refusals.length > 0;
+        };
+        dateInput.onchange = render;
+        render();
+
+        go.onclick = async () => {
+            const iso = dateInput.value;
+            if (moDateCheck(plan, iso).refusals.length || plan.refusals.length) return;
+            running = true;
+            go.disabled = true; cancel.disabled = true; dateInput.disabled = true;
+            const report = (text, ok) => {
+                progress.insertAdjacentHTML('beforeend', `<div style="color:${ok ? 'var(--success)' : 'var(--danger)'};margin-bottom:4px">${ok ? '✓' : '✗'} ${escHtml(text)}</div>`);
+            };
+            let writing = false;
+            try {
+                // Read everything again: if anything changed while the box was open, write nothing.
+                const fresh = await moBuildPlan(tenancyId);
+                if (moSignature(fresh) !== moSignature(plan)) {
+                    report('Something changed in Airtable since this box opened, so nothing was written. Close it and press Moved out again.', false);
+                } else {
+                    writing = true;
+                    await moRun(plan, iso, report);
+                    finished = true;
+                    const rec = allTenancies.find(t => t.id === tenancyId);
+                    if (rec) { rec.fields[F.tenEndDate] = iso; delete rec.fields[F.tenPayStatus]; }
+                    report('Done. Close this box and the row leaves the list.', true);
+                    showToast(`${surname}: tenancy ended, moved out ${moLong(iso)}`, { type: 'success' });
+                }
+            } catch (e) {
+                if (writing) finished = true;   // moRun named the failed step; earlier steps may have landed, so re-read on close
+                else report(`Could not read the records again (${e.message}), so nothing was written.`, false);
+                console.warn('Moved out stopped:', e);
+            } finally {
+                running = false;
+                go.style.display = 'none';
+                cancel.disabled = false;
+                cancel.textContent = 'Close';
+            }
+        };
     }
 
     // ── Comments ──

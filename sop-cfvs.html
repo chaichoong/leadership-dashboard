@@ -103,7 +103,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&larr; Back to Site Map</a>
     <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Detection, management, chase tracking, auto-return and resolution of missing rent payments</div>
-    <div class="version">Version 1.44 &middot; 14 October 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.46 &middot; 31 October 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -140,7 +140,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Version</div>
-        <div class="qr-value">1.44</div>
+        <div class="qr-value">1.46</div>
       </div>
     </div>
   </div>
@@ -455,6 +455,15 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </tbody>
       </table>
 
+      <h4 style="margin-top:1.5rem;font-weight:700">On every row, except an agent-managed tenancy</h4>
+      <table class="label-table">
+        <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Moved out</strong></td><td>Default style</td><td>Use it once you know the tenant has left. It opens a box with the move-out date (today unless you change it; never a future date or one before the tenancy began), then reads the tenancy, its tenant, its unit and its tasks fresh from Airtable and lists exactly what will change. Anything doubtful shows under <strong>Check before you confirm</strong>, and you decide there. <strong>End tenancy</strong> then writes, in order, reading each change back: (1) the tenancy&rsquo;s <strong>Tenancy End Date</strong> = the move-out date and its <strong>Payment Status</strong> cleared (it keeps its unit link as history); (2) the tenant unlinked from the unit and marked <strong>Former</strong>, unless they still have another live tenancy with us, when they stay Active; (3) the unit set to <strong>Void</strong>, only when no other live tenancy sits on it (rows in the old legacy tenancies table do not count); (4) the tenancy&rsquo;s open tasks set to <strong>Cancelled</strong>, never deleted, each with a comment; (5) one dated comment on the tenancy listing every change. If a write fails, the box names the step and stops; nothing after it is written. If the records changed while the box was open, nothing is written. Not shown on an agent-managed tenancy: the agent keeps paying when the occupant leaves (ruling of 6 Aug 2026).</td></tr>
+        </tbody>
+      </table>
+
+
 
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
@@ -733,6 +742,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <table class="label-table">
         <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
         <tbody>
+          <tr><td><strong>1.46</strong></td><td>31 Oct 2026</td><td>Added the <strong>Moved out</strong> button to Section 8 (Kevin, 31 Oct 2026: when a cash flow void turns into a move-out, one click ends the tenancy and puts the records right). It runs the tenancy-ender safety gate in its box before anything is written.</td></tr>
           <tr><td><strong>1.44</strong></td><td>14 Oct 2026</td><td>Removed re-flagging (Kevin, 14 Oct 2026: a CFV or CFV Actioned tenancy is already a CFV and never needs confirming again). A CFV Actioned row now always shows &ldquo;In Payment&rdquo; and &ldquo;Move to CFV&rdquo;; moving it back when an expected payment is missed is your call, with Move to CFV. Rewrote Section 10, and removed the Re-flagged badge, its buttons, its audit comment and its localStorage key from Sections 4, 5, 7, 8, 11, 15 and 16.</td></tr>
           <tr><td><strong>1.35</strong></td><td>3 Sep 2026</td><td>Drift repair against the live code (findings 035, 055, 170, 171, 276). Rewrote Section 4: detection no longer waits 2 days after the due day and no longer asks whether a payment landed in the current calendar month. Both paths now run one payment check, described in full &mdash; no linked payment at all means unpaid, otherwise the cycle that is due (this month&rsquo;s once the due day has passed by 2 days, last month&rsquo;s until then) must have a payment dated within 5 days before its due day. The calendar-month rule is documented as the fallback it now is. Corrected the same wording in the lifecycle table, Section 6, the flow diagrams, the Transactions field table and troubleshooting. The 2-day tolerance is now described where it is really used: re-flagging and dismissal expiry. Removed the <strong>Chase</strong> column from the Section 7 table (it is gone from the page) and added the <strong>Last Payment</strong> column that replaced it; Section 9 now says the chase stage is computed but not shown. Added the dead <code>cfv_{id}_startDate</code> key to Section 15 and corrected the note that said clearing browser data resets Days Overdue.</td></tr>
           <tr><td><strong>1.34</strong></td><td>26 Aug 2026</td><td>Drift repair against the live code (findings 164&ndash;169, 172). Dismissals expire at the next rent due day + 2 days, not after 25 days, and are backed up as tagged Airtable comments that restore them on another device. Days Overdue is derived from the last reconciled payment with a 5-day early-pay window; the localStorage start date is gone. New section 13 documents the Rent Statements block and its live writes to the Transactions table. Corrected how the tab is opened (dashboard button, not a sidebar item) and where the badges render. Payment Status is PATCHed by NAME, so a renamed option is what breaks it. Added the <code>data.recordComments:write</code> scope; a failed comment now warns on screen instead of failing silently.</td></tr>

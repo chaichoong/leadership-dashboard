@@ -8,6 +8,18 @@ license: Complete terms in LICENSE.txt
 
 This skill automates the multi-table updates required to formally end a tenancy within the 'Operations Director' Airtable base. It ensures data consistency across linked records.
 
+## The button does this now (Kevin, 31 Oct 2026)
+
+A tenancy listed on the Cash Flow Voids page is ended with that row's **Moved out** button
+(`cfvMovedOut` in `js/cfv.js`). It runs the gate below in its box, writes every step with a
+read-back, and leaves one dated comment on the tenancy. Point Kevin at the button rather than
+ending such a tenancy by hand. Use this skill by hand only for a tenancy that is not on that page.
+
+Where the button differs from the steps further down, the button is the rule: it **cancels** the
+tenancy's open tasks (never deletes them), keeps a tenant who still has another live tenancy
+Active, and ignores the unit's `Tenancies copy` link (the dead legacy table, whose rows still read
+"Live").
+
 ## SAFETY GATE: run before ANY write (added 18 Sep 2026)
 
 This skill sets a rental unit to `Void`. On 18 Sep 2026 it was run for a former tenant
