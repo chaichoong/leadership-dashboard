@@ -25,7 +25,7 @@
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.156', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.85', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.198', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
-        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.45', sopFile: 'sop-cfvs.html',               sopVer: '1.46', standalone: 'index.html#cfv' },
+        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.46', sopFile: 'sop-cfvs.html',               sopVer: '1.46', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         // Wardrobe (Leadership, 27 Oct 2026): clothes, spring buys and the clear-out. Its "What to wear today" card sits at the top of My Dashboard.
         { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.11', sopFile: 'sop-wardrobe.html',           sopVer: '1.11', standalone: 'index.html#wardrobe' },
