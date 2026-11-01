@@ -60,7 +60,9 @@ def two_clip_day(ep_text, ep_captions, te_text, api=False, seed=None, ep_srt=Non
         srt = os.path.join(workdir, "transcript.srt"); open(srt, "w").write(cues(said))
         return t, srt
 
-    def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
+    # cut_at since 1 Nov 2026: the jingle cut Kevin gave on a sent-back card, which the real
+    # build_outputs takes and lets override the pause detector (findings 973 and 1077).
+    def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode", cut_at=None):
         kinds = ["summary"] if role == "teaser" else ["full", "full_yt", "podcast", "full_srt"]
         paths = {k: os.path.join(workdir, NAMES[k]) for k in kinds}
         for k, p in paths.items(): open(p, "w").write(cues(ep_captions) if k == "full_srt" else "media")

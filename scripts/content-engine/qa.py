@@ -78,6 +78,34 @@ def caption_text(srt_path):
     except Exception: return ""
 
 
+FPS_TOLERANCE = 0.05         # 29.97 probes as 29.97 either side; anything beyond this is a resample
+
+
+def frame_rate_check(ep):
+    """(ok, hard, detail) for 'frame rate held': the delivered episode must come out at the rate it went in at.
+
+    Findings 20261016-phase-3-937, 20261017-phase-3-960, 20261023-phase-3-1052 and 20261025-phase-3-1075. Kevin
+    reported the same thing four times: stabilisation was good around the 2080s episodes and has got jolty since.
+    The cause was a forced 24 fps output on 29.97 fps clips, which drops frames on an uneven 5:4 cadence. 2099,
+    2100 and 2106 all shipped that way and all passed this gate, because the line here was a hardcoded True that
+    ASSERTED "rendered at 24" instead of measuring anything. A quality regression no check measures is a
+    regression nobody finds until Kevin watches it.
+
+    A day with no measurement is NOT a pass dressed up as one: it says it was not measured, and stays soft, the
+    way the horizon report does for days rendered before the stabiliser wrote one."""
+    src, out = ep.get("source_fps"), ep.get("render_fps")
+    if not src and not out:
+        return False, False, "not measured (rendered before 1 Nov 2026)"
+    if not out:
+        return False, False, "source %s fps; the delivered rate was NOT measured, so a resample cannot be ruled out" % src
+    if not src:
+        return False, False, "delivered at %s fps; the source rate was NOT measured, so a resample cannot be ruled out" % out
+    gap = abs(float(out) - float(src))
+    return (gap <= FPS_TOLERANCE, True,
+            "source %s fps, delivered %s fps%s" % (src, out, "" if gap <= FPS_TOLERANCE else
+                                                   " — resampled by %.3f fps, which reads as stabilisation judder" % gap))
+
+
 def ledger_entries(day, ledger):
     ep = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode"]
     te = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "teaser"]
@@ -177,6 +205,12 @@ def checks(day, ledger=None, files=None):
     add("full episode file", d_full > 30, True, "%.0f s" % d_full)
     add("clean YouTube full", d_yt > 30 and abs(d_yt - d_full) < 1.5, True, "%.0f s vs %.0f s" % (d_yt, d_full))
     add("jingle in the full episode", d_full - d_pod >= JINGLE_MIN_S if d_pod else False, True, "full is %.1f s longer than the podcast (jingle 7.0 s)" % (d_full - d_pod))
+    # Where the jingle went, and whose number put it there. 2100 bounced three nights and 2113 once more with a
+    # figure in the note that nothing acted on, so the card now says plainly which it used.
+    if ep.get("intro_at") is not None:
+        by = ep.get("intro_at_by")
+        add("jingle position", True, False, "at %s (%s)" % (mmss(ep["intro_at"]),
+            "the figure on your card" if by == "operator" else "found by the pause detector" if by == "detector" else "provenance not recorded"))
     add("podcast audio", d_pod > 30, True, "%.0f s" % d_pod)
     cues = cue_count(files.get("full_srt", ""))
     add("caption file for YouTube", cues >= MIN_CUES_PER_MINUTE * max(d_full, 60) / 60, True, "%d cues" % cues)
@@ -212,8 +246,7 @@ def checks(day, ledger=None, files=None):
         add("horizon level", worst <= HORIZON_MAX_DEG and (early is None or early <= HORIZON_MAX_DEG * 2), True, "off gravity by " + ", ".join("%s s: %.1f deg" % (k, v) for k, v in sorted(hz.items(), key=lambda kv: float(kv[0]))))
     else:
         add("horizon level", False, False, "no settle report from the stabiliser (rendered before 10 Sep 2026)")
-    fps = ep.get("source_fps")
-    add("frame rate handled", True, False, "source %s fps, rendered at 24" % (fps if fps else "unknown"))
+    add("frame rate held", *frame_rate_check(ep))
     if te:
         add("teaser title", (te.get("title") or "") != GENERIC_TITLE, True, "banner reads %s" % (te.get("title") or "?").replace("|", " / "))
         add("teaser file", seconds(files.get("summary", "")) > 10, True, "%.0f s" % seconds(files.get("summary", "")))
@@ -336,7 +369,32 @@ def selftest():
     led10 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25], lfmd_window_by="operator")}
     assert not gate(9, led10, files)[0], "a hand-placed early window is still judged on its share until someone accepts it"
     assert card_lines([("a", "b")], [("c", "d")])[1:] == ["- a: b", "- FAILED c: d"]
-    shutil.rmtree(tmp); print(json.dumps({"checks": 11, "failed": []}))
+    # 'frame rate held' (findings 937, 960, 1052, 1075). The 29.97 -> 24 resample that made 2099, 2100 and 2106
+    # jolty passed the old line because it was a hardcoded True. These drive the real check.
+    assert frame_rate_check({"source_fps": 29.97, "render_fps": 29.97})[:2] == (True, True)
+    assert frame_rate_check({"source_fps": 24.0, "render_fps": 23.976})[:2] == (True, True), "probe rounding is not a resample"
+    bad = frame_rate_check({"source_fps": 29.97, "render_fps": 24.0})
+    assert bad[0] is False and bad[1] is True and "judder" in bad[2], bad
+    for part in ({"source_fps": 29.97}, {"render_fps": 29.97}, {}):
+        r = frame_rate_check(part)
+        assert r[0] is False and r[1] is False and "not measured" in r[2].lower(), (part, r)
+    # and through the whole gate: 2106's real numbers REFUSE the card, a matched pair does not.
+    led11 = {"a full.insv": dict(led["a full.insv"], source_fps=29.97, render_fps=24.0)}
+    ok, fails, _ = gate(9, led11, files)
+    assert not ok and [n for n, _ in fails] == ["frame rate held"], fails
+    led12 = {"a full.insv": dict(led["a full.insv"], source_fps=29.97, render_fps=29.97)}
+    assert gate(9, led12, files)[0], gate(9, led12, files)[1]
+    # a day with no measurement is reported as unmeasured and does not block (back-test: make it hard and led's
+    # own fixture, which has no render_fps, stops passing above)
+    assert gate(9, led, files)[0], "an unmeasured day is held soft, not refused"
+    assert any(n == "frame rate held" and "not measured" in d.lower() for n, _, _, d in checks(9, led, files)), checks(9, led, files)
+    # the jingle's provenance on the card (findings 973, 1077)
+    led13 = {"a full.insv": dict(led["a full.insv"], intro_at=26.0, intro_at_by="operator")}
+    assert any(n == "jingle position" and "0:26" in d and "the figure on your card" in d for n, _, _, d in checks(9, led13, files))
+    led14 = {"a full.insv": dict(led["a full.insv"], intro_at=33.0, intro_at_by="detector")}
+    assert any(n == "jingle position" and "pause detector" in d for n, _, _, d in checks(9, led14, files))
+    assert not any(n == "jingle position" for n, _, _, _ in checks(9, led, files)), "no recorded cut, no claim about one"
+    shutil.rmtree(tmp); print(json.dumps({"checks": 15, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Usage:
   render.py one CLIP.insv --day N [--out DIR] # render a clip by hand (no Airtable, no Drive)
   render.py selftest
 """
-import argparse, datetime as dt, json, os, re, shutil, subprocess, sys, tempfile, time, urllib.parse
+import argparse, datetime as dt, json, math, os, re, shutil, subprocess, sys, tempfile, time, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -155,6 +155,45 @@ def find_pause(video, segments, duration=None):
     got = quiet_point(video, w0, w1)
     if got: return got
     return round(w0, 2), round(w1, 2)
+
+
+CUT_OVERRIDE_MAX_S = 300.0      # the jingle goes in the cold open; a figure past 5 minutes is a typo, not a timestamp
+
+
+def check_cut_override(at, duration, day):
+    """Kevin's own jingle timestamp, checked before it is rendered at. Raises SystemExit naming what is wrong.
+
+    Findings 20261018-ceo-memory-sweep-973 and 20261025-phase-3-1077. find_pause() is deterministic, so a day
+    sent back for the jingle landing in the wrong place re-renders to exactly the same cut: 2100 came back three
+    nights running (15, 16, 17 Oct 2026) and 2113 again on 25 Oct, each time with a figure in the note that
+    nothing could act on. This is the door for that figure. It is held to bounds the way check_lfmd_window holds
+    a hand-read Learnings window, so a typo can never put the jingle outside the episode."""
+    try:
+        want = float(at)
+    except (TypeError, ValueError):
+        raise SystemExit("episode %s: the jingle cut %r is not a number of seconds" % (day, at))
+    if not math.isfinite(want):
+        raise SystemExit("episode %s: the jingle cut %r is not a finite number of seconds" % (day, at))
+    if want < 0:
+        raise SystemExit("episode %s: a jingle cut of %.2f s is before the start of the episode" % (day, want))
+    if want > CUT_OVERRIDE_MAX_S:
+        raise SystemExit("episode %s: a jingle cut of %.2f s is past the %.0f s cold open, so it is a typo, not a "
+                         "timestamp" % (day, want, CUT_OVERRIDE_MAX_S))
+    if duration and want > duration - 2.0:
+        raise SystemExit("episode %s: a jingle cut of %.2f s leaves under 2 s of a %.1f s episode after it"
+                         % (day, want, duration))
+    return round(want, 2)
+
+
+def cut_with_override(at, resume, override, duration, day):
+    """(cut, resume, how). Kevin's figure wins over the detector and keeps the gap length the detector measured,
+    so the podcast still has the same pause taken out of it. 'how' goes on the ledger and on his card, because a
+    cut nobody can tell the provenance of is the thing that let this bounce four times."""
+    if override is None or override == "":
+        return at, resume, "detector"
+    want = check_cut_override(override, duration, day)
+    gap = max(0.0, round(float(resume or 0.0) - float(at or 0.0), 2))
+    return want, round(want + gap, 2), "operator"
 
 
 def clip_caption_at(srt_text, at):
@@ -645,6 +684,8 @@ def horizon_for(masters):
 
 
 def source_fps(clip):
+    """A media file's frame rate from ffprobe, or None. Used for the source clip AND for the delivered episode,
+    because the only way to know the rate held is to measure the file that goes out."""
     try:
         r = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", clip],
                            capture_output=True, text=True, timeout=60).stdout.strip().split("\n")[0]
@@ -869,7 +910,7 @@ def overlay(ov, args, what):
         raise RuntimeError("overlays %s failed for %s (exit %d)\n%s" % (args[0], what, r.returncode, tail))
 
 
-def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
+def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode", cut_at=None):
     ov = os.path.join(HERE, "overlays.py")
     caps = os.path.join(workdir, "captions.srt")
     overlay(ov, ["captions", srt, caps], "episode %s" % day)
@@ -895,7 +936,9 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     # share one segment, so only the chunks can put the cut in Kevin's gap (10 Sep 2026)
     cap_segs = srt_segments(open(caps).read())
     at, resume = find_pause(masters["16:9"], cap_segs, srt_segments(open(srt).read())[-1][1])
-    LAST_CUT.update({"at": at, "resume": resume})
+    at, resume, cut_by = cut_with_override(at, resume, cut_at, media_seconds(masters["16:9"]), day)
+    if cut_by == "operator": print("intro: jingle cut taken from the figure on the card: %.2f s" % at)
+    LAST_CUT.update({"at": at, "resume": resume, "by": cut_by})
     clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
     with open(caps, "w") as fh: fh.write(clipped)
     check_captions(caps, "episode %s full" % day)
@@ -1104,10 +1147,16 @@ def process(key, ledger, keep=False):
         if how == "claude" and l1: title = (l1 + "|" + l2).upper()
     if role == "teaser":
         title = episode_title_for(day, ledger) or title      # the long clip's title on the teaser banner (Kevin, 10 Sep 2026)
-    paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
+    paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role, cut_at=e.get("intro_at_override"))
     e["horizon"] = horizon_for(masters) or e.get("horizon_part1"); e["source_fps"] = source_fps(clip)
+    # The rate the episode is ACTUALLY delivered at, measured off the file, not assumed. Findings
+    # 20261016-phase-3-937, 20261017-phase-3-960, 20261023-phase-3-1052 and 20261025-phase-3-1075: forcing 24 fps
+    # on a 29.97 fps clip resampled on an uneven 5:4 cadence and read as stabilisation judder, and 2099, 2100 and
+    # 2106 all shipped and all passed the gate, because nothing measured it. stab.py pins the rate to the source
+    # now (fps_for), and this is the number that proves it held.
+    e["render_fps"] = source_fps(paths.get("full") or masters.get("16:9") or "")
     if role == "episode":
-        e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
+        e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume"); e["intro_at_by"] = LAST_CUT.get("by")
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"), role)
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
@@ -1250,6 +1299,42 @@ def feedback_points(feedback):
 LEARN_RE = re.compile(r"learn|diary|dairy|lfmd", re.I)       # a point about the Learnings from my diary clip (2060, 17 Sep 2026)
 SHOW_NAME_RE = re.compile(r"diary of (?:a |the )?r\w*(?:\s+p\w*)?", re.I)   # "Diary of a Runpreneur" (whisper: "Ron Prenner") is the show, not the clip
 BULLET_RE = re.compile(r"^\s*(?:[-*•]+|\d+[.)])\s+")
+
+
+JINGLE_RE = re.compile(r"jingle|intro\s+(?:music|sound|clip|sting)", re.I)
+# "at 26 seconds", "at about 33 seconds". The preposition is required: "I leave a pause after the intro of maybe
+# 5 seconds" and "look for that 5-second pause" describe the PAUSE's length, not where the cut goes, and both are
+# in the notes that bounced 2100 three nights running.
+CUT_AT_RE = re.compile(r"\bat\s+(?:about\s+|around\s+|roughly\s+|approximately\s+)?"
+                       r"(\d{1,3}(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b)", re.I)
+CUT_FROM_NOTE_MIN_S = 8.0     # a cut inside the first 8 s is the "jingle leads the episode" case, never a typed figure
+
+
+def about_jingle(point):
+    """Whether one point of Kevin's note is about where the intro jingle goes."""
+    return bool(JINGLE_RE.search(point or ""))
+
+
+def jingle_cut_from(feedback):
+    """(about, seconds) read off a sent-back card: whether Kevin's note has a point about the jingle, and the
+    timestamp he gave for it, or None when he gave none.
+
+    Findings 20261018-ceo-memory-sweep-973 and 20261025-phase-3-1077. He gave a figure on 2100 ("about 33
+    seconds") and on 2113 ("at 26 seconds") and nothing could act on either, so each redo re-rendered the same
+    cut and the card came straight back. Two different figures in one note is NOT guessed at: it returns None and
+    the detector runs, because a wrong cut asserted from a guess is the thing that bounced four times."""
+    text = feedback or ""
+    if not any(about_jingle(pt) for pt in feedback_points(text)): return False, None
+    # Once ANY point names the jingle, the figure is looked for across the WHOLE note, not inside that point:
+    # feedback_points splits on sentences, and on 2100 he put the complaint in one sentence ("still in the wrong
+    # place") and the figure in the next ("it should appear at about 33 seconds"). Scoping the search to the
+    # sentence with the word "jingle" in it found neither figure he gave.
+    found = set()
+    for m in CUT_AT_RE.finditer(text):
+        v = float(m.group(1))
+        if v >= CUT_FROM_NOTE_MIN_S: found.add(round(v, 2))
+    if len(found) != 1: return True, None
+    return True, found.pop()
 
 
 def about_learnings(point):
@@ -1414,6 +1499,27 @@ def redo_requested(path=None):
                                         "the episode's captions for the spoken 'learnings from my diary' line (render.lfmd_window) and found none." % day, code=finder_code())
                 except (Exception, SystemExit) as bx:
                     print("redo: episode %d not blocked for the fixer lane (%s)" % (day, str(bx)[-200:]), file=sys.stderr)
+
+
+def set_cut(day, at=None, clear=False, ledger=None, save=None):
+    """Record (or drop) Kevin's own jingle timestamp for a day, so the next render puts it there.
+
+    The figure is checked NOW against the episode's measured length, so a typo is refused at the keyboard rather
+    than at 02:00 in the middle of the night's render."""
+    ledger = ledger if ledger is not None else watch.load_ledger()
+    keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
+    if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
+    e = ledger[keys[0]]
+    if clear:
+        had = e.pop("intro_at_override", None)
+        (save or watch.save_ledger)(ledger)
+        print("episode %d: jingle cut back to the detector (was %s)" % (day, had))
+        return None
+    want = check_cut_override(at, e.get("duration"), day)
+    e["intro_at_override"] = want
+    (save or watch.save_ledger)(ledger)
+    print("episode %d: jingle cut set to %.2f s; re-render it (render.py redo --day %d)" % (day, want, day))
+    return want
 
 
 def redo_full(day, keep=False):
@@ -1717,6 +1823,7 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         raise SystemExit("episode %d: the card is not sent back (verdict %r); redo-day works only a card Kevin sent back" % (day, card.get("verdict")))
     text = open(receipt_path).read()
     points, lines = feedback_points(card.get("feedback", "")), receipt_lines(text)
+    about, cut_s = jingle_cut_from(card.get("feedback", ""))
     if not lines or len(lines) < len(points):
         raise SystemExit("episode %d: the receipt answers %d point(s) but Kevin made %d; one '- <his point> → <what changed>' line each"
                          % (day, len(lines), len(points)))
@@ -1745,6 +1852,12 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         if e.get("status") == "failed":
             for f in RESET_STALE: e.pop(f, None)
         if hand: e["lfmd_window_keep"] = hand
+        # The jingle figure Kevin gave on THIS note, acted on rather than read and dropped. A jingle point with no
+        # figure drops any stored one, so the detector gets another go instead of repeating the cut he just
+        # rejected (2100, sent back 15, 16 and 17 Oct 2026 for the same cut).
+        if e.get("role") == "episode" and about:
+            if cut_s is None: e.pop("intro_at_override", None)
+            else: e["intro_at_override"] = check_cut_override(cut_s, e.get("duration"), day)
         e["status"] = "new"; e["reset"] = note
     watch.save_ledger(ledger)
     os.makedirs(root, exist_ok=True)
@@ -2318,7 +2431,64 @@ def selftest():
                  "the learnings from an hour of running are",
                  "I will learn from our hours of work"):
         assert lfmd_window([(0, 5, text), (30, 40, "see you tomorrow")]) is None, "must not match: " + text
-    print(json.dumps({"checks": 74, "failed": []}))
+    # The jingle cut Kevin gives on a sent-back card (findings 20261018-ceo-memory-sweep-973 and
+    # 20261025-phase-3-1077). 2100 came back three nights running and 2113 once more, each with a figure in the
+    # note; find_pause is deterministic, so every redo put the jingle in the same wrong place.
+    assert check_cut_override(26.0, 600.0, 2113) == 26.0
+    assert check_cut_override("33", 600.0, 2100) == 33.0, "a figure typed off the card is read as a number"
+    for bad, why in ((None, "not a number"), ("later", "not a number"), (float("nan"), "not finite"),
+                     (-1.0, "before the start"), (400.0, "past the cold open"), (599.5, "under 2 s left")):
+        try:
+            check_cut_override(bad, 600.0, 2113); raise AssertionError("must refuse: " + why)
+        except SystemExit as exc:
+            assert "2113" in str(exc), str(exc)
+    # the measured gap length is kept, so the podcast still has the same pause taken out
+    assert cut_with_override(41.2, 43.7, 26.0, 600.0, 2113) == (26.0, 28.5, "operator")
+    assert cut_with_override(41.2, 43.7, None, 600.0, 2113) == (41.2, 43.7, "detector"), "no figure, the detector stands"
+    assert cut_with_override(41.2, 43.7, "", 600.0, 2113)[2] == "detector", "a blank figure is not a figure"
+    # the door that stores it, and the one that takes it away again
+    led = {"c.insv": {"episode": 2113, "role": "episode", "duration": 600.0}}
+    saved = []
+    import contextlib as _cl, io as _io
+    with _cl.redirect_stdout(_io.StringIO()):     # set_cut tells the operator what it did; the selftest's stdout is JSON
+        assert set_cut(2113, at="26", ledger=led, save=lambda l: saved.append(1)) == 26.0
+        assert led["c.insv"]["intro_at_override"] == 26.0 and saved == [1]
+        assert set_cut(2113, clear=True, ledger=led, save=lambda l: saved.append(1)) is None
+        assert "intro_at_override" not in led["c.insv"], led
+        for bad_day, bad_at, why in ((2113, "900", "a typo is refused at the keyboard"), (9999, "26", "an unknown day is refused")):
+            try:
+                set_cut(bad_day, at=bad_at, ledger=led, save=lambda l: saved.append(1)); raise AssertionError(why)
+            except SystemExit as exc:
+                assert str(bad_day) in str(exc), str(exc)
+    # build_outputs must actually ASK for the stored figure, and the episode path must pass it: a door nothing
+    # walks through is the bug these findings describe. Back-test by dropping cut_at= from the call at the
+    # episode branch; this assertion then fails.
+    import inspect as _i4
+    bo = _i4.getsource(build_outputs)
+    assert "cut_with_override(at, resume, cut_at" in bo, "the stored figure must override the detector's cut"
+    pr2 = _i4.getsource(process)
+    assert 'cut_at=e.get("intro_at_override")' in pr2, "the episode render must pass the stored figure"
+    assert 'e["render_fps"] = source_fps(' in pr2, "the delivered frame rate must be measured onto the ledger"
+    # Kevin's own words off the 2100 and 2113 cards. The figures he GAVE are taken; the figures that describe the
+    # PAUSE's length are not, because taking a 5 there is how a note about the jingle puts the jingle at 5 s.
+    assert jingle_cut_from("The intro jingle should happen at 26 seconds of the full episode. It is still not in the right place.") == (True, 26.0)
+    assert jingle_cut_from("The jingle is still in the wrong place. It should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.") == (True, 33.0)
+    assert jingle_cut_from("The jingle still in the wrong place. I leave a pause after the intro of maybe 5 seconds.") == (True, None), "a pause length is not a cut point"
+    assert jingle_cut_from("The jingle needs to wait until the pause.") == (True, None), "a jingle point with no figure drops any stored one"
+    assert jingle_cut_from("The Learnings clip is the wrong section.") == (False, None), "no jingle point, nothing to act on"
+    assert jingle_cut_from("") == (False, None) and jingle_cut_from(None) == (False, None)
+    # two different figures in one note is refused, not averaged or picked
+    assert jingle_cut_from("The jingle should be at 26 seconds. Actually the jingle belongs at 31 seconds.") == (True, None)
+    assert jingle_cut_from("The jingle should be at 26 seconds, so at 26 s please.") == (True, 26.0), "the same figure twice is one figure"
+    assert about_jingle("the intro music is late") and about_jingle("JINGLE") and not about_jingle("the thumbnail is wrong")
+    # redo_day must actually act on it. Back-test by deleting the intro_at_override branch there; this fails.
+    import inspect as _i5
+    rd = _i5.getsource(redo_day)
+    assert 'jingle_cut_from(card.get("feedback"' in rd and 'e["intro_at_override"] = check_cut_override(' in rd, \
+        "a sent-back jingle figure must reach the ledger, or the night re-renders the same cut"
+    assert 'e.pop("intro_at_override", None)' in rd, "a jingle point with no figure must drop a stored one"
+    assert "intro_at_override" not in RESET_STALE, "his figure must survive a failed-clip reset"
+    print(json.dumps({"checks": 95, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -2328,6 +2498,8 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=1); ap.add_argument("--keep", action="store_true")
     ap.add_argument("--receipt", default=""); ap.add_argument("--why", default="")
     ap.add_argument("--window", default="", help="START-END in seconds: the Learnings section read off the captions by hand, for redo --only lfmd")
+    ap.add_argument("--at", default="", help="seconds: where the jingle goes on this episode, from Kevin's own note (render.py cut)")
+    ap.add_argument("--clear", action="store_true", help="render.py cut: drop the stored figure and let the detector choose again")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
@@ -2341,6 +2513,9 @@ if __name__ == "__main__":
     elif a.mode == "redo-requested": redo_requested()
     elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
+    elif a.mode == "cut":
+        if not a.day or not (a.at or a.clear): raise SystemExit('usage: render.py cut --day N --at 26.0   (or --clear)')
+        set_cut(a.day, at=(a.at or None), clear=a.clear)
     elif a.mode == "resubmit-ready": resubmit_ready()
     elif a.mode == "queue-sent-back": print(json.dumps(queue_sent_back()))
     elif a.mode == "redo-day":
