@@ -125,6 +125,18 @@ def tenancy(i, due, rent, status="In Payment", start="2025-04-10", tenant="recT_
 # "paid short" and five tests failed from 27 Oct 2026 to the month end.
 def paid(tid, day, amount, account="recA_main"):
     return rec("tx_" + tid + day, {TX["date"]: day, TX["tenancy"]: [tid], TX["amount"]: amount, TX["account"]: [account]})
+# Every cycle the engine could weigh today, paid in full. A case about a payment plan, a text alarm or a
+# benefit cap must not turn red because of the DAY OF THE MONTH, and a single payment on the 1st
+# does exactly that: on the 1st (and for TOLERANCE_DAYS after) judge() steps its judged cycle back a month,
+# because this month's rent is not overdue yet, and the cycle it then weighs had no payment in the fixture.
+# All 20 tenancies read "paid short £0.00 of £500.00" and five cases went red on 1 Nov 2026. Paying the
+# last three cycles leaves the newest payment, and so every verdict under test, exactly as it was.
+def paid_up(tid, today, amount, cycles=3, account="recA_main"):
+    out, d = [], today.replace(day=1)
+    for _ in range(cycles):
+        out.append(paid(tid, d.isoformat(), amount, account))
+        d = (d - timedelta(days=1)).replace(day=1)
+    return out
 def waiting(day, amount, account="recA_main"):
     return rec("txU" + day, {TX["date"]: day, TX["amount"]: amount, TX["account"]: [account]})
 def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None, lateBefore=(), noChase=()):
@@ -427,7 +439,7 @@ print(json.dumps({"small": out}))`);
     const r = py(`
 rows = []
 today = rc.today_london()
-rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(5)], [paid("rec%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(5)], day=today)
+rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(5)], [tx for i in range(5) for tx in paid_up("rec%02d" % i, today, 500)], day=today)
 rc.write_row = lambda status, text, payload, now: rows.append([status, payload])
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
@@ -527,7 +539,7 @@ print(json.dumps({"code": code, "rows": len(rows), "hasLights": "lights" in rows
     const r = py(`
 rows = []
 today = rc.today_london()
-rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(20)], [paid("rec%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)],
+rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(20)], [tx for i in range(20) for tx in paid_up("rec%02d" % i, today, 500)],
                             day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 rc.append_history = lambda *a, **k: None
@@ -1232,7 +1244,7 @@ print(json.dumps({"on": [live["on"], built["on"], building["on"], paused["on"]],
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [tx for i in range(20) for tx in paid_up("recG%02d" % i, today, 500)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 def unread(): raise RuntimeError("control failed: the Cash Flow Voids register row could not be read")
 rc.read_task_state = unread
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
@@ -1254,7 +1266,7 @@ print(json.dumps({"code": code, "status": rows[0][0], "laneB": line("New-tenant 
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [tx for i in range(20) for tx in paid_up("recG%02d" % i, today, 500)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 line = lambda n, start: next(l for l in rows[n][1].splitlines() if l.startswith(start))
@@ -1276,7 +1288,7 @@ print(json.dumps({"codes": [calm, broken], "status": [rows[0][0], rows[1][0]], "
 rows, prints = [], []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [tx for i in range(20) for tx in paid_up("recG%02d" % i, today, 500)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
 line = lambda n: next(l for l in rows[n][1].splitlines() if l.startswith("Text check"))
@@ -1306,7 +1318,7 @@ print(json.dumps({"codes": [quiet, flagged, blind], "status": [x[0] for x in row
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [tx for i in range(20) for tx in paid_up("recG%02d" % i, today, 500)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
 line = lambda n: next(l for l in rows[n][1].splitlines() if l.startswith("Proof of residency"))
@@ -1336,7 +1348,7 @@ print(json.dumps({"codes": [quiet, holding, blind], "status": [x[0] for x in row
 rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
-rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.replace(day=1).isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.load = lambda day: world(ts, [tx for i in range(20) for tx in paid_up("recG%02d" % i, today, 500)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
 rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
 line = lambda n, start: next(l for l in rows[n][1].splitlines() if l.startswith(start))

@@ -18,7 +18,10 @@ describe('content-engine render', () => {
     // 68 since 7 Oct 2026: the hand-read Learnings window (check_lfmd_window) and the redo list's
     // optional @start-end (redo_line) are driven in there, not grepped. The floor rises with them so
     // deleting those cases goes red instead of quietly shrinking the count.
-    expect(out.checks).toBeGreaterThanOrEqual(74);
+    // 95 since 1 Nov 2026: the jingle cut Kevin gives on a sent-back card (check_cut_override,
+    // cut_with_override, jingle_cut_from, set_cut) is driven in there too — findings
+    // 20261018-ceo-memory-sweep-973 and 20261025-phase-3-1077, four bounces on 2100 and 2113.
+    expect(out.checks).toBeGreaterThanOrEqual(95);
   });
 
   // 15 Oct 2026, finding 20261015-phase-3-888: day 2106 held two short recordings. Both were
