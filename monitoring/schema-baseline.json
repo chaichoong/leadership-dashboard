@@ -18040,6 +18040,10 @@
     "name": "Previous Assignee",
     "type": "singleCollaborator"
    },
+   "fldneMJ082y1ij6zz": {
+    "name": "Back At",
+    "type": "dateTime"
+   },
    "fldntrk4LSi0co4Qg": {
     "name": "Team Member (from Business Assignments)",
     "type": "multipleLookupValues"
@@ -18290,6 +18294,47 @@
    }
   },
   "name": "Tasks"
+ },
+ "tblqGdFI6VUH1wUdq": {
+  "fields": {
+   "fld4iO9GEkFP0nR4z": {
+    "name": "Previous worn",
+    "type": "date"
+   },
+   "fld6mmKM5Nw7jz3lC": {
+    "name": "Option",
+    "type": "singleSelect"
+   },
+   "fldFgSJztt3TCKoEp": {
+    "name": "Plan ID",
+    "type": "singleLineText"
+   },
+   "fldKIzCbsNESKdwd0": {
+    "name": "Order",
+    "type": "number"
+   },
+   "fldKVSBHfcHN0U7mW": {
+    "name": "Why",
+    "type": "singleLineText"
+   },
+   "fldLpZormElc2HJ3s": {
+    "name": "Name",
+    "type": "singleLineText"
+   },
+   "fldyXeckfm9O39d7o": {
+    "name": "Items",
+    "type": "multipleRecordLinks"
+   },
+   "fldyl27uPPhXH7LkL": {
+    "name": "Last worn",
+    "type": "date"
+   },
+   "fldz3FqdChXD0ZRK5": {
+    "name": "Season",
+    "type": "singleSelect"
+   }
+  },
+  "name": "Outfits"
  },
  "tblqgWSgryV2FrbS9": {
   "fields": {
@@ -20734,6 +20779,91 @@
    }
   },
   "name": "Costs"
+ },
+ "tblxcSDis9Tl1dFge": {
+  "fields": {
+   "fld44tZ76VsKRH0Db": {
+    "name": "Swatch",
+    "type": "singleLineText"
+   },
+   "fld7VonuseNOhkCcw": {
+    "name": "Layer role",
+    "type": "singleSelect"
+   },
+   "fld8Z9QI5pP97cymY": {
+    "name": "Status",
+    "type": "singleSelect"
+   },
+   "fld8nX4U5pVybs2lG": {
+    "name": "Outfits",
+    "type": "multipleRecordLinks"
+   },
+   "fldBDNIOVC0VFkQjR": {
+    "name": "Wears since wash",
+    "type": "number"
+   },
+   "fldEvjSCyCQ1NLdWj": {
+    "name": "Buy in",
+    "type": "singleLineText"
+   },
+   "fldFSQswPqxR2OvED": {
+    "name": "Plan ID",
+    "type": "singleLineText"
+   },
+   "fldG9hxGddp8ijUwW": {
+    "name": "Name",
+    "type": "singleLineText"
+   },
+   "fldIrdIdrYXKvhktk": {
+    "name": "Reason",
+    "type": "singleLineText"
+   },
+   "fldZZULHcZYAFLEEl": {
+    "name": "Notes",
+    "type": "multilineText"
+   },
+   "fldbA3Yql3NAjdUAq": {
+    "name": "Colour",
+    "type": "singleLineText"
+   },
+   "fldc0Wa3pND9EbAI2": {
+    "name": "Last worn",
+    "type": "date"
+   },
+   "fldfjRleBvHsIbJyl": {
+    "name": "In wash since",
+    "type": "date"
+   },
+   "fldnUA7o3eR62r1FW": {
+    "name": "Type",
+    "type": "singleSelect"
+   },
+   "fldoYeCu7oAqgPZd8": {
+    "name": "Action",
+    "type": "singleSelect"
+   },
+   "fldqINoZ665Tdmb0V": {
+    "name": "Used for",
+    "type": "multipleSelects"
+   },
+   "fldqoYAnlsITO1GLt": {
+    "name": "Previous worn",
+    "type": "date"
+   },
+   "fldqyRbEeDxDKUupb": {
+    "name": "Cap",
+    "type": "singleLineText"
+   },
+   "fldv8kF8yd4CXtB4u": {
+    "name": "Wash every",
+    "type": "number"
+   },
+   "fldyJNcbQ1Ktgqho0": {
+    "name": "Twin group",
+    "type": "singleLineText"
+   }
+  },
+  "name": "Wardrobe"
  },
  "tblxnBxgD9pzLlvgl": {
   "fields": {
