@@ -99,6 +99,56 @@ def build_plan(post_url, text, test):
             "mode": "test" if test else "live"}
 
 
+# WHETHER SHARE WAS EVER PRESSED (finding 20261102-phase-3-1164)
+# -----------------------------------------------------------------------------
+# A failed share is final, because the robot must not press Share a third time
+# (review, 15 Sep 2026). That rule assumes the press happened. It did not when
+# the run died WAITING for the Share control: build_plan's second step is a
+# plain wait on SHARE_BUTTON and nothing has been clicked yet, so there is no
+# double-press to guard against. Treating that as final cost 37 shares: the
+# selector went stale on 19 Oct 2026, every share died on that wait, each one
+# was written off as final, and when the selector was fixed on 25 Oct the
+# backlog stayed written off while every new episode shared cleanly. Eight days
+# later the publish log still reprinted the old failures and read as a live
+# outage (this finding). A wait that never found its control is retryable.
+_SHARE_WAIT_RE = re.compile(r"to be visible|waiting for (?:locator|selector)|Timeout \d+ *ms exceeded", re.I)
+# Anything that can only be reached AFTER the click: a failure naming one of
+# these may have pressed Share, so it stays final.
+_AFTER_CLICK = ("Share now", "share now", "role='dialog'", 'role="dialog"', "contenteditable", "role='textbox'")
+
+
+def share_control_never_pressed(error):
+    """True when this failure happened while WAITING for the reel's own Share control, so Share
+    was never clicked and pressing it next run cannot share twice. Unreadable, empty or anything
+    naming the share dialog reads False: final is the safe answer, and this only ever widens the
+    retry door, never the press."""
+    text = " ".join(str(error or "").split())
+    if not text:
+        return False
+    if any(m in text for m in _AFTER_CLICK):
+        return False
+    if not _SHARE_WAIT_RE.search(text):
+        return False
+    # The label the wait was on. The error carries the selector, which always names Share.
+    return "Share" in text or "share" in text
+
+
+def _selftest_share_control():
+    # The live failure, as the 2 Nov publish log recorded it (head of the message, 19 Oct rule).
+    live = ("Share\']') to be visible | at runSteps (/Users/x/scripts/agent-browser.js:1233:31) "
+            "at async /Users/x/scripts/agent-browser.js:3403:13")
+    assert share_control_never_pressed(live), live
+    assert share_control_never_pressed("page.waitForSelector: Timeout 20000ms exceeded. waiting for "
+                                       "locator('[aria-label=\"Share\"]') to be visible")
+    # After the click: never retried.
+    assert not share_control_never_pressed("waiting for locator(\"[role='dialog'] [aria-label='Share now']\") "
+                                           "to be visible")
+    assert not share_control_never_pressed("Share now never closed the dialog")
+    # No reason at all, and a refusal that is not a wait: final.
+    assert not share_control_never_pressed("")
+    assert not share_control_never_pressed("403:13")
+
+
 def lane():
     return os.path.join(os.path.dirname(HERE), "agent-browser.js")
 
@@ -280,7 +330,8 @@ def selftest():
     assert SCAN_POSTS >= 14 and "slice(0, 14)" in js14, "a week of two-posts-a-day is in reach"
     assert SCAN_POSTS_CATCHUP >= 44 and "slice(0, 44)" in (FIND_JS % {"pw": "", "profile": "", "list_url": '""', "words": '[""]', "need": 1, "enough": 12, "scan": SCAN_POSTS_CATCHUP, "skip": "[]"}), "a catch-up reaches three weeks back"
     assert "all.length >= 14" in js14 and "for (let i = 0; i < 12; i++)" in js14, "it scrolls until the list holds what it means to search"
-    print(json.dumps({"checks": 9, "failed": []}))
+    _selftest_share_control()
+    print(json.dumps({"checks": 10, "failed": []}))
 
 
 if __name__ == "__main__":
