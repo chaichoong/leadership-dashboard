@@ -978,6 +978,12 @@ def reels_already_shared(state, day, clip):
     return used
 
 
+# How many runs a share gets when the Share control never appears, before it is written off. Three is
+# two nights of publish runs: long enough for a Facebook layout wobble to pass, short enough that a
+# control that has genuinely gone stops asking (finding 20261102-phase-3-1164).
+FB_SHARE_CONTROL_TRIES = 3
+
+
 def retry_share(day=0):
     """Clear a FAILED Facebook profile share so the next publish run presses Share once more. The only door back:
     a failed share is never retried on its own, because the robot must not press Share a third time by accident
@@ -1023,8 +1029,13 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         # "Facebook share missing" on the report with no post and no error anywhere: 1799, 2097, 2099 and 2115 to
         # 2120, every one of them a browser failure nobody could see (finding 20261019-phase-3-986). A retry is a
         # decision, so it has its own door: publish.py retry-share --day N.
-        print("episode %s: the %s Facebook share FAILED and will not be pressed again: %s. Retry it with "
-              "publish.py retry-share --day %s" % (day, clip, fb.get("error") or "no reason recorded", day), file=sys.stderr)
+        # WHEN it failed, every time (finding 20261102-phase-3-1164). Without the date this line reprints
+        # each run and reads as today's outage: on 2 Nov 2026 it was read as "the Facebook share still fails
+        # for every episode" when every share since 25 Oct had in fact succeeded and these were the backlog.
+        when = fb.get("failed_at") or fb.get("started") or ""
+        print("episode %s: the %s Facebook share FAILED%s and will not be pressed again: %s. Retry it with "
+              "publish.py retry-share --day %s" % (day, clip, (" on " + when[:10]) if when else "",
+                                                   fb.get("error") or "no reason recorded", day), file=sys.stderr)
         return False
     if fb.get("status") == "unconfirmed" and fb.get("post_url"):
         # 15 Sep 2026: 'unconfirmed' was final, so a share the checker missed stayed missing for ever. Look again;
@@ -1099,11 +1110,24 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         # The HEAD of the message, not the tail (19 Oct 2026). str(ex)[-300:] kept the last 300 characters, which on a
         # node failure is the stack trace and never the reason: all nine stuck episodes recorded
         # "403:13\n at async withPage (agent-browser.js:1024:12)" and the actual message was cut off the front.
-        fb["status"] = "failed"; fb["error"] = share_error_text(ex)
+        why = share_error_text(ex)
+        # A run that died WAITING for the Share control never clicked it, so there is no second press to
+        # guard against and the share is not finished with (finding 20261102-phase-3-1164). It gets
+        # FB_SHARE_CONTROL_TRIES goes before it is written off, so a stale selector cannot turn into a
+        # permanent gap on every episode, and a control that is simply gone still stops asking.
+        tries = int(fb.get("control_tries") or 0) + 1
+        if facebook_share.share_control_never_pressed(why) and tries < FB_SHARE_CONTROL_TRIES:
+            fb.update({"status": "share-control-not-found", "error": why, "control_tries": tries})
+            fb.pop("started", None)
+            print("episode %s: the %s share never found its Share control, so Share was NOT pressed (try %d of %d); "
+                  "looking again next run: %s" % (day, clip, tries, FB_SHARE_CONTROL_TRIES, why), file=sys.stderr)
+            return True
+        fb["status"] = "failed"; fb["error"] = why; fb["failed_at"] = now_utc()
         print("episode %s: Facebook %s profile share FAILED: %s" % (day, clip, fb["error"]), file=sys.stderr)
         return True
     fb.update({"status": "reviewed" if test else "shared", "shot": shot,
                "shared_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    fb.pop("control_tries", None)
     if not test and not facebook_share.verify_shared(url):
         fb["status"] = "unconfirmed"
         print("episode %s: pressed Share on the %s post but it is not on the profile yet" % (day, clip), file=sys.stderr)
@@ -1190,7 +1214,8 @@ def section_status(entry):
               if any(p.get("platform") == "facebook" and p.get("clip") == clip for p in posts)]
     fb = "missing" if not shares else \
          ("done" if all(s == "shared" for s in shares) else
-          ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed", "queued") for s in shares) else "missing"))
+          ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "share-control-not-found",
+                                          "signin-needed", "queued") for s in shares) else "missing"))
     return {"YouTube episode": clips(True, "full"), "YouTube Short": clips(True, "lfmd"),
             "Teaser clips": clips(False, "summary"), "Learnings clips": clips(False, "lfmd"),
             "Blog": "done" if (entry.get("blog") or {}).get("url") else ("pending" if (entry.get("blog") or {}).get("status") in ("creating", "unconfirmed") else "missing"),

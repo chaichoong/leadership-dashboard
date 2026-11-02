@@ -67,7 +67,7 @@ SCENARIO_EARLY = ${JSON.stringify(scenario)}
 def run_plan(plan_path, task, test, shot):
     url = json.load(open(plan_path))["steps"][0]["url"]
     # 15 Oct 2026: the real run_plan signals a lane failure by RAISING SystemExit
-    if SCENARIO_EARLY == "lane-dies" and url == ${JSON.stringify(SUMMARY_REEL)}:
+    if SCENARIO_EARLY.startswith("lane-dies") and url == ${JSON.stringify(SUMMARY_REEL)}:
         raise SystemExit("page.waitForSelector: Timeout 20000ms exceeded.\\nwaiting for locator('[aria-label=\"Share\"]') to be visible")
     pressed.append(url)
 facebook_share.run_plan = run_plan
@@ -86,6 +86,9 @@ if SCENARIO == "stored-duplicate":
 if SCENARIO == "finder-ignores-skip":
     entry["facebook_share"] = {"status": "shared", "post_url": ${JSON.stringify(SUMMARY_REEL)}}
     facebook_share.find_page_post = lambda copy, url=None, day=None, scan=None, skip=(): ${JSON.stringify(SUMMARY_REEL)}
+if SCENARIO == "lane-dies-last-try":
+    # two runs have already failed on the wait; this is the third and last
+    entry["facebook_share"] = {"status": "share-control-not-found", "control_tries": 2}
 if SCENARIO == "other-day":
     state["2189"] = {"facebook_share": {"status": "shared", "post_url": ${JSON.stringify(OLDER_REEL)}}}
 for clip in publish.FB_SHARES:
@@ -199,10 +202,26 @@ describe('a page reel reaches Kevin\'s Facebook profile once (2083, 2 Oct 2026)'
   // of 14 Oct went the same way. One unreachable button took three whole runs with it.
   it('a lane failure on one clip is recorded and the other clip still shares (2099, 15 Oct 2026)', () => {
     const r = harness(SAME_OPENING, 'lane-dies');
-    expect(r.summary.status).toBe('failed');                 // recorded, not silent
-    expect(r.summary.error).toContain('Share');
+    expect(r.summary.error).toContain('Share');              // recorded, not silent
     expect(r.pressed).toEqual([LEARNINGS_REEL]);             // the run carried on past the dead share
     expect(r.lfmd.status).toBe('shared');
+  });
+
+  // 2 Nov 2026 (finding 20261102-phase-3-1164). The Share selector went stale on 19 Oct; every share died
+  // WAITING for the control, each was written off as final, and when the selector was fixed on 25 Oct the
+  // 37 stuck entries stayed written off while every new episode shared cleanly. A wait that never found its
+  // control never pressed Share, so there is no second press to protect and the share is not finished with.
+  it('a share that never found its Share control is retried, not written off: Share was never pressed', () => {
+    const r = harness(SAME_OPENING, 'lane-dies');
+    expect(r.summary.status).toBe('share-control-not-found');
+    expect(r.summary.control_tries).toBe(1);
+    expect(r.pressed).not.toContain(SUMMARY_REEL);           // and it still pressed nothing on this run
+  });
+
+  it('control: the third such run writes it off, so a control that has gone stops asking for ever', () => {
+    const r = harness(SAME_OPENING, 'lane-dies-last-try');
+    expect(r.summary.status).toBe('failed');
+    expect(r.summary.failed_at).toBeTruthy();                // and it says WHEN, so the log line is not read as today
   });
 
   it('a reel already shared for an older day is skipped too, and the day still shares both of its own', () => {
