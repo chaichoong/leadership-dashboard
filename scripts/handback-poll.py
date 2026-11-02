@@ -208,6 +208,54 @@ def cmd_beat(args):
     return 0
 
 
+def cmd_blind_report(args):
+    """Write the report.json a blind run never wrote, saying so.
+
+    1 Nov 2026 (finding 20261102-phase-3-1165): two ticks exited 1 with "produced no report.json
+    ... the run was blind" and left an empty run folder behind. Hand-backs were arriving in that
+    window (later ticks worked 3 and then 1), so nobody could say whether those two worked any,
+    and the only evidence of either was its own absence.
+
+    A blind run stays a FAILED run: the wrapper still exits 1 and nothing here grades it green.
+    What changes is that the failure leaves a record a reader can find, carrying the hand-backs
+    the queue it was handed says it owed. It does NOT re-poll: the next tick is thirty minutes
+    away and re-waking an agent that already ran would risk carrying one hand-back out twice,
+    which is the one thing this lane may never do.
+    """
+    owed, counts, why = 0, {}, ""
+    try:
+        with open(args.queue) as fh:
+            q = json.load(fh)
+        counts = q.get("counts") or {}
+        owed = sum(int(counts.get(k) or 0) for k in HANDBACK_KEYS)
+    except (OSError, ValueError, TypeError) as e:
+        why = "the queue it was handed could not be read: %s" % e
+    report = {
+        "blind": True,
+        "runDir": args.rundir,
+        "exitCode": args.rc,
+        "handbacksOwed": owed,
+        "worked": None,          # not zero: nothing here knows, and a zero would read as a clean tick
+        "queueCounts": counts,
+        "writtenBy": "handback-poll.py blind-report",
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "why": why or ("the run wrote no report.json in %s, so it cannot say whether it worked any of the "
+                       "%d hand-back(s) the queue listed" % (args.rundir, owed)),
+    }
+    path = os.path.join(args.rundir, "report.json")
+    try:
+        os.makedirs(args.rundir, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(report, fh, indent=2)
+        os.replace(tmp, path)            # atomic, so a reader never sees a half-written report
+    except OSError as e:
+        print("ERROR: could not write the blind report to %s: %s" % (path, e), file=sys.stderr)
+        return 1
+    print(json.dumps(report))
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -229,8 +277,14 @@ def main(argv=None):
     b.add_argument("--handbacks", type=int, default=0)
     b.add_argument("--spawned", default="no")
 
+    r = sub.add_parser("blind-report", help="write the report.json a blind run never wrote, saying so")
+    r.add_argument("--rundir", required=True)
+    r.add_argument("--queue", required=True)
+    r.add_argument("--rc", type=int, default=0)
+
     args = p.parse_args(argv)
-    return {"gate": cmd_gate, "beat": cmd_beat, "inflight": cmd_inflight}[args.cmd](args)
+    return {"gate": cmd_gate, "beat": cmd_beat, "inflight": cmd_inflight,
+            "blind-report": cmd_blind_report}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -117,3 +117,104 @@ describe('verify checks the field that actually proves each end state', () => {
     expect(verify).toContain("expected 'Completed'");
   });
 });
+
+// A FULL NOTES FIELD REFUSED THE COMPLETION, SO THE WORK WAS DONE AND NEVER RECORDED
+// ----------------------------------------------------------------------------------
+// Finding 20261102-phase-3-1166. On 1 Nov 2026 task recTtGhchq2fEF7lB reached 99,941 of
+// Airtable's 100,000 Notes characters and `complete --keep-open` was refused 422. The
+// approved action HAD been carried out; only the write failed, so the task stayed open and
+// every run after it did the same work and met the same refusal. The keep-open branch built
+// its Notes by hand and was the one write path with no cap on it at all.
+//
+// These drive the real cap_notes, the real append_notes and the real cmd_complete keep-open
+// branch, with patch_task standing in for Airtable and REFUSING anything over 100,000, which
+// is what Airtable actually did.
+describe('a full Notes field can still be written (20261102-phase-3-1166)', () => {
+  // Airtable's own limit, not ours: the cap exists to stay under this.
+  const AIRTABLE_MAX = 100000;
+
+  it('cap_notes brings an over-cap value under the cap and keeps the newest block', () => {
+    const r = py(`
+import os, tempfile
+d = tempfile.mkdtemp()
+text = ("OLD BLOCK\\n\\n" * 9000) + "[02 Nov 2026 10:00 — agent] CARRIED OUT: the approved action."
+out = m.cap_notes(text, task_id="recFULL", archive_dir=d)
+print(json.dumps({"len": len(out), "cap": m.NOTES_CAP, "keepsNewest": out.endswith("the approved action."),
+                  "pointer": m.NOTES_ARCHIVED_MARK in out,
+                  "archived": [f for f in os.listdir(d)],
+                  "archivedLen": sum(os.path.getsize(os.path.join(d, f)) for f in os.listdir(d))}))
+`);
+    expect(r.len).toBeLessThanOrEqual(r.cap);
+    expect(r.len).toBeLessThan(AIRTABLE_MAX);
+    expect(r.keepsNewest, 'the write that was refused is the one that must land').toBe(true);
+    expect(r.pointer, 'what came off is named, never silently thrown away').toBe(true);
+    expect(r.archived.length).toBe(1);
+    expect(r.archivedLen).toBeGreaterThan(0);
+  });
+
+  it('a value already under the cap is handed back untouched', () => {
+    const r = py(`
+out = m.cap_notes("just a line", task_id="recX", archive_dir="/nonexistent-on-purpose")
+print(json.dumps({"same": out == "just a line"}))
+`);
+    expect(r.same).toBe(true);
+  });
+
+  it('an archive that cannot be written still trims, and says the block is gone', () => {
+    // A write Airtable refuses is worse than a trimmed trail, so this must never raise.
+    const r = py(`
+text = "X" * 120000
+out = m.cap_notes(text, task_id="recX", archive_dir="/dev/null/cannot-be-a-directory")
+print(json.dumps({"len": len(out), "cap": m.NOTES_CAP, "saysGone": "are gone" in out}))
+`);
+    expect(r.len).toBeLessThanOrEqual(r.cap);
+    expect(r.saysGone).toBe(true);
+  });
+
+  it('THE REGRESSION: complete --keep-open lands on a 99,941-character Notes field', () => {
+    const r = py(`
+import tempfile, types
+d = tempfile.mkdtemp()
+m.NOTES_ARCHIVE = d
+FULL = "[01 Nov 2026 09:00 — agent] an older note.\\n\\n" * 2400      # ~99.9k, as the live task was
+FULL = FULL[:99941]
+wrote = {}
+def fake_patch(task_id, fields):
+    notes = fields.get(m.AF["notes"], "")
+    # Airtable's own refusal, reproduced: this is the 422 that stopped the completion.
+    if len(notes) > ${AIRTABLE_MAX}:
+        raise RuntimeError("422 INVALID_VALUE_FOR_COLUMN: Notes field is too long (%d chars)" % len(notes))
+    wrote.update(fields)
+m.patch_task = fake_patch
+m.ledger_append = lambda *a, **k: None
+m.get_task = lambda rec: {"id": rec, "fields": {m.AF["notes"]: FULL}}
+m.task_view = lambda t: {"outcome": "Approved as-is", "name": "a standing chase", "notes": FULL,
+                         "agentOutput": "", "status": "Today"}
+m.merge_card = types.SimpleNamespace(pr_number=lambda name: None)
+m.sign_output_needs_watch = lambda out: False
+args = types.SimpleNamespace(task="recTtGhchq2fEF7lB", keep_open=True, note="the approved chase",
+                             no_certificate="", cost_not_written="", evidence="", not_signed="",
+                             diary_not_written="")
+err = ""
+import contextlib, io
+try:
+    with contextlib.redirect_stdout(io.StringIO()):     # cmd_complete prints its own JSON line
+        m.cmd_complete(args)
+except SystemExit as e:
+    err = str(e)
+except Exception as e:
+    err = "RAISED: %s" % e
+notes = wrote.get(m.AF["notes"], "")
+print(json.dumps({"err": err, "len": len(notes), "cap": m.NOTES_CAP,
+                  "recordsCarryOut": m.CARRIED_OUT_MARK in notes,
+                  "keepsTheNote": "the approved chase" in notes,
+                  "pointer": m.NOTES_ARCHIVED_MARK in notes}))
+`);
+    expect(r.err, 'the completion must not be refused any more').toBe('');
+    expect(r.len).toBeLessThanOrEqual(r.cap);
+    expect(r.len).toBeLessThan(AIRTABLE_MAX);
+    expect(r.recordsCarryOut, 'the carry-out mark is what verify re-reads off the live record').toBe(true);
+    expect(r.keepsTheNote).toBe(true);
+    expect(r.pointer, 'the trail it had to shorten is named').toBe(true);
+  });
+});
