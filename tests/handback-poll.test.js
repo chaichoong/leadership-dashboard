@@ -260,3 +260,78 @@ describe('the runner keeps the loop safe', () => {
     expect(sh.match(/^\s*beat /gm).length).toBeGreaterThanOrEqual(5);
   });
 });
+
+// A BLIND RUN MUST LEAVE A RECORD, NOT AN EMPTY FOLDER
+// ---------------------------------------------------
+// Finding 20261102-phase-3-1165. On 1 Nov 2026 handback-poll exited 1 at 08:06 and again at
+// 13:03 with "produced no report.json ... the run was blind", leaving a run folder holding only
+// queue.json. Hand-backs were arriving in that window (later ticks worked 3 and then 1), so two
+// of the day's polls are unaccounted for and the only evidence of either is its own absence.
+//
+// A blind run stays FAILED: the wrapper still exits 1. What changes is that the failure writes a
+// report a reader can find. These drive the real `blind-report` subcommand.
+describe('a blind run writes a report saying it was blind (20261102-phase-3-1165)', () => {
+  function blind(dir, queuePath, rc) {
+    const out = execFileSync('python3',
+      [POLL, 'blind-report', '--rundir', dir, '--queue', queuePath, '--rc', String(rc ?? 1)],
+      { encoding: 'utf8' });
+    return { stdout: JSON.parse(out), onDisk: JSON.parse(readFileSync(join(dir, 'report.json'), 'utf8')) };
+  }
+
+  it('writes report.json carrying the hand-backs the queue said it owed', () => {
+    const d = tmp();
+    const q = queueFile(d, { approvedHandbacks: 3, changesRequested: 1 });
+    const r = blind(d, q, 1);
+    expect(r.onDisk.blind).toBe(true);
+    expect(r.onDisk.handbacksOwed).toBe(4);
+    expect(r.onDisk.exitCode).toBe(1);
+    expect(r.onDisk.runDir).toBe(d);
+    expect(r.onDisk).toEqual(r.stdout);
+  });
+
+  it('"worked" is null, never 0 — nothing here knows, and a zero would read as a clean tick', () => {
+    const d = tmp();
+    const r = blind(d, queueFile(d, { approvedHandbacks: 2 }), 1);
+    expect(r.onDisk.worked).toBe(null);
+    expect(r.onDisk.worked).not.toBe(0);
+  });
+
+  it('an unreadable queue still gets a report, and says it could not be read', () => {
+    // The worst case: the folder holds nothing at all. It must still leave a record.
+    const d = tmp();
+    const r = blind(d, join(d, 'no-such-queue.json'), 143);
+    expect(r.onDisk.blind).toBe(true);
+    expect(r.onDisk.handbacksOwed).toBe(0);
+    expect(r.onDisk.why).toContain('could not be read');
+    expect(r.onDisk.exitCode).toBe(143);
+  });
+
+  // The runner's own blind branch, RUN, not read: a test that greps source is theatre. The branch
+  // is lifted out of the real script and executed in bash with the surrounding run stubbed, so it
+  // is the shipped text that writes the report and the shipped text that exits 1.
+  it('the runner\'s blind branch writes the report and STILL exits 1 — blind is never graded green', () => {
+    const src = readFileSync(RUNNER, 'utf8');
+    const branch = src.match(/if \[ ! -f "\$RUNDIR\/report\.json" \]; then([\s\S]*?)\nfi\n/)[1];
+    const d = tmp();
+    queueFile(d, { approvedHandbacks: 2, deferredRedos: 1 });
+    const script = [
+      'set -u',
+      `REPO=${JSON.stringify(ROOT)}`, `RUNDIR=${JSON.stringify(d)}`, `SCRATCH=${JSON.stringify(d)}`,
+      'RC=1', 'REASON="2 hand-backs"', 'TOTAL=3',
+      `beat() { echo "beat $*" >> ${JSON.stringify(join(d, 'beats.log'))}; }`,
+      `if [ ! -f "$RUNDIR/report.json" ]; then${branch}
+fi`,
+      'echo "NOT REACHED"',
+    ].join('\n');
+    let code = 0, stdout = '';
+    try {
+      stdout = execFileSync('bash', ['-c', script], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { code = e.status; stdout = String(e.stdout || ''); }
+    expect(code, 'a blind run is a failed run').toBe(1);
+    expect(stdout).not.toContain('NOT REACHED');
+    const report = JSON.parse(readFileSync(join(d, 'report.json'), 'utf8'));
+    expect(report.blind).toBe(true);
+    expect(report.handbacksOwed).toBe(3);
+    expect(readFileSync(join(d, 'beats.log'), 'utf8')).toContain('failed-no-report');
+  });
+});

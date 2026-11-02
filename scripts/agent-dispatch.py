@@ -6805,11 +6805,63 @@ def note_line(who, text):
     return f"[{note_stamp()} — {who}] {text}"
 
 
-def append_notes(existing, *lines):
+# AIRTABLE'S NOTES FIELD HOLDS 100,000 CHARACTERS, AND A FULL ONE REFUSES EVERY WRITE
+# -----------------------------------------------------------------------------------
+# On 1 Nov 2026 task recTtGhchq2fEF7lB reached 99,941 characters and `complete
+# --keep-open` was refused by Airtable 422: the work was DONE and the write was
+# refused, so the task stayed open and every later run did the same work and met the
+# same refusal (finding 20261102-phase-3-1166). Two things were wrong. The keep-open
+# path built its Notes by hand and never passed the cap at all, and the cap itself
+# simply threw the oldest characters away, which is how a task loses the trail that
+# proves what was carried out. So the cap is one function, every write goes through
+# it, and what it drops is written to disk with a line saying where it went.
+NOTES_CAP = 90000
+NOTES_ARCHIVE = os.path.join(os.path.expanduser("~"), "knowledge-os/logs/task-notes-archive")
+NOTES_ARCHIVED_MARK = "OLDER NOTES ARCHIVED:"
+# Room kept for the pointer line, so the pointer plus the tail can never exceed the cap.
+_NOTES_RESERVE = 600
+
+
+def cap_notes(text, task_id="", cap=NOTES_CAP, archive_dir=None, now=None):
+    """TEXT trimmed to CAP, with whatever had to come off written to a file and named in a
+    pointer line at the top. Under the cap it comes back untouched. A failed archive still
+    trims (a write Airtable refuses is worse than a trimmed trail) and says the block was
+    dropped rather than claiming a file that is not there. archive_dir is a parameter so a
+    test never writes a real folder."""
+    text = str(text or "")
+    if len(text) <= cap:
+        return text
+    tail = text[-(cap - _NOTES_RESERVE):]
+    cut = tail.find("\n\n")                 # start the kept trail at a block boundary, never mid-note
+    if 0 <= cut <= 4000:
+        tail = tail[cut + 2:]
+    head = text[:len(text) - len(tail)]
+    stamp = (now or datetime.now(LONDON))
+    where = ""
+    try:
+        d = archive_dir or NOTES_ARCHIVE
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "%s-%s.txt" % (task_id or "task", stamp.strftime("%Y%m%d-%H%M%S")))
+        with open(path, "w") as f:
+            f.write(head)
+        where = "they are in %s" % path
+    except OSError as e:
+        where = "they could not be archived and are gone (%s)" % e
+    pointer = ("[%s \u2014 agent-dispatch] %s the oldest %d characters of these Notes came off so this "
+               "write would fit Airtable's %d-character limit; %s"
+               % (stamp.strftime("%d %b %Y %H:%M"), NOTES_ARCHIVED_MARK, len(head), cap, where))
+    out = (pointer + "\n\n" + tail).strip()
+    if len(out) > cap:                       # the archive path can be long; never hand back an over-cap value
+        out = (pointer + "\n\n" + tail[-(cap - len(pointer) - 2):]).strip()
+    return out
+
+
+def append_notes(existing, *lines, task_id="", archive_dir=None):
     lines = [l for l in lines if l]
     if not lines:
         return str(existing or "")
-    return (str(existing or "").rstrip() + "\n\n" + "\n".join(lines)).strip()[-90000:]
+    return cap_notes((str(existing or "").rstrip() + "\n\n" + "\n".join(lines)).strip(),
+                     task_id=task_id, archive_dir=archive_dir)
 
 
 def attached_stamp(filename, purpose, who="agent"):
@@ -8169,8 +8221,9 @@ def cmd_complete(args):
         detail = (args.note or "the approved action").strip()
         mark = (f"[{stamp} — agent] {CARRIED_OUT_MARK} {detail}. "
                 "Left OPEN deliberately: the approval said so.")
-        existing = t["notes"] or ""
-        patch_task(args.task, {AF["notes"]: (existing + "\n\n" + mark).strip()})
+        # Through append_notes, never by hand: this line had no cap, so a full Notes field
+        # refused the write and the carried-out work was never recorded (finding 20261102-phase-3-1166).
+        patch_task(args.task, {AF["notes"]: append_notes(t["notes"] or "", mark, task_id=args.task)})
         ledger_append(args.task, "done")
         print(json.dumps({"carriedOut": args.task, "keptOpen": True,
                           "status": t["status"]}))
@@ -10435,7 +10488,7 @@ def append_note_checked(task_id, listed_notes, line):
     if not fresh.strip() and str(listed_notes or "").strip():
         raise RuntimeError(f"its Notes read blank by id while the listing read {len(str(listed_notes))} characters, "
                            "so nothing was written over them")
-    patch_task(task_id, {AF["notes"]: (fresh.rstrip() + "\n\n" + line).strip()[-90000:]})
+    patch_task(task_id, {AF["notes"]: cap_notes((fresh.rstrip() + "\n\n" + line).strip(), task_id=task_id)})
     if line not in str((get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or ""):
         raise RuntimeError("the line written to Notes does not read back")
 

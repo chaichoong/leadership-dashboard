@@ -266,6 +266,11 @@ echo "===== done rc=$RC $(date) =====" >> "$LOG"
 # letting an empty $RUNDIR read as a clean tick.
 if [ ! -f "$RUNDIR/report.json" ]; then
   echo "ERROR: handback-poll produced no report.json in $RUNDIR — the run was blind" >&2
+  # A blind run is still a FAILED run (exit 1 below). But it must not leave an empty folder whose
+  # only evidence is its own absence: on 1 Nov 2026 two ticks went this way while hand-backs were
+  # arriving, and nothing could say whether either worked any (finding 20261102-phase-3-1165). The
+  # report says blind, names this run folder and carries the hand-backs the queue listed as owed.
+  /usr/bin/python3 "$REPO/scripts/handback-poll.py" blind-report     --rundir "$RUNDIR" --queue "$RUNDIR/queue.json" --rc "$RC" >/dev/null 2>>"$SCRATCH/blind.err"     || echo "handback-poll: the blind report could not be written either — see $SCRATCH/blind.err" >&2
   beat work "$REASON" "$TOTAL" "failed-no-report"
   exit 1
 fi
