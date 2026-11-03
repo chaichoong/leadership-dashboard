@@ -18,6 +18,12 @@ Aqara's developer service (open-ger.aqara.com for a UK account):
   query.resource.info  a model's resources, so the battery ones are FOUND by
                        their description, never hard-coded per model
   query.resource.value the current reading, with Aqara's own timestamp
+And since 3 Nov 2026, the home network itself: the switches, Wi-Fi access
+points, Aqara hubs, cameras, doorbell and Home Assistant, pinged from the Mac
+mini (private list in ~/.config/od/home-network.json). A device that does not
+answer for 2 hours gets an "is offline" reminder about its plug and cable; if
+the gateway itself does not answer, the Mac mini's own network is down, which
+is one "cannot see" reminder, never a dozen.
 Apple Home keeps no battery level on disk (checked 28 Sep 2026: ZLOWBATTERY
 and ZLASTSEENDATE are empty for all 127 accessories), and the Aqara hubs keep
 passing a dead sensor's last reading to Home, so Home cannot be the source.
@@ -116,6 +122,7 @@ CONFIG = os.path.expanduser("~/.config/od/aqara.json")
 HA_URL = "http://homeassistant.local"   # Home Assistant OS on the Mac mini serves on port 80
 HA_TOKEN = os.path.expanduser("~/.config/od/homeassistant_token")   # "Home Assistant key.command"
 NAMES = os.path.expanduser("~/.config/od/home-battery-names.json")  # private: serial -> "En Suite radiator valve"
+NETWORK = os.path.expanduser("~/.config/od/home-network.json")       # private: {"gateway", "devices": [{"name", "ip"}]}
 
 # The two places the watch reads. Each has its own "cannot see" reminder, its own
 # history and count control, and a reminder is only ever closed by its own source.
@@ -124,6 +131,16 @@ SOURCES = {
            "fix": "double-click Aqara sign-in on the Mac mini desktop"},
     "ha": {"label": "Home Assistant", "app": "Home Assistant or the device's own app",
            "fix": "check Home Assistant is running on the Mac mini (homeassistant.local) and its key is saved"},
+    # The switches, Wi-Fi access points, hubs, cameras and doorbell, pinged from
+    # the Mac mini (Kevin, 3 Nov 2026, after the Living Room switch's plug was
+    # pushed out and its hub, Apple TV and Sky sat dark for 3 days unnoticed).
+    # The list is config, so a device leaving it is not "vanished".
+    "nw": {"label": "the home network", "app": "its own app",
+           "fix": "check the Mac mini itself is online",
+           "offline": "The Mac mini has had no answer from it since about %s. Check its power plug "
+                      "is pushed fully in, then its network cable at both ends. This ticks itself "
+                      "off once it answers again.",
+           "missing": False},
 }
 LOGDIR = os.path.expanduser("~/knowledge-os/logs/home-battery")
 READINGS = os.path.join(LOGDIR, "readings.jsonl")
@@ -683,18 +700,18 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
         t = tracked.get(d["id"]) or {}
         since = t.get("offline_since")
         if d["online"] is False and since and hours(now, since) >= OFFLINE_HOURS - SLACK_HOURS:
-            wanted.append(("offline", d["id"], "%s is offline" % d["name"],
-                           "%s has not heard from it since about %s. Check its power, then "
-                           "re-pair it in %s if it stays off. This ticks itself off once it is "
-                           "back online." % (S["label"], dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M"),
-                                              S["app"])))
+            when = dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M")
+            body = S["offline"] % when if S.get("offline") else (
+                "%s has not heard from it since about %s. Check its power, then re-pair it in %s "
+                "if it stays off. This ticks itself off once it is back online." % (S["label"], when, S["app"]))
+            wanted.append(("offline", d["id"], "%s is offline" % d["name"], body))
             continue
         _, low, text = is_low(t, now, threshold) if d["battery"] else (False, False, "")
         if low:
             wanted.append(("low", d["id"], "Battery low: %s (%s)" % (d["name"], text),
                            "Change or charge its battery. This ticks itself off once %s "
                            "reports it fine again." % S["label"]))
-    if read_ok:
+    if read_ok and S.get("missing", True):
         present = {d["id"] for d in devices}
         for i, t in sorted(tracked.items()):
             if i in present or not t.get("last_seen"):
@@ -847,10 +864,53 @@ def read_once(state, now):
         return [], "unexpected reply from Aqara (%s: %s)" % (type(e).__name__, e)
 
 
-def read_source(tag, sstate, now, ha_token=None):
+def ping(ip):
+    """True when the address answers one of two pings within 3 seconds each."""
+    try:
+        return subprocess.run(["/sbin/ping", "-c", "2", "-t", "3", "-q", ip],
+                              capture_output=True, timeout=15).returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def read_network(now, path=None, pinger=None):
+    """(devices, error) for the home network, or None when no list is set up.
+
+    The gateway is the control: if the Mac mini cannot reach it, its own network
+    is down and every device would read as off, so that is an error (one "cannot
+    see" reminder after 12 hours), never a dozen offline reminders. Each device
+    is mains-powered, so only its online state counts. Pings run in parallel.
+    """
+    pinger = pinger or ping
+    try:
+        with open(path or NETWORK) as f:
+            cfg = json.load(f)
+        gateway, targets = cfg["gateway"], [(d["name"], d["ip"]) for d in cfg["devices"]]
+    except OSError:
+        return None
+    except (ValueError, KeyError, TypeError) as e:
+        return [], "the home network list is damaged (%s): ask Claude to rewrite it" % type(e).__name__
+    if not targets:
+        return [], "the home network list has no devices in it"
+    if not pinger(gateway):
+        return [], "the Mac mini cannot reach the gateway (%s), so its own network is down" % gateway
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        answers = list(pool.map(lambda t: pinger(t[1]), targets))
+    return [{"id": "nw:" + name, "name": name, "model": ip, "online": ok, "battery": False,
+             "level": None, "level_at": None, "low_flag": None, "flag_at": None}
+            for (name, ip), ok in zip(targets, answers)], ""
+
+
+def read_source(tag, sstate, now, ha_token=None, network_path=None):
     """(devices, error) for one source, or None when that source is not set up."""
     if tag == "aq":
         return read_once(sstate, now)
+    if tag == "nw":
+        got = read_network(now, network_path)
+        if got is None and sstate.get("last_ok"):
+            return [], "the home network list is missing: ask Claude to put it back"
+        return got
     got = read_ha(now, ha_token)
     if got is None and sstate.get("last_ok"):
         # Read before, key gone now (a restore, a host move, a tidy-up): that is
@@ -1322,6 +1382,44 @@ def selftest():
         lost = read_source("ha", {"last_ok": iso(now)}, now, gone) or ([], "skipped")
         check("a key lost after a good read is an error, not 'not set up'",
               (lost[0], "missing" in lost[1]), ([], True))
+
+    # The home network (3 Nov 2026): pinged switches, access points, hubs, cameras.
+    with tempfile.TemporaryDirectory() as tmpd:
+        netf = os.path.join(tmpd, "net.json")
+        with open(netf, "w") as f:
+            json.dump({"gateway": "10.0.0.1", "devices": [{"name": "Living Room network switch", "ip": "10.0.0.12"},
+                                                         {"name": "Landing Aqara hub", "ip": "10.0.0.72"}]}, f)
+        up = {"10.0.0.1", "10.0.0.72"}
+        devs, err = read_network(now, netf, pinger=lambda ip: ip in up)
+        check("a silent switch reads offline, an answering hub online",
+              (err, [(d["name"], d["online"], d["battery"]) for d in devs]),
+              ("", [("Living Room network switch", False, False), ("Landing Aqara hub", True, False)]))
+        devs, err = read_network(now, netf, pinger=lambda ip: False)
+        check("no gateway is one error, never a reminder per device", (devs, "gateway" in err), ([], True))
+        check("no network list and never read means not set up", read_source("nw", {}, now, network_path=os.path.join(tmpd, "x")), None)
+        lost = read_source("nw", {"last_ok": iso(now)}, now, network_path=os.path.join(tmpd, "x")) or ([], "skipped")
+        check("a network list lost after a good read is an error", (lost[0], "missing" in lost[1]), ([], True))
+        with open(netf, "w") as f:
+            f.write("{not json")
+        bad = read_network(now, netf, pinger=lambda ip: True)
+        check("a damaged network list is an error", (bad[0], "damaged" in bad[1]), ([], True))
+    sw = [{"id": "nw:Living Room network switch", "name": "Living Room network switch", "model": "x", "online": False,
+           "battery": False, "level": None, "level_at": None, "low_flag": None, "flag_at": None}]
+    s_nw = track(now - dt.timedelta(hours=3), sw, {})
+    s_nw = track(now, sw, s_nw)
+    s_nw["last_ok"] = iso(now)
+    acts = [a for a in decide(now, True, sw, s_nw, [], {}, src="nw") if a["do"] == "create"]
+    check("a switch off for 2 hours+ gets its own reminder about its plug",
+          [(a["title"], "power plug" in a["body"], a["key"].endswith(" nw]")) for a in acts],
+          [("Living Room network switch is offline", True, True)])
+    gone = dict(s_nw)
+    gone["devices"] = dict(gone["devices"], **{"nw:Old switch": {"name": "Old switch", "battery": False,
+                                                                 "last_seen": iso(now - dt.timedelta(hours=30))}})
+    check("a device taken off the network list is not 'vanished'",
+          [a["kind"] for a in decide(now, True, sw, gone, [], {}, src="nw") if a["do"] == "create"], ["offline"])
+    check("a dead Mac network raises 'cannot see the home network' after 12 hours",
+          [a["title"] for a in decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=13))}, [], {}, src="nw") if a["do"] == "create"],
+          ["The home battery watch cannot see the home network"])
 
     # The 28 Sep one-source state moves under "aq" unchanged.
     old = {"last_ok": "2026-09-28T23:20:10", "resources": {"m": 1}, "nudged": {"low:a": "2026-09-28"}}

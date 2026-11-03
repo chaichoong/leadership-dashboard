@@ -167,6 +167,18 @@ out = [titles, crossed, 'FAKEKEY' in bad[1], hb.read_source('ha', {'last_ok': is
             'the Home Assistant key file is missing:']);
     });
 
+    it('pings the home network: a dead switch is offline, a dead gateway is one error', () => {
+        // 3 Nov 2026: the Living Room switch lost power for 3 days unnoticed.
+        const out = py(`
+import tempfile, os, json
+d = tempfile.mkdtemp(); f = os.path.join(d, 'n.json')
+json.dump({'gateway': '10.0.0.1', 'devices': [{'name': 'Living Room network switch', 'ip': '10.0.0.12'}]}, open(f, 'w'))
+devs, err = hb.read_network(now, f, pinger=lambda ip: ip == '10.0.0.1')
+none, gerr = hb.read_network(now, f, pinger=lambda ip: False)
+out = [[(x['name'], x['online']) for x in devs], err, none, 'gateway' in gerr]`);
+        expect(out).toEqual([[['Living Room network switch', false]], '', [], true]);
+    });
+
     it('closes reminders only on a fresh read that proves the problem is gone', () => {
         const out = py(`
 openr = [{'key': hb.marker('offline', 'cam'), 'ref': 'r1'}, {'key': hb.marker('low', 'a'), 'ref': 'r2'}]
