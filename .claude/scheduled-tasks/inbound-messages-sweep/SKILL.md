@@ -130,7 +130,10 @@ task pulled back to Today. Different senders never fold into each other. Exit 3 
 `"action": "refused"` means the gate judged the task an auto-reply (an
 "Automatic reply:"-style name — a machine's receipt of something we sent,
 2 Sep 2026 ruling): nothing was created and nothing is unhandled — log it and
-move on. Any OTHER non-zero exit means the gate could not run (broken read);
+move on. Exit 4 with `"action": "refused"` and `"refusal": "never-a-card"` is
+Kevin's separate never-a-card ruling (17 Sep 2026), not an auto-reply: log the
+gate's reason, and if you judge it wrong re-run with `create --force` saying
+why. Any OTHER non-zero exit means the gate could not run (broken read);
 nothing was created — treat that candidate as unhandled for the watermark and
 report the failure. The gate adds
 `"typecast": true` itself. Fields, keyed by field ID:

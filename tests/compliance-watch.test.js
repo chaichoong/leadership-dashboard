@@ -771,6 +771,24 @@ print(json.dumps({'ids': [rr.AGENT_REC, rr.RENT_AGENT_REC, rr.MONEY_AGENT_REC],
       expect(cls(n)[0], n).toBe('keep');
     }
   });
+  // Finding 20261007-agent-dispatch-778. On 7 Oct 2026 three tasks carrying a RENT SETUP KEY line
+  // moved to the rent agent on the words "universal credit" and "rent". rent_new_tenant.py reads
+  // Roy's yes or no off those tasks and the DWP is his alone, so the clock waited on an answer that
+  // could not come. The key in the Notes is what keeps them, not the task's name.
+  it("a new-tenant rent step whose answer the clock reads off the task stays with Roy", () => {
+    const withKey = (name, step) => cls(name, `, rr.F['notes']: 'RENT SETUP KEY: recTEN123:${step}:1'`);
+    expect(withKey('Luke Example: housing costs check', 'costs')[0]).toBe('keep');
+    expect(withKey('Andrew Example: confirm the first rent payment landed', 'paid')[0]).toBe('keep');
+    expect(withKey('Piotr Example: documents on the Universal Credit journal', 'journal')[0]).toBe('keep');
+    expect(withKey('Luke Example: housing costs check', 'costs')[1]).toMatch(/new-tenant rent clock/);
+    // Only Roy's three steps. The form step is the agent's own work, and an ordinary rent chase
+    // with no key still moves, so the rule did not swallow the lane.
+    expect(withKey('Sam Example: UC47 form for Room 2', 'form')).toEqual(['move', 'admin']);
+    expect(cls('Sam Example: chase the Universal Credit claim in writing')).toEqual(['move', 'admin']);
+    // The steps and the marker are read from rent_new_tenant.py, never copied.
+    const r = py(`print(json.dumps([rr.SETUP_KEY_MARK, list(rr.ROY_SETUP_STEPS)]))`);
+    expect(r).toEqual(['RENT SETUP KEY: ', ['journal', 'costs', 'paid']]);
+  });
   it("Roy's own sign-in stays", () => {
     expect(cls('Open your dashboard and sign in')[0]).toBe('keep');
   });

@@ -78,6 +78,17 @@ beforeAll(async () => {
     }
     if (u.pathname === '/as/authorization.oauth2') return page('<h1>Sign in</h1><label>Email address<input type="email"></label><button>Next</button>');
     if (u.pathname === '/billing') { res.writeHead(302, { location: '/?url=%252Fbilling' }); return res.end(); }
+    // The Acturis container as it stood on 29 Oct 2026: the signed-in landing, with a password box
+    // the page keeps hidden (finding 20261029-agent-dispatch-1124).
+    if (u.pathname === '/container') {
+      return page('<h1>Welcome to Everywhen</h1><p>TNT Management Limited</p><p>Account reference 72207884</p>'
+        + '<a href="/account">My Account</a><button>Get a quote</button>'
+        + '<div style="display:none"><label>Change password<input type="password" name="pw"></label></div>'
+        + '<input type="password" name="pw2" style="visibility:hidden">');
+    }
+    if (u.pathname === '/container-door') {
+      return page('<h1>Sign in</h1><label>Password<input type="password" name="pw"></label><button>Sign in</button>');
+    }
     return page('<h1>Welcome</h1><p>Pick a product.</p>');
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -138,5 +149,26 @@ describe('`session` walks the checkUrl and reads where it lands', () => {
     expect(r.json.passwordFields).toBe(0);
     expect(r.json.signedIn).toBe(false);
     expect(r.json.door).toBe("the site's own sign-in page");
+  }, 120000);
+
+  // Finding 20261029-agent-dispatch-1124. The signed-in Acturis page keeps a hidden password box,
+  // so the count read 1 and the account read signed out minutes after Kevin signed it in. Only a
+  // box he can see is a door; the control below proves a real one still is.
+  it('a hidden password box on the signed-in page is not a door, and a visible one still is', async () => {
+    const env = home({ label: 'Local Acturis', login: true, loginUrl: `http://127.0.0.1:${port}/`,
+      checkUrl: `http://127.0.0.1:${port}/container` });
+    const r = await session(env);
+    expect(r.code, r.err).toBe(0);
+    expect(r.json.url).toBe(`http://127.0.0.1:${port}/container`);
+    expect(r.json.passwordFields).toBe(0);
+    expect(r.json.signedIn).toBe(true);
+    expect(r.json.signinPage).toBe(false);
+
+    const door = home({ label: 'Local Acturis door', login: true, loginUrl: `http://127.0.0.1:${port}/`,
+      checkUrl: `http://127.0.0.1:${port}/container-door` });
+    const d = await session(door);
+    expect(d.code, d.err).toBe(0);
+    expect(d.json.passwordFields).toBe(1);
+    expect(d.json.signedIn).toBe(false);
   }, 120000);
 });

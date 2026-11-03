@@ -2316,7 +2316,19 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
     expect(done.code, done.stdout + done.stderr).toBe(0);
     const t = timeline();
     expect(t.guest.start).toBeGreaterThan(t.render.start);
-    expect(t.guest.end, 'the guest only ran once the render had finished').toBeLessThan(t.render.end);
+    // A CONDITION, NOT TWO CLOCKS A THIRD OF A SECOND APART (finding 20261030-queue-fixer-1137).
+    // This used to read `t.guest.end < t.render.end`, and the step script ends the render 0.3s
+    // after it SEES the guest start while the guest itself runs for 0.3s: the two ends land on
+    // top of each other, so under load it is a coin toss. On 30 Oct 2026 the full suite lost that
+    // toss and red-gated a green fixer PR, #857, on 6537 of 6538 tests, while the file on its own
+    // passed 157 of 157. What this test is for is that the guest ran WHILE the render held the
+    // queue, and the queue's own log says so: the guest's acquire comes before the render's
+    // release, whatever the machine was doing.
+    expect(t.guest.start, 'the guest started before the render finished').toBeLessThan(t.render.end);
+    const lane = events().filter((e) => (e.job === 'light-guest' && e.state === 'acquired')
+      || (e.job === 'render-host' && e.state === 'released'));
+    expect(lane.map((e) => `${e.job}:${e.state}`)[0], 'the guest acquired after the render let go')
+      .toBe('light-guest:acquired');
     const acq = events().find((e) => e.job === 'light-guest' && e.state === 'acquired');
     expect(acq.lane).toBe('guest');
     expect(acq.beside).toBe('render-host');

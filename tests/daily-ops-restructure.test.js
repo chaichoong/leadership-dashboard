@@ -45,7 +45,11 @@ print(json.dumps(m.APPROVED_SLOTS))
  *  {name: {times, day}} with day null for the daily and hourly ones. */
 function installerJobs() {
   const sh = read('scripts/install-slot-jobs.sh');
-  const block = sh.split('JOBS=(')[1].split(')')[0];
+  // The array ends at a `)` ALONE ON A LINE. Splitting on the first `)` anywhere stopped at
+  // the first comment carrying a bracket, so every entry after it was invisible to these
+  // checks and an uninstalled slot would have read as installed (found 3 Nov 2026 while
+  // fixing finding 20261101-phase-1-1155).
+  const block = sh.split('JOBS=(')[1].split(/^\)$/m)[0];
   const out = {};
   for (const line of block.split('\n')) {
     const m = line.match(/"([a-z0-9-]+)\|(?:(Sun|Mon|Tue|Wed|Thu|Fri|Sat) )?([0-9*:,]+)\|/);
@@ -68,9 +72,21 @@ describe('the installer and the register cannot drift apart', () => {
     for (const [name, { times, day }] of Object.entries(installerJobs())) {
       expect(sched[name], `${name} missing from job-schedule.json`).toBeTruthy();
       const [min, hour, , , dow] = sched[name].cron.split(' ');
-      const first = times.split(',')[0];
-      expect(`${Number(first.split(':')[0])}:${Number(first.split(':')[1])}`)
-        .toBe(`${Number(hour)}:${Number(min)}`);
+      // EVERY time the installer writes, not just the first. While the parser above stopped at
+      // the first bracketed comment, this check never saw the two-a-day and hourly entries
+      // (found 3 Nov 2026): `7:30,12:30` must match `30 7,12 * * *`, and `*:05` the hourly
+      // `5 * * * *`.
+      const pairs = times.split(',').map(t => t.split(':'));
+      if (pairs[0][0] === '*') {
+        expect(hour, `${name}: installer says hourly, the register does not`).toBe('*');
+        expect(Number(min)).toBe(Number(pairs[0][1]));
+      } else {
+        const want = new Set();
+        for (const h of hour.split(',')) for (const m of min.split(',')) want.add(`${Number(h)}:${Number(m)}`);
+        const got = new Set(pairs.map(([h, m]) => `${Number(h)}:${Number(m)}`));
+        expect([...got].sort(), `${name}: installer times and register cron disagree`)
+          .toEqual([...want].sort());
+      }
       // The weekday has to agree too, or the register says one day and launchd
       // fires on another — with nothing to notice, because both look plausible.
       expect(dow, `${name}: installer day and register day disagree`)

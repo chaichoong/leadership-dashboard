@@ -50,7 +50,13 @@ JOBS=(
   "ceo-agent|6:45|/bin/bash $SLOT ceo-agent $TASKS/ceo-agent/SKILL.md"
   # uc-check RETIRED 1 Sep 2026 by Kevin, Slack cleanup: whole UC process stopped.
   # prospecting PARKED 27 Sep 2026 by Kevin: Operations Director parked to January 2027.
-  "prod-sweep-weekly|11:00|/bin/bash $SLOT prod-sweep-weekly $TASKS/prod-sweep-weekly/SKILL.md"
+  # SUNDAYS, IN THE SCHEDULE. Finding 20261101-phase-1-1155: this line had no
+  # weekday, so launchd fired the slot at 11:00 EVERY day and the skill read the
+  # weekday itself and stopped at step one on the other six - six Claude slot runs
+  # a week that took the queue lock and skipped in 14 seconds. The in-skill weekday
+  # check stays as belt and braces. No round brackets in this block: the test that
+  # parses this array stops at the first one.
+  "prod-sweep-weekly|Sun 11:00|/bin/bash $SLOT prod-sweep-weekly $TASKS/prod-sweep-weekly/SKILL.md"
   # Hourly, and hourly on purpose: Utilita's login is a rolling ONE HOUR that
   # only a visit renews, so the read is what holds the session open.
   # utilita-balance.py sends at most one message a day plus one alarm per flat,

@@ -619,9 +619,19 @@ def auto_reply_refusal(fields, cache):
 # Knowledge/inbox-decision-protocol.md.
 DISSOLVED_COMPANY_RE = re.compile(
     r"\btwo chefs\b|\bcafe\s*@?\s*highgate\b|\bcafehighgate\b|\bsocial housing holdings\b", re.I)
+# A TAX ENQUIRY IS A LEGAL MATTER (finding 20261027-inbound-email-triage-1098).
+# On 27 Oct 2026 the HMRC officer on compliance check CFS-0000000 sent seventeen
+# further questions with a 27 Nov reply date. One question was about Social
+# Housing Holdings, so DISSOLVED_COMPANY_RE matched; the pattern below had no
+# word for HMRC, a compliance check, an enquiry or a penalty, so the gate
+# refused the create and the triage skill archived the message as answered. A
+# tier-1 HMRC enquiry with a hard deadline is the worst thing this rule can
+# refuse, so the tax words are part of "a legal matter is never refused".
 LEGAL_MATTER_RE = re.compile(
     r"official receiver|liquidator|insolvency service|\bcourt\b|\bclaim\b|solicitor|\blegal\b|"
-    r"winding.up|disqualif|\bhmcts\b|tribunal|judg(?:e)?ment|bailiff|enforcement", re.I)
+    r"winding.up|disqualif|\bhmcts\b|tribunal|judg(?:e)?ment|bailiff|enforcement|"
+    r"\bhmrc\b|compliance check|\benquir(?:y|ies)\b|\binvestigation\b|information notice|"
+    r"\bpenalt(?:y|ies)\b|\btax(?:es|ation)?\b", re.I)
 PAYMENT_WORD_RE = re.compile(
     r"\b(?:payment|payout|transfer|direct debit|collection)s?\b", re.I)
 FAILED_WORD_RE = re.compile(r"\bfail(?:ed|s|ure)?\b", re.I)
@@ -2639,11 +2649,23 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
         # Refuse BEFORE the board read: an auto-reply is not a matter, so the
         # duplicate question never arises. --force is the human override and
         # is logged by the caller's own reason.
-        why = auto_reply_refusal(fields, cache) or never_a_card_refusal(fields)
+        # TWO REFUSALS, TWO EXIT CODES (finding 20261027-inbound-email-triage-1098).
+        # Exit 3 means "auto-reply" to inbound-email-triage and
+        # inbound-messages-sweep, and both answer it by archiving the message.
+        # A never-a-card refusal is a different ruling of Kevin's, so it gets
+        # its own code and its own `refusal` field: on 27 Oct 2026 an HMRC
+        # compliance-check email was refused as never-a-card and the skill read
+        # the 3 as "auto-reply", archiving a tier-1 enquiry with a hard deadline
+        # and no task.
+        why = auto_reply_refusal(fields, cache)
+        kind = "auto-reply"
+        if not why:
+            why = never_a_card_refusal(fields)
+            kind = "never-a-card"
         if why:
-            print(json.dumps({"action": "refused", "reason": why,
+            print(json.dumps({"action": "refused", "refusal": kind, "reason": why,
                               "key": verdict["key"], "dryRun": dry_run}))
-            return 3
+            return 3 if kind == "auto-reply" else 4
     if parent and not force:
         twin = open_child_of(parent, fields.get(F["name"], ""))
         if twin:
@@ -2779,13 +2801,31 @@ def track_record_for(fields, task_id=None, runner=None):
     if sender and "@" in sender:
         cmd += ["--email", sender]
     run = runner or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=120))
-    try:
-        r = run(cmd)
-    except Exception as e:                                   # noqa: BLE001
-        return f"TRACK RECORD: not built ({str(e)[:120]})"
-    if getattr(r, "returncode", 1) != 0 or not (r.stdout or "").strip():
-        return "TRACK RECORD: not built (" + ((r.stderr or "").strip().splitlines() or ["history failed"])[-1][:160] + ")"
-    return r.stdout.strip()
+
+    # THE REASON FIRST, AND ONE RETRY (findings 20261007-inbound-comms-triage-776
+    # and 20261016-inbound-email-triage-954). Three creates across the 7 and 16
+    # Oct triage slots wrote "TRACK RECORD: not built (Command [python3 …" into
+    # Notes: str(e) cut at 120 characters is the COMMAND, so nobody could tell a
+    # timeout from a crash, and one history call failing under Gmail pacing cost
+    # the task its record for good. Now the line leads with what went wrong and
+    # the call is tried once more before the record is given up.
+    def why(e):
+        if isinstance(e, subprocess.TimeoutExpired):
+            return "timed out after %ss" % (int(e.timeout) if e.timeout else "?")
+        return "%s: %s" % (type(e).__name__, str(e).strip()[-160:])
+
+    reason = ""
+    for attempt in (1, 2):
+        try:
+            r = run(cmd)
+        except Exception as e:                               # noqa: BLE001
+            reason = why(e)
+            continue
+        if getattr(r, "returncode", 1) == 0 and (r.stdout or "").strip():
+            return r.stdout.strip()
+        last = ((r.stderr or "").strip().splitlines() or ["no output and no error"])[-1][:160]
+        reason = "exit %s: %s" % (getattr(r, "returncode", "?"), last)
+    return "TRACK RECORD: not built (%s; tried twice)" % reason
 
 
 TRACK_BLOCK_RE = re.compile(
@@ -3285,6 +3325,22 @@ def selftest():
     check("direction matters: a legal thing that has NOT happened yet still creates",
           nac("INBOUND: Two Chefs Cambridge Limited - update",
               "The liquidator has not yet responded to our email.") is None)
+    # ── a tax enquiry is a legal matter (finding …-1098) ─────────────────
+    # The 27 Oct 2026 create, verbatim in shape: the HMRC officer on compliance
+    # check CFS-0000000 asks seventeen further questions, one of them about
+    # Social Housing Holdings, with a 27 Nov reply date.
+    check("27 Oct back-test: an HMRC compliance check naming a dissolved company creates",
+          nac("INBOUND: HMRC compliance check CFS-0000000 - 17 further questions",
+              "The HMRC officer has sent seventeen further questions with a reply date of "
+              "27 November 2026. One question asks about Social Housing Holdings.") is None)
+    check("an HMRC enquiry with no dissolved company still creates",
+          nac("INBOUND: HMRC enquiry - information notice", "Reply by 27 November 2026.") is None)
+    check("a penalty notice naming a dissolved company creates",
+          nac("INBOUND: Two Chefs - late filing penalty notice",
+              "A penalty has been charged for the late return.") is None)
+    check("'no HMRC enquiry in it' does not buy a card",
+          nac("INBOUND: Two Chefs Cambridge Limited - receipt",
+              "A receipt only. No HMRC enquiry in it.") is not None)
     check("'nothing legal in it' does not count either",
           nac("INBOUND: Two Chefs Cambridge Limited - receipt",
               "Nothing legal in it, just a receipt.") is not None)

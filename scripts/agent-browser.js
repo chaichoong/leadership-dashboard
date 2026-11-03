@@ -1161,9 +1161,25 @@ async function domText(page, limit) {
   }
 }
 
+// ONLY A BOX A PERSON CAN SEE IS A DOOR (finding 20261029-agent-dispatch-1124).
+// On 29 Oct 2026, minutes after Kevin signed the robot in, `session --site
+// business.everywhen.co.uk` read signedIn false on the signed-in landing page
+// ("Welcome to Everywhen", "Account reference …", four Get a quote tiles and no
+// sign-in form): the Acturis container carries a HIDDEN password box, this count
+// included it, and sessionVerdict calls any page with a password input signed
+// out. So the task would have been re-blocked on SIGN-IN straight after he
+// cleared it, and the half-hourly keep-warm poll would log the account signed
+// out for ever. A hidden box is counted by nothing: offsetParent covers
+// display:none and a hidden ancestor, the client rects cover a fixed-position
+// box, and visibility:hidden is read off the computed style.
 async function passwordFieldCount(page) {
   try {
-    return await page.evaluate(() => document.querySelectorAll('input[type=password]').length);
+    return await page.evaluate(() => Array.from(document.querySelectorAll('input[type=password]'))
+      .filter((el) => {
+        if (el.offsetParent === null && el.getClientRects().length === 0) return false;
+        const s = window.getComputedStyle(el);
+        return s.visibility !== 'hidden' && s.display !== 'none';
+      }).length);
   } catch (err) {
     if (!EVAL_BLOCKED.test(String(err && err.message))) throw err;
     const html = await page.content();

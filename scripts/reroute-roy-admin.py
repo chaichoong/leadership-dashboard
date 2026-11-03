@@ -111,6 +111,19 @@ TENANT_PLACEMENT_RE = re.compile(
     r"\bsign (?:a |the )?(?:new )?tenants?\b|\bfind (?:a |new |the )?(?:new )?tenants?\b|"
     r"\blet (?:unit|room|flat)\b|\btenant into payment\b", re.I)
 NOTE_TEXT = "Admin moved to the agent under the 5 Oct 2026 ruling; Roy keeps the physical step."
+# THE NEW-TENANT RENT CLOCK READS ROY'S ANSWER OFF THE TASK (finding
+# 20261007-agent-dispatch-778). On 7 Oct 2026 three tasks carrying a
+# `RENT SETUP KEY:` line were moved to the rent agent on the words "universal
+# credit" and "rent": rent_new_tenant.py reads Roy's yes or no off those tasks,
+# contacting the DWP is Roy's alone (Kevin's ruling 7, 2 Oct 2026) and the agent
+# file forbids the agent drafting anything to the DWP, so with no Assignee Roy
+# was never asked and the clock waited on an answer that could not come. The
+# name prefix rule below is not enough on its own: the key in the Notes is what
+# the clock matches on, and it survives a rename.
+SETUP_KEY_MARK = const("rent_new_tenant.py", "SETUP_KEY_MARK")
+ROY_SETUP_STEPS = const("rent_new_tenant.py", "ROY_STEPS")
+SETUP_KEY_RE = re.compile(re.escape(SETUP_KEY_MARK) + r"\s*[^\s:]+:(" +
+                          "|".join(re.escape(s) for s in ROY_SETUP_STEPS) + r")\b", re.I)
 
 PHYSICAL_RE = re.compile(
     r"\b(?:visit(?:s|ed|ing)?|attend(?:s|ed|ing|ance)?|access|photo(?:s|graph\w*)?|pictures?|"
@@ -172,6 +185,10 @@ def classify(rec, chain=((), ())):
         return "keep", "Maintenance Ticket: a repair, Roy's under the standing approval"
     if NOTE_TEXT in str(f.get(F["notes"]) or ""):
         return "keep", "moved once already and linked to Roy again since: a person put it back"
+    m = SETUP_KEY_RE.search(str(f.get(F["notes"]) or ""))
+    if m:
+        return "keep", ("the new-tenant rent clock reads Roy's answer off this task "
+                        "(%s step)" % m.group(1).lower())
     m = SIGN_IN_RE.search(name)
     if m:
         return "keep", "Roy's own sign-in (%r)" % m.group(0)

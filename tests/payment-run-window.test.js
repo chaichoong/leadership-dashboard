@@ -103,6 +103,21 @@ describe('the payment-run script is self-consistent', () => {
     const out = execFileSync('python3', [PY, 'selftest'], { encoding: 'utf8' });
     expect(out).toContain('all checks pass');
   });
+
+  // Finding 20261023-payment-run-1058. The 23 Oct 2026 run read 46 PDFs on a budget of 46, skipped
+  // 41 and set truncated on BOTH mailboxes, so the week was incomplete; at 120 it read 87 and
+  // completed. The skill passes the budget on the command line, so the two must not drift: a run
+  // told 40 is truncated whatever the script's own default says.
+  it('the attachment budget is at least a real week (120), and the skill passes the same number', () => {
+    const py = readFileSync(PY, 'utf8');
+    const m = py.match(/^MAX_ATTACHMENTS = (\d+)$/m);
+    expect(m, 'MAX_ATTACHMENTS not found').toBeTruthy();
+    expect(Number(m[1])).toBeGreaterThanOrEqual(120);
+    const skill = readFileSync(join(ROOT, '.claude/scheduled-tasks/payment-run/SKILL.md'), 'utf8');
+    const flag = skill.match(/--max-attachments (\d+)/);
+    expect(flag, '--max-attachments not found in the skill').toBeTruthy();
+    expect(Number(flag[1])).toBe(Number(m[1]));
+  });
 });
 
 describe('three sections', () => {
