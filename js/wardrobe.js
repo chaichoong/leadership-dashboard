@@ -130,7 +130,7 @@
     function optionCard(pick, best) {
         const isBest = pick.option === best;
         if (!pick.outfit) {
-            return `<article class="wear-opt"><h3>${esc(pick.option)}</h3><p class="wear-note">No outfit ready today: each one for this option has a piece in the wash or is out of season.</p></article>`;
+            return `<article class="wear-opt"><h3><span>${esc(pick.option)}</span></h3><p class="wear-note">No outfit ready today: each one for this option has a piece in the wash or is out of season.</p></article>`;
         }
         const addedById = new Map(pick.added.map(a => [a.item.id, a]));
         const btn = pick.wornToday
@@ -411,6 +411,14 @@
     const WEAR_KEYS = { lastWorn: 'lastWorn', prevWorn: 'prevWorn', wears: 'wears', inWashSince: 'inWashSince' };
     // night: the pyjamas log, which touches only pyjamas and no outfit; the day log never touches pyjamas,
     // so pressing Wearing this after logging tonight's pair never takes the pair's night back.
+    // True when these ticked pieces still cover the outfit: each of its own pieces, or a twin of it, or (when
+    // leather boots are on, as rain swaps them in) any of its shoes.
+    function outfitCovered(o, ids) {
+        const items = state.data.items;
+        const twin = (a, b) => items[a] && items[b] && items[a].twinGroup && items[a].twinGroup === items[b].twinGroup;
+        const bootsOn = ids.some(id => items[id] && items[id].type === 'Shoes' && /^Leather boots/.test(items[id].layerRole || ''));
+        return o.itemIds.length > 0 && o.itemIds.every(id => ids.includes(id) || ids.some(t => twin(t, id)) || (bootsOn && items[id] && items[id].type === 'Shoes'));
+    }
     function wearSteps(ids, chosen, date, night) {
         const items = state.data.items;
         const itemChanges = [];
@@ -419,7 +427,9 @@
             const f = ids.includes(it.id) ? P().wearFields(it, date) : P().unwearFields(it, date);
             if (f) itemChanges.push({ it, f });
         });
-        const outfitChanges = night ? [] : state.data.outfits.filter(o => o.lastWorn === date && o !== chosen)
+        // An outfit pressed earlier today stays pressed while its pieces are still on (a padel session after a
+        // casual day keeps both); one whose pieces came off goes back to its last date.
+        const outfitChanges = night ? [] : state.data.outfits.filter(o => o.lastWorn === date && o !== chosen && !outfitCovered(o, ids))
             .map(o => ({ o, f: { lastWorn: o.prevWorn || null, prevWorn: null } }));
         if (!night && chosen && chosen.lastWorn !== date) outfitChanges.push({ o: chosen, f: { lastWorn: date, prevWorn: chosen.lastWorn || null } });
         const pick = (obj, keys) => Object.fromEntries(keys.map(k => [k, obj[k] == null ? null : obj[k]]));
@@ -472,7 +482,10 @@
         if (state.saving || !state.data) return;
         const pick = currentPicks().find(p => p.option === option);
         if (!pick || !pick.outfit) return;
-        saveWorn(pick.items.map(it => it.id), pick.outfit, `Saved: you're wearing ${pick.outfit.name} today.`);
+        // Wearing adds to the day (casual by day, football at night); unticking in the picker takes a piece off.
+        const date = today();
+        const already = Object.values(state.data.items).filter(it => it.lastWorn === date && !P().isNightwear(it)).map(it => it.id);
+        saveWorn([...new Set([...already, ...pick.items.map(it => it.id)])], pick.outfit, `Saved: you're wearing ${pick.outfit.name} today.`);
     }
 
     // ── Wardrobe page ──
@@ -597,8 +610,12 @@
                     : state.wxError ? { status: 'fail', detail: state.wxError } : { status: 'warn', detail: 'Not read yet' }) },
                 { name: 'An outfit ready for every option today', kind: 'sync', run: () => {
                     if (!state.data) return { status: 'warn', detail: 'Not read yet' };
-                    const missing = currentPicks().filter(p => !p.outfit).map(p => p.option);
-                    return missing.length ? { status: 'warn', detail: `Nothing ready for: ${missing.join(', ')}` } : { status: 'pass', detail: 'All three options have an outfit' };
+                    // An option with no outfit for this season at all (summer-only touchline kit in winter) is not a fault.
+                    const season = P().seasonOf(new Date());
+                    const inSeason = (opt) => state.data.outfits.some(o => o.option === opt && (o.season === 'All' || o.season === season));
+                    const picks = currentPicks().filter(p => inSeason(p.option));
+                    const missing = picks.filter(p => !p.outfit).map(p => p.option);
+                    return missing.length ? { status: 'warn', detail: `Nothing ready for: ${missing.join(', ')}` } : { status: 'pass', detail: `All ${picks.length} options in season have an outfit` };
                 } },
             ],
         });
@@ -701,11 +718,9 @@
                 // today's pressed one first, so a later change in the weather never un-presses it.
                 const items = state.data.items;
                 // Rain swaps an outfit's shoes for leather boots, so ticked boots stand in for its shoes.
-                const bootsOn = ids.some(id => items[id] && items[id].type === 'Shoes' && /^Leather boots/.test(items[id].layerRole || ''));
                 // A ticked twin (the other white tee, say) stands in for the outfit's own piece.
                 const twin = (a, b) => items[a] && items[b] && items[a].twinGroup && items[a].twinGroup === items[b].twinGroup;
-                const met = (id) => ids.includes(id) || ids.some(t => twin(t, id)) || (bootsOn && items[id] && items[id].type === 'Shoes');
-                const fits = (o) => o.itemIds.length && o.itemIds.every(met)
+                const fits = (o) => outfitCovered(o, ids)
                     && ids.every(id => o.itemIds.includes(id) || o.itemIds.some(b => twin(b, id)) || (items[id] && items[id].layerRole));
                 const same = state.data.outfits.find(o => o.lastWorn === today() && fits(o))
                     || (currentPicks().find(p => p.outfit && fits(p.outfit)) || {}).outfit;

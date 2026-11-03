@@ -189,3 +189,51 @@ describe('twins and today\'s dirty pieces', () => {
         expect(P.chooseBase(outfits, items, 'Out casual', D).id).toBe('N');
     });
 });
+
+// Kevin, 3 Nov 2026: Site visits, Football training (on the touchline) and Padel (outdoors).
+describe('sport and site options', () => {
+    const ITEMS = Object.fromEntries([
+        item('polo', 'Tee'), item('top', 'Lounge', { washEvery: 3 }), item('trackies', 'Lounge', { washEvery: 3 }), item('astro', 'Shoes'),
+        item('rainJ', 'Jacket', { layerRole: 'Touchline rain jacket' }), item('mgr', 'Coat', { layerRole: 'Touchline coat' }),
+        item('wolfBeanie', 'Accessory', { layerRole: 'Sport beanie' }), item('skin', 'Tee', { layerRole: 'Top skin' }),
+        item('thermal', 'Tee', { layerRole: 'Thermal top skin' }), item('legs', 'Lounge', { layerRole: 'Bottom skin', washEvery: 1 }),
+        item('quarter', 'Lounge', { layerRole: 'Sport warm-up top', washEvery: 1 }),
+        item('runTee', 'Tee'), item('shorts', 'Shorts', { washEvery: 1 }), item('padelShoes', 'Shoes'),
+        item('siteTee', 'Tee'), item('greyJeans', 'Trousers'), item('reeboks', 'Shoes'),
+        item('barbour', 'Jacket', { layerRole: 'Rain jacket' }), item('boots', 'Shoes', { layerRole: 'Leather boots casual' }),
+    ].map(i => [i.id, i]));
+    const OUTFITS = [outfit('F', 'Football training', ['polo', 'top', 'trackies', 'astro']), outfit('P', 'Padel', ['runTee', 'shorts', 'padelShoes']),
+        outfit('S', 'Site visits', ['siteTee', 'greyJeans', 'reeboks'])];
+    const pick = (wx, o) => P.pickOutfits(OUTFITS, ITEMS, wx, D).find(p => p.option === o).items.map(i => i.id);
+
+    it('the card offers six options, in order', () => {
+        expect(P.pickOutfits(OUTFITS, ITEMS, {}, D).map(p => p.option))
+            .toEqual(['Stay at home', 'Out casual', 'Out smart casual', 'Site visits', 'Football training', 'Padel']);
+    });
+    it('touchline, cold and wet (feels 3°, rain 80%): manager jacket, thermal skin, beanie, bottom skin', () => {
+        expect(pick({ feelsMin: 3, rainChance: 80 }, 'Football training')).toEqual(['polo', 'top', 'trackies', 'astro', 'mgr', 'thermal', 'wolfBeanie', 'legs']);
+    });
+    it('touchline, mild and wet (feels 13°, rain 80%): the rain jacket only', () => {
+        expect(pick({ feelsMin: 13, rainChance: 80 }, 'Football training')).toEqual(['polo', 'top', 'trackies', 'astro', 'rainJ']);
+    });
+    it('padel at feels 11°: a normal top skin', () => {
+        expect(pick({ feelsMin: 11, rainChance: 0 }, 'Padel')).toEqual(['runTee', 'shorts', 'padelShoes', 'skin']);
+    });
+    it('padel at feels 5°: thermal skin, bottom skin and the warm-up top, never a normal skin as well', () => {
+        expect(pick({ feelsMin: 5, rainChance: 0 }, 'Padel')).toEqual(['runTee', 'shorts', 'padelShoes', 'thermal', 'legs', 'quarter']);
+    });
+    it('padel in the warm (feels 18°): nothing added', () => {
+        expect(pick({ feelsMin: 18, rainChance: 0 }, 'Padel')).toEqual(['runTee', 'shorts', 'padelShoes']);
+    });
+    it('a wet site visit gets the rain jacket but keeps the site shoes', () => {
+        expect(pick({ feelsMin: 9, rainChance: 80 }, 'Site visits')).toEqual(['siteTee', 'greyJeans', 'reeboks', 'barbour']);
+    });
+});
+
+describe('touchline outfit that already has a jacket', () => {
+    it('gets no second jacket when cold', () => {
+        const items = Object.fromEntries([item('polo', 'Tee'), item('rainJ', 'Jacket', { layerRole: 'Touchline rain jacket' }), item('mgr', 'Coat', { layerRole: 'Touchline coat' })].map(i => [i.id, i]));
+        const pick = P.pickOutfits([outfit('F', 'Football training', ['polo', 'rainJ'])], items, { feelsMin: 5, rainChance: 90 }, D).find(p => p.option === 'Football training');
+        expect(pick.items.map(i => i.id)).not.toContain('mgr');
+    });
+});

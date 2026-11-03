@@ -85,10 +85,10 @@ async function open(page, hash, opts = {}) {
 const realErrors = errs => errs.filter(e => !/net::ERR|Failed to fetch|NetworkError/.test(e));
 
 test.describe('What to wear today', () => {
-  test('sits at the top of My Dashboard with the date, the weather, a reason and three options', async ({ page }) => {
+  test('sits at the top of My Dashboard with the date, the weather, a reason and six options', async ({ page }) => {
     const errors = await open(page, 'home');
     const card = page.locator('#homeWear');
-    await expect(card.locator('.wear-opt')).toHaveCount(3, { timeout: 20000 });
+    await expect(card.locator('.wear-opt')).toHaveCount(6, { timeout: 20000 });   // six options since 3 Nov 2026
     // The jump row sits above the card (Kevin, 28 Oct 2026).
     const top = await page.evaluate(() => [document.getElementById('homeWear'), document.getElementById('homeJumpSlot')].map(e => e.getBoundingClientRect().top));
     expect(top[1]).toBeLessThan(top[0]);
@@ -119,7 +119,7 @@ test.describe('What to wear today', () => {
   test('on a phone the recommended option is shown first', async ({ page }) => {
     await page.setViewportSize({ width: 400, height: 900 });
     await open(page, 'home');
-    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(3, { timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(6, { timeout: 20000 });   // six options since 3 Nov 2026
     const tops = await page.evaluate(() => [...document.querySelectorAll('#homeWear .wear-opt')].map(o => [o.classList.contains('wear-opt-best'), o.getBoundingClientRect().top]));
     const best = tops.find(t => t[0])[1];
     expect(tops.every(t => t[1] >= best)).toBe(true);
@@ -176,7 +176,7 @@ test.describe('What to wear today', () => {
 
   test('with the weather down the options still show, and the card says why', async ({ page }) => {
     const errors = await open(page, 'home', { weatherDown: true });
-    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(3, { timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(6, { timeout: 20000 });   // six options since 3 Nov 2026
     await expect(page.locator('#homeWear .wear-error')).toContainText("weather could not be read");
     expect(realErrors(errors)).toEqual([]);
   });
@@ -219,7 +219,7 @@ test.describe('Wardrobe page', () => {
 test.describe('Jump row', () => {
   test('sits above the card, and What to wear brings the card back from further down', async ({ page }) => {
     await open(page, 'home');
-    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(3, { timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(6, { timeout: 20000 });   // six options since 3 Nov 2026
     await expect(page.locator('#homeJump .home-jump-btn').first()).toHaveText('What to wear');
     await page.evaluate(() => window.scrollTo(0, 2500));
     await expect.poll(() => page.evaluate(() => document.getElementById('homeWear').getBoundingClientRect().bottom < 0)).toBe(true);
@@ -493,6 +493,47 @@ test.describe('Wearing something else, and the wash', () => {
     await expect(page.locator('#homeWear .wear-logged')).toContainText('Test black turtleneck');
     expect(field(opts.store, 'recRoll', WR.lastWorn)).toBe(today);
     expect(field(opts.store, 'recTee', WR.lastWorn)).toBe(today);           // ticked before the search, still saved
+  });
+
+  // Kevin, 3 Nov 2026: six options; a padel session goes straight into tonight's wash.
+  test('the card shows six options, and a padel session puts the tee and shorts in tonight\'s wash', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    await expect(page.locator('#homeWear .wear-opt h3 > span:first-child')).toHaveText(['Stay at home', 'Out casual', 'Out smart casual', 'Site visits', 'Football training', 'Padel'], { timeout: 20000 });
+    opts.store.db[T_WR].push(piece('recRun', 'Test run tee', 'Tee', { [WR.usedFor]: [] }), piece('recSportShorts', 'Test sports shorts', 'Shorts', { [WR.washEvery]: 1 }),
+      piece('recPadel', 'Test padel trainers', 'Shoes'));
+    opts.store.db[T_OF].push(outfit('recOP', 'Padel', 'Padel', ['recRun', 'recSportShorts', 'recPadel']));
+    await page.reload();
+    const padel = page.locator('#homeWear .wear-opt', { hasText: 'Padel' }).last();
+    await expect(padel).toContainText('Test padel trainers', { timeout: 20000 });
+    await padel.locator('[data-wear-option]').click();
+    const into = page.locator('#homeWear .wear-washcols > div', { has: page.locator('h4', { hasText: 'Into the wash tonight' }) });
+    await expect(into.locator('li')).toHaveText([/Test run tee/, /Test sports shorts/]);
+    await expect(page.locator('#homeWear .wear-wash')).not.toContainText('Test padel trainers');
+  });
+
+  // Review fix (3 Nov 2026): casual by day and padel at night are both kept, never one wiping the other.
+  test('Wearing a second option the same day adds to the day: casual by day, padel at night', async ({ page }) => {
+    const opts = { live: true };
+    await open(page, 'home', opts);
+    const today = localTodayISO();
+    opts.store.db[T_WR].push(piece('recRun', 'Test run tee', 'Tee', { [WR.usedFor]: [] }), piece('recSportShorts', 'Test sports shorts', 'Shorts', { [WR.washEvery]: 1 }),
+      piece('recPadel', 'Test padel trainers', 'Shoes'));
+    opts.store.db[T_OF].push(outfit('recOP', 'Padel', 'Padel', ['recRun', 'recSportShorts', 'recPadel']));
+    await page.reload();
+    const casual = page.locator('#homeWear .wear-opt', { hasText: 'Out casual' });
+    await casual.locator('[data-wear-option]').click({ timeout: 20000 });
+    await expect(casual.locator('.wear-btn-done')).toHaveText('Wearing today');
+    await page.locator('#homeWear .wear-opt', { hasText: 'Padel' }).last().locator('[data-wear-option]').click();
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Padel' }).last().locator('.wear-btn-done')).toHaveText('Wearing today');
+    await expect(casual.locator('.wear-btn-done')).toHaveText('Wearing today');              // the day's outfit stays
+    expect(field(opts.store, 'recTee', WR.lastWorn)).toBe(today);                               // casual pieces keep their wear
+    expect(field(opts.store, 'recTee', WR.wears)).toBe(1);
+    expect(field(opts.store, 'recRun', WR.lastWorn)).toBe(today);
+    expect(opts.store.db[T_OF].find(r => r.id === 'recO1').fields[OF.lastWorn]).toBe(today);
+    const into = page.locator('#homeWear .wear-washcols > div', { has: page.locator('h4', { hasText: 'Into the wash tonight' }) });
+    await expect(into).toContainText('Test white tee');
+    await expect(into).toContainText('Test run tee');
   });
 
   test('2 days after it went in the wash, a piece is offered again with no press', async ({ page }) => {
