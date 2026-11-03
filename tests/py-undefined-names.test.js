@@ -92,6 +92,7 @@ const ESTATE_SCRIPTS = [
   'scripts/magic-battery.py',
   'scripts/home-battery.py',
   'scripts/uk-gigs.py',
+  'scripts/sport-calendar.py',
   'scripts/merge-pr.py',
   'scripts/merge-guard.py',
   'scripts/affected-pages.py',

@@ -14,6 +14,9 @@
 .wear-chip { font-size: var(--fs-xs); font-weight: var(--fw-semibold); border-radius: var(--radius-full); padding: 3px 10px; background: var(--bg-subtle); color: var(--text-secondary); }
 .wear-chip-rain { background: var(--info-bg); color: var(--info); }
 .wear-chip-wind { background: var(--warning-bg); color: var(--warning); }
+.wear-chip-sport { background: var(--accent-soft); color: var(--accent); }
+.wear-opt-today { border-color: var(--accent-gold); box-shadow: inset 0 0 0 1px var(--accent-gold); }
+.wear-today { color: var(--text-primary); background: var(--accent-gold-soft); }
 .wear-chip-sun { background: var(--accent-gold-soft); color: var(--text-primary); }
 .wear-why { margin: var(--space-4) 0 0; padding: var(--space-3); border-left: 3px solid var(--accent); background: var(--bg-surface-2); border-radius: 0 var(--radius-md) var(--radius-md) 0; color: var(--text-secondary); max-width: 75ch; }
 .wear-opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
@@ -86,7 +89,7 @@
 .wr-washevery { display: inline-flex; gap: var(--space-1); align-items: center; }
 .wr-washevery input { width: 52px; font: inherit; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 4px; }
 .wr-washevery input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
-@media (max-width: 900px) { .wear-opts { grid-template-columns: 1fr; } .wear-opt-best { order: -1; } }   /* on a phone the recommended option comes first */
+@media (max-width: 900px) { .wear-opts { grid-template-columns: 1fr; } .wear-opt-best, .wear-opt-today { order: -1; } }   /* on a phone the recommended option comes first */
 
 /* ── Wardrobe page ── */
 .wr-title { margin: 0 0 var(--space-4); font-size: var(--fs-2xl); color: var(--text-primary); }
