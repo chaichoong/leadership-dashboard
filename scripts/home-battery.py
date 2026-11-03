@@ -128,8 +128,13 @@ NETWORK = os.path.expanduser("~/.config/od/home-network.json")       # private: 
 # The two places the watch reads. Each has its own "cannot see" reminder, its own
 # history and count control, and a reminder is only ever closed by its own source.
 SOURCES = {
+    # Off (Kevin, 3 Nov 2026): Aqara's developer service never approved the
+    # account, and both Aqara hubs now share every device with Home Assistant
+    # over Matter, so Aqara reaches the watch through "ha". Kept, not deleted,
+    # so the reader can come back by removing "off".
     "aq": {"label": "Aqara", "app": "the Aqara app",
-           "fix": "double-click Aqara sign-in on the Mac mini desktop"},
+           "fix": "double-click Aqara sign-in on the Mac mini desktop",
+           "off": "retired 3 Nov 2026: Aqara reaches the watch through Home Assistant over Matter"},
     "ha": {"label": "Home Assistant", "app": "Home Assistant or the device's own app",
            "fix": "check Home Assistant is running on the Mac mini (homeassistant.local) and its key is saved"},
     # The switches, Wi-Fi access points, hubs, cameras and doorbell, pinged from
@@ -949,10 +954,23 @@ def read_source(tag, sstate, now, ha_token=None, network_path=None):
     return got
 
 
+def active_sources():
+    """The sources the watch reads now. One marked "off" is skipped whole: no
+    read, no "cannot see" reminder, and its old reminders are left alone."""
+    return [(tag, S) for tag, S in SOURCES.items() if not S.get("off")]
+
+
+def say_off():
+    for S in SOURCES.values():
+        if S.get("off"):
+            print("%s: off, %s" % (S["label"], S["off"]))
+
+
 def cmd_read():
     now = dt.datetime.now()
     state, bad = load_state(), 0
-    for tag, S in SOURCES.items():
+    say_off()
+    for tag, S in active_sources():
         got = read_source(tag, state["sources"].setdefault(tag, {}), now)
         if got is None:
             print("== %s: not set up" % S["label"])
@@ -982,7 +1000,8 @@ def cmd_run(argv):
     state = load_state()
     reminders = open_reminders()
     did = 0
-    for tag, S in SOURCES.items():
+    say_off()
+    for tag, S in active_sources():
         sstate = state["sources"].setdefault(tag, {})
         try:
             got = read_source(tag, sstate, now)
@@ -1530,6 +1549,8 @@ def selftest():
     check("an Aqara read never closes a reminder for a device it does not list",
           [a for a in decide(now.replace(hour=9), True, back, st(back), [{"key": marker("offline", "aqara:gone"), "ref": "r"}], {}) if a["do"] == "complete"], [])
     check("the network list has no count control (its gateway is the control)", SOURCES["nw"].get("counted"), False)
+    check("the retired Aqara reader is never read (Aqara comes through Home Assistant, 3 Nov 2026)",
+          [t for t, _ in active_sources()], ["ha", "nw"])
     order = []
     def logged(*a):
         order.append("complete")

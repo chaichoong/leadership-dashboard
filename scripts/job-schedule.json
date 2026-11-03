@@ -348,7 +348,7 @@
   "maxLateMinutes": 50,
   "mode": "wrapped",
   "queued": false,
-  "note": "Reads every Aqara device's battery and online state from Aqara's developer service, and every battery entity in Home Assistant on the Mac mini (including the 62 Aqara devices both hubs share with it over Matter since 3 Nov 2026), and pings the network switches, access points, hubs and cameras, hourly and, on the 21:20 run, puts one reminder per problem (a battery at 20% or below, a device offline 2 hours or more, a device gone from Aqara's list for 24 hours, or no good read of Aqara for 12 hours) in Kevin's Apple Reminders list with a 21:30 alert. Outside the queue for the same reason as magic-battery: it writes Apple Reminders only, and a nudge stuck behind a long render misses its evening. Runs at :20 so it never touches Reminders at the same moment as magic-battery at :25."
+  "note": "Reads every battery entity in Home Assistant on the Mac mini (including the 62 Aqara devices both hubs share with it over Matter; the direct Aqara developer-service reader is off since 3 Nov 2026) and pings the network switches, access points, hubs and cameras, hourly and, on the 21:20 run, puts one reminder per problem (a battery at 20% or below, a device offline 2 hours or more, a device gone from Home Assistant's list for 24 hours, or no good read for 12 hours) in Kevin's Apple Reminders list with a 21:30 alert. Outside the queue for the same reason as magic-battery: it writes Apple Reminders only, and a nudge stuck behind a long render misses its evening. Runs at :20 so it never touches Reminders at the same moment as magic-battery at :25."
  },
  "padel-courts": {
   "cron": "*/15 6-22 * * *",
