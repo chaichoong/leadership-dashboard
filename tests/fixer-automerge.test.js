@@ -141,6 +141,72 @@ describe('a merge is only real when it landed', () => {
   });
 });
 
+describe('a merged workspace is torn down by the merge itself (finding 20261102-queue-fixer-1170)', () => {
+  // STEP 5b of the fixer skill said to run `worktree.sh done` after a successful merge, and
+  // nothing enforced it: on 2 Nov 2026 five merged fixer workspaces were still on disk, two of
+  // them three and four weeks old. A run that hits its time ceiling never reaches its own step 5b.
+  const drive = (snippet) => JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, os, stat, sys, tempfile
+spec = importlib.util.spec_from_file_location('fm', ${JSON.stringify(GATE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+repo = tempfile.mkdtemp()
+os.makedirs(os.path.join(repo, 'scripts'))
+log = os.path.join(repo, 'called.txt')
+sh = os.path.join(repo, 'scripts', 'worktree.sh')
+open(sh, 'w').write(chr(35) + '!/bin/bash' + chr(10) + 'echo "$@" >> ' + log + chr(10) + 'echo "removed the workspace"' + chr(10))
+os.chmod(sh, 0o755)
+m.REPO = repo
+def ws(topic):
+    os.makedirs(os.path.join(repo, '.claude', 'worktrees', topic), exist_ok=True)
+def called():
+    return open(log).read().split() if os.path.exists(log) else []
+${snippet}
+`], { encoding: 'utf8' }).trim().split('\n').pop());
+
+  it('runs worktree.sh done for the branch it just merged, and reports a refusal', () => {
+    const r = drive(`
+ws('queue-fixes-2026-11-03')
+out = m.teardown_workspace('fix/queue-fixes-2026-11-03', '')
+print(json.dumps({'out': out, 'called': called()}))`);
+    expect(r.out.topic).toBe('queue-fixes-2026-11-03');
+    expect(r.out.removed).toBe(true);
+    expect(r.out.say).toContain('removed the workspace');
+    expect(r.called).toEqual(['done', 'queue-fixes-2026-11-03']);
+  });
+
+  it('never touches content-engine-runtime or main, whatever the branch says', () => {
+    const r = drive(`
+ws('content-engine-runtime')
+ws('main')
+a = m.teardown_workspace('content-engine-runtime', '')
+b = m.teardown_workspace('main', '')
+print(json.dumps({'a': a, 'b': b, 'called': called()}))`);
+    // Those two worktrees run the nightly and daytime content-engine jobs and removing them
+    // breaks both with no error raised.
+    expect(r.a.skipped).toMatch(/never torn down/);
+    expect(r.b.skipped).toMatch(/never torn down/);
+    expect(r.called).toEqual([]);
+  });
+
+  it('says plainly when the branch could not be deleted because a worktree held it', () => {
+    const r = drive(`
+out = m.teardown_workspace('fix/gone-already', "failed to run git: error: cannot lock ref 'refs/heads/x'")
+print(json.dumps({'out': out, 'called': called()}))`);
+    expect(r.out.skipped).toBe('no workspace on disk');
+    expect(r.out.note).toMatch(/could not delete the branch because a worktree still held it/);
+    expect(r.called).toEqual([]);
+  });
+
+  it('the teardown runs only after the merge is confirmed, beside the findings landing', () => {
+    const fn = SRC.slice(SRC.indexOf('def cmd_merge'));
+    const guardAt = fn.indexOf('if merged:');
+    const tearAt = fn.indexOf('teardown_workspace(branch');
+    expect(guardAt, 'the `if merged:` guard is gone').toBeGreaterThan(-1);
+    expect(tearAt, 'the teardown call is gone').toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(tearAt);
+  });
+});
+
 describe('the routines actually use it', () => {
   it('the fixer skill calls the gate, not a bare gh merge', () => {
     const s = readFileSync(FIXER_SKILL, 'utf8');
