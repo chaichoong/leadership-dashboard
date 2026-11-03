@@ -167,6 +167,19 @@ out = [titles, crossed, 'FAKEKEY' in bad[1], hb.read_source('ha', {'last_ok': is
             'the Home Assistant key file is missing:']);
     });
 
+    it('reads an Aqara sensor Home Assistant lost through Matter as offline, with its own reminder', () => {
+        // 3 Nov 2026: 62 Aqara devices joined Home Assistant through Matter with no
+        // connectivity sensor, so an unavailable battery has to read as offline.
+        const out = py(`
+rows = [{'entity': 'sensor.toilet_motion_battery', 'device': 'Toilet Motion', 'model': 'Aqara Motion Sensor',
+         'state': 'unavailable', 'unit': '%', 'changed': '2026-10-25T07:02:00+00:00', 'conn': []}]
+ha = hb.ha_devices(rows, {}, now)
+s = hb.track(now - dt.timedelta(hours=3), ha, {}); s['last_ok'] = iso(now)
+acts = hb.decide(now, True, ha, s, [], {}, src='ha')
+out = [ha[0]['online'], [a['title'] for a in acts if a['do'] == 'create'], hb.no_level(ha, now)]`);
+        expect(out).toEqual([false, ['Toilet Motion is offline'], []]);
+    });
+
     it('pings the home network: a dead switch is offline, a dead gateway is one error', () => {
         // 3 Nov 2026: the Living Room switch lost power for 3 days unnoticed.
         const out = py(`
