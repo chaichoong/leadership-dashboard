@@ -18,13 +18,19 @@
 (function (root) {
     'use strict';
 
-    const OPTIONS = ['Stay at home', 'Out casual', 'Out smart casual'];
+    // Site visits, Football training (on the touchline) and Padel (outdoors) added by Kevin, 3 Nov 2026.
+    const OPTIONS = ['Stay at home', 'Out casual', 'Out smart casual', 'Site visits', 'Football training', 'Padel'];
     const OWNED = ['Own', 'Bought'];
     const RAIN_PCT = 50;
     const JACKET_BELOW = 12;
     const COAT_BELOW = 10;
     const BEANIE_AT = 6;
     const SCARF_AT = 4;
+    // Sport layers (Kevin, 3 Nov 2026): the touchline is cold standing still; padel is played outdoors.
+    const TOUCHLINE_COAT_BELOW = 10;   // the padded manager jacket; above this, the rain jacket when wet
+    const THERMAL_BELOW = 9;           // thermal top skin, for both
+    const BOTTOM_SKIN_AT = 4;          // touchline: bottom skin under the tracksuit bottoms
+    const PADEL_SKIN_BELOW = 14;       // padel: a normal top skin; below THERMAL_BELOW the thermal one, a bottom skin and the warm-up top
     // Kevin, 31 Oct 2026: lounge pieces (hoodies, sweatshirts, joggers) go over a tee, so 3 wears, not 1; shirts 2.
     // Sport kit and the dressing gown carry their own Wash every (1 and 7) on the piece.
     const WASH_DEFAULT = { Tee: 1, Shirt: 2, Lounge: 3, Knit: 3, Trousers: 5, Shorts: 5, Pyjamas: 3 };   // anything else is never counted
@@ -163,8 +169,26 @@
         const known = (v) => typeof v === 'number' && isFinite(v);
         const rainy = known(wx.rainChance) && wx.rainChance >= RAIN_PCT;
         const cold = known(wx.feelsMin);   // an unknown low adds nothing, never every layer
-        const casual = option === 'Out casual';
         const add = (it, why) => { if (it && !items.includes(it)) { items.push(it); added.push({ item: it, why }); } };
+        const role = (r, prefer) => byRole(itemsById, r, prefer, today);
+        if (option === 'Football training') {
+            if (!items.some(isOuter)) {   // an outfit that already has a jacket gets no second one
+                if (cold && wx.feelsMin < TOUCHLINE_COAT_BELOW) add(role('Touchline coat'), 'cold');
+                else if (rainy) add(role('Touchline rain jacket'), 'rain');
+            }
+            if (cold && wx.feelsMin < THERMAL_BELOW) add(role('Thermal top skin'), 'cold');
+            if (cold && wx.feelsMin <= BEANIE_AT) add(role('Sport beanie'), 'cold');
+            if (cold && wx.feelsMin <= BOTTOM_SKIN_AT) add(role('Bottom skin'), 'cold');
+            return { items, added };
+        }
+        if (option === 'Padel') {
+            if (cold && wx.feelsMin < THERMAL_BELOW) {
+                add(role('Thermal top skin'), 'cold'); add(role('Bottom skin'), 'cold'); add(role('Sport warm-up top'), 'cold');
+            } else if (cold && wx.feelsMin < PADEL_SKIN_BELOW) add(role('Top skin'), 'cold');
+            return { items, added };
+        }
+        const site = option === 'Site visits';
+        const casual = option === 'Out casual' || site;   // a site visit layers like a casual day
 
         if (!items.some(isOuter) && cold) {
             if (casual && wx.feelsMin < JACKET_BELOW) {
@@ -175,7 +199,7 @@
                 add(byRole(itemsById, 'Smart coat', null, today), 'cold');
             }
         }
-        if (rainy) {
+        if (rainy && !site) {   // site shoes stay site shoes: the leather boots are for days out
             const shoe = items.find(it => it.type === 'Shoes');
             const boots = byRole(itemsById, casual ? 'Leather boots casual' : 'Leather boots smart', null, today);
             if (boots && shoe && !/^Leather boots/.test(shoe.layerRole || '')) {
@@ -192,7 +216,7 @@
     // outfits going out, so it never promises a layer the card does not show.
     function reasonFor(wx, picks) {
         const known = (v) => typeof v === 'number' && isFinite(v);
-        const adds = (picks || []).filter(p => p.option !== 'Stay at home').flatMap(p => p.added);
+        const adds = (picks || []).filter(p => ['Out casual', 'Out smart casual', 'Site visits'].includes(p.option)).flatMap(p => p.added);
         const has = (why, type) => adds.some(a => a.why === why && (!type || a.item.type === type || a.item.layerRole === type));
         const parts = [];
         const gap = known(wx.actualNow) && known(wx.feelsNow) ? Math.round(wx.actualNow - wx.feelsNow) : 0;
