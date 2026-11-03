@@ -18,7 +18,7 @@
     const WEATHER_MAX_AGE_MS = 15 * 60 * 1000;   // Open-Meteo's "current" moves every 15 minutes (Kevin, 29 Oct 2026: exact conditions)
     const HOUR_FROM = 6;            // the hourly strip runs 06:00 to 23:00 (Kevin, 28 Oct 2026)
     const WINDY_MPH = 15;           // the wind chip turns amber from here (was 25 km/h)
-    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, wxTriedAt: 0, wxTriedHour: null, shownHour: null, saving: false, view: 'own', form: null, other: false };   // form: null, 'add' or the id of the piece being removed; other: the I'm wearing something else picker is open
+    const state = { data: null, dataError: null, loading: null, wx: null, wxError: null, wxAt: 0, wxDay: '', wxLoading: null, wxTriedAt: 0, wxTriedHour: null, shownHour: null, saving: false, view: 'own', form: null, other: false, sport: null };   // form: null, 'add' or the id of the piece being removed; other: the I'm wearing something else picker is open
     const UNKNOWN_WX = { feelsNow: null, actualNow: null, feelsMin: null, feelsMax: null, rainChance: null, code: null };
 
     const signedIn = () => typeof PAT === 'string' && PAT.length > 0;
@@ -127,17 +127,35 @@
         return `<li><i class="wear-sw" style="background:${swatch(it.swatch)}" aria-hidden="true"></i><span class="wear-name">${esc(it.name)}${tag}</span></li>`;
     }
 
+    // Today's sport from the diary (Kevin, 3 Nov 2026): scripts/sport-calendar.py reads his calendar hourly on
+    // the Mac and leaves one Estate Status row (key sport-day) with each session's option and start time,
+    // never the event's title. Only today's row counts; a read that fails just shows no badge.
+    async function loadSport() {
+        try {
+            const rows = await airtableFetch(TABLES.estateStatus, { filterByFormula: "{Key}='sport-day'", pageSize: 1 });
+            const raw = rows.length ? getField(rows[0], ESTATE_FIELDS.payload) : null;
+            const p = raw ? JSON.parse(raw) : null;
+            state.sport = p && p.date === today() && Array.isArray(p.sessions) ? p.sessions : [];
+        } catch (err) {
+            console.error('[wardrobe] Could not read today\'s sport row:', err);
+            state.sport = [];
+        }
+    }
+    const sportTimes = (option) => (state.sport || []).filter(s => s.option === option).map(s => s.start || 'all day');
+
     function optionCard(pick, best) {
         const isBest = pick.option === best;
+        const times = sportTimes(pick.option);
+        const todayBadge = times.length ? `<span class="wear-best wear-today">Today ${esc(times.join(', '))}</span>` : '';
         if (!pick.outfit) {
-            return `<article class="wear-opt"><h3><span>${esc(pick.option)}</span></h3><p class="wear-note">No outfit ready today: each one for this option has a piece in the wash or is out of season.</p></article>`;
+            return `<article class="wear-opt${times.length ? ' wear-opt-today' : ''}"><h3><span>${esc(pick.option)}</span>${todayBadge}</h3><p class="wear-note">No outfit ready today: each one for this option has a piece in the wash or is out of season.</p></article>`;
         }
         const addedById = new Map(pick.added.map(a => [a.item.id, a]));
         const btn = pick.wornToday
             ? '<button type="button" class="wear-btn wear-btn-done" disabled>Wearing today</button>'
             : `<button type="button" class="wear-btn${isBest ? ' wear-btn-primary' : ''}" data-wear-option="${esc(pick.option)}"${state.saving ? ' disabled' : ''}>Wearing this</button>`;
-        return `<article class="wear-opt${isBest ? ' wear-opt-best' : ''}">
-            <h3><span>${esc(pick.option)}</span>${isBest ? `<span class="wear-best">${pick.wornToday ? 'Today' : 'Best for today'}</span>` : ''}</h3>
+        return `<article class="wear-opt${isBest ? ' wear-opt-best' : ''}${times.length ? ' wear-opt-today' : ''}">
+            <h3><span>${esc(pick.option)}</span>${isBest ? `<span class="wear-best">${pick.wornToday ? 'Today' : 'Best for today'}</span>` : todayBadge}</h3>
             <p class="wear-outfit">${esc(pick.outfit.name)}</p>
             <ul>${pick.items.map(it => itemRow(it, addedById.get(it.id))).join('')}</ul>
             ${pick.outfit.why ? `<p class="wear-note">${esc(pick.outfit.why)}</p>` : ''}
@@ -275,6 +293,7 @@
                     ${wx.rainChance != null ? `<span class="wear-chip${wx.rainChance >= P().RULES.RAIN_PCT ? ' wear-chip-rain' : ''}">Rain ${Math.round(wx.rainChance)}%</span>` : ''}
                     ${wx.wind != null ? `<span class="wear-chip${wx.wind >= WINDY_MPH ? ' wear-chip-wind' : ''}">Wind ${Math.round(wx.wind)} mph</span>` : ''}
                     ${wx.sunset ? `<span class="wear-chip wear-chip-sun">Sunset ${esc(wx.sunset)}</span>` : ''}
+                    ${(state.sport || []).map(s => `<span class="wear-chip wear-chip-sport">${esc(s.option === 'Football training' ? 'Football' : s.option)} ${esc(s.start || 'all day')}</span>`).join('')}
                 </div></div>` : ''}
         </div>${wx ? hourStrip(wx.hours, placeHour(wx), wx.sunset) : ''}`;
         state.shownHour = wx ? placeHour(wx) : null;   // followTheHour redraws when the clock moves past it
@@ -626,7 +645,7 @@
         // Only show "refreshing" when something is actually read; reopening Home with fresh data reads nothing.
         const fetching = force || !state.data || !state.wx || state.wxDay !== today() || Date.now() - state.wxAt >= WEATHER_MAX_AGE_MS;
         if (fetching && typeof markTabRefreshing === 'function') markTabRefreshing(TAB);
-        await Promise.all([loadData(force), loadWeather(force)]);
+        await Promise.all([loadData(force), loadWeather(force), loadSport()]);
         renderHomeCard();
         renderWardrobePage();
         if (typeof markTabSynced === 'function') markTabSynced(TAB);
@@ -801,7 +820,7 @@
             const due = Date.now() - state.wxTriedAt >= WEATHER_MAX_AGE_MS || hour !== state.wxTriedHour;
             if (hour === state.shownHour && !due) return;
             if (state.other) return;   // never redraw over half-ticked boxes; the next minute tries again
-            (due ? loadWeather(true) : Promise.resolve()).then(() => {
+            (due ? Promise.all([loadWeather(true), loadSport()]) : Promise.resolve()).then(() => {
                 const card = document.getElementById('homeWear');
                 if (state.saving || !card) return;   // the save redraws the card itself
                 // Put focus and the strip's scroll back where they were.

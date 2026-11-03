@@ -59,6 +59,12 @@
 //                             can never touch an entry Kevin or Gmail made.
 //   GET  /calendar/test   — token health + whether calendar scope is granted.
 //
+// CALENDAR DAY READ (added 3 Nov 2026, Kevin: the What to wear card marks Padel or Football training
+// on the days they are in his diary). Read-class, so gated by Bearer <GMAIL_TRIAGE_KEY>, never the
+// send key. Returns each event's title and times only: no description, location or attendees.
+//   POST /calendar/day — { date: 'YYYY-MM-DD', account? } → { account, date, events: [{ title, start, end, allDay }] }
+//                        Events starting on that London date, cancelled ones left out.
+//
 // GMAIL TRIAGE (added 24 Aug 2026, Inbound Comms Triage agent): script-only
 // read + label endpoints so the daily triage run can sort Kevin's inbox
 // headlessly. Gated by Bearer <GMAIL_TRIAGE_KEY> — deliberately NOT the send
@@ -294,6 +300,43 @@ export default {
                 return jsonResponse({ status: 'sent', id: sent.id, threadId: sent.threadId });
             } catch (e) {
                 return jsonResponse({ error: e.message }, 500);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Calendar day read — script-only, read-class (the triage key). Titles and times only.
+        // ------------------------------------------------------------------
+        if (url.pathname === '/calendar/day') {
+            const auth = request.headers.get('Authorization') || '';
+            if (!env.GMAIL_TRIAGE_KEY || auth !== `Bearer ${env.GMAIL_TRIAGE_KEY}`) {
+                return jsonResponse({ error: 'Forbidden' }, 403);
+            }
+            if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
+            try {
+                const body = await request.json();
+                const date = String(body.date || '');
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonResponse({ error: 'date must be YYYY-MM-DD' }, 400);
+                const acct = (body.account || DEFAULT_SENDER).toLowerCase().trim();
+                const refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${acct}`);
+                if (!refreshToken) return jsonResponse({ error: `Google not connected for ${acct}` }, 409);
+                const accessToken = await getGmailAccessToken(env, refreshToken);
+                // A window wide enough for any UK offset; the London date of each start decides.
+                const day = new Date(date + 'T12:00:00Z');
+                const from = new Date(day.getTime() - 36 * 3600 * 1000).toISOString();
+                const to = new Date(day.getTime() + 36 * 3600 * 1000).toISOString();
+                const q = new URLSearchParams({ timeMin: from, timeMax: to, singleEvents: 'true', orderBy: 'startTime',
+                    maxResults: '100', timeZone: 'Europe/London', fields: 'items(status,summary,start,end)' });
+                const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${q}`,
+                    { headers: { Authorization: `Bearer ${accessToken}` } });
+                if (!res.ok) throw new Error('Calendar read failed: ' + (await res.text()).slice(0, 300));
+                const londonDate = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+                const events = ((await res.json()).items || [])
+                    .filter(e => e.status !== 'cancelled')
+                    .map(e => ({ title: e.summary || '', start: e.start.dateTime || e.start.date, end: (e.end || {}).dateTime || (e.end || {}).date || null, allDay: !e.start.dateTime }))
+                    .filter(e => (e.allDay ? e.start : londonDate(e.start)) === date);
+                return jsonResponse({ account: acct, date, events });
+            } catch (e) {
+                return jsonResponse({ error: String(e && e.message || e).slice(0, 300) }, 502);
             }
         }
 

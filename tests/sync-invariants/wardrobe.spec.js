@@ -79,6 +79,9 @@ async function open(page, hash, opts = {}) {
   await setupMockAirtable(page, { ...makeFixtures(), wardrobe: wardrobe(), outfits: outfits(), ...(opts.fixtures || {}) });
   if (opts.weatherDown) await page.route('**/api.open-meteo.com/**', r => r.fulfill({ status: 503, body: 'down' }));
   if (opts.weather) await page.route('**/api.open-meteo.com/**', opts.weather);
+  // Today's sport row (Estate Status, key sport-day), written on the Mac by scripts/sport-calendar.py.
+  if (opts.sport) await page.route(/api\.airtable\.com\/v0\/[^/]+\/tblZVrdzivyBueZVf/, r => r.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ records: [{ id: 'recSport', fields: { fldLO6xJqkokvVR4g: 'sport-day', fldiqs9lvyLimoR7i: JSON.stringify(opts.sport) } }] }) }));
   if (opts.live) opts.store = await liveTables(page, opts.fail);
   await page.goto('/' + (hash ? '#' + hash : ''));
   return errors;
@@ -545,6 +548,23 @@ test.describe('Wearing something else, and the wash', () => {
     await expect(page.locator('#homeWear')).not.toContainText('Test burgundy beanie');
     await page.locator('#homeWear [data-wear-other]').click();
     await expect(page.locator('#homeWear [data-wear-otherform] input[value="recOnWay"]')).toHaveCount(0);
+  });
+
+  // Kevin, 3 Nov 2026: padel or football in the diary today is marked on its card with the time.
+  test('padel in today\'s diary: the Padel card says "Today 19:30" and a chip shows it; yesterday\'s row shows nothing', async ({ page }) => {
+    await open(page, 'home', { sport: { date: localTodayISO(), sessions: [{ option: 'Padel', start: '19:30' }] } });
+    const padel = page.locator('#homeWear .wear-opt', { hasText: 'Padel' }).last();
+    await expect(padel.locator('.wear-today')).toHaveText('Today 19:30', { timeout: 20000 });
+    await expect(padel).toHaveClass(/wear-opt-today/);
+    await expect(page.locator('#homeWear .wear-chip-sport')).toHaveText('Padel 19:30');
+    await expect(page.locator('#homeWear .wear-opt', { hasText: 'Football training' }).locator('.wear-today')).toHaveCount(0);
+  });
+
+  test('a sport row from another day marks nothing', async ({ page }) => {
+    await open(page, 'home', { sport: { date: '2026-01-01', sessions: [{ option: 'Padel', start: '19:30' }] } });
+    await expect(page.locator('#homeWear .wear-opt')).toHaveCount(6, { timeout: 20000 });
+    await expect(page.locator('#homeWear .wear-today')).toHaveCount(0);
+    await expect(page.locator('#homeWear .wear-chip-sport')).toHaveCount(0);
   });
 
   test('2 days after it went in the wash, a piece is offered again with no press', async ({ page }) => {
