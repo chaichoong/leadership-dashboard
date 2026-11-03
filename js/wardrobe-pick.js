@@ -20,7 +20,8 @@
 
     // Site visits, Football training (on the touchline) and Padel (outdoors) added by Kevin, 3 Nov 2026.
     const OPTIONS = ['Stay at home', 'Out casual', 'Out smart casual', 'Site visits', 'Football training', 'Padel'];
-    const OWNED = ['Own', 'Bought'];
+    // Only pieces in hand (Kevin, 3 Nov 2026): Bought means paid for and on the way until Arrived marks it Own.
+    const OWNED = ['Own'];
     const RAIN_PCT = 50;
     const JACKET_BELOW = 12;
     const COAT_BELOW = 10;

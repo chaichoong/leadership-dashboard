@@ -237,3 +237,14 @@ describe('touchline outfit that already has a jacket', () => {
         expect(pick.items.map(i => i.id)).not.toContain('mgr');
     });
 });
+
+// Kevin, 3 Nov 2026: a piece bought but not yet arrived (Bought) is never offered; Arrived makes it Own.
+describe('pieces on the way', () => {
+    it('an outfit needing a piece still on the way is not offered, and no weather layer comes from one', () => {
+        const items = Object.fromEntries([item('tee', 'Tee'), item('jeans', 'Trousers'), item('newShoes', 'Shoes', { status: 'Bought' }),
+            item('newBeanie', 'Accessory', { status: 'Bought', layerRole: 'Beanie' })].map(i => [i.id, i]));
+        expect(P.chooseBase([outfit('A', 'Out casual', ['tee', 'jeans', 'newShoes'])], items, 'Out casual', D)).toBeNull();
+        const pick = P.pickOutfits([outfit('B', 'Out casual', ['tee', 'jeans'])], items, { feelsMin: 2, rainChance: 0 }, D).find(p => p.option === 'Out casual');
+        expect(pick.items.map(i => i.id)).not.toContain('newBeanie');
+    });
+});

@@ -24,7 +24,8 @@ const wardrobe = () => [
   piece('recBeanie', 'Test olive beanie', 'Accessory', { [WR.layerRole]: 'Beanie' }),
   piece('recRoll', 'Test black turtleneck', 'Knit', { [WR.lastWorn]: '2026-10-20' }), piece('recBlack', 'Test black jeans', 'Trousers'),
   piece('recChelsea', 'Test Chelsea boots', 'Shoes', { [WR.layerRole]: 'Leather boots smart' }),
-  piece('recCoat', 'Test grey coat', 'Coat', { [WR.layerRole]: 'Smart coat', [WR.status]: 'Bought' }),
+  piece('recCoat', 'Test grey coat', 'Coat', { [WR.layerRole]: 'Smart coat' }),
+  piece('recOnWay', 'Test burgundy beanie', 'Accessory', { [WR.layerRole]: 'Beanie', [WR.usedFor]: ['Evening'], [WR.status]: 'Bought' }),   // paid for, not arrived
   piece('recSweat', 'Test grey sweatshirt', 'Lounge'), piece('recJog', 'Test navy joggers', 'Lounge'),
   piece('recNeed', 'Test stripe top', 'Tee', { [WR.status]: 'Need', [WR.buyIn]: 'March', [WR.cap]: '£10 + delivery', [WR.reason]: 'Spring weekends' }),
   piece('recOut', 'Test orange hoodie', 'Lounge', { [WR.status]: 'Clear out', [WR.action]: 'Donate', [WR.reason]: 'Outside your colours' }),
@@ -186,7 +187,7 @@ test.describe('Wardrobe page', () => {
   test('lists owned clothes, the buys and the clear-out, with a working health bar', async ({ page }) => {
     const errors = await open(page, 'wardrobe');
     const pageEl = page.locator('#wardrobePage');
-    await expect(pageEl.locator('.wr-stat').first()).toContainText('12', { timeout: 20000 });
+    await expect(pageEl.locator('.wr-stat').first()).toContainText('13', { timeout: 20000 });   // 12 in hand + the beanie on the way
     await expect(pageEl.locator('.wr-stats')).toContainText('3 / 4');
     await expect(pageEl.locator('#wrPanel-own')).toContainText('Test grey coat');
     await expect(pageEl.locator('#wrPanel-own')).not.toContainText('Test orange hoodie');
@@ -278,11 +279,12 @@ test.describe('Editing the wardrobe', () => {
     const opts = { live: true };
     await open(page, 'wardrobe', opts);
     const pg = page.locator('#wardrobePage');
-    const coat = pg.locator('#wrPanel-own tr', { hasText: 'Test grey coat' });
+    const coat = pg.locator('#wrPanel-own tr', { hasText: 'Test burgundy beanie' });
     await expect(coat.locator('.wr-pill-new')).toBeVisible({ timeout: 20000 });
     await coat.locator('[data-wr-arrived]').click();
     await expect(page.locator('#appToast')).toContainText('arrived');
     await expect(coat.locator('.wr-pill-new')).toHaveCount(0);
+    expect(opts.store.db[T_WR].find(r => r.id === 'recOnWay').fields[WR.status]).toBe('Own');
     await pg.locator('[data-wr-view="add"]').click();
     await pg.locator('[data-wr-bought="recNeed"]').click();
     await expect(page.locator('#appToast')).toContainText('Test stripe top moved to your clothes');
@@ -534,6 +536,15 @@ test.describe('Wearing something else, and the wash', () => {
     const into = page.locator('#homeWear .wear-washcols > div', { has: page.locator('h4', { hasText: 'Into the wash tonight' }) });
     await expect(into).toContainText('Test white tee');
     await expect(into).toContainText('Test run tee');
+  });
+
+  test('a piece still on the way is never offered on the card or in the picker', async ({ page }) => {
+    await open(page, 'home');
+    const smart = page.locator('#homeWear .wear-opt', { hasText: 'Out smart casual' });
+    await expect(smart).toContainText('Test grey coat', { timeout: 20000 });
+    await expect(page.locator('#homeWear')).not.toContainText('Test burgundy beanie');
+    await page.locator('#homeWear [data-wear-other]').click();
+    await expect(page.locator('#homeWear [data-wear-otherform] input[value="recOnWay"]')).toHaveCount(0);
   });
 
   test('2 days after it went in the wash, a piece is offered again with no press', async ({ page }) => {

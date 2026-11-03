@@ -179,7 +179,7 @@
     function otherBlock(picks, best) {
         const date = today();
         // Pyjamas have their own block below: the day's log never touches them.
-        const all = Object.values(state.data.items).filter(it => (it.status === 'Own' || it.status === 'Bought') && !P().isNightwear(it));
+        const all = Object.values(state.data.items).filter(it => it.status === 'Own' && !P().isNightwear(it));   // in hand only, not on the way
         const wornNow = all.filter(it => it.lastWorn === date);
         const dis = state.saving ? ' disabled' : '';
         if (!state.other) {
@@ -212,7 +212,7 @@
     const weekday = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long' });
     function pyjamasBlock() {
         const date = today();
-        const pairs = Object.values(state.data.items).filter(it => (it.status === 'Own' || it.status === 'Bought') && P().isNightwear(it))
+        const pairs = Object.values(state.data.items).filter(it => it.status === 'Own' && P().isNightwear(it))
             .sort((a, b) => a.name.localeCompare(b.name));
         if (!pairs.length) return '';
         const dis = state.saving ? ' disabled' : '';
