@@ -180,6 +180,29 @@ out = [ha[0]['online'], [a['title'] for a in acts if a['do'] == 'create'], hb.no
         expect(out).toEqual([false, ['Toilet Motion is offline'], []]);
     });
 
+    it('never reads the retired Aqara source in a run, and raises no reminder for it', () => {
+        // 3 Nov 2026: Aqara reaches the watch through Home Assistant over Matter, so the
+        // direct reader (never approved by Aqara) is off and must not cry "cannot see Aqara".
+        const out = py(`
+import tempfile, os, io, contextlib
+d = tempfile.mkdtemp()
+hb.STATE = os.path.join(d, 'state.json'); hb.READINGS = os.path.join(d, 'r.jsonl'); hb.LOGDIR = d
+seen = []
+def fake(tag, sstate, now, *a, **k):
+    seen.append(tag)
+    return [], ''
+hb.read_source = fake
+hb.open_reminders = lambda *a, **k: []
+hb.count_ok = lambda devices, last, label: (True, '')
+made = []
+hb.apply = lambda acts, *a, **k: made.extend(x for x in acts if x.get('do') == 'create') or True
+log = io.StringIO()
+with contextlib.redirect_stdout(log):
+    hb.cmd_run(['--dry-run'])
+out = [seen, made, 'Aqara: off' in log.getvalue()]`);
+        expect(out).toEqual([['ha', 'nw'], [], true]);
+    });
+
     it('pings the home network: a dead switch is offline, a dead gateway is one error', () => {
         // 3 Nov 2026: the Living Room switch lost power for 3 days unnoticed.
         const out = py(`
