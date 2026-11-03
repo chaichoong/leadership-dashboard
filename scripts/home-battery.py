@@ -766,9 +766,12 @@ def alert_time(now):
 LIST_OPEN = r'''
 on run argv
   set mk to item 1 of argv
+  set ln to item 2 of argv
   set out to {}
+  -- Only the list the watch writes to. Searching every list took over 120 s
+  -- and crashed 74 of 857 runs between 28 Sep and 3 Nov 2026.
   tell application "Reminders"
-    repeat with r in (reminders whose completed is false and body contains mk)
+    repeat with r in (reminders of list ln whose completed is false and body contains mk)
       set end of out to (id of r) & tab & (body of r)
     end repeat
   end tell
@@ -815,9 +818,18 @@ def osa(script, *args):
     return p.stdout.strip()
 
 
-def open_reminders():
+def open_reminders(run=None):
+    """The watch's open reminders, or None when Reminders does not answer in
+    time. None means "cannot de-duplicate this hour", so the run reads and saves
+    but makes and ticks nothing, rather than crashing (3 Nov 2026)."""
+    run = run or osa
     rows = []
-    for line in osa(LIST_OPEN, MARK).splitlines():
+    try:
+        listed = run(LIST_OPEN, MARK, LIST_NAME)
+    except (RuntimeError, subprocess.SubprocessError, OSError) as e:
+        print("WARN: Reminders did not answer (%s); no reminders made or ticked this hour" % type(e).__name__)
+        return None
+    for line in listed.splitlines():
         if "\t" not in line:
             continue
         rid, body = line.split("\t", 1)
@@ -985,9 +997,12 @@ def cmd_run(argv):
         state["sources"][tag] = sstate
         if not dry:
             append_reading(now, devices if read_ok else [], error, tag)
+        if reminders is None:
+            continue
         actions = decide(now, read_ok, devices, sstate, reminders, state["nudged"],
                          threshold=threshold, force_nudge=force, src=tag)
-        apply(actions, state, now, dry, force)
+        if not apply(actions, state, now, dry, force):
+            reminders = None  # Reminders stopped answering: leave the rest for next hour
         did += len(actions)
     if not did:
         print("nothing to do")
@@ -1003,6 +1018,16 @@ def apply(actions, state, now, dry, force, run=None):
     bookkeeping (nudged marks, forgetting a closed list) without Reminders.
     """
     run = run or osa
+    try:
+        _apply(actions, state, now, dry, force, run)
+        return True
+    except (RuntimeError, subprocess.SubprocessError, OSError) as e:
+        # Never a crash: what was done is recorded, the rest waits an hour.
+        print("WARN: Reminders stopped answering (%s); the rest waits for next hour" % type(e).__name__)
+        return False
+
+
+def _apply(actions, state, now, dry, force, run):
     at = alert_time(now)
     when = [str(at.year), str(at.month), str(at.day), str(at.hour * 3600 + at.minute * 60)]
     for a in actions:
@@ -1420,6 +1445,22 @@ def selftest():
     check("a dead Mac network raises 'cannot see the home network' after 12 hours",
           [a["title"] for a in decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=13))}, [], {}, src="nw") if a["do"] == "create"],
           ["The home battery watch cannot see the home network"])
+
+    # A slow Reminders app never crashes the run (74 of 857 runs did, to 3 Nov 2026).
+    def slow(*a):
+        raise subprocess.TimeoutExpired("osascript", 120)
+    check("a Reminders timeout while listing means 'skip this hour', not a crash", open_reminders(run=slow), None)
+    made = []
+    def create_once(*a):
+        if made:
+            raise subprocess.TimeoutExpired("osascript", 120)
+        made.append(a[1])
+    st_apply = {"nudged": {}}
+    two = [{"do": "create", "kind": "low", "id": "a", "key": "k1", "title": "One", "body": "b"},
+           {"do": "create", "kind": "low", "id": "b", "key": "k2", "title": "Two", "body": "b"}]
+    ok = apply(two, st_apply, now, False, False, run=create_once)
+    check("a timeout part-way records only what was made, and does not crash",
+          (ok, made, sorted(st_apply["nudged"])), (False, ["One"], ["low:a"]))
 
     # The 28 Sep one-source state moves under "aq" unchanged.
     old = {"last_ok": "2026-09-28T23:20:10", "resources": {"m": 1}, "nudged": {"low:a": "2026-09-28"}}
