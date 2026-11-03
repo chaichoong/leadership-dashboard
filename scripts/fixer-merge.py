@@ -41,6 +41,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -433,6 +434,44 @@ def raise_merge_card(pr, d, gate):
         return {"error": str(e)[:300]}
 
 
+def teardown_workspace(branch, merge_output=""):
+    """Tear the merged branch's workspace down, here, in the same breath as the merge
+    (finding 20261102-queue-fixer-1170).
+
+    STEP 5b of the queue-fixer skill said to run `worktree.sh done` after a successful
+    merge and nothing enforced it, so on 2 Nov 2026 five merged fixer workspaces were
+    still on disk, two of them three and four weeks old. Each is a checkout something
+    can be run from by mistake, which is finding 20260909-queue-fixer-504, where
+    content-engine ran from a worktree five commits behind main. A run that hits its
+    time ceiling never reaches its own step 5b; this one cannot be skipped.
+
+    worktree.sh done already REFUSES while anything would be lost - uncommitted files,
+    commits that exist nowhere else, a branch not merged into origin/main - so a refusal
+    is information and is reported, never forced past.
+    """
+    topic = branch.split("/", 1)[1] if "/" in branch else branch
+    out = {"branch": branch, "topic": topic}
+    # NEVER these two. content-engine-runtime is checked out on main on purpose for the
+    # nightly and daytime content-engine jobs, and removing it breaks both with no error.
+    if not topic or topic in ("main", "content-engine-runtime"):
+        out["skipped"] = "never torn down: %s" % (topic or "no branch name")
+        return out
+    path = os.path.join(REPO, ".claude", "worktrees", topic)
+    if not os.path.isdir(path):
+        out["skipped"] = "no workspace on disk"
+    else:
+        r = sh(["bash", os.path.join(REPO, "scripts", "worktree.sh"), "done", topic], timeout=300)
+        out["removed"] = r.returncode == 0
+        out["say"] = (r.stdout or r.stderr or "").strip()[-400:]
+    # The other side of the same shape, PR #871 on 2 Nov: gh could not delete the merged
+    # branch BECAUSE a worktree still held it, and said so only in git's own words.
+    if re.search(r"worktree|already checked out|cannot force update|cannot lock ref",
+                 merge_output or "", re.I):
+        out["note"] = ("the merge could not delete the branch because a worktree still held "
+                       "it; that workspace is the one torn down here")
+    return out
+
+
 def cmd_merge(args):
     d = decide(args.pr)
     # A protected PR is never merged here (the refusal below comes before the merge call). Its
@@ -516,6 +555,14 @@ def cmd_merge(args):
         land = sh([sys.executable, os.path.join(REPO, "scripts", "findings.py"),
                    "land", "--pr", str(args.pr)])
         out["landed"] = (land.stdout or "").strip()[-200:]
+        br = sh(["gh", "pr", "view", str(args.pr), "--json", "headRefName"])
+        branch = ""
+        try:
+            branch = (json.loads(br.stdout or "{}").get("headRefName") or "")
+        except json.JSONDecodeError:
+            pass
+        out["workspace"] = (teardown_workspace(branch, out["mergeOutput"]) if branch
+                            else {"skipped": "could not read the PR's branch name"})
     print(json.dumps(out, indent=2))
     return 0
 
