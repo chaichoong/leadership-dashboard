@@ -973,9 +973,6 @@ def cmd_run(argv):
     now = dt.datetime.now()
     state = load_state()
     reminders = open_reminders()
-    alarm = reminders_health(state, reminders is not None)
-    if alarm:
-        print(alarm)
     did = 0
     for tag, S in SOURCES.items():
         sstate = state["sources"].setdefault(tag, {})
@@ -1022,6 +1019,11 @@ def cmd_run(argv):
         did += len(actions)
     if not did:
         print("nothing to do")
+    # After the loop: a failed listing OR a failed make/tick-off both leave
+    # reminders as None, so either one counts towards the ERROR line.
+    alarm = reminders_health(state, reminders is not None)
+    if alarm:
+        print(alarm)
     if not dry and not force:
         save_state(state)
     return 0
