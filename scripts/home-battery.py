@@ -401,7 +401,10 @@ def ha_devices(rows, names, now):
 
     A % sensor gives a level, a battery binary sensor gives the low flag
     (on = low). Online comes from the device's connectivity sensor: any 'on'
-    is online, all 'off' is offline, none is unknown. A reading HA still shows
+    is online, all 'off' is offline. With no such sensor (Aqara over Matter,
+    Sonos, locks) an 'unavailable' battery is offline, because HA marks what it
+    has lost unavailable; anything else is unknown (3 Nov 2026, when 62 Aqara
+    devices joined through Matter with no connectivity sensor). A reading HA still shows
     is dated now, because HA marks an entity 'unavailable' the moment it loses
     it (its last_changed only marks the last CHANGE, so a Sonos sitting at 100%
     for days would otherwise read as stale, review of 29 Sep 2026). An
@@ -418,6 +421,8 @@ def ha_devices(rows, names, now):
         conn = [c for c in (r.get("conn") or []) if c in ("on", "off")]
         online = True if "on" in conn else (False if conn else None)
         state, entity = str(r.get("state")), r["entity"]
+        if online is None and state == "unavailable":
+            online = False
         level = flag = None
         if entity.startswith("binary_sensor."):
             flag = {"on": True, "off": False}.get(state)
@@ -611,7 +616,9 @@ def no_level(devices, now=None):
     passed over as mains: a model the source would not describe, no readable
     level or flag, and (with now) any reading is_low() cannot use (an old flag
     or level on a device of unknown state, review of 29 Sep 2026), or a level
-    dated over STALE_DAYS ago or undated (review 4 of 28 Sep)."""
+    dated over STALE_DAYS ago or undated (review 4 of 28 Sep). An offline
+    device is left out: it has its own reminder, and this one says the watch
+    can flag these going offline."""
     def unusable(d):
         if now is None:
             return d.get("level") is None and d.get("low_flag") is None
@@ -619,7 +626,8 @@ def no_level(devices, now=None):
         stale = d.get("level") is not None and \
             (not d.get("level_at") or hours(now, d["level_at"]) > STALE_DAYS * 24)
         return not known or stale
-    return [d for d in devices if d["battery"] is None or (d["battery"] and unusable(d))]
+    return [d for d in devices if d.get("online") is not False and
+            (d["battery"] is None or (d["battery"] and unusable(d)))]
 
 
 def forget(state, kind, sid):
@@ -1382,6 +1390,10 @@ def selftest():
          "changed": "2026-09-28T23:15:25+00:00", "conn": []},
         {"entity": "sensor.sonos_move_battery_2", "device": "Sonos Move", "model": "Move", "state": "unavailable",
          "unit": "%", "changed": "2026-09-28T23:15:25+00:00", "conn": []},
+        {"entity": "sensor.va3_battery", "device": "VA3", "model": "VA02", "state": "unavailable",
+         "unit": "%", "changed": "2026-09-28T23:15:25+00:00", "conn": ["on"]},
+        {"entity": "sensor.toilet_motion_battery", "device": "Toilet Motion", "model": "Aqara Motion Sensor",
+         "state": "unknown", "unit": "%", "changed": "2026-11-03T15:50:00+00:00", "conn": []},
     ]
     ha = {d["id"]: d for d in ha_devices(rows, {"VA1": "En Suite radiator valve"}, now)}
     check("a tado low flag reads as low, named by the private map, online by its connection",
@@ -1397,8 +1409,13 @@ def selftest():
           ["Sonos Move (sonos_move_battery)", "Sonos Move (sonos_move_battery_2)"])
     check("an HA reading still shown is dated by the read, not by its last change",
           ha["ha:sensor.sonos_move_battery"]["level_at"], iso(now))
-    check("a Sonos at 100% for days is not named; the unavailable one is",
-          [d["name"] for d in no_level(list(ha.values()), now)], ["Sonos Move (sonos_move_battery_2)"])
+    check("unavailable with no connection sensor (Aqara over Matter, 3 Nov 2026) is offline",
+          ha["ha:sensor.sonos_move_battery_2"]["online"], False)
+    check("unavailable with a connection sensor on stays online", ha["ha:sensor.va3_battery"]["online"], True)
+    check("unknown with no connection sensor stays unknown, never offline",
+          ha["ha:sensor.toilet_motion_battery"]["online"], None)
+    check("a Sonos at 100% is not named; an offline one is left to its own reminder",
+          [d["name"] for d in no_level(list(ha.values()), now)], ["VA3", "Toilet Motion"])
     for label, bad in [("a non-list HA reply is an error", {"message": "x"}), ("an HA row with no entity is an error", [{"state": "on"}])]:
         try:
             ha_devices(bad, {}, now)
