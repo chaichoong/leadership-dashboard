@@ -11,7 +11,8 @@
 //
 // Washing (Kevin, 29 Oct 2026): each day a piece is worn adds one wear. At its limit (by Type, or its
 // own Wash every; 0 = never counted) it goes in the wash and is not offered for 2 days, then counts as
-// clean again on its own. The outfit worn longest ago, judged by its washable pieces too, comes first.
+// clean again on its own. The outfit worn longest ago comes first (never worn = first of all), and among
+// outfits worn equally long ago, the one whose washable pieces were worn longest ago (3 Nov 2026).
 //
 // Pyjamas (Kevin, 31 Oct 2026): their own Type, 3 nights to a wash, picked for tonight on their own and
 // never part of the day's outfits or its "I'm wearing something else" log.
@@ -141,9 +142,11 @@
         return all.find(it => prefer && (it.usedFor || []).includes(prefer)) || all[0] || null;
     }
 
-    // The outfit for one option: today's worn one if any, else the least recently worn eligible one,
-    // ties going to list order. Eligible = this option, this season (or All), every item owned and none
-    // in the wash. Least recently worn counts its washable pieces' own dates too.
+    // The outfit for one option: today's worn one if any, else the eligible one worn longest ago by its
+    // own date, never-worn first; ties go to the one whose washable pieces were worn longest ago, then
+    // list order. Eligible = this option, this season (or All), every item owned and none in the wash.
+    // Rotation (Kevin, 3 Nov 2026): ranking by pieces first made every outfit sharing the everyday jeans
+    // or white tee look just worn, so 4 or 5 outfits per option cycled and the rest were never offered.
     function chooseBase(outfits, itemsById, option, date) {
         const season = seasonOf(date);
         const today = isoDay(date);
@@ -157,6 +160,8 @@
         if (!clean.length) return null;
         clean.forEach(e => { e.f = freshness(e.o, itemsById); });
         clean.sort((a, b) => {
+            const oa = a.o.lastWorn || '', ob = b.o.lastWorn || '';
+            if (oa !== ob) return oa < ob ? -1 : 1;
             const la = a.f, lb = b.f;
             return la === lb ? a.i - b.i : (la < lb ? -1 : 1);
         });

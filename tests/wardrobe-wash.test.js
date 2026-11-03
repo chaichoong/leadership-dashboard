@@ -122,6 +122,35 @@ describe('the picks', () => {
     });
 });
 
+// Rotation (Kevin, 3 Nov 2026): every outfit gets its turn. The outfit's own last wear decides first, so a
+// never-worn look sharing the everyday jeans is offered before a look worn a week ago in rarer pieces.
+describe('rotation across every outfit', () => {
+    const ITEMS = Object.fromEntries([
+        item('teeA', 'Tee'), item('teeB', 'Tee'), item('teeC', 'Tee'), item('jeans', 'Trousers', { lastWorn: '2026-10-28' }),
+        item('chinos', 'Trousers', { lastWorn: '2026-10-22' }), item('trainers', 'Shoes'),
+    ].map(i => [i.id, i]));
+    it('offer a never-worn outfit before one worn last week, even when it shares a piece worn yesterday', () => {
+        const outfits = [outfit('Rare', 'Out casual', ['teeA', 'chinos', 'trainers'], '2026-10-22'),
+            outfit('New', 'Out casual', ['teeB', 'jeans', 'trainers'])];
+        expect(P.chooseBase(outfits, ITEMS, 'Out casual', D).id).toBe('New');
+    });
+    it('cycle through every outfit before repeating one', () => {
+        const outfits = [outfit('A', 'Out casual', ['teeA', 'chinos', 'trainers']), outfit('B', 'Out casual', ['teeB', 'jeans', 'trainers']),
+            outfit('C', 'Out casual', ['teeC', 'jeans', 'trainers'])];
+        const items = JSON.parse(JSON.stringify(ITEMS));
+        const seen = [];
+        for (let i = 0; i < 6; i++) {
+            const day = new Date(2026, 9, 29 + i, 9, 0), today = P.isoDay(day);
+            const o = P.chooseBase(outfits, items, 'Out casual', day);
+            seen.push(o.id);
+            o.lastWorn = today;
+            o.itemIds.forEach(id => Object.assign(items[id], P.wearFields(items[id], today) || {}));
+        }
+        expect(new Set(seen.slice(0, 3)).size).toBe(3);
+        expect(new Set(seen.slice(3, 6)).size).toBe(3);
+    });
+});
+
 // Kevin, 31 Oct 2026: lounge pieces go over a tee, so they last 3 wears; shirts 2. Tees stay at 1.
 describe('limits that match how pieces are worn', () => {
     it('lounge 3, shirt 2, tee 1; a piece\'s own Wash every still wins', () => {
