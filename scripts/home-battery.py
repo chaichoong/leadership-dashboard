@@ -18,6 +18,12 @@ Aqara's developer service (open-ger.aqara.com for a UK account):
   query.resource.info  a model's resources, so the battery ones are FOUND by
                        their description, never hard-coded per model
   query.resource.value the current reading, with Aqara's own timestamp
+And since 3 Nov 2026, the home network itself: the switches, Wi-Fi access
+points, Aqara hubs, cameras, doorbell and Home Assistant, pinged from the Mac
+mini (private list in ~/.config/od/home-network.json). A device that does not
+answer for 2 hours gets an "is offline" reminder about its plug and cable; if
+the gateway itself does not answer, the Mac mini's own network is down, which
+is one "cannot see" reminder, never a dozen.
 Apple Home keeps no battery level on disk (checked 28 Sep 2026: ZLOWBATTERY
 and ZLASTSEENDATE are empty for all 127 accessories), and the Aqara hubs keep
 passing a dead sensor's last reading to Home, so Home cannot be the source.
@@ -100,6 +106,7 @@ FALLBACK_HOURS = 6             # a failed evening read nudges from a good read t
 SHRINK = 0.8                   # a list under 80% of the last good count is a partial read
 RESOURCE_DAYS = 1              # re-check each model's resource list this often
 ONCE = ("missing", "nolevel")  # reminders made once, not every evening
+REMINDERS_ERROR_RUNS = 3       # Reminders silent this many runs in a row = an ERROR line
 LIST_NAME = "Reminders"        # Kevin's default list. Never "Captures": that feeds the brain.
 MARK = "[home-battery"         # every reminder this script owns carries this in its notes
 
@@ -116,6 +123,7 @@ CONFIG = os.path.expanduser("~/.config/od/aqara.json")
 HA_URL = "http://homeassistant.local"   # Home Assistant OS on the Mac mini serves on port 80
 HA_TOKEN = os.path.expanduser("~/.config/od/homeassistant_token")   # "Home Assistant key.command"
 NAMES = os.path.expanduser("~/.config/od/home-battery-names.json")  # private: serial -> "En Suite radiator valve"
+NETWORK = os.path.expanduser("~/.config/od/home-network.json")       # private: {"gateway", "devices": [{"name", "ip"}]}
 
 # The two places the watch reads. Each has its own "cannot see" reminder, its own
 # history and count control, and a reminder is only ever closed by its own source.
@@ -124,6 +132,16 @@ SOURCES = {
            "fix": "double-click Aqara sign-in on the Mac mini desktop"},
     "ha": {"label": "Home Assistant", "app": "Home Assistant or the device's own app",
            "fix": "check Home Assistant is running on the Mac mini (homeassistant.local) and its key is saved"},
+    # The switches, Wi-Fi access points, hubs, cameras and doorbell, pinged from
+    # the Mac mini (Kevin, 3 Nov 2026, after the Living Room switch's plug was
+    # pushed out and its hub, Apple TV and Sky sat dark for 3 days unnoticed).
+    # The list is config, so a device leaving it is not "vanished".
+    "nw": {"label": "the home network", "app": "its own app",
+           "fix": "check the Mac mini itself is online",
+           "offline": "The Mac mini has had no answer from it since about %s. Check its power plug "
+                      "is pushed fully in, then its network cable at both ends. This ticks itself "
+                      "off once it answers again.",
+           "missing": False, "counted": False},
 }
 LOGDIR = os.path.expanduser("~/knowledge-os/logs/home-battery")
 READINGS = os.path.join(LOGDIR, "readings.jsonl")
@@ -658,6 +676,10 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
             continue
         d = seen_now.get(sid)
         if d is None:
+            if not S.get("missing", True) and kind in ("offline", "low"):
+                # A list we write (the network list): a device taken off it, or
+                # renamed, has nothing left to prove, so its reminder closes.
+                actions.append({"do": "complete", "ref": r["ref"], "why": "no longer on the list"})
             continue
         t = tracked.get(d["id"]) or {}
         known, low, _ = is_low(t, now, threshold)
@@ -683,18 +705,18 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
         t = tracked.get(d["id"]) or {}
         since = t.get("offline_since")
         if d["online"] is False and since and hours(now, since) >= OFFLINE_HOURS - SLACK_HOURS:
-            wanted.append(("offline", d["id"], "%s is offline" % d["name"],
-                           "%s has not heard from it since about %s. Check its power, then "
-                           "re-pair it in %s if it stays off. This ticks itself off once it is "
-                           "back online." % (S["label"], dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M"),
-                                              S["app"])))
+            when = dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M")
+            body = S["offline"] % when if S.get("offline") else (
+                "%s has not heard from it since about %s. Check its power, then re-pair it in %s "
+                "if it stays off. This ticks itself off once it is back online." % (S["label"], when, S["app"]))
+            wanted.append(("offline", d["id"], "%s is offline" % d["name"], body))
             continue
         _, low, text = is_low(t, now, threshold) if d["battery"] else (False, False, "")
         if low:
             wanted.append(("low", d["id"], "Battery low: %s (%s)" % (d["name"], text),
                            "Change or charge its battery. This ticks itself off once %s "
                            "reports it fine again." % S["label"]))
-    if read_ok:
+    if read_ok and S.get("missing", True):
         present = {d["id"] for d in devices}
         for i, t in sorted(tracked.items()):
             if i in present or not t.get("last_seen"):
@@ -749,9 +771,13 @@ def alert_time(now):
 LIST_OPEN = r'''
 on run argv
   set mk to item 1 of argv
+  set ln to item 2 of argv
   set out to {}
+  -- Only the list the watch writes to. Searching every list took over 120 s
+  -- and crashed 74 of 857 runs between 28 Sep and 3 Nov 2026. A reminder moved
+  -- to another list is no longer the watch's: it is left alone there.
   tell application "Reminders"
-    repeat with r in (reminders whose completed is false and body contains mk)
+    repeat with r in (reminders of list ln whose completed is false and body contains mk)
       set end of out to (id of r) & tab & (body of r)
     end repeat
   end tell
@@ -798,9 +824,18 @@ def osa(script, *args):
     return p.stdout.strip()
 
 
-def open_reminders():
+def open_reminders(run=None):
+    """The watch's open reminders, or None when Reminders does not answer in
+    time. None means "cannot de-duplicate this hour", so the run reads and saves
+    but makes and ticks nothing, rather than crashing (3 Nov 2026)."""
+    run = run or osa
     rows = []
-    for line in osa(LIST_OPEN, MARK).splitlines():
+    try:
+        listed = run(LIST_OPEN, MARK, LIST_NAME)
+    except (RuntimeError, subprocess.SubprocessError, OSError) as e:
+        print("WARN: Reminders did not answer (%s); no reminders made or ticked this hour" % type(e).__name__)
+        return None
+    for line in listed.splitlines():
         if "\t" not in line:
             continue
         rid, body = line.split("\t", 1)
@@ -847,10 +882,57 @@ def read_once(state, now):
         return [], "unexpected reply from Aqara (%s: %s)" % (type(e).__name__, e)
 
 
-def read_source(tag, sstate, now, ha_token=None):
+def ping(ip):
+    """True when the address answers one of two pings within 3 seconds each."""
+    try:
+        return subprocess.run(["/sbin/ping", "-c", "2", "-t", "3", "-q", ip],
+                              capture_output=True, timeout=15).returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def read_network(now, path=None, pinger=None):
+    """(devices, error) for the home network, or None when no list is set up.
+
+    The gateway is the control: if the Mac mini cannot reach it, its own network
+    is down and every device would read as off, so that is an error (one "cannot
+    see" reminder after 12 hours), never a dozen offline reminders. Each device
+    is mains-powered, so only its online state counts. Pings run in parallel.
+    """
+    pinger = pinger or ping
+    try:
+        with open(path or NETWORK) as f:
+            cfg = json.load(f)
+        gateway, targets = cfg["gateway"], [(d["name"], d["ip"]) for d in cfg["devices"]]
+        bad = [v for v in [gateway] + [x for t in targets for x in t] if not isinstance(v, str) or not v.strip()]
+        names = [n for n, _ in targets]
+        if bad or len(set(names)) != len(names):
+            raise ValueError("an entry that is blank, not text, or a repeated name")
+    except OSError:
+        return None
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        return [], "the home network list is damaged (%s): ask Claude to rewrite it" % type(e).__name__
+    if not targets:
+        return [], "the home network list has no devices in it"
+    if not pinger(gateway):
+        return [], "the Mac mini cannot reach the gateway (%s), so its own network is down" % gateway
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        answers = list(pool.map(lambda t: pinger(t[1]), targets))
+    return [{"id": "nw:" + name, "name": name, "model": ip, "online": ok, "battery": False,
+             "level": None, "level_at": None, "low_flag": None, "flag_at": None}
+            for (name, ip), ok in zip(targets, answers)], ""
+
+
+def read_source(tag, sstate, now, ha_token=None, network_path=None):
     """(devices, error) for one source, or None when that source is not set up."""
     if tag == "aq":
         return read_once(sstate, now)
+    if tag == "nw":
+        got = read_network(now, network_path)
+        if got is None and sstate.get("last_ok"):
+            return [], "the home network list is missing: ask Claude to put it back"
+        return got
     got = read_ha(now, ha_token)
     if got is None and sstate.get("last_ok"):
         # Read before, key gone now (a restore, a host move, a tidy-up): that is
@@ -894,13 +976,16 @@ def cmd_run(argv):
     did = 0
     for tag, S in SOURCES.items():
         sstate = state["sources"].setdefault(tag, {})
-        got = read_source(tag, sstate, now)
+        try:
+            got = read_source(tag, sstate, now)
+        except Exception as e:  # a surprise in one source is that source's error, never the run's
+            got = ([], "unexpected error reading %s (%s)" % (S["label"], type(e).__name__))
         if got is None:
             print("%s: not set up, skipped" % S["label"])
             continue
         devices, error = got
         read_ok = not error
-        if read_ok:
+        if read_ok and S.get("counted", True):
             read_ok, error = count_ok(devices, sstate.get("last_count"), S["label"])
         if read_ok:
             merged = track(now, devices, dict(sstate, nudged=state["nudged"]))
@@ -925,15 +1010,38 @@ def cmd_run(argv):
         state["sources"][tag] = sstate
         if not dry:
             append_reading(now, devices if read_ok else [], error, tag)
+        if reminders is None:
+            continue
         actions = decide(now, read_ok, devices, sstate, reminders, state["nudged"],
                          threshold=threshold, force_nudge=force, src=tag)
-        apply(actions, state, now, dry, force)
+        if not apply(actions, state, now, dry, force):
+            reminders = None  # Reminders stopped answering: leave the rest for next hour
         did += len(actions)
     if not did:
         print("nothing to do")
+    # After the loop: a failed listing OR a failed make/tick-off both leave
+    # reminders as None, so either one counts towards the ERROR line.
+    alarm = reminders_health(state, reminders is not None)
+    if alarm:
+        print(alarm)
     if not dry and not force:
         save_state(state)
     return 0
+
+
+def reminders_health(state, answered):
+    """Count runs in a row where Reminders did not answer; return an ERROR line
+    once that reaches REMINDERS_ERROR_RUNS. A one-off slow hour is only a WARN,
+    but a fault that does not clear (the list renamed, permission withdrawn)
+    must not read green for ever: run-job.sh flags a line starting "ERROR:"
+    (review of 3 Nov 2026)."""
+    fails = 0 if answered else state.get("reminders_failing", 0) + 1
+    state["reminders_failing"] = fails
+    if fails < REMINDERS_ERROR_RUNS:
+        return ""
+    return ("ERROR: Apple Reminders has not answered for %d hourly runs in a row, so the watch cannot "
+            "make or tick any reminder. Check the \"%s\" list exists and that Reminders still allows "
+            "this Mac's scripts to control it." % (fails, LIST_NAME))
 
 
 def apply(actions, state, now, dry, force, run=None):
@@ -943,15 +1051,25 @@ def apply(actions, state, now, dry, force, run=None):
     bookkeeping (nudged marks, forgetting a closed list) without Reminders.
     """
     run = run or osa
+    try:
+        _apply(actions, state, now, dry, force, run)
+        return True
+    except (RuntimeError, subprocess.SubprocessError, OSError) as e:
+        # Never a crash: what was done is recorded, the rest waits an hour.
+        print("WARN: Reminders stopped answering (%s); the rest waits for next hour" % type(e).__name__)
+        return False
+
+
+def _apply(actions, state, now, dry, force, run):
     at = alert_time(now)
     when = [str(at.year), str(at.month), str(at.day), str(at.hour * 3600 + at.minute * 60)]
     for a in actions:
         if a["do"] == "complete":
             print("%s ticked off a reminder (%s)" % ("WOULD" if dry else "DONE ", a["why"]))
             if not dry:
-                run(COMPLETE, a["ref"])
                 if a.get("forget"):
-                    forget(state, *a["forget"])
+                    forget(state, *a["forget"])  # first: a tick-off that times out must not strand it
+                run(COMPLETE, a["ref"])
             continue
         title = ("TEST: " + a["title"]) if force else a["title"]
         print("%s reminder: %s" % ("WOULD" if dry else "MADE ", title))
@@ -1322,6 +1440,92 @@ def selftest():
         lost = read_source("ha", {"last_ok": iso(now)}, now, gone) or ([], "skipped")
         check("a key lost after a good read is an error, not 'not set up'",
               (lost[0], "missing" in lost[1]), ([], True))
+
+    # The home network (3 Nov 2026): pinged switches, access points, hubs, cameras.
+    with tempfile.TemporaryDirectory() as tmpd:
+        netf = os.path.join(tmpd, "net.json")
+        with open(netf, "w") as f:
+            json.dump({"gateway": "10.0.0.1", "devices": [{"name": "Living Room network switch", "ip": "10.0.0.12"},
+                                                         {"name": "Landing Aqara hub", "ip": "10.0.0.72"}]}, f)
+        up = {"10.0.0.1", "10.0.0.72"}
+        devs, err = read_network(now, netf, pinger=lambda ip: ip in up)
+        check("a silent switch reads offline, an answering hub online",
+              (err, [(d["name"], d["online"], d["battery"]) for d in devs]),
+              ("", [("Living Room network switch", False, False), ("Landing Aqara hub", True, False)]))
+        devs, err = read_network(now, netf, pinger=lambda ip: False)
+        check("no gateway is one error, never a reminder per device", (devs, "gateway" in err), ([], True))
+        check("no network list and never read means not set up", read_source("nw", {}, now, network_path=os.path.join(tmpd, "x")), None)
+        lost = read_source("nw", {"last_ok": iso(now)}, now, network_path=os.path.join(tmpd, "x")) or ([], "skipped")
+        check("a network list lost after a good read is an error", (lost[0], "missing" in lost[1]), ([], True))
+        with open(netf, "w") as f:
+            f.write("{not json")
+        bad = read_network(now, netf, pinger=lambda ip: True)
+        check("a damaged network list is an error", (bad[0], "damaged" in bad[1]), ([], True))
+    sw = [{"id": "nw:Living Room network switch", "name": "Living Room network switch", "model": "x", "online": False,
+           "battery": False, "level": None, "level_at": None, "low_flag": None, "flag_at": None}]
+    s_nw = track(now - dt.timedelta(hours=3), sw, {})
+    s_nw = track(now, sw, s_nw)
+    s_nw["last_ok"] = iso(now)
+    acts = [a for a in decide(now, True, sw, s_nw, [], {}, src="nw") if a["do"] == "create"]
+    check("a switch off for 2 hours+ gets its own reminder about its plug",
+          [(a["title"], "power plug" in a["body"], a["key"].endswith(" nw]")) for a in acts],
+          [("Living Room network switch is offline", True, True)])
+    gone = dict(s_nw)
+    gone["devices"] = dict(gone["devices"], **{"nw:Old switch": {"name": "Old switch", "battery": False,
+                                                                 "last_seen": iso(now - dt.timedelta(hours=30))}})
+    check("a device taken off the network list is not 'vanished'",
+          [a["kind"] for a in decide(now, True, sw, gone, [], {}, src="nw") if a["do"] == "create"], ["offline"])
+    check("a dead Mac network raises 'cannot see the home network' after 12 hours",
+          [a["title"] for a in decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=13))}, [], {}, src="nw") if a["do"] == "create"],
+          ["The home battery watch cannot see the home network"])
+
+    # A slow Reminders app never crashes the run (74 of 857 runs did, to 3 Nov 2026).
+    def slow(*a):
+        raise subprocess.TimeoutExpired("osascript", 120)
+    check("a Reminders timeout while listing means 'skip this hour', not a crash", open_reminders(run=slow), None)
+    made = []
+    def create_once(*a):
+        if made:
+            raise subprocess.TimeoutExpired("osascript", 120)
+        made.append(a[1])
+    st_apply = {"nudged": {}}
+    two = [{"do": "create", "kind": "low", "id": "a", "key": "k1", "title": "One", "body": "b"},
+           {"do": "create", "kind": "low", "id": "b", "key": "k2", "title": "Two", "body": "b"}]
+    ok = apply(two, st_apply, now, False, False, run=create_once)
+    check("a timeout part-way records only what was made, and does not crash",
+          (ok, made, sorted(st_apply["nudged"])), (False, ["One"], ["low:a"]))
+
+    # Review of 3 Nov 2026 (network source and Reminders timeouts).
+    with tempfile.TemporaryDirectory() as tmpd:
+        netf = os.path.join(tmpd, "n.json")
+        for label, cfgv in [("a null address", {"gateway": "g", "devices": [{"name": "A", "ip": None}]}),
+                            ("a null gateway", {"gateway": None, "devices": [{"name": "A", "ip": "1"}]}),
+                            ("a number for a name", {"gateway": "g", "devices": [{"name": 5, "ip": "1"}]}),
+                            ("two devices with one name", {"gateway": "g", "devices": [{"name": "Hub", "ip": "1"},
+                                                                                         {"name": "Hub", "ip": "2"}]})]:
+            with open(netf, "w") as f:
+                json.dump(cfgv, f)
+            got = read_network(now, netf, pinger=lambda ip: True)
+            check("%s is a damaged list, not a crash or a hidden device" % label, (got[0], "damaged" in got[1]), ([], True))
+    gone_sw = [{"key": marker("offline", "nw:Old name", "nw"), "ref": "r-old"}]
+    check("a network device renamed or taken off the list has its reminder closed",
+          [a["ref"] for a in decide(now.replace(hour=9), True, sw, s_nw, gone_sw, {}, src="nw") if a["do"] == "complete"], ["r-old"])
+    check("an Aqara read never closes a reminder for a device it does not list",
+          [a for a in decide(now.replace(hour=9), True, back, st(back), [{"key": marker("offline", "aqara:gone"), "ref": "r"}], {}) if a["do"] == "complete"], [])
+    check("the network list has no count control (its gateway is the control)", SOURCES["nw"].get("counted"), False)
+    order = []
+    def logged(*a):
+        order.append("complete")
+        raise subprocess.TimeoutExpired("osascript", 120)
+    st_f = {"nudged": {"nolevel:set:x": "2026-11-01"}}
+    apply([{"do": "complete", "ref": "r", "why": "w", "forget": ("nolevel", short_id("set:x"))}], st_f, now, False, False, run=logged)
+    check("a tick-off that times out has already forgotten its list", (order, st_f["nudged"]), (["complete"], {}))
+
+    hs = {}
+    seen = [reminders_health(hs, False), reminders_health(hs, False), reminders_health(hs, False)]
+    check("Reminders silent 3 runs in a row raises an ERROR line, not before",
+          [x.startswith("ERROR:") for x in seen], [False, False, True])
+    check("one good answer resets the count", (reminders_health(hs, True), hs["reminders_failing"]), ("", 0))
 
     # The 28 Sep one-source state moves under "aq" unchanged.
     old = {"last_ok": "2026-09-28T23:20:10", "resources": {"m": 1}, "nudged": {"low:a": "2026-09-28"}}
