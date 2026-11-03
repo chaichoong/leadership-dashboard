@@ -480,7 +480,15 @@ from then on. A `"note"` about a differing sender means it deliberately
 created anyway — never fold two counterparties into one task. Exit 3 with
 `"action": "refused"` is the gate applying rule 0a (the task is an
 auto-reply): nothing was created and nothing is unhandled — log `note --do
-answered --reason "auto-reply: gate refused"` and archive per rule 0a. Any
+answered --reason "auto-reply: gate refused"` and archive per rule 0a.
+Exit 4 with `"action": "refused"` and `"refusal": "never-a-card"` is a
+DIFFERENT ruling of Kevin's (17 Sep 2026: a company that no longer trades
+with nothing legal in it, or a payment failure under £25) — never read it as
+an auto-reply. Log `note --do answered --reason "never a card: <the gate's
+reason>"` and archive; if you judge the gate wrong on this one, re-run with
+`create --force` and say why, as the 27 Oct 2026 HMRC compliance check
+needed (finding 20261027-inbound-email-triage-1098, the day the two
+refusals shared exit 3 and a tier-1 enquiry was archived with no task). Any
 OTHER non-zero exit means the gate could not run (broken read); nothing was created — count
 that thread unhandled for Step 6 and report it, exactly like a failed dedupe
 query.

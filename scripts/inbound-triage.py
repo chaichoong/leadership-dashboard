@@ -1121,10 +1121,19 @@ def cmd_act(msg_id, action, reason, label_num=None, override=None, task_id=None)
             fail("label %r is not a file destination. Allowed: %s. 7/9/14 and "
                  "the workflow/automation labels are never applied by triage."
                  % (n, sorted(FILE_LABEL_ALLOW)))
-        lbl = find_label(worker_labels(), n)
+        labels = worker_labels()
+        lbl = find_label(labels, n)
         if not lbl:
             fail("no Gmail label with prefix %r found" % n)
-        add, remove = [lbl["name"]], ["INBOX"]
+        # FILING A MESSAGE TAKES IT OUT OF ITS OLD LANE (finding
+        # 20261024-inbound-comms-triage-1070). On 24 Oct 2026 a lane-13 thread was
+        # filed to label 10 at the 09:00 slot and still carried label 13 at 13:00,
+        # so it came back in stranded_13 every slot: the move added the file label
+        # and dropped only INBOX. A message cannot be in a lane and filed at once,
+        # so both triage lanes come off in the same modify call.
+        _, l12, l13 = resolve_triage_labels(labels)
+        lanes = [l["name"] for l in (l12, l13) if l and l["name"] != lbl["name"]]
+        add, remove = [lbl["name"]], ["INBOX"] + lanes
         digest_do = "file-%s" % n
     elif action in ("label12", "label13"):
         l8, l12, l13 = resolve_triage_labels()

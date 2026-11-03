@@ -284,14 +284,38 @@ def spy(cmd):
     seen['cmd'] = cmd
     return types.SimpleNamespace(returncode=0, stdout='TRACK RECORD: none found (searched tasks)', stderr='')
 c.track_record_for(fields, 'recX', runner=spy)
-print(json.dumps({'ok': ok, 'bad': bad, 'cmd': seen['cmd']}))`], { encoding: 'utf8' });
+
+# Findings 20261007-inbound-comms-triage-776 and 20261016-inbound-email-triage-954: the
+# reason leads the line (never the cut command) and one failure is retried.
+import subprocess
+calls = []
+def slow(cmd):
+    calls.append(cmd)
+    raise subprocess.TimeoutExpired(cmd, 120)
+timed_out = c.track_record_for(fields, 'recX', runner=slow)
+second = []
+def flaky(cmd):
+    second.append(cmd)
+    if len(second) == 1:
+        raise subprocess.TimeoutExpired(cmd, 120)
+    return types.SimpleNamespace(returncode=0, stdout='TRACK RECORD: none found (searched tasks)', stderr='')
+recovered = c.track_record_for(fields, 'recX', runner=flaky)
+print(json.dumps({'ok': ok, 'bad': bad, 'cmd': seen['cmd'], 'timedOut': timed_out,
+                  'tries': len(calls), 'recovered': recovered, 'retries': len(second)}))`], { encoding: 'utf8' });
     const r = JSON.parse(out);
     expect(r.ok).toBe('TRACK RECORD: none found (searched tasks)');
-    expect(r.bad).toBe('TRACK RECORD: not built (Airtable 422)');
+    expect(r.bad).toBe('TRACK RECORD: not built (exit 1: Airtable 422; tried twice)');
     expect(r.cmd).toContain('--email');
     expect(r.cmd).toContain('hmrc@example.com');
     expect(r.cmd).toContain('--task');
     expect(r.cmd).toContain('--from-text');
+    // A timeout says it timed out and how long it waited, and never the command.
+    expect(r.timedOut).toBe('TRACK RECORD: not built (timed out after 120s; tried twice)');
+    expect(r.timedOut).not.toMatch(/Command|python3/);
+    expect(r.tries).toBe(2);
+    // One bad call no longer costs the task its record.
+    expect(r.recovered).toBe('TRACK RECORD: none found (searched tasks)');
+    expect(r.retries).toBe(2);
   });
 });
 

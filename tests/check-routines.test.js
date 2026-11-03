@@ -459,7 +459,14 @@ print(json.dumps(m.slot_attendance({}, sched, 26, ref=datetime.datetime.fromisof
   it('the real schedule declares it, so the daily false alarm is actually gone', () => {
     const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
     expect(real['prod-sweep-weekly'].runsOnDays).toEqual([7]);
-    expect(real['prod-sweep-weekly'].cron).toBe('0 11 * * *');   // still no weekday in the cron
+    // ONE NAMED DAY since 3 Nov 2026 (finding 20261101-phase-1-1155): the cron read '0 11 * * *',
+    // so launchd fired the slot at 11:00 every day and six mornings a week started a Claude slot
+    // that took the queue lock and skipped in 14 seconds. Sunday is 0 in this codebase's cron
+    // reader AND in launchd, the installer writes the NAME and maps it in one place, and the
+    // Sunday gate stays in the SKILL, so a wrong number cannot walk on the wrong day.
+    expect(real['prod-sweep-weekly'].cron).toBe('0 11 * * 0');
+    expect(readFileSync(resolve(__dirname, '../scripts/install-slot-jobs.sh'), 'utf8'))
+      .toMatch(/"prod-sweep-weekly\|Sun 11:00\|/);
   });
 });
 

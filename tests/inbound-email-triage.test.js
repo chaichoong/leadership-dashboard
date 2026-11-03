@@ -320,6 +320,76 @@ describe('an auto-reply never becomes a task (Kevin, 2 Sep 2026)', () => {
         expect(JSON.parse(out.trim().split('\n').pop()).action).toBe('refused');
     });
 
+    // Finding 20261027-inbound-email-triage-1098. On 27 Oct 2026 an HMRC compliance-check email was
+    // refused as never-a-card (it named a dissolved company) and the skill read the exit 3 as
+    // "auto-reply", archiving a tier-1 enquiry with a hard deadline and no task. Two rules: a tax
+    // enquiry is a legal matter, so it is never refused; and the never-a-card refusal has its own
+    // exit code and its own `refusal` field, so no caller can read it as an auto-reply again.
+    it('a never-a-card refusal exits 4 with refusal "never-a-card", and an HMRC enquiry is not refused at all', () => {
+        const run = (name, desc) => {
+            const fields = JSON.stringify({ fldgFjGBw6bTKJFCD: name, fldRGhBQViKZKtkQ6: desc });
+            let code = 0, out = '';
+            try {
+                out = execFileSync('python3', [path.join(root, 'scripts/create-agent-task.py'), 'create',
+                    '--fields-json', fields, '--dry-run'],
+                    { encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: '/nonexistent-dir-for-test' } });
+            } catch (e) { code = e.status; out = String(e.stdout || ''); }
+            return { code, out };
+        };
+        const dissolved = run('INBOUND: Stripe action required - verify Two Chefs Cambridge business', 'Nothing legal in it.');
+        expect(dissolved.code).toBe(4);
+        const j = JSON.parse(dissolved.out.trim().split('\n').pop());
+        expect(j.action).toBe('refused');
+        expect(j.refusal).toBe('never-a-card');
+
+        // The 27 Oct shape, read through the refusal itself so the check needs no Airtable: the tax
+        // words carry it past the dissolved-company name, so nothing refuses it.
+        const hmrc = execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location("g", ${JSON.stringify(path.join(root, 'scripts/create-agent-task.py'))})
+g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+print(json.dumps(g.never_a_card_refusal({
+  g.F["name"]: "INBOUND: HMRC compliance check CFS-0000000 - 17 further questions",
+  g.F["desc"]: "Seventeen further questions with a reply date of 27 November 2026. "
+               "One asks about Social Housing Holdings.",
+})))`], { encoding: 'utf8' }).trim();
+        expect(JSON.parse(hmrc)).toBeNull();
+    });
+
+    // Finding 20261024-inbound-comms-triage-1070. A lane-13 thread filed to label 10 at the 24 Oct
+    // 09:00 slot still carried label 13 at 13:00, so it came back in stranded_13 every slot: the
+    // move added the file label and dropped only INBOX.
+    it('filing a message takes it out of lane 12 and lane 13 in the same modify call', () => {
+        const out = execFileSync('python3', ['-c', `
+import importlib.util, json, os, sys, tempfile
+os.environ["INBOUND_TRIAGE_DIR"] = tempfile.mkdtemp()
+spec = importlib.util.spec_from_file_location("t", ${JSON.stringify(path.join(root, 'scripts/inbound-triage.py'))})
+t = importlib.util.module_from_spec(spec); sys.modules["t"] = t; spec.loader.exec_module(t)
+calls = []
+t.worker_labels = lambda: [{"id": "L11", "name": "11: filed", "type": "user"},
+                           {"id": "L12", "name": "12: for the agents", "type": "user"},
+                           {"id": "L13", "name": "13: for Roy", "type": "user"},
+                           {"id": "L8", "name": "8: Mica", "type": "user"}]
+t.worker_post = lambda p, b: (calls.append(b) or {"modified": 1})
+t.read_scan_cache = lambda: {"m1": {"sender": "a@example.com", "subject": "EICR", "threadId": "th1"}}
+t.cmd_act("m1", "file", "x", label_num="11")
+print(json.dumps(calls[0]))`], { encoding: 'utf8' }).trim().split('\n').pop();
+        const body = JSON.parse(out);
+        expect(body.addLabels).toEqual(['11: filed']);
+        expect(body.removeLabels).toContain('INBOX');
+        expect(body.removeLabels).toContain('12: for the agents');
+        expect(body.removeLabels).toContain('13: for Roy');
+    });
+
+    it('both inbox skills tell exit 4 apart from the auto-reply exit 3', () => {
+        for (const p of ['.claude/scheduled-tasks/inbound-email-triage/SKILL.md',
+                         '.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md']) {
+            const skill = readFileSync(path.join(root, p), 'utf8');
+            expect(skill).toMatch(/Exit 4 with/);
+            expect(skill).toMatch(/never-a-card/);
+        }
+    });
+
     // Kevin, 18 Oct 2026: a date for his diary becomes a CALENDAR: task. A booking confirmation is
     // machine-sent, so its thread reads as all auto-replies; the diary task must still be created.
     it('a diary task on an all-auto-reply thread is created; a reply task on it is still refused', () => {

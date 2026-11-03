@@ -65,7 +65,7 @@ report with **Last week**, because that is what he is paying tonight.
 ### 1. Scan
 
 ```
-python3 scripts/payment-run.py scan --max-attachments 40 > $SCRATCH/scan.json
+python3 scripts/payment-run.py scan --max-attachments 120 > $SCRATCH/scan.json
 ```
 
 Writes JSON: candidates from both mailboxes with body excerpts and the extracted

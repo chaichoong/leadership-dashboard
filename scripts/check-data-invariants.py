@@ -1115,6 +1115,13 @@ ACKNOWLEDGED_BRIEF_GAPS = {
                   "hide the evidence. Task rec4ccYAcaf0AIfxG.",
         "acknowledged": "2026-10-22",
     },
+    "2026-10-27": {
+        "record": "recsf1UPbPlgHyPl3",
+        "reason": "fallback stub only (Slack post failed: invalid_blocks); the written brief "
+                  "was never stored, so the row cannot be rebuilt. Precedent 5 Oct, task "
+                  "recGgA3Y5vYrHEBaT. Task rec9iW3NF1mCwJsZb.",
+        "acknowledged": "2026-10-30",
+    },
 }
 
 

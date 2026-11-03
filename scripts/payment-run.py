@@ -168,7 +168,12 @@ CUTOFF_HOUR = 21
 MAX_PAGES = 12
 # Attachments are the expensive part — one worker call and a full download each.
 # The cap is per run across both accounts. A run that hits it says so.
-MAX_ATTACHMENTS = 40
+# 40 TRUNCATED A NORMAL WEEK (finding 20261023-payment-run-1058). The 23 Oct 2026
+# run read 46 PDFs on a budget of 46 (40 for 8 days), skipped 41 and set
+# truncated on BOTH mailboxes; re-run at 120 it read 87 and completed. The budget
+# is shared across the two accounts and mail copied to both roughly doubles
+# demand, so a week's real demand is around 90.
+MAX_ATTACHMENTS = 120
 # Bytes. Above this a PDF is not downloaded: a 30MB scan of a letter is never
 # the invoice, and it would spend the whole run's budget on one message.
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
