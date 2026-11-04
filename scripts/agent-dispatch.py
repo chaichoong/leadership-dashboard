@@ -4715,7 +4715,7 @@ def cmd_handover(args):
         # which is where the audit trail belongs.
         AF["approvalOutcome"]: None,
         AF["approvedAt"]: None,
-        AF["notes"]: (existing + "\n\n" + note).strip(),
+        AF["notes"]: cap_notes((existing + "\n\n" + note).strip(), task_id=args.task),
     })
     # TELL THEM. Until 28 Aug 2026 this command reassigned the task and
     # notified nobody: 47 tasks sat linked to Roy Lavin and not one email had
@@ -4826,7 +4826,7 @@ def cmd_clear_alerts(args):
             # changed hands would later read as an approved carry-out.
             AF["approvalOutcome"]: None,
             AF["approvedAt"]: None,
-            AF["notes"]: (existing + "\n\n" + note).strip(),
+            AF["notes"]: cap_notes((existing + "\n\n" + note).strip(), task_id=entry.get("task") or ""),
         })
         moved.append(entry)
     print(json.dumps({"cleared": len(moved), "items": moved,
@@ -5789,7 +5789,7 @@ def cmd_annotate(args):
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     note = f"[{stamp} — agent] {args.note}"
     patch_task(args.task, {
-        AF["notes"]: (existing + "\n\n" + note).strip(),
+        AF["notes"]: cap_notes((existing + "\n\n" + note).strip(), task_id=args.task),
     })
     print(json.dumps({"annotated": args.task, "chars": len(note), "parked": False}))
 
@@ -5890,7 +5890,7 @@ def cmd_due(args):
     patch_task(args.task, {
         AF["dueDate"]: new_due.isoformat(),
         AF["status"]: status,
-        AF["notes"]: (str(fields.get(AF["notes"]) or "") + "\n\n" + note).strip(),
+        AF["notes"]: cap_notes((str(fields.get(AF["notes"]) or "") + "\n\n" + note).strip(), task_id=args.task),
     })
     check = get_task(args.task).get("fields", {}) or {}
     if str(check.get(AF["dueDate"]) or "") != new_due.isoformat():
@@ -6370,7 +6370,7 @@ def cmd_revise(args):
             f"{original[:20000]}")
     patch_task(args.task, {
         AF["agentOutput"]: revised[:95000],
-        AF["notes"]: ((t["notes"] or "") + "\n\n" + mark).strip(),
+        AF["notes"]: cap_notes(((t["notes"] or "") + "\n\n" + mark).strip(), task_id=args.task),
     })
     print(json.dumps({"revised": args.task, "chars": len(revised),
                       "wasChars": len(original)}))
@@ -6423,7 +6423,7 @@ def cmd_retype(args):
             f"{reason[:300]} The approved text and Kevin's verdict are unchanged.")
     patch_task(args.task, {
         AF["taskType"]: args.type,
-        AF["notes"]: ((t["notes"] or "") + "\n\n" + note).strip(),
+        AF["notes"]: cap_notes(((t["notes"] or "") + "\n\n" + note).strip(), task_id=args.task),
     })
     back = task_view(get_task(args.task))
     if back["taskType"] != args.type:

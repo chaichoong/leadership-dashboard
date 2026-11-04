@@ -218,3 +218,79 @@ print(json.dumps({"err": err, "len": len(notes), "cap": m.NOTES_CAP,
     expect(r.pointer, 'the trail it had to shorten is named').toBe(true);
   });
 });
+
+// ─── THE SAME FULL FIELD, THROUGH THE OTHER DOORS ────────────────────────────
+//
+// Findings 20261030-agent-dispatch-1144 and 20261101-agent-dispatch-1161, and the
+// 30 Oct / 31 Oct / 1 Nov fix notes on 20261001-task-manager-board-687, which asked
+// for ONE helper used by complete, annotate, block and revise.
+//
+// PR #872 put `complete --keep-open` through cap_notes and left every other Notes
+// write building its own value. Six of them did not truncate at all, so the moment a
+// long-running task's Notes crossed 100,000 characters Airtable refused those writes
+// too, with the same 422 and the same consequence: the work is done, the record says
+// it is not, and the next run repeats it. `annotate` is the one every agent touches.
+//
+// These drive the real functions against the live task's own size, and the assertion
+// is the one Airtable makes: the value written must fit the field. Back-tested by
+// taking cap_notes back off each call site — both cases fail with the 422.
+describe('REGRESSION — every Notes door survives a near-full field (1144, 1161)', () => {
+  const AIRTABLE_MAX = 100000;
+  const FULL_SETUP = `
+import tempfile, types, contextlib, io
+d = tempfile.mkdtemp()
+m.NOTES_ARCHIVE = d
+FULL = ("[01 Nov 2026 09:00 — agent] an older note.\\n\\n" * 2400)[:99900]
+wrote = {}
+def fake_patch(task_id, fields):
+    notes = fields.get(m.AF["notes"])
+    if notes is not None and len(notes) > ${AIRTABLE_MAX}:
+        raise RuntimeError("422 INVALID_VALUE_FOR_COLUMN: Notes is too long (%d chars)" % len(notes))
+    wrote.update(fields)
+m.patch_task = fake_patch
+m.ledger_append = lambda *a, **k: None
+m.get_task = lambda rec: {"id": rec, "fields": {m.AF["notes"]: FULL}}
+`;
+
+  it('annotate writes a note onto a 99,900-character Notes field', () => {
+    const r = py(`${FULL_SETUP}
+args = types.SimpleNamespace(task="recTtGhchq2fEF7lB", note="chased the letting agent again")
+err = ""
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        m.cmd_annotate(args)
+except SystemExit as e:
+    err = "EXIT: %s" % e
+except Exception as e:
+    err = "RAISED: %s" % e
+notes = wrote.get(m.AF["notes"], "")
+print(json.dumps({"err": err, "len": len(notes), "cap": m.NOTES_CAP,
+                  "keepsTheNote": "chased the letting agent again" in notes,
+                  "pointer": m.NOTES_ARCHIVED_MARK in notes}))
+`);
+    expect(r.err, 'the note must not be refused').toBe('');
+    expect(r.len).toBeLessThanOrEqual(r.cap);
+    expect(r.len).toBeLessThan(AIRTABLE_MAX);
+    expect(r.keepsTheNote, 'the newest note is the whole point of the write').toBe(true);
+    expect(r.pointer, 'what came off is named, never silently dropped').toBe(true);
+  });
+
+  it('CONTROL — an ordinary-sized Notes field is left exactly as it was', () => {
+    // Without this, a cap that mangled every note would pass the test above.
+    const r = py(`
+import types, contextlib, io
+wrote = {}
+m.patch_task = lambda task_id, fields: wrote.update(fields)
+m.ledger_append = lambda *a, **k: None
+m.get_task = lambda rec: {"id": rec, "fields": {m.AF["notes"]: "[01 Nov 2026 — agent] one short note."}}
+args = types.SimpleNamespace(task="recSHORT", note="chased the letting agent again")
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_annotate(args)
+notes = wrote.get(m.AF["notes"], "")
+print(json.dumps({"notes": notes, "pointer": m.NOTES_ARCHIVED_MARK in notes}))
+`);
+    expect(r.pointer, 'nothing is archived when nothing had to come off').toBe(false);
+    expect(r.notes).toContain('one short note.');
+    expect(r.notes).toContain('chased the letting agent again');
+  });
+});

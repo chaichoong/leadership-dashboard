@@ -653,7 +653,22 @@ function buildApprovalBlocks(t, agent, warn) {
 // remember. Mirrors APV_QUEUE_FORMULA in os/agents/index.html.
 const NOT_DEFERRED = `NOT(IS_AFTER({Deferred Until}, TODAY()))`;
 
-async function postPending(env, channels, log) {
+// ─── A STEP ONLY KEVIN CAN DO IS NOT SOMEBODY ELSE'S DECISION ────────────────
+//
+// Finding 20261015-agent-dispatch-911, task recfTre4IN01T8ttw. A "YOUR STEP:" card
+// is work the robot cannot do and Kevin must: sign in somewhere, put in a payment
+// detail, give access. agent-dispatch.py (YOUR_STEP_MARK) puts that block at the
+// top of Agent Output and leaves the task in Approval, and your_step_fields never
+// checks who the approver is — so this worker is the only thing standing between
+// such a card and a Slack lane that is not his. Posted there it asks somebody who
+// cannot act to approve something that is not a decision, and it stamps a Slack TS
+// that takes the card out of Kevin's own unposted lane for good.
+const YOUR_STEP_RE = /^\s*YOUR STEP:/i;
+export function isYourStepCard(t) {
+    return YOUR_STEP_RE.test(String((t && t.agentOutput) || ''));
+}
+
+export async function postPending(env, channels, log) {
     // Kevin's lane never receives a Slack TS any more, so his rows match this
     // formula until he decides them in the dashboard. Fetching only
     // MAX_POSTS_PER_RUN rows would let ten of his rows permanently occupy the
@@ -661,7 +676,7 @@ async function postPending(env, channels, log) {
     // and cap the POSTS, not the read.
     const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0, ${NOT_DEFERRED})`, 200);
     if (recs.length === 200) log.push('post: unposted queue hit the 200-row read cap — some of Mica\u2019s cards may wait a sweep');
-    let posted = 0, kevinHeld = 0;
+    let posted = 0, kevinHeld = 0, yourStepHeld = 0;
     for (const rec of recs) {
         if (posted >= MAX_POSTS_PER_RUN) break;
         const t = taskView(rec);
@@ -672,6 +687,9 @@ async function postPending(env, channels, log) {
         // task unposted (no Slack TS) is deliberate: nothing to react to,
         // nothing to reconcile, nothing on his phone.
         if (approver.key === 'kevin') { kevinHeld++; continue; }
+        // Only Kevin can carry out a YOUR STEP card, whoever the approver reads as
+        // (finding 20261015-agent-dispatch-911). It stays unposted, like his lane.
+        if (isYourStepCard(t)) { yourStepHeld++; continue; }
         const agent = await agentName(env, t.agentId);
         const channel = await resolveChannelFor(env, approver, channels, log);
         const res = await slack(env, SLACK.post, {
@@ -695,6 +713,7 @@ async function postPending(env, channels, log) {
         log.push(`posted ${t.id}`);
     }
     if (kevinHeld) log.push(`kevin-lane pending without cards (by design): ${kevinHeld}`);
+    if (yourStepHeld) log.push(`your-step cards held back from Slack (only Kevin can do them): ${yourStepHeld}`);
     return posted;
 }
 

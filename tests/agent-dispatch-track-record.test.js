@@ -405,7 +405,11 @@ print('---JSON---'); print(json.dumps({'entries': entries, 'note': note}))`);
     const letter = readFileSync(join(ROOT, 'scripts', 'send-letter.py'), 'utf8');
     const html = readFileSync(join(ROOT, 'os', 'agents', 'index.html'), 'utf8');
     expect(email).toMatch(/except \(SystemExit, Exception\) as e:[^\n]*\n\s+print\(f"WARNING: sent/);
-    expect(letter).toMatch(/except \(SystemExit, Exception\) as e:[^\n]*\n\s+print\(f"WARNING: posted/);
+    // Finding 916 changed the wording, not the guard: the stamp is no longer always
+    // "posted" (a letter Pingen holds at awaiting_credits is stamped NOT POSTED), so
+    // the warning after it can no longer start with that word and stay true. What this
+    // asserts is unchanged — an error writing the stamp warns and does not kill the run.
+    expect(letter).toMatch(/except \(SystemExit, Exception\) as e:[^\n]*\n\s+print\(f"WARNING: the send stamp could not be written/);
     expect(html).toContain("apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)");
     expect(html).not.toContain("apvOpenAttachment(event,'${t.id}','${esc(f.filename)}')");
   });

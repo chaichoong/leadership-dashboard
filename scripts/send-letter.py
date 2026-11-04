@@ -152,6 +152,27 @@ DOC_MAX_BYTES = 20 * 1024 * 1024
 # ≈ 25mm from the left edge) and is the number to build PDF templates against.
 PINGEN_OK_STATUS = "valid"
 
+# WHAT PINGEN'S STATUS MEANS AFTER A SEND (finding 20261015-agent-dispatch-916)
+# ----------------------------------------------------------------------------
+# On 15 Oct 2026 letter 62f2f949 for task recW1SunBsFaWc9FA was written to the
+# ledger as sent and stamped "SENT: ... posted via Pingen" on the task. Pingen
+# was holding it at `awaiting_credits`: nothing was printed, nothing was posted,
+# the account needed topping up, and no exit code, log line or alarm said so.
+# The task read as done.
+#
+# Read off the real ledger (~/knowledge-os/logs/agent-dispatch/sent-letter.jsonl):
+# the send PATCH returns `submitted` straight away with no price, and a letter
+# that is really going turns into `processing` with a price within seconds. So
+# `submitted` is transient and is NEVER proof of a post on its own.
+PINGEN_SENDING = "submitted"          # transient: the API has taken it, nothing is printed yet
+PINGEN_POSTED = ("processing", "sending", "sent", "printed", "delivered", "in_delivery")
+PINGEN_NOT_POSTED = ("awaiting_credits",)   # measured: the account has no credit, so nothing prints
+
+
+def line_kind(posted, blocked):
+    """What the stamp said, for a warning that has to be true either way."""
+    return "posted" if posted else ("not posted" if blocked else "posting not confirmed")
+
 
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -411,8 +432,15 @@ def last_prepared(task_id):
 
 
 def already_sent(task_id):
+    """The send that POSTED this task's letter, if there is one.
+
+    A row whose own `posted` is False printed nothing (Pingen held it at
+    awaiting_credits), so it must not block the retry — before 4 Nov 2026 it did,
+    and letter 62f2f949 could never be sent at all. "A letter cannot be unposted"
+    still holds for every row that posted, and for every older row, which has no
+    `posted` key and is treated as a real post."""
     for row in ledger_rows(task_id):
-        if row.get("cmd") == "send":
+        if row.get("cmd") == "send" and row.get("posted", True):
             return row
     return None
 
@@ -570,28 +598,67 @@ def cmd_send(args):
             "print_spectrum": "grayscale",
         }}})
 
-    after = pingen("GET", f"/organisations/{org}/letters/{letter_id}", token)
-    a2 = after["data"]["attributes"]
+    # DID IT ACTUALLY GO? (finding 20261015-agent-dispatch-916)
+    #
+    # The send PATCH returns `submitted` at once and prints nothing. Poll until the
+    # status leaves that transient state (up to 30 s, the same shape as prepare's
+    # validating poll), then judge the status Pingen settled on. Claiming a post off
+    # the PATCH alone is how a letter sat at awaiting_credits reading as sent.
+    import time as _time
+    for _attempt in range(10):
+        after = pingen("GET", f"/organisations/{org}/letters/{letter_id}", token)
+        a2 = after["data"]["attributes"]
+        if a2.get("status") != PINGEN_SENDING:
+            break
+        _time.sleep(3)
+    status = a2.get("status")
+    posted = status in PINGEN_POSTED
+    blocked = status in PINGEN_NOT_POSTED
+    price = f"{a2.get('price_currency')} {a2.get('price_value')}"
     ledger_append({"at": now_iso(), "cmd": "send", "task": args.task,
                    "letter": letter_id, "taskName": letter["taskName"],
                    "outcome": letter["outcome"], "address": letter["address"],
-                   "delivery": letter["delivery"], "status": a2.get("status"),
-                   "price": f"{a2.get('price_currency')} {a2.get('price_value')}"})
-    # The dated trail (Kevin, 8 Sep 2026): the post goes on the task, dated.
-    try:
-        stamp = datetime.now().strftime("%d %b %Y %H:%M")
+                   "delivery": letter["delivery"], "status": status,
+                   "posted": posted, "price": price})
+    # The dated trail (Kevin, 8 Sep 2026): the post goes on the task, dated. It says
+    # what happened, so a letter nobody printed never leaves a note saying posted.
+    stamp = datetime.now().strftime("%d %b %Y %H:%M")
+    if posted:
         line = (f"[{stamp} — send-letter] SENT: letter {letter_id} posted via Pingen to "
-                f"{(letter['address'] or ['?'])[0]} ({letter['delivery']}, "
-                f"{a2.get('price_currency')} {a2.get('price_value')})")
+                f"{(letter['address'] or ['?'])[0]} ({letter['delivery']}, {price})")
+    elif blocked:
+        line = (f"[{stamp} — send-letter] NOT POSTED: letter {letter_id} is held by Pingen at "
+                f"{status!r} — the account needs credit. Nothing has been printed or posted "
+                f"({letter['delivery']}, {price}).")
+    else:
+        line = (f"[{stamp} — send-letter] POSTING NOT CONFIRMED: letter {letter_id} reads "
+                f"{status!r} at Pingen, which is neither posted nor a known hold. Treat it as "
+                f"NOT posted until checked ({letter['delivery']}, {price}).")
+    try:
         live = get_task(args.task).get("fields", {}) or {}
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
         airtable("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",
                  {"fields": {AF["notes"]: notes}})
     except (SystemExit, Exception) as e:                     # noqa: BLE001
-        print(f"WARNING: posted, but the SENT stamp could not be written: {e}", file=sys.stderr)
-    print(f"Posted. Letter {letter_id} is now {a2.get('status')}.")
+        print(f"WARNING: the send stamp could not be written ({line_kind(posted, blocked)}): {e}",
+              file=sys.stderr)
+    if not posted:
+        print(f"\nNOT POSTED. Letter {letter_id} is at status {status!r}.", file=sys.stderr)
+        if blocked:
+            print("         The Pingen account has no credit, so nothing was printed.\n"
+                  "         Top the account up, then run this same send again: the\n"
+                  "         ledger records this attempt as posted=false, so the retry\n"
+                  "         is allowed.", file=sys.stderr)
+        else:
+            print("         This status is neither a post nor a known hold, so the\n"
+                  "         letter is reported as NOT posted rather than guessed at.\n"
+                  "         Check it in Pingen before sending again.", file=sys.stderr)
+        print(f"  to     : {'; '.join(letter['address'])}", file=sys.stderr)
+        print(f"  ledger : {SENT_LEDGER}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Posted. Letter {letter_id} is now {status}.")
     print(f"  to     : {'; '.join(letter['address'])}")
-    print(f"  cost   : {a2.get('price_currency')} {a2.get('price_value')}")
+    print(f"  cost   : {price}")
     print(f"  ledger : {SENT_LEDGER}")
 
 

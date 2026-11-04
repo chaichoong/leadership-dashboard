@@ -107,9 +107,27 @@ fi
 # Before this, a fix never woke anything: 6 Chedburgh Place stayed parked after
 # TopCashback was added and Kevin had signed in. No model tokens. The output is
 # the Estate status row's source; a failure is loud but never stops hand-backs.
-if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" blockers --sweep > "$SCRATCH/blockers.json" 2>"$SCRATCH/blockers.err"; then
+#
+# Built in a temp file and renamed over the last one (4 Nov 2026, finding
+# 20261027-agent-dispatch-1097). A plain `>` redirect TRUNCATES blockers.json to
+# 0 bytes the moment the sweep starts and holds it empty for the whole Airtable
+# read, seconds to minutes. estate-status.py blockers_row (every 10 minutes) and
+# ai_team_health.py json.load the same file: landing in that window gives
+# "Expecting value: line 1 column 1 (char 0)" and the Robots blocked row reads
+# Failed while nothing is actually wrong. A failed sweep left it empty for good.
+# A rename is atomic, so a reader sees the last whole report or the new whole
+# report, and a failed or unparsable build leaves the last whole report to age
+# into the row's own staleness check. Same pattern as queue.json below.
+# Rule: .claude/rules/python-scripts.md — truncate-then-write is not atomic.
+if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" blockers --sweep > "$SCRATCH/blockers.json.tmp" 2>"$SCRATCH/blockers.err"; then
+  rm -f "$SCRATCH/blockers.json.tmp"
   echo "WARNING: blocker sweep failed — a fixed wall may not have woken its task" >&2
   tail -c 500 "$SCRATCH/blockers.err" >&2
+elif ! /usr/bin/python3 -m json.tool "$SCRATCH/blockers.json.tmp" >/dev/null 2>&1; then
+  rm -f "$SCRATCH/blockers.json.tmp"
+  echo "WARNING: blocker sweep wrote no readable JSON — the last report is kept" >&2
+else
+  mv -f "$SCRATCH/blockers.json.tmp" "$SCRATCH/blockers.json"
 fi
 
 # --- free half: merge what Kevin approved (7 Oct 2026) ----------------------
