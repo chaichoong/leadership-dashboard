@@ -323,6 +323,8 @@
   "maxLateMinutes": 300,
   "maxRuntimeMinutes": 600,
   "maxRuntimeNote": "11 Sep 2026 (finding 20260911-daily-ops-phase-2-522): above the 480 default because one run on the queue log held for 514 min.",
+  "cpuStallMinutes": 20,
+  "cpuStallNote": "20 minutes (finding 20261103-phase-5-1173). On 3 Nov 2026 this job took the queue at 05:00:37Z and held it 2h11m while its grandchild LibationCli used 0.22s of CPU in 2h10m: hung, not working. The wrapper above it was healthy and kept the lease alive, so sweep could never reclaim it and seven jobs waited behind it (compliance-watch, mcp-inventory, payment-run-daily, session-keepalive, project-status-sync, ceo-agent, masterplan-sync) until daily-ops killed the scan by hand. maxRuntimeMinutes 600 would not have fired until about 15:00. The run uses well under a minute of CPU when idle, so a process group that has not moved for 20 minutes is hung. Opt-in per job on purpose: a job that legitimately waits on a network read or a sign-in must never be killed for using no CPU.",
   "mode": "wrapped",
   "needs": [
    "network"
@@ -630,7 +632,7 @@
   "note": "Kevin, 4 Sep 2026: keep the robot signed in. Visits every login site that can hold a session (allowlist entries with a loginUrl and no shortSession flag) so the cookie stays fresh, and raises ONE parked task in the standard SIGN-IN NEEDED form for any site that has signed out, timed for the 08:00 message. GOV.UK and HMRC are skipped: their sessions need his code every time. A run where every site reads unknown FAILS rather than reporting all well."
  },
  "estate-drift": {
-  "cron": "25 6 * * *",
+  "cron": "0 7 * * *",
   "maxLateMinutes": 600,
   "mode": "wrapped",
   "retryWhenDeferred": true,
@@ -639,6 +641,7 @@
     "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
    }
   ],
+  "cronNote": "07:00, not 06:25 (finding 20261101-phase-1-1156). The rulings this check reads are written by the CEO memory sweep in the ceo-agent slot (06:45; it ran 06:46-06:52 on 1 Nov 2026), so a 06:25 run read the Decisions folder 25 minutes before that day's notes existed and printed '0 rulings behind', exit 0. The same code by hand at 07:13 exited 1 and named the ruling. Every ruling was invisible to the morning check on the day it was written, and CLAUDE.md's rule is that red is fixed the same day. Keep it later than ceo-agent and earlier than daily-ops; scripts/install-slot-jobs.sh must agree.",
   "note": "Kevin, 7 Sep 2026: 'I felt that he [the CEO] is outdated.' Scans the CEO, the eleven heads, the five workers, the /ceo and /huddle skills, the CEO slot instructions, the five brain files the CEO loads first and the 09:00 brief worker for wording a dated ruling retired, and fails if a Decisions/ file newer than ~/.claude/agents/ESTATE.md's As at stamp touches the estate. Red means a prompt is lying about how the estate works. Fewer than 20 readable surfaces exits 2, never 0. LOCK-EXEMPT (9 Sep 2026, finding 20260909-daily-ops-exceptions-502): read-only — it makes no git commit, no Airtable write and no file write outside its own snapshot/report, so it never queues. On 9 Sep content-engine held the lock 02:16 to past 07:13 and the whole morning check block was starved ten deep. Under two minutes of machine time between them, lost to four hours of ffmpeg.",
   "lockExempt": true
  },

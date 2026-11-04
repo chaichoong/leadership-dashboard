@@ -47,7 +47,8 @@ CONTROLS, because a scan that sees nothing looks exactly like a clean scan:
   sometimes absent), exits 2. "0 rulings behind" off an empty folder is not a pass.
 
 Exit 0 clean, 1 drift found (listed on stdout, summary on stderr), 2 cannot verify.
-Runs daily as the wrapped launchd job `estate-drift` (06:25), and by hand:
+Runs daily as the wrapped launchd job `estate-drift` (07:00 — AFTER the CEO memory
+sweep that writes the rulings it reads, finding 20261101-phase-1-1156), and by hand:
 
     python3 scripts/agent-estate-drift.py            # scan the live estate
     python3 scripts/agent-estate-drift.py --selftest # prove the patterns fire
@@ -76,6 +77,36 @@ MEMORY = os.path.join(HOME, ".claude/projects",
                       "-Users-kevinbrittain-Projects-leadership-dashboard", "memory")
 
 MIN_FILES = 20
+
+# ─── A READ TAKEN BEFORE TODAY'S RULINGS ARE WRITTEN IS NOT A PASS ──────────
+#
+# Finding 20261101-phase-1-1156. The rulings this check reads are written into the
+# Drive Decisions folder by the CEO memory sweep in the ceo-agent slot, which ran
+# 06:46 to 06:52 on 1 Nov 2026. The launchd job was at 06:25, so it read a folder
+# that did not yet hold that day's four ruling notes and printed "0 rulings behind",
+# exit 0 — reading identically to a genuinely clean estate. The same code by hand at
+# 07:13 exited 1 and named the ruling. Every ruling was invisible to the morning
+# check on the day it was written, one day late, and CLAUDE.md's rule is that red is
+# fixed the same day.
+#
+# The job has moved to 07:00. This is the belt: a run that starts before the sweep
+# can have written says CANNOT VERIFY instead of green, so re-scheduling it back
+# into the stale window can never again read as a clean estate.
+SWEEP_WRITES_BY_HOUR = 7       # London; the ceo-agent slot is 06:45 and takes minutes
+
+
+def read_may_be_stale(now=None):
+    """The reason this read may predate today's rulings, or "" when it cannot.
+
+    Local time on purpose: the slot times are London times, and this is the same
+    clock the sweep that writes the rulings runs on."""
+    now = now or dt.datetime.now()
+    if now.hour < SWEEP_WRITES_BY_HOUR:
+        return ("this run started at %s, before the CEO memory sweep (the ceo-agent slot, "
+                "06:45) has written today's ruling notes to the Decisions folder, so "
+                "'0 rulings behind' would only mean 'not yet written'"
+                % now.strftime("%H:%M"))
+    return ""
 
 # (regex, retired on, what replaced it). Keep each pattern specific enough that
 # it cannot match a sentence describing the rule as history. Add a line here in
@@ -523,6 +554,10 @@ def main(argv=None):
         return selftest()
     code, res = run(a.agents, a.skills, a.tasks, a.brain, a.repo,
                     a.claude_md, a.memory)
+    # Before the sweep has written, a clean answer is only an early one (1156).
+    stale = read_may_be_stale()
+    if stale and code == 0:
+        code, res = 2, dict(res, reason=stale)
     if a.json:
         print(json.dumps(res, indent=2))
     if code == 2:

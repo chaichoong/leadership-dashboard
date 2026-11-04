@@ -202,6 +202,89 @@ describe('staleness cut-off', () => {
     expect(line).toContain('SKIPPED');
     expect(line).toMatch(/late|stale|min/i);        // the reason, not just the fact
   });
+
+  // ─── A HOLD THAT IS HAPPENING NOW (finding 20261103-phase-5-1173) ──────────
+  //
+  // audiobook-backfill took the queue at 05:00:37Z on 3 Nov 2026 and held it for
+  // 2h11m. Its runs.log carried no line for that day at all, because a wrapped run
+  // appended its line only when it FINISHED, so the one place a routine would look
+  // for the job's own history said nothing while seven jobs queued behind it.
+  it('writes a START line into the job\'s runs.log as soon as a wrapped run takes the lock', () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'holder-job': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped' },
+    }));
+    const r = run(['run', 'holder-job', '--', 'true'], { env: { HOME: fakeHome } });
+    expect(r.code).toBe(0);
+    const log = readFileSync(join(fakeHome, 'knowledge-os', 'logs', 'holder-job', 'runs.log'), 'utf8');
+    expect(log, 'the hold must be visible in the job\'s own log').toContain('START');
+    expect(log, 'and say how long the lease it holds is').toMatch(/lease .* min/);
+    expect(log).toMatch(/pid \d+/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A HUNG CHILD IS NOT WORK (finding 20261103-phase-5-1173)
+//
+// LibationCli used 0.22 seconds of CPU in 2 hours 10 minutes on 3 Nov 2026 while
+// the healthy wrapper above it kept beating, so the lease never lapsed, sweep
+// could never reclaim it, and maxRuntimeMinutes 600 would not have fired until
+// about 15:00. The lease mechanism assumed a live wrapper means live work.
+//
+// Driven here with a tiny sample interval, because a test that waited twenty real
+// minutes would be a test nobody runs.
+// ---------------------------------------------------------------------------
+describe('cpuStallMinutes: a run that stops using CPU is stopped', () => {
+  const FAST = { JOB_QUEUE_CPU_SAMPLE: '0.3' };
+
+  it('THE REGRESSION: a wrapped job whose child just sleeps is stopped and the queue freed', () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      'hangs-job': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped',
+                     cpuStallMinutes: 0.03 },
+    }));
+    const r = run(['run', 'hangs-job', '--', 'sleep', '30'], { env: FAST });
+    expect(r.code, 'a hung run must not sit there until its runtime ceiling').not.toBe(0);
+    const reasons = events().map((e) => `${e.state} ${e.reason || ''}`).join(' | ');
+    expect(reasons, 'the queue log must name WHY it was stopped').toContain('cpu-stall');
+    expect(reasons).toMatch(/no CPU/);
+    // And the lock is free again, so the next job can have it.
+    expect(run(['acquire', 'hangs-job']).code).toBe(0);
+    run(['release', 'hangs-job']);
+  });
+
+  it('CONTROL — a job doing real work is never stopped', () => {
+    // Without this, a watchdog that killed everything would pass the test above.
+    writeFileSync(schedulePath, JSON.stringify({
+      'busy-job': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped',
+                    cpuStallMinutes: 0.03 },
+    }));
+    const r = run(['run', 'busy-job', '--', 'python3', '-c',
+                   'import time\nt=time.time()\nx=0\nwhile time.time()-t<3: x+=1'], { env: FAST });
+    expect(r.code, 'a job burning CPU for 3 s must finish normally').toBe(0);
+    expect(events().map((e) => e.state)).not.toContain('cpu-stall');
+  });
+
+  it('CONTROL — a job that declares nothing is never sampled at all', () => {
+    // The watchdog is opt-in: a job that legitimately waits on a network read or a
+    // browser sign-in uses no CPU for a long time and must never be killed for it.
+    writeFileSync(schedulePath, JSON.stringify({
+      'patient-job': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped' },
+    }));
+    const r = run(['run', 'patient-job', '--', 'sleep', '2'], { env: FAST });
+    expect(r.code).toBe(0);
+    expect(events().map((e) => e.state)).not.toContain('cpu-stall');
+  });
+
+  it('the real schedule declares it only for the job measured to hang', () => {
+    const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    const declared = Object.entries(real)
+      .filter(([, cfg]) => cfg && typeof cfg === 'object' && cfg.cpuStallMinutes)
+      .map(([name]) => name);
+    expect(declared, 'audiobook-backfill is the job with the measured hang').toContain('audiobook-backfill');
+    for (const name of declared) {
+      expect(real[name].cpuStallNote, `${name} must say why it opted in`).toBeTruthy();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
