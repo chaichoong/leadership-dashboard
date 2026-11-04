@@ -1078,6 +1078,92 @@ def log_skipped_run(job, code, reason):
         pass
 
 
+def log_started_run(job, lease_minutes):
+    """Append a START line to the job's runs.log the moment it takes the lock.
+
+    WHY (finding 20261103-phase-5-1173). A wrapped run appended its line only when
+    it FINISHED. audiobook-backfill took the queue at 05:00:37Z on 3 Nov 2026 and
+    held it for 2h11m while its grandchild LibationCli sat hung, and the job's own
+    runs.log carried no line for that day at all — its newest entry was 28 Oct. Seven
+    jobs queued behind it and the only place the hold was visible was
+    `job-queue.py status`, which no routine reads for OTHER jobs. A hold that is
+    happening now is written where the job's own history is kept, as it starts.
+
+    Never raises: a logging failure must not change what the queue does."""
+    try:
+        d = os.path.join(HOME, "knowledge-os/logs", job)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "runs.log"), "a") as fh:
+            fh.write("=== %s START: holds the queue, lease %g min, pid %d ===\n"
+                     % (iso(), lease_minutes, os.getpid()))
+    except OSError:
+        pass
+
+
+# ─── A HUNG CHILD IS NOT WORK, AND MUST NOT KEEP THE LEASE ALIVE ────────────
+#
+# Finding 20261103-phase-5-1173, measured. audiobook-backfill's grandchild
+# LibationCli used 0.22 seconds of CPU in 2 hours 10 minutes: hung, not working.
+# The wrapper above it was perfectly healthy and kept beating, so the lease never
+# lapsed and sweep could never reclaim it. The lease mechanism assumes a live
+# wrapper means live work, and that is the whole defect.
+#
+# So a job may declare `cpuStallMinutes` in job-schedule.json. While it is set, the
+# total CPU time of the run's whole process group is sampled, and a group that has
+# not moved for that long is stopped the same way the runtime ceiling stops one:
+# TERM then KILL, the lock released, the run reported as failed with the reason.
+# Stopping it is safer than merely dropping the lease, which would leave the child
+# running with no lock at all beside whoever took the queue next.
+#
+# It is OPT-IN on purpose. A job can legitimately use no CPU for a long time while
+# it waits on a network read or a browser sign-in, and killing one of those would
+# be a worse fault than the hold. Only jobs measured to hang declare it.
+# How often the group is sampled. An env override so a test can prove the whole
+# mechanism in seconds instead of twenty minutes (tests never wait on real clocks).
+try:
+    CPU_SAMPLE_SECONDS = float(os.environ.get("JOB_QUEUE_CPU_SAMPLE") or 60)
+except ValueError:
+    CPU_SAMPLE_SECONDS = 60
+
+
+def group_cpu_seconds(pgid):
+    """Total CPU time of every process in PGID, or None when it cannot be read.
+
+    None means NOT MEASURED and never counts as a stall: a ps that fails must not
+    be able to kill a working job."""
+    try:
+        out = subprocess.run(["ps", "-o", "time=", "-g", str(pgid)],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    total = 0.0
+    seen = False
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # ps prints [dd-]hh:mm:ss.ff or mm:ss.ff
+        days = 0
+        if "-" in line:
+            d, _, line = line.partition("-")
+            try:
+                days = int(d)
+            except ValueError:
+                continue
+        parts = line.split(":")
+        try:
+            secs = 0.0
+            for part in parts:
+                secs = secs * 60 + float(part)
+        except ValueError:
+            continue
+        total += days * 86400 + secs
+        seen = True
+    return total if seen else None
+
+
 class WaiterSignalled(Exception):
     """The acquire() waiter was told to stop before it got the lock.
 
@@ -1583,6 +1669,10 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
                         if LAST_REFUSAL.get("job") == job else None)
         return code
 
+    # The hold is written where this job's own history is kept, as it STARTS
+    # (finding 20261103-phase-5-1173), not only when it ends.
+    log_started_run(job, lease_minutes)
+
     # ─── THE WHOLE TREE, NOT JUST THE WRAPPER (finding 20260904-content-engine-459)
     #
     # `proc.terminate()` signals the immediate child only — the wrapper shell.
@@ -1723,6 +1813,42 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
         event(job, "max-runtime", reason=running["ceiling"])
         stop_child(running["ceiling"])
 
+    try:
+        stall_min = float((load_schedule().get(job) or {}).get("cpuStallMinutes") or 0)
+    except (TypeError, ValueError):
+        stall_min = 0
+
+    def cpu_stall_watchdog():
+        """Stop a run whose whole process group has stopped using CPU.
+
+        Opt-in per job (cpuStallMinutes). None from group_cpu_seconds is NOT MEASURED
+        and resets nothing: it can never be the thing that kills a working job."""
+        last = None
+        still_since = None
+        while not stop.wait(CPU_SAMPLE_SECONDS):
+            proc = running["proc"]
+            if proc is None:
+                continue
+            try:
+                pgid = os.getpgid(proc.pid)
+            except (OSError, ProcessLookupError):
+                return
+            total = group_cpu_seconds(pgid)
+            if total is None:
+                continue
+            if last is None or total > last + 0.05:
+                last, still_since = total, None
+                continue
+            still_since = still_since or now()
+            if now() - still_since < stall_min * 60:
+                continue
+            running["ceiling"] = ("used no CPU for %g minutes (hung, not working): "
+                                 "%.2fs of CPU in the whole process group"
+                                 % (stall_min, total))
+            event(job, "cpu-stall", reason=running["ceiling"], cpuSeconds=round(total, 2))
+            stop_child(running["ceiling"])
+            return
+
     ticker = None
     if not exempt:
         ticker = threading.Thread(target=beat, daemon=True)
@@ -1747,6 +1873,8 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
         # still holds the Mac.
         if ceiling_min > 0:
             threading.Thread(target=watchdog, daemon=True).start()
+        if stall_min > 0:
+            threading.Thread(target=cpu_stall_watchdog, daemon=True).start()
         code = proc.wait()
         running["code"] = code
         if running["ceiling"]:

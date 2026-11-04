@@ -44,7 +44,15 @@ MODE="${1:---dry-run}"
 # and so would have vanished the day these were rebuilt.
 JOBS=(
   "drift-scan|6:20|/usr/bin/python3 $REPO/scripts/drift-scan.py"
-  "estate-drift|6:25|/usr/bin/python3 $REPO/scripts/agent-estate-drift.py"
+  # 7:00, AFTER the sweep that writes the rulings it checks (finding
+  # 20261101-phase-1-1156). At 6:25 it read the Drive Decisions folder 25
+  # minutes BEFORE the CEO memory sweep in the ceo-agent slot (6:45, which ran
+  # 06:46-06:52 on 1 Nov 2026) wrote that day's ruling notes, so it printed
+  # "0 rulings behind" and exited 0 while the same code run by hand at 07:13
+  # exited 1 and named the ruling. Every ruling was invisible to the morning
+  # check on the day it was written, and the false green read exactly like a
+  # clean estate. Must stay later than ceo-agent and earlier than daily-ops.
+  "estate-drift|7:00|/usr/bin/python3 $REPO/scripts/agent-estate-drift.py"
   "data-invariants|6:40|/usr/bin/python3 $REPO/scripts/check-data-invariants.py"
   "drive-auth|6:50|/usr/bin/python3 $REPO/scripts/drive-auth-check.py"
   "ceo-agent|6:45|/bin/bash $SLOT ceo-agent $TASKS/ceo-agent/SKILL.md"

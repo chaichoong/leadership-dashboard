@@ -229,7 +229,7 @@ gate, Kevin's surfaces and the clocks fit together. The CEO, every head, every w
   workforce shape or the clocks** goes to the brain's `Decisions/` AND into `ESTATE.md` with
   its `As at` date bumped, in the same session. Wording the ruling retires is added to
   `RETIRED` in `scripts/agent-estate-drift.py`.
-- `python3 scripts/agent-estate-drift.py` is the check (daily 06:25 as the wrapped job
+- `python3 scripts/agent-estate-drift.py` is the check (daily 07:00 as the wrapped job
   `estate-drift`, and before every huddle). Red is fixed the same day, never silenced.
 - Never state a register count or a persona list in a prompt; the register is read live and
   the eleven heads are the `dept-*` files.

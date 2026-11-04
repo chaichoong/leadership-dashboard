@@ -17,7 +17,7 @@
 // MEMORY.md and CLAUDE.md are fully live.
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -391,5 +391,68 @@ describe('agent-estate-drift', () => {
     const r = run(e);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/CANNOT VERIFY/);
+  });
+});
+
+// ─── THE MORNING CHECK CANNOT BE GREEN BEFORE THE RULINGS ARE WRITTEN ────────
+//
+// Finding 20261101-phase-1-1156, measured on 1 Nov 2026. The launchd job ran at
+// 06:25 and printed "estate drift: 0 stale lines, 0 rulings behind", exit 0. The
+// SAME code run by hand at 07:13 exited 1 and named a ruling. The difference was
+// file times: all four of that day's ruling notes were written into the Drive
+// Decisions folder at 06:50:51-06:51:35 by the CEO memory sweep in the ceo-agent
+// slot (06:46-06:52). So every ruling was invisible to the morning check on the
+// day it was written, and the false green read exactly like a clean estate.
+//
+// Two parts, both proven here: the job moved to 07:00, after the sweep, and a run
+// that starts before the sweep can have written now says CANNOT VERIFY.
+describe('a read taken before the sweep is not a pass (1156)', () => {
+  const SRC = readFileSync(SCRIPT, 'utf8');
+  const py = (snippet) => JSON.parse(spawnSync('python3', ['-c', `
+import importlib.util, json, datetime
+spec = importlib.util.spec_from_file_location('d', ${JSON.stringify(SCRIPT)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+${snippet}
+`], { encoding: 'utf8' }).stdout.trim());
+
+  it('THE REGRESSION: 06:25 is reported as CANNOT VERIFY, not as clean', () => {
+    const r = py(`
+print(json.dumps({
+  "at0625": m.read_may_be_stale(datetime.datetime(2026, 11, 1, 6, 25)),
+  "at0700": m.read_may_be_stale(datetime.datetime(2026, 11, 1, 7, 0)),
+  "at0713": m.read_may_be_stale(datetime.datetime(2026, 11, 1, 7, 13)),
+}))`);
+    expect(r.at0625, 'the 06:25 run must not be able to read as clean').toBeTruthy();
+    expect(r.at0625).toMatch(/not yet written|before the CEO memory sweep/);
+    expect(r.at0700, 'CONTROL — the new slot time is a valid read').toBe('');
+    expect(r.at0713, 'CONTROL — the hand-run that found the truth is a valid read').toBe('');
+  });
+
+  it('a stale read can only downgrade a clean answer, never hide a red one', () => {
+    // A ruling that IS behind must still be reported as behind, whatever the hour:
+    // turning a real red into "cannot verify" would be a worse fault than the one
+    // being fixed.
+    const main = SRC.slice(SRC.indexOf('def main('));
+    expect(main).toMatch(/if stale and code == 0:/);
+  });
+
+  it('the installed slot time is later than the sweep that writes the rulings', () => {
+    const sh = readFileSync(resolve(__dirname, '../scripts/install-slot-jobs.sh'), 'utf8');
+    // Read straight off the JOBS array lines: "name|H:MM|command"
+    const at = (job) => {
+      const line = sh.split('\n').map((l) => l.trim())
+        .find((l) => l.startsWith(`"${job}|`));
+      expect(line, `${job} must be in the installer's JOBS array`).toBeTruthy();
+      const [h, m] = line.split('|')[1].split(':');
+      return Number(h) * 60 + Number(m);
+    };
+    expect(at('estate-drift'),
+      'estate-drift reads what the ceo-agent sweep writes, so it must run after it')
+      .toBeGreaterThan(at('ceo-agent'));
+    // And the schedule the queue reads has to agree with the installer.
+    const sched = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    const [min, hour] = sched['estate-drift'].cron.split(' ');
+    expect(Number(hour) * 60 + Number(min)).toBe(at('estate-drift'));
   });
 });
