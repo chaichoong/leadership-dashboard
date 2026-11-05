@@ -28,6 +28,11 @@
 //   * One text per person per booking: a ledger on this Mac (~/knowledge-os/logs/padel-paid/
 //     texts.jsonl) gets a line BEFORE each send, and only a send Messages definitely refused may
 //     go again. SMS follows an iMessage only when Messages shows the iMessage failed.
+//   * Delivery is read from Messages' own record, written each run by scripts/padel-delivery.py
+//     (bash may read chat.db from the scheduled run; this script, on node, may not: 5 Nov 2026).
+//     A text not yet confirmed keeps the texts step open for one more run, which decides it once:
+//     delivered, or (only when Messages' record shows THAT text failed) the same words by SMS.
+//     Pending, missing or unreadable is "not confirmed", never a second text.
 //   * Texts go between 07:30 and 21:30 London only, checked before every single text. The Splitwise
 //     step starts in the same daytime window, because Splitwise notifies the players the moment the
 //     entry is saved (5 Nov 2026: a booking marked paid at 00:40 would otherwise have pinged six phones
@@ -57,6 +62,7 @@ export const PLAYERS_FILE = join(homedir(), 'Projects/kevin-hq/padel/players.jso
 export const LOG_DIR = join(homedir(), 'knowledge-os/logs/padel-paid');
 export const SW = 'https://secure.splitwise.com';
 export const STALE_CLAIM_MS = 30 * 60 * 1000;      // a claim this old means the robot stopped part-way
+export const STALE_TEXTS_MS = 60 * 60 * 1000;      // an open texts step waits for its follow-up run: one missed run is fine
 export const TEXT_FROM = '07:30';                   // texts go out between these London times only
 export const TEXT_UNTIL = '21:30';
 export const TEXT_LAST_START = '21:00';
@@ -197,17 +203,22 @@ export async function sendMessage(number, text, service) {
   const args = OSA_SEND.flatMap((l) => ['-e', l]).concat([number, text, service]);
   return run('/usr/bin/osascript', args, { timeout: 60000 });
 }
-// Did Messages deliver the last text to that number? Read-only on its own database.
-export async function deliveryOf(number, sinceMs) {
-  const digits = number.replace(/\D/g, '').slice(-10);
-  const apple = Math.floor((sinceMs / 1000 - 978307200) * 1e9);
-  const sql = `SELECT m.error, m.is_delivered, m.is_sent, m.service FROM message m JOIN handle h ON h.ROWID = m.handle_id
-    WHERE m.is_from_me = 1 AND m.date >= ${apple} AND replace(replace(h.id, '+', ''), ' ', '') LIKE '%${digits}' ORDER BY m.date DESC LIMIT 1;`;
-  const r = await run('/usr/bin/sqlite3', ['-readonly', '-separator', '|', `file:${join(homedir(), 'Library/Messages/chat.db')}?mode=ro`, sql], { timeout: 20000 });
-  if (r.code !== 0) return { known: false, readable: false };
-  if (!r.stdout.trim()) return { known: false, readable: true };   // readable, and no such message
-  const [error, delivered, sent, service] = r.stdout.trim().split('|');
-  return { known: true, readable: true, error: Number(error) || 0, delivered: delivered === '1', sent: sent === '1', service };
+// What happened to THE text sent to that number at sinceMs: the first one Messages holds from then
+// (a later text, to the same person for another booking, is never mistaken for it). From the record
+// padel-delivery.py wrote this run (node is refused chat.db itself); a record written before the
+// text went says nothing yet.
+export const DELIVERY_FILE = join(LOG_DIR, 'delivery.json');
+const DELIVERY_FRESH_MS = 20 * 60 * 1000;
+export async function deliveryOf(number, sinceMs, { file = DELIVERY_FILE, now = Date.now } = {}) {
+  let rec;
+  try { rec = JSON.parse(readFileSync(file, 'utf8')); } catch { return { known: false, readable: false }; }
+  if (!rec || !(now() - rec.at <= DELIVERY_FRESH_MS)) return { known: false, readable: false };
+  const list = (rec.numbers || {})[String(number).replace(/\D/g, '').slice(-10)];
+  if (!list) return { known: false, readable: false };              // not a number the record covers
+  if (rec.at < sinceMs) return { known: false, readable: true, stale: true };
+  const m = list.filter((x) => x.at >= sinceMs)[0];
+  if (!m) return { known: false, readable: true };
+  return { known: true, readable: true, error: m.error, delivered: m.delivered, sent: m.sent, service: m.service };
 }
 // One text per person. iMessage first; SMS only when Messages' own record shows the iMessage failed,
 // or osascript failed and Messages holds no such message at all. Anything else that is not a clear
@@ -220,12 +231,13 @@ export async function texted(number, text, { send = sendMessage, delivery = deli
   for (let waited = 0; waited < DELIVERY_WAIT_MS; waited += 4000) {
     await sleep(4000);
     d = await delivery(number, t0);
+    if (d.stale) break;                                              // written before this text: the next run checks it
     if (d.known && d.error) break;                                   // iMessage refused: send it as a text
     if (d.known && (d.delivered || d.sent)) return { ok: true, via: 'iMessage' };
   }
-  const refused = (d.known && d.error) || (first.code !== 0 && d.readable && !d.known);
+  const refused = (d.known && d.error) || (first.code !== 0 && d.readable && !d.known && !d.stale);
   if (!refused) {
-    return { ok: null, via: first.code !== 0 ? 'iMessage (Messages did not answer)' : d.readable ? 'iMessage (not yet delivered)' : 'iMessage (delivery not readable)' };
+    return { ok: null, via: first.code !== 0 ? 'iMessage (Messages did not answer)' : d.stale ? 'iMessage (checked on the next run)' : d.readable ? 'iMessage (not yet delivered)' : 'iMessage (delivery not readable)' };
   }
   const sms = await send(number, text, 'SMS');
   return sms.code === 0 ? { ok: true, via: 'SMS' } : { ok: false, why: 'Messages refused both iMessage and SMS' };
@@ -249,7 +261,8 @@ export function makeLedger(file = join(LOG_DIR, 'texts.jsonl')) {
 }
 
 export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now = Date.now, log = (l) => process.stdout.write(`${l}\n`),
-  key = readKey(), players = readPlayers(), textOne = texted, ledger = makeLedger(), logDir = LOG_DIR } = {}) {
+  key = readKey(), players = readPlayers(), textOne = texted, ledger = makeLedger(), logDir = LOG_DIR,
+  delivery = deliveryOf, sendSms = (number, text) => sendMessage(number, text, 'SMS') } = {}) {
   if (!key) { log(`FAILED: padel-paid: no robot key at ${KEY_FILE}`); return 1; }
   const headers = { 'X-Robot-Key': key, 'Content-Type': 'application/json' };
   const get = await fetchImpl(PAID_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
@@ -270,12 +283,15 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
   const kevinSw = kevin ? kevin[1].splitwise_id : null;
   for (const b of bookings) {
     // A claim left behind by a run that stopped part-way: failed, so Kevin decides (check Splitwise, then Retry).
+    let stale = false;
     for (const step of ['splitwise', 'texts']) {
-      if (b[step].state === 'claimed' && now() - Date.parse(b[step].at) > STALE_CLAIM_MS) {
-        await mark(b, step, 'failed', 'the robot stopped part-way: check Splitwise before Retry');
+      if (b[step].state === 'claimed' && now() - Date.parse(b[step].at) > (step === 'texts' ? STALE_TEXTS_MS : STALE_CLAIM_MS)) {
+        await mark(b, step, 'failed', `the robot stopped part-way: check ${step === 'texts' ? 'Messages' : 'Splitwise'} before Retry`);
         problems.push(`${b.slot} ${step} was left part-way`);
+        stale = true;
       }
     }
+    if (stale) continue;
     if (b.splitwise.state === null) {
       if (!textStart(now())) continue;                              // Splitwise pings the players too: daytime only
       const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir });
@@ -283,6 +299,10 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {
       if (!textStart(now())) continue;                              // texts wait for the morning
       const r = await textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now });
+      if (r) problems.push(`${b.slot} texts: ${r}`);
+    } else if (b.splitwise.state === 'done' && b.texts.state === 'claimed') {
+      if (!textHours(now())) continue;                              // an SMS copy waits for the morning too
+      const r = await textsFollowUp(b, { players, mark, ledger, now, delivery, sendSms });
       if (r) problems.push(`${b.slot} texts: ${r}`);
     }
   }
@@ -369,13 +389,52 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now }
     if (!textHours(now())) { late = true; continue; }                 // checked before every text
     const number = (info.phones || [])[0];
     if (!number) { why = why || 'a player has no phone number'; continue; }
-    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, state: 'sending' });
-    const r = await textOne(number, textFor(b, names, check.owes[info.splitwise_id]));
-    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ok: r.ok, via: r.via || null });   // ok: true, false or null (unsure)
+    const text = textFor(b, names, check.owes[info.splitwise_id]);
+    const sentAt = new Date(now()).toISOString();
+    ledger.add({ at: sentAt, slot: b.slot, person: p.id, state: 'sending' });
+    const r = await textOne(number, text);
+    // ok: true, false or null (unsure). An unsure line keeps the words and the moment it went, for
+    // the follow-up.
+    ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ok: r.ok, via: r.via || null, ...(r.ok === null ? { text, sentAt } : {}) });
     if (r.ok !== false) sent++; else why = why || r.why || 'Messages did not send it';
     if (r.ok === null) unsure++;
   }
+  if (unsure && sent === due) return null;                           // stays claimed: the next run confirms them
   const note = `${sent} of ${due} sent${unsure ? ` (${unsure} not confirmed)` : ''}${late ? '; the rest wait: Retry after 07:30' : ''}${why ? `: ${why}` : ''}`;
+  if (sent === due) { await mark(b, 'texts', 'done', note); return null; }
+  await mark(b, 'texts', 'failed', note);
+  return note;
+}
+
+// The run after the texts decides each one not yet confirmed, once, and writes the decision:
+// delivered; or, only when Messages' record shows that very text failed, the same words by SMS;
+// otherwise "not confirmed" (pending, missing or unreadable is never a reason for a second text).
+async function textsFollowUp(b, { players, mark, ledger, now, delivery, sendSms }) {
+  let sent = 0;
+  let due = 0;
+  let unsure = 0;
+  let bySms = 0;
+  let why = '';
+  for (const p of b.players) {
+    const info = players.players[String(p.id)];
+    if (!info || info.self) continue;
+    due++;
+    const last = ledger.last(b.slot, p.id);
+    if (!last || last.ok === false) continue;
+    const line = (extra) => ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ...extra });
+    if (last.ok === true) { sent++; if (/not confirmed/.test(last.via || '')) unsure++; if (/^SMS/.test(last.via || '')) bySms++; continue; }   // decided already
+    const number = (info.phones || [])[0];
+    const d = number && last.sentAt ? await delivery(number, Date.parse(last.sentAt) - 2000) : { known: false, readable: false };
+    // A send Messages never answered may not be in its record at all: a later text to the same person
+    // (another booking) would then pass for it, so that one is never confirmed.
+    if (d.known && d.delivered && !/did not answer/.test(last.via || '')) { line({ ok: true, via: 'iMessage (delivered)' }); sent++; continue; }
+    if (!(d.known && d.error) || !last.text || !textHours(now())) { line({ ok: true, via: 'iMessage (not confirmed)' }); sent++; unsure++; continue; }
+    line({ state: 'sending', via: 'SMS' });
+    const r = await sendSms(number, last.text);
+    line({ ok: r.code === 0, via: 'SMS (the iMessage failed; not confirmed)' });   // Messages only queues it
+    if (r.code === 0) { sent++; bySms++; unsure++; } else why = why || 'Messages refused the SMS too';
+  }
+  const note = `${sent} of ${due} sent${bySms ? `, ${bySms} by SMS` : ''}${unsure ? ` (${unsure} not confirmed)` : ''}${why ? `: ${why}` : ''}`;
   if (sent === due) { await mark(b, 'texts', 'done', note); return null; }
   await mark(b, 'texts', 'failed', note);
   return note;

@@ -3,13 +3,13 @@
 // runOnce() with the Worker, Splitwise (through agent-browser) and Messages replaced by fakes that
 // behave like them. Every person here is invented; the phone numbers are Ofcom's drama range.
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
-  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown,
+  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown, deliveryOf,
 } from '../scripts/padel-paid.mjs';
 
 const require_ = createRequire(import.meta.url);
@@ -42,7 +42,7 @@ const entry = (id, desc, owes, { cost = Object.values(owes).reduce((a, x) => a +
 const NINES = { 11: 900, 12: 900, 13: 900, 14: 900 };
 
 // A fake padel Worker: the robot's GET and its claimed/done/failed POSTs, with the Worker's own rules.
-function worker(bookings, { refuse = () => false } = {}) {
+function worker(bookings, { refuse = () => false, clock = () => AT } = {}) {
   const posts = [];
   const fetchImpl = async (url, init = {}) => {
     if (url !== PAID_URL) throw new Error(`unexpected ${url}`);
@@ -52,7 +52,7 @@ function worker(bookings, { refuse = () => false } = {}) {
     const b = bookings.find((x) => x.slot === body.slot);
     const cur = b[body.step].state;
     const ok = !refuse(body) && (body.state === 'claimed' ? cur === null && body.paidAt === b.paidAt && (body.step === 'splitwise' || b.splitwise.state === 'done') : cur === 'claimed');
-    if (ok) b[body.step] = { state: body.state, at: AT, note: body.note || null };
+    if (ok) b[body.step] = { state: body.state, at: clock(), note: body.note || null };
     return new Response(JSON.stringify({ ok: true, changed: ok }), { status: 200 });
   };
   return { fetchImpl, posts };
@@ -325,14 +325,113 @@ describe('a run', () => {
     expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'failed', note: '2 of 3 sent: Messages refused both iMessage and SMS' });
   });
 
-  it('a text Messages did not confirm counts as sent, is never sent again, and the note says so', async () => {
+  // 5 Nov 2026: from the scheduled run the robot (node) may not read Messages, so a text is checked a run
+  // later, against the record padel-delivery.py writes under bash.
+  it('texts not yet confirmed keep the step open; the next run decides each once: delivered, one SMS only for a recorded failure, else not confirmed', async () => {
     const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
-    const w = worker([b]);
-    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), { textOk: (n) => (n.endsWith('04') ? { ok: null, via: 'iMessage (delivery not readable)' } : { ok: true, via: 'iMessage' }) });
-    r.ledger.add({ slot: b.slot, person: 2, state: 'sending' });      // a run that stopped mid-send for Bob
+    const w = worker([b], { clock: () => new Date(NOON).toISOString() });
+    const sms = [];
+    const record = {
+      '+447700900002': { known: true, readable: true, error: 0, sent: true, delivered: true },
+      '+447700900003': { known: true, readable: true, error: 22, sent: false, delivered: false },
+      '+447700900004': { known: false, readable: true },                         // Messages holds no such text
+    };
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
+      textOk: () => ({ ok: null, via: 'iMessage (checked on the next run)' }),
+      opts: { delivery: async (n) => record[n], sendSms: async (n, t) => { sms.push({ n, t }); return { code: 0 }; } } });
     expect(await r.run()).toBe(0);
-    expect(r.sent.map((x) => x.number)).toEqual(['+447700900003', '+447700900004']);
+    expect(r.sent).toHaveLength(3);
+    expect(w.posts.map((p) => [p.step, p.state])).toEqual([['texts', 'claimed']]);   // open: nothing confirmed yet
+    expect(await r.run()).toBe(0);                                                   // the next run
+    expect(sms.map((x) => x.n)).toEqual(['+447700900003']);                          // a recorded failure only
+    expect(sms[0].t).toBe(r.sent[1].text);                                            // the same words, once
+    expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'done', note: '3 of 3 sent, 1 by SMS (2 not confirmed)' });   // an SMS is only queued
+    expect(r.sent).toHaveLength(3);                                                   // no second iMessage
+    await r.run();
+    expect(sms).toHaveLength(1);                                                      // finished: nothing more
+  });
+
+  it('a follow-up that still cannot read Messages counts them as sent, sends nothing more, and says so', async () => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
+    const w = worker([b], { clock: () => new Date(NOON).toISOString() });
+    const sms = [];
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
+      textOk: () => ({ ok: null, via: 'iMessage (delivery not readable)' }),
+      opts: { delivery: async () => ({ known: false, readable: false }), sendSms: async (n) => { sms.push(n); return { code: 0 }; } } });
+    r.ledger.add({ at: new Date(NOON).toISOString(), slot: b.slot, person: 2, state: 'sending' });   // a run that stopped mid-send for Bob
+    await r.run();
+    expect(r.sent.map((x) => x.number)).toEqual(['+447700900003', '+447700900004']);   // Bob is never texted twice
+    await r.run();
+    expect(sms).toEqual([]);
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (3 not confirmed)' });
+  });
+
+  // Review of PR 887: pending, sent-not-delivered and missing are never a reason for a second text;
+  // the decision is made once; the SMS cut-off is checked before each SMS; THE text is the one sent.
+  const followUp = async ({ record, refuseDone = false, clocks = null }) => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
+    let doneRefused = refuseDone;
+    let n = 0;
+    const clock = () => (clocks ? clocks(n) : NOON);
+    const w = worker([b], { clock: () => new Date(clock()).toISOString(), refuse: (p) => p.state === 'done' && doneRefused && ((doneRefused = false) || true) });
+    const sms = [];
+    const asked = [];
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
+      textOk: () => ({ ok: null, via: 'iMessage (checked on the next run)' }),
+      opts: { now: clock, delivery: async (num, since) => { asked.push(since); return record[num] || { known: false, readable: true }; },
+        sendSms: async (num) => { sms.push(num); n++; return { code: 0 }; } } });
+    await r.run();
+    await r.run();
+    return { r, w, sms, asked };
+  };
+  it('a pending iMessage, or one sent but not delivered: not confirmed, no SMS', async () => {
+    const { sms, w } = await followUp({ record: {
+      '+447700900002': { known: true, readable: true, error: 0, sent: false, delivered: false },
+      '+447700900003': { known: true, readable: true, error: 0, sent: true, delivered: false },
+      '+447700900004': { known: true, readable: true, error: 0, sent: true, delivered: true } } });
+    expect(sms).toEqual([]);
     expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (2 not confirmed)' });
+  });
+  it('the follow-up asks about the moment each text went, and decides once even when the Worker misses the done', async () => {
+    const fail = { known: true, readable: true, error: 22 };
+    const { r, sms, asked, w } = await followUp({ record: { '+447700900003': fail }, refuseDone: true });
+    expect(asked).toEqual(Array(3).fill(NOON - 2000));                               // the sending moment, not the result line
+    expect(sms).toEqual(['+447700900003']);
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done' });                         // refused once, then written on the next run
+    await r.run();
+    expect(sms).toEqual(['+447700900003']);                                           // never a second SMS
+  });
+  it('a send Messages never answered is not confirmed by a later delivered text to the same person', async () => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
+    const w = worker([b], { clock: () => new Date(NOON).toISOString() });
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
+      textOk: () => ({ ok: null, via: 'iMessage (Messages did not answer)' }),
+      opts: { delivery: async () => ({ known: true, readable: true, error: 0, sent: true, delivered: true }), sendSms: async () => ({ code: 0 }) } });
+    await r.run();
+    await r.run();
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (3 not confirmed)' });
+  });
+  it('the 21:30 cut-off is checked before each SMS', async () => {
+    const fail = { known: true, readable: true, error: 22 };
+    const { sms, w } = await followUp({ record: { '+447700900002': fail, '+447700900003': fail },
+      clocks: (sent) => (sent ? Date.parse('2026-11-01T21:31:00Z') : Date.parse('2026-11-01T20:50:00Z')) });
+    expect(sms).toEqual(['+447700900002']);
+    expect(w.posts.at(-1).note).toBe('3 of 3 sent, 1 by SMS (3 not confirmed)');
+  });
+
+  it('the follow-up waits outside the text hours, and a stale open step is failed, not followed up', async () => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' }, texts: { state: 'claimed', at: '2026-11-01T21:20:00.000Z', note: null } });
+    const w = worker([b]);
+    const sms = [];
+    const opts = { delivery: async () => ({ known: true, readable: true, error: 22 }), sendSms: async (n) => { sms.push(n); return { code: 0 }; } };
+    const r = go(w, splitwise(), { opts: { ...opts, now: () => Date.parse('2026-11-01T21:35:00Z') } });
+    r.ledger.add({ at: '2026-11-01T21:20:00.000Z', slot: b.slot, person: 2, ok: null, via: 'x', text: 'hi' });
+    expect(await r.run()).toBe(0);
+    expect(sms).toEqual([]);                                                          // 21:35: no SMS at night
+    expect(w.posts).toEqual([]);
+    expect(await go(w, splitwise(), { ledger: r.ledger, opts: { ...opts, now: () => Date.parse('2026-11-02T08:00:00Z') } }).run()).toBe(1);
+    expect(sms).toEqual([]);                                                          // left overnight: failed for Kevin, no SMS
+    expect(w.posts).toEqual([expect.objectContaining({ step: 'texts', state: 'failed' })]);
   });
 
   it('an entry changed in Splitwise after it was checked: no texts, and the step says why', async () => {
@@ -361,6 +460,61 @@ describe('a run', () => {
     const w3 = worker([booking({ splitwise: { state: 'claimed', at: '2026-11-01T11:00:00.000Z', note: null } })]);
     expect(await go(w3, splitwise()).run()).toBe(1);
     expect(w3.posts).toEqual([expect.objectContaining({ step: 'splitwise', state: 'failed', note: 'the robot stopped part-way: check Splitwise before Retry' })]);
+  });
+});
+
+describe('deliveryOf(): the record padel-delivery.py writes', () => {
+  const dir = tmp();
+  const file = join(dir, 'delivery.json');
+  const T = Date.parse('2026-11-05T09:30:00Z');
+  const write = (at, numbers) => writeFileSync(file, JSON.stringify({ at, numbers }));
+  const msg = (at, extra = {}) => ({ at, service: 'iMessage', sent: true, delivered: false, error: 0, ...extra });
+  const ask = (n, since, nowAt) => deliveryOf(n, since, { file, now: () => nowAt });
+  it('the first text from the moment asked about (never a later one to the same person), matched on the last ten digits', async () => {
+    write(T + 60000, { 7700900002: [msg(T - 5000, { error: 22 }), msg(T + 1000, { delivered: true }), msg(T + 30000, { error: 22 })] });
+    expect(await ask('+44 7700 900002', T, T + 120000)).toEqual({ known: true, readable: true, error: 0, delivered: true, sent: true, service: 'iMessage' });
+  });
+  it('a record written before the text went is stale; none since is "no such text"; an old record or an unknown number is unreadable', async () => {
+    write(T - 1000, { 7700900002: [] });
+    expect(await ask('+447700900002', T, T + 60000)).toEqual({ known: false, readable: true, stale: true });
+    write(T + 60000, { 7700900002: [msg(T - 5000)] });
+    expect(await ask('+447700900002', T, T + 120000)).toEqual({ known: false, readable: true });
+    expect(await ask('+447700900002', T, T + 60000 + 21 * 60000)).toEqual({ known: false, readable: false });
+    expect(await ask('+447700900099', T, T + 120000)).toEqual({ known: false, readable: false });
+    expect(await deliveryOf('+447700900002', T, { file: join(dir, 'none.json'), now: () => T })).toEqual({ known: false, readable: false });
+  });
+});
+
+describe('padel-delivery.py: Messages\' record for the players only, no words', () => {
+  it('writes each player\'s texts from the last 48 hours, and nothing else', () => {
+    const dir = tmp();
+    const db = join(dir, 'chat.db');
+    const players = join(dir, 'players.json');
+    const out = join(dir, 'delivery.json');
+    writeFileSync(players, JSON.stringify(PLAYERS));
+    const now = Date.parse('2026-11-05T10:00:00Z') / 1000;
+    const apple = (sec) => Math.round((sec - 978307200) * 1e9);
+    const py = `import sqlite3, sys, importlib.util
+db, players, out, now = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+c = sqlite3.connect(db)
+c.executescript("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT); CREATE TABLE message (ROWID INTEGER PRIMARY KEY, handle_id INTEGER, is_from_me INTEGER, date INTEGER, service TEXT, is_sent INTEGER, is_delivered INTEGER, error INTEGER, text TEXT);")
+c.executemany("INSERT INTO handle VALUES (?, ?)", [(1, '+447700900002'), (2, '+447700900077'), (3, '+447700900001')])
+c.executemany("INSERT INTO message (handle_id, is_from_me, date, service, is_sent, is_delivered, error, text) VALUES (?,?,?,?,?,?,?,?)", [
+  (1, 1, ${apple(now - 600)}, 'iMessage', 1, 1, 0, 'secret words'),
+  (1, 0, ${apple(now - 500)}, 'iMessage', 0, 0, 0, 'a reply'),
+  (1, 1, ${apple(now - 3 * 86400)}, 'SMS', 1, 1, 0, 'too old'),
+  (2, 1, ${apple(now - 600)}, 'iMessage', 1, 1, 0, 'not a player'),
+  (3, 1, ${apple(now - 600)}, 'iMessage', 1, 1, 0, 'Kevin himself')])
+c.commit(); c.close()
+spec = importlib.util.spec_from_file_location('pd', 'scripts/padel-delivery.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.dump(players_path=players, db_path=db, out_path=out, now=now)`;
+    execFileSync('/usr/bin/python3', ['-c', py, db, players, out, String(now)], { stdio: 'pipe' });
+    const rec = JSON.parse(readFileSync(out, 'utf8'));
+    expect(statSync(out).mode & 0o777).toBe(0o600);
+    expect(rec.at).toBe(now * 1000);
+    expect(Object.keys(rec.numbers).sort()).toEqual(['7700900002', '7700900003', '7700900004', '7700900009']);   // the players, not Kevin
+    expect(rec.numbers['7700900002']).toEqual([{ at: (now - 600) * 1000, service: 'iMessage', sent: true, delivered: true, error: 0 }]);
+    expect(JSON.stringify(rec)).not.toMatch(/secret|reply|not a player|Kevin/);
   });
 });
 
@@ -393,6 +547,10 @@ describe('texted(): one text per person, SMS only when the iMessage definitely f
     expect((await try_({ code: 1, stderr: 'timeout' }, [NONE])).sends).toEqual(['iMessage', 'SMS']);
     expect(await try_({ code: 1, stderr: 'timeout' }, [BLIND])).toEqual({ r: { ok: null, via: 'iMessage (Messages did not answer)' }, sends: ['iMessage'] });
     expect((await try_({ code: 1, stderr: 'timeout' }, [{ known: true, readable: true, error: 0 }])).sends).toEqual(['iMessage']);
+  });
+  it('a record written before the text went: one iMessage, unsure, checked on the next run', async () => {
+    const out = await try_({ code: 0 }, [{ known: false, readable: true, stale: true }]);
+    expect(out).toEqual({ r: { ok: null, via: 'iMessage (checked on the next run)' }, sends: ['iMessage'] });
   });
   it('Messages not allowed on the Mac: not sent, and says what to fix', async () => {
     const out = await try_({ code: 1, stderr: 'execution error: Not authorized to send Apple events to Messages. (-1743)' }, [NONE]);
