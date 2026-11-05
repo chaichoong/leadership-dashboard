@@ -28,7 +28,10 @@
 //   * One text per person per booking: a ledger on this Mac (~/knowledge-os/logs/padel-paid/
 //     texts.jsonl) gets a line BEFORE each send, and only a send Messages definitely refused may
 //     go again. SMS follows an iMessage only when Messages shows the iMessage failed.
-//   * Texts go between 07:30 and 21:30 London only, checked before every single text.
+//   * Texts go between 07:30 and 21:30 London only, checked before every single text. The Splitwise
+//     step starts in the same daytime window, because Splitwise notifies the players the moment the
+//     entry is saved (5 Nov 2026: a booking marked paid at 00:40 would otherwise have pinged six phones
+//     at 06:00).
 //   * No phone number, name or key is ever printed or sent to the Worker; notes say counts only.
 //   * The players' phone numbers and Splitwise ids live in ~/Projects/kevin-hq/padel/players.json
 //     (private, never in this repo).
@@ -141,7 +144,8 @@ export function checkEntry(e, b, kevinId, playerIds) {
 const clock = (ms) => { const p = londonParts(ms); return `${p.hh}:${p.mm}`; };
 export const textHours = (ms) => clock(ms) >= TEXT_FROM && clock(ms) < TEXT_UNTIL;
 // A texts step starts by 21:00, so a normal run (a few players, under a minute each) ends well
-// before 21:30; the 21:30 check before each text only bites if the Mac slept mid-run.
+// before 21:30; the 21:30 check before each text only bites if the Mac slept mid-run. The Splitwise
+// step starts in the same window: its own notification reaches the players at once.
 export const textStart = (ms) => textHours(ms) && clock(ms) < TEXT_LAST_START;
 
 // ── The outside world, behind small functions the tests replace ──
@@ -261,6 +265,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
       }
     }
     if (b.splitwise.state === null) {
+      if (!textStart(now())) continue;                              // Splitwise pings the players too: daytime only
       const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir });
       if (r) problems.push(`${b.slot} Splitwise: ${r}`);
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {

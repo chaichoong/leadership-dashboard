@@ -203,6 +203,18 @@ describe('a run', () => {
     expect(r.sent).toEqual([]);                               // texts wait for the next run, after Splitwise is done
   });
 
+  it('Splitwise pings the players too, so the step waits for 07:30 to 21:00 (5 Nov 2026: paid at 00:40 would have pinged six phones at 06:00)', async () => {
+    const w = worker([booking()]);
+    const s = splitwise();
+    for (const t of ['2026-11-01T06:00:00Z', '2026-11-01T07:29:00Z', '2026-11-01T21:05:00Z', '2026-11-01T23:59:00Z']) {
+      expect(await go(w, s, { opts: { now: () => Date.parse(t) } }).run()).toBe(0);
+    }
+    expect(w.posts).toEqual([]);                              // not even claimed
+    expect(s.calls).toEqual([]);                              // Splitwise not opened
+    expect(await go(w, s, { opts: { now: () => Date.parse('2026-11-01T07:30:00Z') } }).run()).toBe(0);
+    expect(w.posts.map((p) => [p.step, p.state])).toEqual([['splitwise', 'claimed'], ['splitwise', 'done']]);
+  });
+
   it('then the texts: each player but Kevin gets one, with his or her own share from the entry', async () => {
     const w = worker([booking({ pricePence: 3601 })]);
     const r = go(w, splitwise());
