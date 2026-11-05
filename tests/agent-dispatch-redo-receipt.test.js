@@ -145,6 +145,26 @@ describe('the archive is written once', () => {
     const r = j(`print(json.dumps([ad.feedback_archived("[2026-09-04 12:03] Check the bedrooms.\\n\\n[2026-09-04 19:08] Check the bedrooms.", "Check   the bedrooms."), ad.feedback_archived("[2026-09-04 12:03] Check the bedrooms.", "Something new"), ad.feedback_archived("", "")]))`);
     expect(r).toEqual([true, false, true]);
   });
+  it('a resubmitted I-cant that joins two already-archived blocks is not archived again', () => {
+    // finding 20261010-agent-dispatch-823 (task recsFecLLCHEhkQfs): the redo
+    // arrives as the earlier feedback PLUS the new refusal in one value. Each
+    // line is already a block of its own, so the whole-text match misses.
+    const hist = '[2026-10-09 11:02] Check the bedroom window latch.\n\n'
+      + '[2026-10-09 18:40] I can\'t do this step: the portal needs a sign-in.';
+    const joined = 'Check the bedroom window latch.\n'
+      + "I can't do this step: the portal needs a sign-in.";
+    const r = j(`print(json.dumps([
+  ad.feedback_archived(${JSON.stringify(hist)}, ${JSON.stringify(joined)}),
+  ad.feedback_archived(${JSON.stringify(hist)}, ${JSON.stringify(joined + '\nAnd the keys are missing.')}),
+  ad.feedback_archived(${JSON.stringify(hist)}, "Yes"),
+  ad.feedback_archived("[2026-10-09 11:02] Yes", "Yes"),
+  ad.feedback_archived(${JSON.stringify(hist)}, "Check the bedroom window latch.")
+]))`);
+    // 1: every line already archived -> archived. 2: one new line -> NOT.
+    // 3: a one-line answer never rides on a matching line. 4: one line still
+    // matches a whole block. 5: a single line that IS a whole block matches.
+    expect(r).toEqual([true, false, false, true, true]);
+  });
   it('submit consults it instead of comparing stamped blocks', () => {
     expect(SRC).toMatch(/if not feedback_archived\(hist, prior\):/);
     expect(SRC).not.toMatch(/if block not in hist:/);

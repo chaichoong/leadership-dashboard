@@ -1936,7 +1936,30 @@ def feedback_archived(history, text):
     if not want:
         return True
     blocks = re.split(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", str(history or ""), flags=re.M)
-    return any(" ".join(b.split()) == want for b in blocks)
+    if any(" ".join(b.split()) == want for b in blocks):
+        return True
+    # A JOINED REPEAT IS STILL A REPEAT (10 Oct 2026, finding
+    # 20261010-agent-dispatch-823). A resubmitted "I can't do this step" on a
+    # redo arrives as the EARLIER feedback plus the new refusal in one Approval
+    # Feedback value. Each half is already archived as its own block, so the
+    # whole-text match misses and the pair is archived a second time: task
+    # recsFecLLCHEhkQfs gained a duplicate block that way. Every non-empty line
+    # already somewhere in the archive means nothing new was said.
+    #
+    # Single-line text stays on the whole-block rule above, deliberately: a
+    # short answer like "Yes" matches a line in almost every archive, and
+    # swallowing a real new answer is far worse than one duplicate block.
+    lines = [" ".join(ln.split()) for ln in str(text or "").splitlines()]
+    lines = [ln for ln in lines if ln]
+    if len(lines) < 2:
+        return False
+    archived_lines = set()
+    for b in blocks:
+        for ln in b.splitlines():
+            ln = " ".join(ln.split())
+            if ln:
+                archived_lines.add(ln)
+    return all(ln in archived_lines for ln in lines)
 
 
 # ─── THE REPORT GATE (Kevin, 7 Sep 2026) ──────────────────────────────

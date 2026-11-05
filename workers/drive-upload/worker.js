@@ -88,6 +88,17 @@
 //                        50-subrequest budget); `nextPageToken` is returned
 //                        when more remain — callers MUST treat its presence
 //                        as "you have not seen everything".
+//   POST /gmail/get    — { id, account? } → ONE message with the FULL plain
+//                        text (capped at 60,000 characters), its headers,
+//                        links and attachment list. Added 5 Nov 2026 (finding
+//                        20261102-agent-dispatch-1171): /gmail/list cuts the
+//                        body at 4,000 characters, which is right for a scan
+//                        and wrong for reading. An agent that had to answer a
+//                        long email could read only its opening, and nothing
+//                        said the rest existed. `bodyChars` is the full length
+//                        and `bodyTruncated` says whether the cap bit, so a
+//                        cut is never silent. /gmail/list stays at 4,000.
+//                        Read-only, one Gmail fetch.
 //   POST /gmail/modify — { ids: [..], addLabels?: [..], removeLabels?: [..], account? }
 //                        Applies label changes; archive = removeLabels ["INBOX"].
 //                        Label NAMES resolve via the labels list; raw user-label
@@ -482,7 +493,8 @@ export default {
         // triage credential cannot send. Requires the gmail.modify scope.
         // ------------------------------------------------------------------
         if (url.pathname === '/gmail/labels' || url.pathname === '/gmail/list'
-            || url.pathname === '/gmail/modify' || url.pathname === '/gmail/attachment') {
+            || url.pathname === '/gmail/modify' || url.pathname === '/gmail/attachment'
+            || url.pathname === '/gmail/get') {
             // A separate key from /send-email on purpose: the triage runtime's
             // credential must not be able to send mail. Fails closed when unset.
             const auth = request.headers.get('Authorization') || '';
@@ -500,6 +512,7 @@ export default {
                 const accessToken = await getGmailAccessToken(env, refreshToken);
                 if (url.pathname === '/gmail/labels') return jsonResponse(await gmailLabels(accessToken));
                 if (url.pathname === '/gmail/list') return jsonResponse(await gmailList(accessToken, body));
+                if (url.pathname === '/gmail/get') return jsonResponse(await gmailGet(accessToken, body));
                 if (url.pathname === '/gmail/attachment') return jsonResponse(await gmailAttachment(accessToken, body));
                 return jsonResponse(await gmailModify(accessToken, body));
             } catch (e) {
@@ -757,6 +770,39 @@ async function gmailList(token, { q, labelIds, maxResults, pageToken }) {
         });
     }
     return { messages: out, resultSizeEstimate, nextPageToken: nextPageToken || null };
+}
+
+// ONE MESSAGE, READ IN FULL (5 Nov 2026, finding 20261102-agent-dispatch-1171).
+// /gmail/list is a SCAN and keeps its 4,000-character excerpt: 25 full bodies
+// in one reply is how a worker runs out of memory and a triage slot reads
+// nothing. This is the read route, one message at a time, and it says in the
+// reply how long the body really was so a cut can never pass as the whole mail.
+const GMAIL_GET_BODY_CAP = 60000;
+
+async function gmailGet(token, { id }) {
+    const msgId = String(id || '').trim();
+    if (!msgId) throw new Error('id (a Gmail message id) is required');
+    const msgRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(msgId)}?format=full`,
+        { headers: { Authorization: `Bearer ${token}` } });
+    if (!msgRes.ok) throw new Error('Gmail get failed for ' + msgId + ': ' + await msgRes.text());
+    const msg = await msgRes.json();
+    const headers = {};
+    for (const h of (msg.payload?.headers || [])) headers[h.name.toLowerCase()] = h.value;
+    const full = extractPlainText(msg.payload);
+    return {
+        id: msg.id,
+        threadId: msg.threadId,
+        labelIds: msg.labelIds || [],
+        internalDate: Number(msg.internalDate) || null,
+        snippet: msg.snippet || '',
+        headers,
+        body: full.slice(0, GMAIL_GET_BODY_CAP),
+        bodyChars: full.length,
+        bodyTruncated: full.length > GMAIL_GET_BODY_CAP,
+        links: extractLinks(msg.payload),
+        attachments: extractAttachments(msg.payload),
+    };
 }
 
 async function gmailModify(token, { ids, addLabels, removeLabels }) {
