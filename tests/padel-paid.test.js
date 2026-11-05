@@ -3,7 +3,7 @@
 // runOnce() with the Worker, Splitwise (through agent-browser) and Messages replaced by fakes that
 // behave like them. Every person here is invented; the phone numbers are Ofcom's drama range.
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -327,7 +327,7 @@ describe('a run', () => {
 
   // 5 Nov 2026: from the scheduled run the robot (node) may not read Messages, so a text is checked a run
   // later, against the record padel-delivery.py writes under bash.
-  it('texts not yet confirmed keep the step open; the next run confirms them, or sends one SMS when the iMessage failed or never went', async () => {
+  it('texts not yet confirmed keep the step open; the next run decides each once: delivered, one SMS only for a recorded failure, else not confirmed', async () => {
     const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
     const w = worker([b], { clock: () => new Date(NOON).toISOString() });
     const sms = [];
@@ -343,12 +343,12 @@ describe('a run', () => {
     expect(r.sent).toHaveLength(3);
     expect(w.posts.map((p) => [p.step, p.state])).toEqual([['texts', 'claimed']]);   // open: nothing confirmed yet
     expect(await r.run()).toBe(0);                                                   // the next run
-    expect(sms.map((x) => x.n)).toEqual(['+447700900003', '+447700900004']);
+    expect(sms.map((x) => x.n)).toEqual(['+447700900003']);                          // a recorded failure only
     expect(sms[0].t).toBe(r.sent[1].text);                                            // the same words, once
-    expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'done', note: '3 of 3 sent, 2 by SMS' });
+    expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'done', note: '3 of 3 sent, 1 by SMS (1 not confirmed)' });
     expect(r.sent).toHaveLength(3);                                                   // no second iMessage
     await r.run();
-    expect(sms).toHaveLength(2);                                                      // finished: nothing more
+    expect(sms).toHaveLength(1);                                                      // finished: nothing more
   });
 
   it('a follow-up that still cannot read Messages counts them as sent, sends nothing more, and says so', async () => {
@@ -364,6 +364,49 @@ describe('a run', () => {
     await r.run();
     expect(sms).toEqual([]);
     expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (3 not confirmed)' });
+  });
+
+  // Review of PR 887: pending, sent-not-delivered and missing are never a reason for a second text;
+  // the decision is made once; the SMS cut-off is checked before each SMS; THE text is the one sent.
+  const followUp = async ({ record, refuseDone = false, clocks = null }) => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
+    let doneRefused = refuseDone;
+    let n = 0;
+    const clock = () => (clocks ? clocks(n) : NOON);
+    const w = worker([b], { clock: () => new Date(clock()).toISOString(), refuse: (p) => p.state === 'done' && doneRefused && ((doneRefused = false) || true) });
+    const sms = [];
+    const asked = [];
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
+      textOk: () => ({ ok: null, via: 'iMessage (checked on the next run)' }),
+      opts: { now: clock, delivery: async (num, since) => { asked.push(since); return record[num] || { known: false, readable: true }; },
+        sendSms: async (num) => { sms.push(num); n++; return { code: 0 }; } } });
+    await r.run();
+    await r.run();
+    return { r, w, sms, asked };
+  };
+  it('a pending iMessage, or one sent but not delivered: not confirmed, no SMS', async () => {
+    const { sms, w } = await followUp({ record: {
+      '+447700900002': { known: true, readable: true, error: 0, sent: false, delivered: false },
+      '+447700900003': { known: true, readable: true, error: 0, sent: true, delivered: false },
+      '+447700900004': { known: true, readable: true, error: 0, sent: true, delivered: true } } });
+    expect(sms).toEqual([]);
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (2 not confirmed)' });
+  });
+  it('the follow-up asks about the moment each text went, and decides once even when the Worker misses the done', async () => {
+    const fail = { known: true, readable: true, error: 22 };
+    const { r, sms, asked, w } = await followUp({ record: { '+447700900003': fail }, refuseDone: true });
+    expect(asked).toEqual(Array(3).fill(NOON - 2000));                               // the sending moment, not the result line
+    expect(sms).toEqual(['+447700900003']);
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done' });                         // refused once, then written on the next run
+    await r.run();
+    expect(sms).toEqual(['+447700900003']);                                           // never a second SMS
+  });
+  it('the 21:30 cut-off is checked before each SMS', async () => {
+    const fail = { known: true, readable: true, error: 22 };
+    const { sms, w } = await followUp({ record: { '+447700900002': fail, '+447700900003': fail },
+      clocks: (sent) => (sent ? Date.parse('2026-11-01T21:31:00Z') : Date.parse('2026-11-01T20:50:00Z')) });
+    expect(sms).toEqual(['+447700900002']);
+    expect(w.posts.at(-1).note).toBe('3 of 3 sent, 1 by SMS (2 not confirmed)');
   });
 
   it('the follow-up waits outside the text hours, and a stale open step is failed, not followed up', async () => {
@@ -417,8 +460,8 @@ describe('deliveryOf(): the record padel-delivery.py writes', () => {
   const write = (at, numbers) => writeFileSync(file, JSON.stringify({ at, numbers }));
   const msg = (at, extra = {}) => ({ at, service: 'iMessage', sent: true, delivered: false, error: 0, ...extra });
   const ask = (n, since, nowAt) => deliveryOf(n, since, { file, now: () => nowAt });
-  it('the newest text since the moment asked about, matched on the last ten digits', async () => {
-    write(T + 60000, { 7700900002: [msg(T - 5000, { error: 22 }), msg(T + 1000, { delivered: true })] });
+  it('the first text from the moment asked about (never a later one to the same person), matched on the last ten digits', async () => {
+    write(T + 60000, { 7700900002: [msg(T - 5000, { error: 22 }), msg(T + 1000, { delivered: true }), msg(T + 30000, { error: 22 })] });
     expect(await ask('+44 7700 900002', T, T + 120000)).toEqual({ known: true, readable: true, error: 0, delivered: true, sent: true, service: 'iMessage' });
   });
   it('a record written before the text went is stale; none since is "no such text"; an old record or an unknown number is unreadable', async () => {
@@ -457,6 +500,7 @@ spec = importlib.util.spec_from_file_location('pd', 'scripts/padel-delivery.py')
 m.dump(players_path=players, db_path=db, out_path=out, now=now)`;
     execFileSync('/usr/bin/python3', ['-c', py, db, players, out, String(now)], { stdio: 'pipe' });
     const rec = JSON.parse(readFileSync(out, 'utf8'));
+    expect(statSync(out).mode & 0o777).toBe(0o600);
     expect(rec.at).toBe(now * 1000);
     expect(Object.keys(rec.numbers).sort()).toEqual(['7700900002', '7700900003', '7700900004', '7700900009']);   // the players, not Kevin
     expect(rec.numbers['7700900002']).toEqual([{ at: (now - 600) * 1000, service: 'iMessage', sent: true, delivered: true, error: 0 }]);

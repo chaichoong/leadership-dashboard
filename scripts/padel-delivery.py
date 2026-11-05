@@ -54,9 +54,10 @@ def dump(players_path=PLAYERS, db_path=DB, out_path=OUT, now=None):
         msgs.sort(key=lambda m: m["at"])
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     tmp = out_path + ".tmp"
-    with open(tmp, "w") as fh:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # private from the first byte
+    with os.fdopen(fd, "w") as fh:
         json.dump({"at": int(now * 1000), "numbers": out}, fh)
-    os.chmod(tmp, 0o600)
+    os.chmod(tmp, 0o600)                                                # an old tmp left with wider rights
     os.replace(tmp, out_path)
     return out
 
