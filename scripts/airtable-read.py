@@ -104,7 +104,19 @@ def read_table(table, formula=None, fields=None, view=None, sort=None,
         url = "%s/%s/%s?%s" % (API, BASE_ID, urllib.parse.quote(table),
                                urllib.parse.urlencode(q))
         page = get(url, pat)
-        rows.extend(page.get("records") or [])
+        # NO RECORDS KEY IS AN ERROR, NOT AN EMPTY TABLE (4 Nov 2026, finding
+        # 20261104-phase-2-1187). `page.get("records") or []` reads a reply that
+        # carries no records at all as zero rows, and a zero is what gets acted
+        # on: on 4 Nov a dedupe read whose reply had no records key was read as
+        # "no duplicates" and nearly created one. A reply we cannot find rows in
+        # is NOT CHECKED, loudly, whatever its HTTP status was.
+        if not isinstance(page, dict) or not isinstance(page.get("records"), list):
+            die("the read returned no records key",
+                "Airtable replied with %s. A reply with no records list is an "
+                "error, never an empty result." % (
+                    ", ".join(sorted(page.keys())) if isinstance(page, dict)
+                    else type(page).__name__))
+        rows.extend(page["records"])
         pages += 1
         offset = page.get("offset")
         if not offset:
@@ -139,7 +151,51 @@ def read_schema():
     return tables
 
 
+def selftest():
+    """Drive the real read_table over a stubbed `get`. No network, no token."""
+    g, failed, checks = globals(), [], 0
+    saved = (g["get"], g["token"])
+    g["token"] = lambda: "stub"
+
+    def run(pages):
+        """pages: the replies `get` hands back, in order."""
+        seq = list(pages)
+        g["get"] = lambda url, pat: seq.pop(0)
+        return read_table("Tasks")
+
+    def check(name, ok):
+        nonlocal checks
+        checks += 1
+        if not ok:
+            failed.append(name)
+
+    try:
+        rows, n = run([{"records": [{"id": "rec1"}]}])
+        check("a normal read returns its rows", len(rows) == 1 and n == 1)
+        rows, n = run([{"records": []}])
+        check("a genuinely empty page is zero rows, not an error", rows == [] and n == 1)
+        rows, n = run([{"records": [{"id": "a"}], "offset": "o1"},
+                       {"records": [{"id": "b"}]}])
+        check("every page is followed", [r["id"] for r in rows] == ["a", "b"] and n == 2)
+        # finding 20261104-phase-2-1187: a reply with no records key must NOT
+        # read as zero. die() exits 2, so the guard shows up as SystemExit.
+        for reply in ({"error": {"type": "UNKNOWN_FIELD_NAME"}}, {}, {"records": None},
+                      {"records": {"id": "a"}}, []):
+            try:
+                run([reply])
+                check("a reply with no records list is refused: %r" % (reply,), False)
+            except SystemExit as e:
+                check("a reply with no records list is refused: %r" % (reply,),
+                      e.code == 2)
+    finally:
+        g["get"], g["token"] = saved
+    print(json.dumps({"checks": checks, "failed": failed}, indent=2))
+    return 1 if failed else 0
+
+
 def main(argv=None):
+    if (argv if argv is not None else sys.argv[1:])[:1] == ["selftest"]:
+        return selftest()
     p = argparse.ArgumentParser(
         description="Read-only Airtable reader for the robots. Prints JSON.")
     p.add_argument("table", nargs="?",
