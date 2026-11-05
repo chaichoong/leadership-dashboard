@@ -2169,9 +2169,22 @@ def build_update(existing_fields, incoming_fields, today_iso):
         # on, so an unvalidated value here would mint the phantom option the
         # create path now refuses.
         wanted = _sel_name(incoming_fields.get(F["status"]))
-        has_sender = bool([x for x in (incoming_fields.get(F["sentForApprovalBy"]) or []) if x])
+        senders = [x for x in (incoming_fields.get(F["sentForApprovalBy"]) or []) if x]
+        has_sender = bool(senders)
         patch[F["status"]] = (wanted if wanted in NEW_TASK_STATUSES
                               and (wanted != "Approval" or has_sender) else "Today")
+        # A CARD WITHOUT ITS SENDER IS NOT IN THE QUEUE (4 Nov 2026, finding
+        # 20261104-agent-dispatch-1189). The fold moved Status to Approval and
+        # left Sent For Approval By as the existing task had it — usually
+        # empty, because the task it folded into was ordinary work. The gate
+        # hides an Approval row with no sender (`has_sender` above is the same
+        # test), so the card was at Approval, counted as waiting, and shown to
+        # Kevin nowhere. Whenever this patch is the write that makes the row a
+        # card, the sender rides along in the SAME write.
+        if patch[F["status"]] == "Approval" and has_sender:
+            old_senders = [x for x in (existing_fields.get(F["sentForApprovalBy"]) or []) if x]
+            if sorted(old_senders) != sorted(senders):
+                patch[F["sentForApprovalBy"]] = senders
 
     ex_due = str(existing_fields.get(F["due"]) or "")[:10]
     in_due = str(incoming_fields.get(F["due"]) or "")[:10]
@@ -3482,6 +3495,26 @@ def selftest():
     patch = build_update({F["desc"]: "a", F["status"]: {"name": "Today"}},
                          {F["desc"]: "b", F["status"]: "Approval"}, "2026-09-15")
     check("fold path never writes a sender-less Approval", patch[F["status"]] == "Today")
+    # finding 20261104-agent-dispatch-1189: a fold that makes the row a card
+    # carries the sender in the same write, or the gate hides it.
+    patch = build_update({F["desc"]: "a", F["status"]: {"name": "Upcoming"}},
+                         {F["desc"]: "b", F["status"]: "Approval",
+                          F["sentForApprovalBy"]: ["recAgent"]}, "2026-11-05")
+    check("a fold to Approval carries Sent For Approval By",
+          patch[F["status"]] == "Approval"
+          and patch.get(F["sentForApprovalBy"]) == ["recAgent"])
+    patch = build_update({F["desc"]: "a", F["status"]: {"name": "Upcoming"},
+                          F["sentForApprovalBy"]: ["recAgent"]},
+                         {F["desc"]: "b", F["status"]: "Approval",
+                          F["sentForApprovalBy"]: ["recAgent"]}, "2026-11-05")
+    check("an unchanged sender is not rewritten",
+          patch[F["status"]] == "Approval" and F["sentForApprovalBy"] not in patch)
+    patch = build_update({F["desc"]: "a", F["status"]: {"name": "Approval"},
+                          F["sentForApprovalBy"]: ["recOther"]},
+                         {F["desc"]: "b", F["status"]: "Approval",
+                          F["sentForApprovalBy"]: ["recAgent"]}, "2026-11-05")
+    check("a task already at Approval keeps its own sender and status",
+          F["status"] not in patch and F["sentForApprovalBy"] not in patch)
     # And the create itself goes out with typecast OFF, carrying the corrected
     # status: the whole point, so it is asserted on the request that leaves.
     sent = []

@@ -38,6 +38,7 @@ Never guess an entity attribute — property location, tenancy status, cost stat
 - `ARRAYJOIN()` over a link field returns display names, never record ids. Match ids through a lookup of `RECORD_ID()`; a name match needs a control.
 - Date equality needs `DATESTR()` or `IS_SAME()`. `{Date}="2026-08-06"` returns zero.
 - A blank number field passes `!= 0` and fails `> 0`. Use `ABS({field}) > 0` for "set and non-zero", and test every formula change against a blank record.
+- **A reply with no `records` key is an error, not an empty population** (4 Nov 2026, finding 20261104-phase-2-1187). This is the converse of "a wrong query still returns 200": `len(resp.get("records") or [])` turns an error reply into a confident zero, and a zero gets acted on. Any count asserts the `records` key is PRESENT and a list before trusting it. `scripts/airtable-read.py` does this and refuses; use it rather than a hand-rolled curl.
 - Every count states the number it expects and fails loudly on a miss.
 - Anything that accumulates value lives in Airtable, never localStorage, keyed on something stable across records.
 - Never set a unit to Void without the six-question gate in the airtable-tenancy-ender skill. Occupancy lives in both the `Tenancies` and `Tenancies copy` links. A payment belongs to the tenancy in its own `Tenancy` link, not the tenancy record that displays it.

@@ -690,17 +690,33 @@ def extract_pdf_text(raw, max_pages=5):
         return "", "pdf read failed: %s" % exc
 
 
-def fetch_attachment_text(message, account, budget):
+def fetch_attachment_text(message, account, budget, cache=None, dup_key=None):
     """Extracted text of the message's document attachments, within budget.
 
     Returns (list of {filename, chars, text, error}, budget_hit: bool). Only
     PDFs are read: a .jpeg of a gas certificate carries no machine-readable
-    amount, and downloading it would spend the run's budget for nothing."""
+    amount, and downloading it would spend the run's budget for nothing.
+
+    ONE INVOICE IS ONE READ (3 Nov 2026, finding 20261103-queue-fixer-1174).
+    The scan loops per ACCOUNT and reads attachments before the duplicateKey
+    grouping, so a PDF copied to both mailboxes was downloaded and extracted
+    twice: two worker calls, two pacing sleeps, and two of the run's limited
+    attachment budget for one bill. `cache` carries the extracted text across
+    the per-account loop, keyed on (duplicateKey, filename, size) — the three
+    things that make it the same file on the same matter, never the message id,
+    which differs per copy. A reused copy spends no budget and is marked
+    `reused` so the report can say what was read once."""
     out, budget_hit = [], False
     for att in (message.get("attachments") or []):
         name = (att.get("filename") or "")
         if not name.lower().endswith(".pdf"):
             continue
+        key = None
+        if cache is not None and dup_key:
+            key = (dup_key, name.lower(), att.get("size", 0))
+            if key in cache:
+                out.append(dict(cache[key], reused=True))
+                continue
         if att.get("size", 0) > MAX_ATTACHMENT_BYTES:
             out.append({"filename": name, "chars": 0, "text": "",
                         "error": "skipped: %d bytes is too large to be an invoice"
@@ -720,8 +736,13 @@ def fetch_attachment_text(message, account, budget):
         data = got.get("data") or ""
         raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
         text, error = extract_pdf_text(raw)
-        out.append({"filename": name, "chars": len(text), "text": text[:6000],
-                    "error": error})
+        entry = {"filename": name, "chars": len(text), "text": text[:6000],
+                 "error": error}
+        # Only a real read is cached. A skip (too large, budget spent) must not
+        # teach the second copy that this file has no text.
+        if key is not None:
+            cache[key] = dict(entry)
+        out.append(entry)
     return out, budget_hit
 
 
@@ -820,6 +841,9 @@ def cmd_scan(args):
     cards = [c for c in approved_payment_cards() if c.get("card")]
     card_refs = [dict(c["card"], taskId=c["id"], text=c["text"]) for c in cards]
     accounts_out, kept_total, seen_total = [], 0, 0
+    # Lives ACROSS the per-account loop on purpose: the same bill copied to both
+    # mailboxes is one read (finding 20261103-queue-fixer-1174).
+    attachment_cache = {}
 
     for account in ACCOUNTS:
         messages, truncated = list_account(account, query, max_pages)
@@ -842,7 +866,9 @@ def cmd_scan(args):
             if not keep:
                 dropped.append(dict(summary, reason=reason))
                 continue
-            attachments, budget_hit = fetch_attachment_text(msg, account, budget)
+            attachments, budget_hit = fetch_attachment_text(
+                msg, account, budget, cache=attachment_cache,
+                dup_key=summary["duplicateKey"])
             if budget_hit:
                 truncated = True
             amounts = find_amounts(
@@ -899,6 +925,9 @@ def cmd_scan(args):
         "candidates": kept_total,
         "distinctMatters": len(groups),
         "attachmentsRead": _calls["attachments"],
+        "attachmentsReused": sum(
+            1 for a in accounts_out for m in a["messages"]
+            for att in m.get("attachments") or [] if att.get("reused")),
         "duplicateGroups": duplicate_groups,
         "accounts": accounts_out,
     }, indent=2))
@@ -2884,6 +2913,55 @@ def cmd_selftest(_args):
     check("a two-week catch-up gets two weeks of pages", pages_for(15), 26)
     check("one week keeps the old page cap", pages_for(8), MAX_PAGES + 2)
     check("the page cap has a ceiling", pages_for(365), MAX_PAGES * 5)
+
+    # ONE INVOICE IS ONE READ (finding 20261103-queue-fixer-1174). The same PDF
+    # in both mailboxes: the second copy carries the text and costs no call.
+    g = globals()
+    saved_post, saved_pdf, saved_calls = (g["worker_post"], g["extract_pdf_text"],
+                                          dict(_calls))
+    posts = []
+    try:
+        g["worker_post"] = lambda path, payload, account, sleep=None: (
+            posts.append((path, payload["attachmentId"], account)) or
+            {"data": base64.urlsafe_b64encode(b"pdf-bytes").decode()})
+        g["extract_pdf_text"] = lambda raw: ("Amount due 190.86", "")
+        _calls["attachments"] = 0
+        cache = {}
+        msg_a = {"id": "m1", "attachments": [
+            {"filename": "Invoice-01.pdf", "size": 1234, "attachmentId": "a1"}]}
+        msg_b = {"id": "m2", "attachments": [
+            {"filename": "Invoice-01.pdf", "size": 1234, "attachmentId": "a2"}]}
+        out_a, _ = fetch_attachment_text(msg_a, "main", 10, cache=cache, dup_key="k1")
+        out_b, _ = fetch_attachment_text(msg_b, "second", 10, cache=cache, dup_key="k1")
+        check("the first copy is read", (len(posts), out_a[0]["chars"]), (1, 17))
+        check("the second copy costs no worker call", len(posts), 1)
+        check("the second copy still carries the text", out_b[0]["text"],
+              "Amount due 190.86")
+        check("the reused copy says so", out_b[0].get("reused"), True)
+        check("one read, one of the budget", _calls["attachments"], 1)
+        # A DIFFERENT matter with the same file name is a different file.
+        msg_c = {"id": "m3", "attachments": [
+            {"filename": "Invoice-01.pdf", "size": 1234, "attachmentId": "a3"}]}
+        fetch_attachment_text(msg_c, "main", 10, cache=cache, dup_key="k2")
+        check("a different duplicateKey is read on its own", len(posts), 2)
+        # A SKIP IS NEVER CACHED: too large on one copy must not silence the other.
+        _calls["attachments"] = 0
+        cache2, posts[:] = {}, []
+        big = {"id": "m4", "attachments": [
+            {"filename": "Big.pdf", "size": MAX_ATTACHMENT_BYTES + 1,
+             "attachmentId": "a4"}]}
+        out_big, _ = fetch_attachment_text(big, "main", 10, cache=cache2, dup_key="k3")
+        check("a too-large attachment is skipped", bool(out_big[0]["error"]), True)
+        check("a skip is not cached", cache2, {})
+        # No cache passed at all: the old behaviour, two reads.
+        _calls["attachments"], posts[:] = 0, []
+        fetch_attachment_text(msg_a, "main", 10)
+        fetch_attachment_text(msg_b, "second", 10)
+        check("with no cache both copies are read", len(posts), 2)
+    finally:
+        g["worker_post"], g["extract_pdf_text"] = saved_post, saved_pdf
+        _calls.clear()
+        _calls.update(saved_calls)
 
     if failures:
         for line in failures:
