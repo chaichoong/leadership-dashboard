@@ -55,7 +55,8 @@ import { readFileSync, appendFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseMatchi, parseGladstone, matchiUrl, londonDates, londonParts, londonMidnightMs, addDays, MATCHI_HEADERS, UNI_HOST, UNI_ACTIVITY } from '../workers/padel/padel.js';
+import { parseMatchi, parseGladstone, parsePlaytomic, parsePlaytomicCourts, playtomicClubUrl, playtomicAvailabilityUrl, onPlaytomic, venueConfig,
+  matchiUrl, londonDates, londonParts, londonMidnightMs, addDays, MATCHI_HEADERS, UNI_HOST, UNI_ACTIVITY } from '../workers/padel/padel.js';
 
 export const ENDPOINT = 'https://padel.runpreneur.org.uk/api/courts';
 export const KEY_FILE = join(homedir(), '.config/od/padel_robot_key');
@@ -124,6 +125,27 @@ export async function readUni(fetchImpl, dates, nowMs = Date.now()) {
   }
 }
 
+// Playtomic (PDL from 1 Dec 2026): the club page once a run for its courts, then one call a day.
+// Never throws: a failure is a reason, as for Matchi.
+const failReason = (e) => (e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'timed out' : 'could not reach the site');
+export async function readPlaytomicCourts(fetchImpl, slug) {
+  try {
+    const res = await fetchImpl(playtomicClubUrl(slug), { headers: { ...MATCHI_HEADERS }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
+    if (res.status !== 200) return { error: `HTTP ${res.status}` };
+    const courts = parsePlaytomicCourts(await res.text());
+    return courts ? { courts } : { error: 'the club page could not be read' };
+  } catch (e) { return { error: failReason(e) }; }
+}
+export async function readPlaytomicDay(fetchImpl, tenantId, date, courts) {
+  try {
+    const res = await fetchImpl(playtomicAvailabilityUrl(tenantId, date), { headers: { ...MATCHI_HEADERS, Accept: 'application/json' }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
+    if (res.status !== 200) return { status: 'error', reason: `HTTP ${res.status}` };
+    let json;
+    try { json = JSON.parse(await res.text()); } catch { return { status: 'error', reason: 'unexpected shape' }; }
+    return parsePlaytomic(json, courts, date);
+  } catch (e) { return { status: 'error', reason: failReason(e) }; }
+}
+
 // What the Worker stores: no court names, just counts and the shortest and longest booking.
 export function toPayloadDay(day) {
   if (day.status !== 'ok') return day.status === 'closed' ? { status: 'closed' } : { status: 'error', reason: day.reason || 'unknown' };
@@ -135,20 +157,32 @@ export function toPayloadDay(day) {
 // Read the 28 Matchi pages (2 venues x 14 days) one after another, then the University's feed.
 export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), nowMs }) {
   const dates = londonDates(nowMs);
+  const cfg = venueConfig();
   const raw = {};
   let first = true;
+  const courtsBySlug = {};                     // a Playtomic club's courts, read once a run
+  const courtsOf = async (slug) => {
+    if (courtsBySlug[slug]) return courtsBySlug[slug];
+    let c = await readPlaytomicCourts(fetchImpl, slug);
+    if (c.error && isRetryable(c.error)) { await sleep(RETRY_MS); c = await readPlaytomicCourts(fetchImpl, slug); }
+    return (courtsBySlug[slug] = c);
+  };
   for (const v of MATCHI) {
     raw[v.code] = {};
     for (const date of dates) {
       if (!first) await sleep(GAP_MS);
       first = false;
-      let day = await readDay(fetchImpl, v.id, date);
+      const read = onPlaytomic(cfg, v.code, date)
+        ? async () => { const c = await courtsOf(cfg[v.code].playtomicSlug); return c.error ? { status: 'error', reason: c.error, courtsRead: true } : readPlaytomicDay(fetchImpl, cfg[v.code].playtomicId, date, c.courts); }
+        : () => readDay(fetchImpl, v.id, date);
+      let day = await read();
       // A page lost to a timeout, a 5xx or no connection gets one more try before it counts. A
       // 4xx, a 429, or a page that arrived and could not be parsed does not.
-      if (day.status === 'error' && isRetryable(day.reason)) {
+      if (day.status === 'error' && isRetryable(day.reason) && !day.courtsRead) {   // the court list had its own retry
         await sleep(RETRY_MS);
-        day = await readDay(fetchImpl, v.id, date);
+        day = await read();
       }
+      if (day.courtsRead) day = { status: 'error', reason: day.reason };
       raw[v.code][date] = day;
     }
   }

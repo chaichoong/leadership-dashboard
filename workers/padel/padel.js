@@ -113,7 +113,10 @@ const RELAY_URL = 'https://apple-inbound/slack-relay';
 export function venueConfig(env = {}) {
   return {
     si: { code: 'si', label: env.SI_LABEL || 'St Ives Golf Club', short: env.SI_SHORT || 'St Ives', matchiId: env.SI_MATCHI_ID || '2619' },
-    pdl: { code: 'pdl', label: env.PDL_LABEL || 'PDL Padel United Cambridge', short: env.PDL_SHORT || 'Cambridge', matchiId: env.PDL_MATCHI_ID || '3122' },
+    // PDL moves from Matchi to Playtomic for games from 1 Dec 2026 (club email, 3 Nov 2026).
+    pdl: { code: 'pdl', label: env.PDL_LABEL || 'PDL Padel United Cambridge', short: env.PDL_SHORT || 'Cambridge', matchiId: env.PDL_MATCHI_ID || '3122',
+      playtomicFrom: env.PDL_PLAYTOMIC_FROM || '2026-12-01', playtomicId: env.PDL_PLAYTOMIC_ID || '90683b2f-2f6a-4680-a167-cbfa4fd7ea55',
+      playtomicSlug: env.PDL_PLAYTOMIC_SLUG || 'pdl-padel-united-cambridge' },
     pp: { code: 'pp', label: env.PP_LABEL || 'Pulse Padel Huntingdon', short: env.PP_SHORT || 'Huntingdon', clubId: env.PP_CLUB_ID || 'VEqVgpQmiJLiEC1Lm4z3' },
     cu: { code: 'cu', label: env.CU_LABEL || 'University of Cambridge Sports Centre', short: env.CU_SHORT || 'Cambridge Uni' },
   };
@@ -124,10 +127,65 @@ export const matchiUrl = (id, date) => `https://www.matchi.se/book/schedule?faci
 export const UNI_HOST = 'https://cambridgesport.gladstonego.cloud';
 export const UNI_ACTIVITY = 'USCAPADWO02';            // "Padel 55mins Non Member": court hire for anyone
 export const uniBookUrl = (date) => `${UNI_HOST}/book/calendar/${UNI_ACTIVITY}?activityDate=${date}T06:00:00.000Z`;
+// Playtomic (read 5 Nov 2026): the club's page lists its courts; the site's own availability call
+// gives each court's free starts for a day, in UTC, with every booking length on offer.
+export const PLAYTOMIC_HOST = 'https://playtomic.com';
+export const playtomicClubUrl = (slug) => `${PLAYTOMIC_HOST}/clubs/${slug}`;
+export const playtomicAvailabilityUrl = (tenantId, date) => `${PLAYTOMIC_HOST}/api/clubs/availability?tenant_id=${tenantId}&date=${date}&sport_id=PADEL`;
+export const onPlaytomic = (cfg, code, date) => !!(cfg[code] && cfg[code].playtomicFrom && date >= cfg[code].playtomicFrom);
 export function bookUrl(cfg, code, date) {
   if (code === 'pp') return PULSE_PAGE;
   if (code === 'cu') return uniBookUrl(date);
+  if (onPlaytomic(cfg, code, date)) return playtomicClubUrl(cfg[code].playtomicSlug);
   return matchiUrl(cfg[code].matchiId, date);
+}
+
+// The club's courts from its Playtomic page, where the court list sits in the page's data with its
+// quotes escaped: [{ id, name, double }], or null when the page has no readable list. Only courts
+// marked "Double" are ever counted (a singles court is no use to four).
+export function parsePlaytomicCourts(html) {
+  const key = '\\"resources\\":[';
+  const at = typeof html === 'string' ? html.indexOf(key) : -1;
+  if (at < 0) return null;
+  const s = html.slice(at + key.length - 1, at + 40000).replace(/\\"/g, '"');
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '[') depth++;
+    else if (s[i] === ']' && --depth === 0) {
+      try {
+        return JSON.parse(s.slice(0, i + 1)).map((r) => ({ id: String(r.resourceId), name: String(r.name || ''), double: (r.features || []).includes('Double') }));
+      } catch { return null; }
+    }
+  }
+  return null;
+}
+// One London day from Playtomic's availability reply, [{ resource_id, start_date, slots: [{
+// start_time: "HH:MM:SS" UTC, duration: minutes }] }], counted as Matchi is: per start, the doubles
+// courts free and the shortest and longest booking (capped at RUN_CAP_MIN).
+export function parsePlaytomic(reply, courts, date) {
+  if (!Array.isArray(reply)) return { status: 'error', reason: 'unexpected shape' };
+  if (!Array.isArray(courts) || !courts.length) return { status: 'error', reason: 'no courts listed on Playtomic' };
+  const doubles = new Set(courts.filter((c) => c.double).map((c) => c.id));
+  const per = new Map();
+  for (const r of reply) {
+    if (!r || !doubles.has(String(r.resource_id))) continue;
+    for (const sl of r.slots || []) {
+      const ms = Date.parse(`${r.start_date}T${sl.start_time}Z`);
+      const dur = Math.min(Number(sl.duration) || 0, RUN_CAP_MIN);
+      if (!Number.isFinite(ms) || dur <= 0) return { status: 'error', reason: 'unexpected shape' };
+      const p = londonParts(ms);
+      if (p.date !== date) continue;
+      const key = `${p.hh}:${p.mm}`;
+      const e = per.get(key) || { ids: new Set(), min: dur, max: dur };
+      e.ids.add(String(r.resource_id));
+      e.min = Math.min(e.min, dur);
+      e.max = Math.max(e.max, dur);
+      per.set(key, e);
+    }
+  }
+  const starts = {};
+  for (const key of [...per.keys()].sort()) { const e = per.get(key); starts[key] = { courts: e.ids.size, min: e.min, max: e.max }; }
+  return { status: 'ok', starts };
 }
 
 // ── London time. Workers run in UTC; every date and hour the group sees is London local. ──
