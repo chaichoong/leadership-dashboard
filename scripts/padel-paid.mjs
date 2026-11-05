@@ -422,15 +422,17 @@ async function textsFollowUp(b, { players, mark, ledger, now, delivery, sendSms 
     const last = ledger.last(b.slot, p.id);
     if (!last || last.ok === false) continue;
     const line = (extra) => ledger.add({ at: new Date(now()).toISOString(), slot: b.slot, person: p.id, ...extra });
-    if (last.ok === true) { sent++; if (/not confirmed/.test(last.via || '')) unsure++; if (/^SMS/.test(last.via || '')) bySms++; continue; }
+    if (last.ok === true) { sent++; if (/not confirmed/.test(last.via || '')) unsure++; if (/^SMS/.test(last.via || '')) bySms++; continue; }   // decided already
     const number = (info.phones || [])[0];
     const d = number && last.sentAt ? await delivery(number, Date.parse(last.sentAt) - 2000) : { known: false, readable: false };
-    if (d.known && d.delivered) { line({ ok: true, via: 'iMessage (delivered)' }); sent++; continue; }
+    // A send Messages never answered may not be in its record at all: a later text to the same person
+    // (another booking) would then pass for it, so that one is never confirmed.
+    if (d.known && d.delivered && !/did not answer/.test(last.via || '')) { line({ ok: true, via: 'iMessage (delivered)' }); sent++; continue; }
     if (!(d.known && d.error) || !last.text || !textHours(now())) { line({ ok: true, via: 'iMessage (not confirmed)' }); sent++; unsure++; continue; }
     line({ state: 'sending', via: 'SMS' });
     const r = await sendSms(number, last.text);
-    line({ ok: r.code === 0, via: 'SMS (the iMessage failed)' });
-    if (r.code === 0) { sent++; bySms++; } else why = why || 'Messages refused the SMS too';
+    line({ ok: r.code === 0, via: 'SMS (the iMessage failed; not confirmed)' });   // Messages only queues it
+    if (r.code === 0) { sent++; bySms++; unsure++; } else why = why || 'Messages refused the SMS too';
   }
   const note = `${sent} of ${due} sent${bySms ? `, ${bySms} by SMS` : ''}${unsure ? ` (${unsure} not confirmed)` : ''}${why ? `: ${why}` : ''}`;
   if (sent === due) { await mark(b, 'texts', 'done', note); return null; }

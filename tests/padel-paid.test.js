@@ -345,7 +345,7 @@ describe('a run', () => {
     expect(await r.run()).toBe(0);                                                   // the next run
     expect(sms.map((x) => x.n)).toEqual(['+447700900003']);                          // a recorded failure only
     expect(sms[0].t).toBe(r.sent[1].text);                                            // the same words, once
-    expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'done', note: '3 of 3 sent, 1 by SMS (1 not confirmed)' });
+    expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'done', note: '3 of 3 sent, 1 by SMS (2 not confirmed)' });   // an SMS is only queued
     expect(r.sent).toHaveLength(3);                                                   // no second iMessage
     await r.run();
     expect(sms).toHaveLength(1);                                                      // finished: nothing more
@@ -401,12 +401,22 @@ describe('a run', () => {
     await r.run();
     expect(sms).toEqual(['+447700900003']);                                           // never a second SMS
   });
+  it('a send Messages never answered is not confirmed by a later delivered text to the same person', async () => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
+    const w = worker([b], { clock: () => new Date(NOON).toISOString() });
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), {
+      textOk: () => ({ ok: null, via: 'iMessage (Messages did not answer)' }),
+      opts: { delivery: async () => ({ known: true, readable: true, error: 0, sent: true, delivered: true }), sendSms: async () => ({ code: 0 }) } });
+    await r.run();
+    await r.run();
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (3 not confirmed)' });
+  });
   it('the 21:30 cut-off is checked before each SMS', async () => {
     const fail = { known: true, readable: true, error: 22 };
     const { sms, w } = await followUp({ record: { '+447700900002': fail, '+447700900003': fail },
       clocks: (sent) => (sent ? Date.parse('2026-11-01T21:31:00Z') : Date.parse('2026-11-01T20:50:00Z')) });
     expect(sms).toEqual(['+447700900002']);
-    expect(w.posts.at(-1).note).toBe('3 of 3 sent, 1 by SMS (2 not confirmed)');
+    expect(w.posts.at(-1).note).toBe('3 of 3 sent, 1 by SMS (3 not confirmed)');
   });
 
   it('the follow-up waits outside the text hours, and a stale open step is failed, not followed up', async () => {
