@@ -185,6 +185,7 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
           return readPlaytomicDay(fetchImpl, cfg[v.code].playtomicId, date, c.courts);
         }
         : () => readDay(fetchImpl, v.id, date);
+      const playtomic = onPlaytomic(cfg, v.code, date);
       let day = await read();
       // A page lost to a timeout, a 5xx or no connection gets one more try before it counts. A
       // 4xx, a 429, or a page that arrived and could not be parsed does not.
@@ -193,7 +194,7 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
         day = await read();
       }
       if (day.courtsRead) day = { status: 'error', reason: day.reason };
-      raw[v.code][date] = day;
+      raw[v.code][date] = playtomic ? { ...day, playtomic: true } : day;   // its own "every day errored" check
     }
   }
   // The University: the same one more try after 2 s when the whole read was lost to the network.
@@ -229,23 +230,25 @@ export function countStatuses(raw) {
 const reasonsOf = (days) => [...new Set(days.map((d) => d.reason))].slice(0, 3).join(', ');
 export function readProblems(raw, dates) {
   const problems = [];
-  const all = MATCHI.flatMap((v) => Object.values(raw[v.code] || {}));
+  const all = MATCHI.flatMap((v) => Object.values(raw[v.code] || {})).filter((d) => !d.playtomic);
   const everyPage = all.length > 0 && all.every((d) => d.status === 'error');
   if (everyPage) problems.push(`every Matchi page errored (${reasonsOf(all)})`);
   for (const v of VENUES) {
     const open = [];
+    const openPlaytomic = [];                    // PDL from 1 Dec: a source of its own, checked on its own
     dates.forEach((date, i) => {
       const d = raw[v.code]?.[date];
       if (!d) return;
       if (d.status === 'error' && !isSoftReason(d.reason)) problems.push(`${v.name} ${date} could not be read (${d.reason})`);
       if (!mustBeOpen(v.code, i)) return;
-      open.push(d);
+      (d.playtomic ? openPlaytomic : open).push(d);
       if (d.status === 'closed' && !d.notLive) problems.push(`${v.name} ${date} has no court cells`);
     });
     // A good University reply with today and tomorrow missing is a closure (no slots those days),
     // not a broken feed: it reads "couldn't check" and the run is not failed for it.
     const closure = !v.id && open.every((d) => d.reason === 'day not in the reply') && Object.values(raw[v.code] || {}).some((d) => d.status !== 'error');
     if ((!everyPage || !v.id) && !closure && open.length && open.every((d) => d.status === 'error')) problems.push(`${v.name} errored on every day that should be open (${reasonsOf(open)})`);
+    if (openPlaytomic.length && openPlaytomic.every((d) => d.status === 'error')) problems.push(`${v.name} on Playtomic errored on every day that should be open (${reasonsOf(openPlaytomic)})`);
   }
   return problems;
 }

@@ -122,7 +122,7 @@ describe('the reader across the switch', () => {
     expect(f.calls.matchi.filter((c) => c.startsWith('2619'))).toHaveLength(14);
     expect(f.calls.days).toEqual(after);
     expect(f.calls.club).toBe(1);
-    expect(raw.pdl['2026-12-01']).toEqual({ status: 'ok', starts: { '18:00': { courts: 1, min: 90, max: 90 } } });
+    expect(raw.pdl['2026-12-01']).toEqual({ status: 'ok', starts: { '18:00': { courts: 1, min: 90, max: 90 } }, playtomic: true });
     expect(raw.pdl[before[0]].status).toBe('ok');                       // a Matchi day, as before
   });
 
@@ -132,26 +132,38 @@ describe('the reader across the switch', () => {
     const { raw } = await readAll({ fetchImpl: f.fetchImpl, sleep, nowMs: NOW });
     expect(f.calls.club).toBe(2);
     expect(f.calls.days).toEqual([]);
-    expect(raw.pdl['2026-12-07']).toEqual({ status: 'error', reason: 'HTTP 503' });
+    expect(raw.pdl['2026-12-07']).toEqual({ status: 'error', reason: 'HTTP 503', playtomic: true });
     expect(sleeps.filter((ms) => ms === RETRY_MS)).toHaveLength(1);    // the one retry of the club page
   });
 
   it('a club not live on Playtomic yet: its days are "not open yet" until the switch, and the run passes; from the switch it is an error that fails the run', async () => {
     const empty = () => new Response('x \\"resources\\":[] y', { status: 200 });
     const before = await readAll({ fetchImpl: fake({ club: empty }).fetchImpl, sleep, nowMs: NOW });
-    expect(before.raw.pdl['2026-12-01']).toEqual({ status: 'closed', notLive: true });
+    expect(before.raw.pdl['2026-12-01']).toEqual({ status: 'closed', notLive: true, playtomic: true });
     expect(readProblems(before.raw, before.dates).filter((p) => p.startsWith('PDL'))).toEqual([]);   // (this fake University feed is empty)
     const LATER = Date.parse('2026-12-02T09:00:00Z');
     const after = await readAll({ fetchImpl: fake({ club: empty }).fetchImpl, sleep, nowMs: LATER });
-    expect(after.raw.pdl['2026-12-02']).toEqual({ status: 'error', reason: 'no courts listed on Playtomic' });
+    expect(after.raw.pdl['2026-12-02']).toEqual({ status: 'error', reason: 'no courts listed on Playtomic', playtomic: true });
     expect(readProblems(after.raw, after.dates).join(' ')).toMatch(/PDL 2026-12-02 could not be read \(no courts listed on Playtomic\)/);
   });
 
   it('Playtomic refusing us (a 4xx) fails the run at once, even in November when MATCHi still reads', async () => {
     const f = fake({ day: () => new Response('', { status: 403 }) });
     const { raw, dates } = await readAll({ fetchImpl: f.fetchImpl, sleep, nowMs: NOW });
-    expect(raw.pdl['2026-12-01']).toEqual({ status: 'error', reason: 'Playtomic refused (HTTP 403)' });
+    expect(raw.pdl['2026-12-01']).toEqual({ status: 'error', reason: 'Playtomic refused (HTTP 403)', playtomic: true });
     expect(readProblems(raw, dates).join(' ')).toMatch(/PDL 2026-12-01 could not be read \(Playtomic refused \(HTTP 403\)\)/);
+  });
+
+  it('each source is checked on its own: Cambridge on Matchi all lost, or on Playtomic all lost, fails the run (review of PR 888)', async () => {
+    const matchiDown = fake();
+    const real = matchiDown.fetchImpl;
+    const fetchImpl = async (url) => (new URL(url).searchParams.get('facilityId') === '3122' ? new Response('', { status: 429 }) : real(url));
+    const a = await readAll({ fetchImpl, sleep, nowMs: NOW });
+    expect(readProblems(a.raw, a.dates).join(' ')).toMatch(/PDL errored on every day that should be open \(HTTP 429/);
+    const b = await readAll({ fetchImpl: fake({ day: () => new Response('', { status: 503 }) }).fetchImpl, sleep, nowMs: NOW });
+    expect(readProblems(b.raw, b.dates).join(' ')).toMatch(/PDL on Playtomic errored on every day that should be open \(HTTP 503/);
+    const c = await readAll({ fetchImpl: fake().fetchImpl, sleep, nowMs: NOW });
+    expect(readProblems(c.raw, c.dates).filter((p) => p.startsWith('PDL'))).toEqual([]);
   });
 
   it('a Playtomic day lost to a 5xx is read once more; a 4xx is not', async () => {
@@ -160,8 +172,8 @@ describe('the reader across the switch', () => {
     const { raw } = await readAll({ fetchImpl: f.fetchImpl, sleep, nowMs: NOW });
     expect(seen['2026-12-03']).toBe(2);
     expect(seen['2026-12-04']).toBe(1);
-    expect(raw.pdl['2026-12-03']).toEqual({ status: 'error', reason: 'HTTP 502' });
-    expect(raw.pdl['2026-12-05']).toEqual({ status: 'ok', starts: {} });
+    expect(raw.pdl['2026-12-03']).toEqual({ status: 'error', reason: 'HTTP 502', playtomic: true });
+    expect(raw.pdl['2026-12-05']).toEqual({ status: 'ok', starts: {}, playtomic: true });
   });
 });
 
