@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { readAll, RETRY_MS } from '../scripts/padel-courts.mjs';
+import { readAll, readProblems, RETRY_MS } from '../scripts/padel-courts.mjs';
 import { parsePlaytomic, parsePlaytomicCourts, bookUrl, venueConfig, londonDates } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,6 +24,12 @@ describe('the club page: its courts, doubles marked', () => {
     expect(COURTS).toEqual([
       { id: C(1), name: 'Court 1', double: true }, { id: C(2), name: 'Court 2', double: true },
       { id: C(3), name: 'Court 3 [New]', double: true }, { id: C(4), name: 'Singles', double: false }]);
+  });
+  it('names with quotes and brackets are names, not structure (the page escapes them twice)', () => {
+    const esc = (t) => t.replace(/\\/g, '\\\\').replace(/"/g, '\\"');           // how the page's data string escapes JSON
+    const list = [{ resourceId: 'x1', name: 'Court "B" ] odd [', features: ['Double'] }, { resourceId: 'x2', name: 'Plain', features: ['Single'] }];
+    const page = `<script>self.__next_f.push([1,"${esc(JSON.stringify({ resources: list, after: [1, 2] }))}"])</script>`;
+    expect(parsePlaytomicCourts(page)).toEqual([{ id: 'x1', name: 'Court "B" ] odd [', double: true }, { id: 'x2', name: 'Plain', double: false }]);
   });
   it('a page with no court list is unreadable; a club not live yet has an empty list', () => {
     expect(parsePlaytomicCourts('<html>Not found</html>')).toBeNull();
@@ -50,6 +56,21 @@ describe('a day from the availability call', () => {
   it('lengths over three hours are shown as three hours; nothing free is a day with no starts', () => {
     expect(parsePlaytomic([{ resource_id: C(1), start_date: '2026-12-02', slots: [slot('10:00:00', 240)] }], COURTS, '2026-12-02').starts['10:00'].max).toBe(180);
     expect(parsePlaytomic([], COURTS, '2026-12-02')).toEqual({ status: 'ok', starts: {} });
+  });
+  it('a court whose day crosses midnight UTC comes back as two entries: each start counted once', () => {
+    const reply = [
+      { resource_id: C(1), start_date: '2026-12-01', slots: [slot('20:00:00', 60)] },
+      { resource_id: C(1), start_date: '2026-12-01', slots: [slot('20:00:00', 90)] },
+      { resource_id: C(1), start_date: '2026-12-02', slots: [slot('00:30:00', 60)] }];
+    expect(parsePlaytomic(reply, COURTS, '2026-12-01')).toEqual({ status: 'ok', starts: { '20:00': { courts: 1, min: 60, max: 90 } } });
+  });
+  it('never "no court free" by mistake: no doubles listed, or a reply about courts the page does not list, is an error (review of PR 888)', () => {
+    const singlesOnly = COURTS.map((c) => ({ ...c, double: false }));
+    expect(parsePlaytomic([], singlesOnly, '2026-12-01')).toEqual({ status: 'error', reason: 'no doubles courts listed on Playtomic' });
+    const stranger = [{ resource_id: 'not-on-the-page', start_date: '2026-12-01', slots: [slot('18:00:00', 60)] }];
+    expect(parsePlaytomic(stranger, COURTS, '2026-12-01')).toEqual({ status: 'error', reason: 'the reply names courts the club page does not list' });
+    const singlesBusy = [{ resource_id: C(4), start_date: '2026-12-01', slots: [slot('18:00:00', 60)] }];
+    expect(parsePlaytomic(singlesBusy, COURTS, '2026-12-01')).toEqual({ status: 'ok', starts: {} });   // only the singles court free: no doubles free
   });
   it('a reply it cannot read, or a club with no courts listed, is an error with its reason', () => {
     expect(parsePlaytomic({ error: 'x' }, COURTS, '2026-12-01')).toEqual({ status: 'error', reason: 'unexpected shape' });
@@ -115,6 +136,24 @@ describe('the reader across the switch', () => {
     expect(sleeps.filter((ms) => ms === RETRY_MS)).toHaveLength(1);    // the one retry of the club page
   });
 
+  it('a club not live on Playtomic yet: its days are "not open yet" until the switch, and the run passes; from the switch it is an error that fails the run', async () => {
+    const empty = () => new Response('x \\"resources\\":[] y', { status: 200 });
+    const before = await readAll({ fetchImpl: fake({ club: empty }).fetchImpl, sleep, nowMs: NOW });
+    expect(before.raw.pdl['2026-12-01']).toEqual({ status: 'closed', notLive: true });
+    expect(readProblems(before.raw, before.dates).filter((p) => p.startsWith('PDL'))).toEqual([]);   // (this fake University feed is empty)
+    const LATER = Date.parse('2026-12-02T09:00:00Z');
+    const after = await readAll({ fetchImpl: fake({ club: empty }).fetchImpl, sleep, nowMs: LATER });
+    expect(after.raw.pdl['2026-12-02']).toEqual({ status: 'error', reason: 'no courts listed on Playtomic' });
+    expect(readProblems(after.raw, after.dates).join(' ')).toMatch(/PDL 2026-12-02 could not be read \(no courts listed on Playtomic\)/);
+  });
+
+  it('Playtomic refusing us (a 4xx) fails the run at once, even in November when MATCHi still reads', async () => {
+    const f = fake({ day: () => new Response('', { status: 403 }) });
+    const { raw, dates } = await readAll({ fetchImpl: f.fetchImpl, sleep, nowMs: NOW });
+    expect(raw.pdl['2026-12-01']).toEqual({ status: 'error', reason: 'Playtomic refused (HTTP 403)' });
+    expect(readProblems(raw, dates).join(' ')).toMatch(/PDL 2026-12-01 could not be read \(Playtomic refused \(HTTP 403\)\)/);
+  });
+
   it('a Playtomic day lost to a 5xx is read once more; a 4xx is not', async () => {
     const seen = {};
     const f = fake({ day: (date) => { seen[date] = (seen[date] || 0) + 1; return date === '2026-12-03' ? new Response('', { status: 502 }) : date === '2026-12-04' ? new Response('', { status: 404 }) : new Response('[]', { status: 200 }); } });
@@ -123,5 +162,14 @@ describe('the reader across the switch', () => {
     expect(seen['2026-12-04']).toBe(1);
     expect(raw.pdl['2026-12-03']).toEqual({ status: 'error', reason: 'HTTP 502' });
     expect(raw.pdl['2026-12-05']).toEqual({ status: 'ok', starts: {} });
+  });
+});
+
+describe('the reader and the Worker agree on the club', () => {
+  it('the defaults the Mac reader uses are the settings in wrangler.toml', () => {
+    const toml = readFileSync(resolve(ROOT, 'workers/padel/wrangler.toml'), 'utf8');
+    const v = (k) => (new RegExp(`^${k}\\s*=\\s*"([^"]+)"`, 'm').exec(toml) || [])[1];
+    const pdl = venueConfig().pdl;
+    expect([v('PDL_PLAYTOMIC_FROM'), v('PDL_PLAYTOMIC_ID'), v('PDL_PLAYTOMIC_SLUG')]).toEqual([pdl.playtomicFrom, pdl.playtomicId, pdl.playtomicSlug]);
   });
 });

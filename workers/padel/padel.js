@@ -147,10 +147,17 @@ export function parsePlaytomicCourts(html) {
   const key = '\\"resources\\":[';
   const at = typeof html === 'string' ? html.indexOf(key) : -1;
   if (at < 0) return null;
-  const s = html.slice(at + key.length - 1, at + 40000).replace(/\\"/g, '"');
+  const s = html.slice(at + key.length - 1, at + 40000).replace(/\\(["\\])/g, '$1');   // the page's string escapes, one level
   let depth = 0;
+  let inString = false;
   for (let i = 0; i < s.length; i++) {
-    if (s[i] === '[') depth++;
+    if (inString) {                             // a "[" or "]" in a court's name is not structure
+      if (s[i] === '\\') i++;
+      else if (s[i] === '"') inString = false;
+      continue;
+    }
+    if (s[i] === '"') inString = true;
+    else if (s[i] === '[') depth++;
     else if (s[i] === ']' && --depth === 0) {
       try {
         return JSON.parse(s.slice(0, i + 1)).map((r) => ({ id: String(r.resourceId), name: String(r.name || ''), double: (r.features || []).includes('Double') }));
@@ -166,6 +173,11 @@ export function parsePlaytomic(reply, courts, date) {
   if (!Array.isArray(reply)) return { status: 'error', reason: 'unexpected shape' };
   if (!Array.isArray(courts) || !courts.length) return { status: 'error', reason: 'no courts listed on Playtomic' };
   const doubles = new Set(courts.filter((c) => c.double).map((c) => c.id));
+  // Never "no court free" by mistake: a club with no doubles listed, or a reply about courts the club
+  // page does not list, is a page that changed, not a full day.
+  if (!doubles.size) return { status: 'error', reason: 'no doubles courts listed on Playtomic' };
+  const listed = new Set(courts.map((c) => c.id));
+  if (reply.some((r) => r && r.resource_id) && !reply.some((r) => r && listed.has(String(r.resource_id)))) return { status: 'error', reason: 'the reply names courts the club page does not list' };
   const per = new Map();
   for (const r of reply) {
     if (!r || !doubles.has(String(r.resource_id))) continue;

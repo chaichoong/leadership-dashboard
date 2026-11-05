@@ -126,12 +126,15 @@ export async function readUni(fetchImpl, dates, nowMs = Date.now()) {
 }
 
 // Playtomic (PDL from 1 Dec 2026): the club page once a run for its courts, then one call a day.
-// Never throws: a failure is a reason, as for Matchi.
+// Never throws: a failure is a reason, as for Matchi. A 5xx or no connection is soft and retried; a
+// 4xx means Playtomic refused us or moved, which fails the run at once, before December arrives.
+// The defaults these read (venueConfig() with no settings) match wrangler.toml: a test holds them.
 const failReason = (e) => (e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'timed out' : 'could not reach the site');
+const httpReason = (status) => (status >= 400 && status < 500 ? `Playtomic refused (HTTP ${status})` : `HTTP ${status}`);
 export async function readPlaytomicCourts(fetchImpl, slug) {
   try {
     const res = await fetchImpl(playtomicClubUrl(slug), { headers: { ...MATCHI_HEADERS }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
-    if (res.status !== 200) return { error: `HTTP ${res.status}` };
+    if (res.status !== 200) return { error: httpReason(res.status) };
     const courts = parsePlaytomicCourts(await res.text());
     return courts ? { courts } : { error: 'the club page could not be read' };
   } catch (e) { return { error: failReason(e) }; }
@@ -139,7 +142,7 @@ export async function readPlaytomicCourts(fetchImpl, slug) {
 export async function readPlaytomicDay(fetchImpl, tenantId, date, courts) {
   try {
     const res = await fetchImpl(playtomicAvailabilityUrl(tenantId, date), { headers: { ...MATCHI_HEADERS, Accept: 'application/json' }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
-    if (res.status !== 200) return { status: 'error', reason: `HTTP ${res.status}` };
+    if (res.status !== 200) return { status: 'error', reason: httpReason(res.status) };
     let json;
     try { json = JSON.parse(await res.text()); } catch { return { status: 'error', reason: 'unexpected shape' }; }
     return parsePlaytomic(json, courts, date);
@@ -173,7 +176,14 @@ export async function readAll({ fetchImpl = globalThis.fetch, sleep = (ms) => ne
       if (!first) await sleep(GAP_MS);
       first = false;
       const read = onPlaytomic(cfg, v.code, date)
-        ? async () => { const c = await courtsOf(cfg[v.code].playtomicSlug); return c.error ? { status: 'error', reason: c.error, courtsRead: true } : readPlaytomicDay(fetchImpl, cfg[v.code].playtomicId, date, c.courts); }
+        ? async () => {
+          const c = await courtsOf(cfg[v.code].playtomicSlug);
+          if (c.error) return { status: 'error', reason: c.error, courtsRead: true };
+          // The club lists no courts until it is live there (10 Nov 2026): its days are "not open
+          // yet" until the switch date, and an error from then on.
+          if (!c.courts.length && dates[0] < cfg[v.code].playtomicFrom) return { status: 'closed', notLive: true };
+          return readPlaytomicDay(fetchImpl, cfg[v.code].playtomicId, date, c.courts);
+        }
         : () => readDay(fetchImpl, v.id, date);
       let day = await read();
       // A page lost to a timeout, a 5xx or no connection gets one more try before it counts. A
@@ -230,7 +240,7 @@ export function readProblems(raw, dates) {
       if (d.status === 'error' && !isSoftReason(d.reason)) problems.push(`${v.name} ${date} could not be read (${d.reason})`);
       if (!mustBeOpen(v.code, i)) return;
       open.push(d);
-      if (d.status === 'closed') problems.push(`${v.name} ${date} has no court cells`);
+      if (d.status === 'closed' && !d.notLive) problems.push(`${v.name} ${date} has no court cells`);
     });
     // A good University reply with today and tomorrow missing is a closure (no slots those days),
     // not a broken feed: it reads "couldn't check" and the run is not failed for it.
