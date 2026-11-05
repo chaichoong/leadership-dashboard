@@ -4634,6 +4634,47 @@ def cmd_search(q, limit, account=None):
                       "messages": rows}, indent=1))
 
 
+def cmd_read(msg_id, account=None):
+    """ONE message, read in FULL (5 Nov 2026, finding 20261102-agent-dispatch-1171).
+
+    `scan` and `search` go through /gmail/list, which cuts the body at 4,000
+    characters. That is right for a scan and wrong for an agent that has to
+    ANSWER a long email: it could read only the opening and nothing told it the
+    rest existed. This calls the worker's /gmail/get, which returns the whole
+    plain text up to 60,000 characters and says how long it really was, so a cut
+    is reported rather than silent."""
+    if not msg_id or not msg_id.strip():
+        fail("read needs --id <gmail message id>")
+    if account and account not in SEARCH_ACCOUNTS:
+        fail("read --account must be one of: " + ", ".join(sorted(SEARCH_ACCOUNTS)))
+    payload = {"id": msg_id.strip()}
+    if account:
+        payload["account"] = account
+    got = worker_post("/gmail/get", payload)
+    h = got.get("headers") or {}
+    out = {
+        "id": got.get("id"),
+        "threadId": got.get("threadId"),
+        "from": h.get("from"),
+        "to": h.get("to"),
+        "cc": h.get("cc"),
+        "subject": h.get("subject"),
+        "date": h.get("date"),
+        "labelIds": got.get("labelIds") or [],
+        "bodyChars": got.get("bodyChars"),
+        "bodyTruncated": bool(got.get("bodyTruncated")),
+        "body": got.get("body") or "",
+        "links": got.get("links") or [],
+        "attachments": [{"filename": a.get("filename"), "mimeType": a.get("mimeType"),
+                         "size": a.get("size")}
+                        for a in (got.get("attachments") or [])],
+    }
+    if out["bodyTruncated"]:
+        out["note"] = ("the body is longer than 60,000 characters and was cut here; "
+                       "%d characters in all" % (out["bodyChars"] or 0))
+    print(json.dumps(out, indent=1))
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # attachments (Kevin, 25 Sep 2026)
 # ══════════════════════════════════════════════════════════════════════════
@@ -4807,6 +4848,8 @@ def main(argv):
         return cmd_matters()
     elif cmd == "search":
         cmd_search(opt("--q"), int(opt("--limit", "20")), opt("--account"))
+    elif cmd == "read":
+        cmd_read(opt("--id"), opt("--account"))
     elif cmd == "attachments":
         cmd_attachments(opt("--q"), opt("--id"), opt("--account"), opt("--out"))
     elif cmd == "health":

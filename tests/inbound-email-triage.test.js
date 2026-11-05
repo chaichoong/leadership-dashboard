@@ -103,7 +103,10 @@ describe('triage stays triage-only', () => {
         const endpoints = [...script.matchAll(/worker_post\("([^"]+)"/g)].map(m => m[1]);
         expect(endpoints.length).toBeGreaterThan(0);
         // /gmail/attachment is read-only (25 Sep 2026: agents read email attachments).
-        const allowed = new Set(['/gmail/labels', '/gmail/list', '/gmail/modify', '/gmail/attachment']);
+        // /gmail/get is read-only too (5 Nov 2026, finding 20261102-agent-dispatch-1171:
+        // one message, full body, because /gmail/list cuts it at 4,000 characters).
+        const allowed = new Set(['/gmail/labels', '/gmail/list', '/gmail/modify',
+                                 '/gmail/attachment', '/gmail/get']);
         for (const e of endpoints) expect(allowed.has(e), `unexpected worker endpoint ${e}`).toBe(true);
         expect(script).toContain('gmail_triage_key');
         expect(script).not.toContain('gmail_send_key');
