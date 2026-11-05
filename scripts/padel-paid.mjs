@@ -101,6 +101,8 @@ export function sameBooking(expense, b) {
   const th = '(st|nd|rd|th)?';
   return new RegExp(`\\b0?${day}${th}(\\s+of)?\\s*${mon}\\b|\\b${mon}\\.?\\s*0?${day}${th}\\b`, 'i').test(d);
 }
+// "(£4.94/person)" under the amount, never "(£0.00/person)": the form has taken the amount.
+export const PER_PERSON_SHOWN = 'text=/\\(£(?!0\\.00\\/)[\\d,]+\\.\\d\\d\\/person\\)/';
 // The Splitwise form, as agent-browser plan steps. Everyone in the group who is not playing is
 // unticked under "equally", by the Splitwise id on his or her row; the players stay ticked.
 export function buildPlan(b, groupId, memberIds, playerIds) {
@@ -113,12 +115,17 @@ export function buildPlan(b, groupId, memberIds, playerIds) {
       { do: 'wait', for: 'text=Add an expense' },
       { do: 'click', selector: 'text=Add an expense' },
       { do: 'wait', for: 'input.description' },
+      // Splitwise counts the amount only from keystrokes: a plain fill showed £34.60 but
+      // "£0.00/person" (5 Nov 2026, 06:00: Save refused, nothing saved). So it settles, the amount
+      // is typed key by key...
+      { do: 'wait', ms: 1500 },
       { do: 'fill', selector: 'input.description', value: desc },
-      { do: 'fill', selector: "input[placeholder='0.00']", value: money(b.pricePence) },
+      { do: 'fill', selector: "input[placeholder='0.00']", value: money(b.pricePence), typed: true },
       { do: 'click', selector: 'text=equally' },
       { do: 'wait', for: '.split_method.equal .person' },
       ...out.map((id) => ({ do: 'click', selector: `.split_method.equal .person[data-id='${id}'] input.share` })),
-      { do: 'wait', ms: 1000 },
+      // ...and Save is pressed only once the form shows a real share per person.
+      { do: 'wait', for: PER_PERSON_SHOWN, ms: 15000 },
       { do: 'submit', selector: "button.submit:has-text('Save')" },
     ],
     confirm: { selector: `text="${desc}"`, timeoutMs: 20000 },

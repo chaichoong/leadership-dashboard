@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
-  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL,
+  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, PER_PERSON_SHOWN,
 } from '../scripts/padel-paid.mjs';
 
 const require_ = createRequire(import.meta.url);
@@ -132,7 +132,9 @@ describe('the pure parts', () => {
     expect(plan.steps[plan.steps.length - 1]).toEqual({ do: 'submit', selector: "button.submit:has-text('Save')" });
     expect(plan.steps.filter((s) => s.do === 'submit')).toHaveLength(1);
     expect(plan.confirm.selector).toBe('text="Tue 3 Nov, Testford, 19:30, 90 min"');
-    expect(plan.steps.find((s) => s.selector === "input[placeholder='0.00']").value).toBe('36.00');
+    expect(plan.steps.find((s) => s.selector === "input[placeholder='0.00']")).toEqual({ do: 'fill', selector: "input[placeholder='0.00']", value: '36.00', typed: true });
+    // Save only once the form shows a real share per person (5 Nov 2026: "£0.00/person" at 06:00).
+    expect(plan.steps[plan.steps.length - 2]).toEqual({ do: 'wait', for: PER_PERSON_SHOWN, ms: 15000 });
   });
   it('checks an entry against the booking: total, exactly the players owing, paid by Kevin', () => {
     const d = description(b);
@@ -459,5 +461,49 @@ describe("agent-browser's padel approval (commit --padel-slot)", () => {
     const both = ['--task', 'recAAAAAAAAAAAAAA', '--padel-slot', '2026-11-03|19'];
     expect(runIt({ steps: [{ do: 'submit', selector: 'button' }] }, both)).toMatch(/declares no proof of landing/);
     expect(runIt({ steps: [{ do: 'submit', selector: 'button' }], confirm: { selector: 'text=ok' } }, both)).toMatch(/commit takes --task or --padel-slot, never both/);
+  });
+});
+
+// 5 Nov 2026, 06:00: Splitwise showed £34.60 but "(£0.00/person)": its amount box counts keystrokes,
+// and a plain fill makes none, so Save was refused. A page that behaves the same, driven through the
+// robot's real step runner in a real browser.
+describe.skipIf(!(() => { try { require_('playwright-core'); return true; } catch { return false; } })())('the amount is typed, and Save waits for a real share per person', () => {
+  const { chromium } = require_('playwright-core');
+  const ab = require_('../scripts/agent-browser.js');
+  const dir = tmp();
+  const form = join(dir, 'form.html');
+  writeFileSync(form, `<!doctype html><meta charset="utf-8">
+<input placeholder="0.00"><div class="human_summary">split equally <div class="details">(£0.00/person)</div></div>
+<button class="submit" id="save">Save</button><div id="out"></div>
+<script>
+const box = document.querySelector('input');
+box.addEventListener('keyup', () => {
+  const v = Number(box.value) || 0;
+  document.querySelector('.details').textContent = '(£' + (v / 7).toFixed(2) + '/person)';
+});
+document.getElementById('save').addEventListener('click', () => { document.getElementById('out').textContent = 'Saved'; });
+</script>`);
+  const run = async (typed) => {
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    try {
+      await page.goto('file://' + form);
+      const steps = [
+        { do: 'fill', selector: "input[placeholder='0.00']", value: '34.60', ...(typed ? { typed: true } : {}) },
+        { do: 'wait', for: PER_PERSON_SHOWN, ms: 2000 },
+        { do: 'submit', selector: '#save' },
+      ];
+      const r = await ab.runSteps(page, steps, true, { selector: 'text=Saved', timeoutMs: 3000 }).then(() => 'saved', (e) => String(e.message));
+      return { r, out: await page.textContent('#out'), details: await page.textContent('.details') };
+    } finally { await browser.close(); }
+  };
+  it('typed: the form shows £4.94 a person and Save goes', async () => {
+    expect(await run(true)).toEqual({ r: 'saved', out: 'Saved', details: '(£4.94/person)' });
+  });
+  it('a plain fill: the form stays at £0.00 a person and Save is never pressed', async () => {
+    const r = await run(false);
+    expect(r.details).toBe('(£0.00/person)');
+    expect(r.out).toBe('');
+    expect(r.r).toMatch(/Timeout|waiting for/);
   });
 });
