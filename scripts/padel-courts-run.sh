@@ -34,7 +34,11 @@ fi
 # Splitwise entry and the texts), in the same tick. Each says FAILED on its own; the job fails if either does.
 "$NODE" "$TARGET" run "$@"
 courts=$?
+# Messages' own record of the players' texts, read under bash: the robot (node) is refused chat.db.
+/usr/bin/python3 "$(dirname "$TARGET")/padel-delivery.py"
+delivery=$?
 "$NODE" "$(dirname "$TARGET")/padel-paid.mjs" run
 paid=$?
 [ "$courts" -ne 0 ] && exit "$courts"
+[ "$delivery" -ne 0 ] && exit "$delivery"
 exit "$paid"
