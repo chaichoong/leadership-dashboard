@@ -1298,7 +1298,12 @@ async function runSteps(page, steps, allowSubmit, confirm) {
       case 'fill':
         await assertNotCredential(page, s.selector, s.value);
         // {{today}} for every plan, so a prepare proof fills what the handover will.
-        await page.fill(s.selector, String(fillTokens(s.value)), { timeout: 20000 });
+        // `typed: true` types it key by key: some forms only count keystrokes, and a plain fill
+        // shows the value but never adds it up (Splitwise's amount, 5 Nov 2026: "£0.00/person").
+        if (s.typed) {
+          await page.fill(s.selector, '', { timeout: 20000 });
+          await page.type(s.selector, String(fillTokens(s.value)), { delay: 40, timeout: 20000 });
+        } else await page.fill(s.selector, String(fillTokens(s.value)), { timeout: 20000 });
         break;
       case 'select': {
         // By what the page SHOWS (25 Sep 2026): the agent wrote "Terraced" and

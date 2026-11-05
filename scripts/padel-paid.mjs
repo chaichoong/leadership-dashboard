@@ -28,7 +28,10 @@
 //   * One text per person per booking: a ledger on this Mac (~/knowledge-os/logs/padel-paid/
 //     texts.jsonl) gets a line BEFORE each send, and only a send Messages definitely refused may
 //     go again. SMS follows an iMessage only when Messages shows the iMessage failed.
-//   * Texts go between 07:30 and 21:30 London only, checked before every single text.
+//   * Texts go between 07:30 and 21:30 London only, checked before every single text. The Splitwise
+//     step starts in the same daytime window, because Splitwise notifies the players the moment the
+//     entry is saved (5 Nov 2026: a booking marked paid at 00:40 would otherwise have pinged six phones
+//     at 06:00).
 //   * No phone number, name or key is ever printed or sent to the Worker; notes say counts only.
 //   * The players' phone numbers and Splitwise ids live in ~/Projects/kevin-hq/padel/players.json
 //     (private, never in this repo).
@@ -98,6 +101,13 @@ export function sameBooking(expense, b) {
   const th = '(st|nd|rd|th)?';
   return new RegExp(`\\b0?${day}${th}(\\s+of)?\\s*${mon}\\b|\\b${mon}\\.?\\s*0?${day}${th}\\b`, 'i').test(d);
 }
+// "(£4.94/person)" under the amount: the form has taken THIS amount for THESE players (a dropped
+// keystroke, 3.60 for 34.60, shows a different share). Splitwise's rounding is not documented, so
+// the share rounded down and rounded to the nearest penny both count.
+export function perPersonShown(pricePence, players) {
+  const shares = [...new Set([Math.floor(pricePence / players), Math.round(pricePence / players)])].map((p) => money(p).replace('.', '\\.'));
+  return `text=/\\(£(${shares.join('|')})\\/person\\)/`;
+}
 // The Splitwise form, as agent-browser plan steps. Everyone in the group who is not playing is
 // unticked under "equally", by the Splitwise id on his or her row; the players stay ticked.
 export function buildPlan(b, groupId, memberIds, playerIds) {
@@ -110,12 +120,17 @@ export function buildPlan(b, groupId, memberIds, playerIds) {
       { do: 'wait', for: 'text=Add an expense' },
       { do: 'click', selector: 'text=Add an expense' },
       { do: 'wait', for: 'input.description' },
+      // Splitwise counts the amount only from keystrokes: a plain fill showed £34.60 but
+      // "£0.00/person" (5 Nov 2026, 06:00: Save refused, nothing saved). So it settles, the amount
+      // is typed key by key...
+      { do: 'wait', ms: 1500 },
       { do: 'fill', selector: 'input.description', value: desc },
-      { do: 'fill', selector: "input[placeholder='0.00']", value: money(b.pricePence) },
+      { do: 'fill', selector: "input[placeholder='0.00']", value: money(b.pricePence), typed: true },
       { do: 'click', selector: 'text=equally' },
       { do: 'wait', for: '.split_method.equal .person' },
       ...out.map((id) => ({ do: 'click', selector: `.split_method.equal .person[data-id='${id}'] input.share` })),
-      { do: 'wait', ms: 1000 },
+      // ...and Save is pressed only once the form shows a real share per person.
+      { do: 'wait', for: perPersonShown(b.pricePence, playerIds.length), ms: 15000 },
       { do: 'submit', selector: "button.submit:has-text('Save')" },
     ],
     confirm: { selector: `text="${desc}"`, timeoutMs: 20000 },
@@ -141,7 +156,8 @@ export function checkEntry(e, b, kevinId, playerIds) {
 const clock = (ms) => { const p = londonParts(ms); return `${p.hh}:${p.mm}`; };
 export const textHours = (ms) => clock(ms) >= TEXT_FROM && clock(ms) < TEXT_UNTIL;
 // A texts step starts by 21:00, so a normal run (a few players, under a minute each) ends well
-// before 21:30; the 21:30 check before each text only bites if the Mac slept mid-run.
+// before 21:30; the 21:30 check before each text only bites if the Mac slept mid-run. The Splitwise
+// step starts in the same window: its own notification reaches the players at once.
 export const textStart = (ms) => textHours(ms) && clock(ms) < TEXT_LAST_START;
 
 // ── The outside world, behind small functions the tests replace ──
@@ -261,6 +277,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
       }
     }
     if (b.splitwise.state === null) {
+      if (!textStart(now())) continue;                              // Splitwise pings the players too: daytime only
       const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir });
       if (r) problems.push(`${b.slot} Splitwise: ${r}`);
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {
