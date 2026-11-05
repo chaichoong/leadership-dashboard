@@ -213,6 +213,11 @@ describe('a run', () => {
     expect(s.calls).toEqual([]);                              // Splitwise not opened
     expect(await go(w, s, { opts: { now: () => Date.parse('2026-11-01T07:30:00Z') } }).run()).toBe(0);
     expect(w.posts.map((p) => [p.step, p.state])).toEqual([['splitwise', 'claimed'], ['splitwise', 'done']]);
+    const late = worker([booking()]);
+    expect(await go(late, splitwise(), { opts: { now: () => Date.parse('2026-11-01T21:00:00Z') } }).run()).toBe(0);
+    expect(late.posts).toEqual([]);                           // 21:00 is past the last start
+    expect(await go(late, splitwise(), { opts: { now: () => Date.parse('2026-11-01T20:59:00Z') } }).run()).toBe(0);
+    expect(late.posts[0]).toMatchObject({ step: 'splitwise', state: 'claimed' });
   });
 
   it('then the texts: each player but Kevin gets one, with his or her own share from the entry', async () => {

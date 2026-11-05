@@ -233,6 +233,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       <li><span class="chip striped" aria-hidden="true">St Ives soon</span> not open for booking yet</li>
       <li><span class="chip striped" aria-hidden="true">St Ives ?</span> couldn't check</li>
     </ul>
+    <p id="key-line" class="note" hidden>Kevin's phone? <button type="button" class="btn small" data-paste-key>Paste key</button></p>
     <p class="note">St Ives = St Ives Golf Club. Cambridge = PDL Padel United. Huntingdon = Pulse Padel at the garden centre. Cambridge Uni = University of Cambridge Sports Centre, West Cambridge (hour slots, bookable 7 days ahead). St Ives, Cambridge and Cambridge Uni are checked every 15 minutes from 06:30 to 23:00, Huntingdon every 15 to 30 minutes; a court can go between checks, so the booking site has the last word. Once an hour on a day is marked Booked, that day's other hours drop out of Ready to book.</p>
   </footer>
 </div>
@@ -408,17 +409,25 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
 
   // Paste key: the clipboard holds the key (or a #admin= link). Kept only if the Worker says it is Kevin's.
+  // One check at a time. A reply held back by a save in flight is caught up when the save lands.
+  let pasting = false;
   async function pasteKey() {
-    let text = '';
-    try { text = String(await navigator.clipboard.readText()).trim(); } catch (e) { toast("Couldn't read the clipboard. Copy the key, then tap Paste key again."); return; }
-    const m = /^(?:.*[#&]admin=)?([A-Za-z0-9_-]{16,128})$/.exec(text);
-    if (!m) { toast("That isn't a phone key."); return; }
-    const before = adminKey;
-    adminKey = m[1];
-    let r;
-    try { r = await api('/api/state'); } catch (e) { adminKey = before; toast(e.message); return; }
-    if (r.data.admin) { store.set('padel.admin', adminKey); applyNewest(r); toast('This phone can now edit people and bookings.'); }
-    else { adminKey = before; toast("That key didn't work."); }
+    if (pasting) return;
+    pasting = true;
+    try {
+      let text = '';
+      try { text = String(await navigator.clipboard.readText()).trim(); } catch (e) { toast("Couldn't read the clipboard. Copy the key, then tap Paste key again."); return; }
+      const m = /^(?:.*[#&]admin=)?([A-Za-z0-9_-]{16,128})$/.exec(text);
+      if (!m) { toast("That isn't a phone key."); return; }
+      const before = adminKey;
+      adminKey = m[1];
+      let r;
+      try { r = await api('/api/state'); } catch (e) { adminKey = before; toast(e.message); return; }
+      if (!r.data.admin) { adminKey = before; toast("That key didn't work."); return; }
+      store.set('padel.admin', adminKey);
+      if (!applyNewest(r) && saving()) overlapped = true;
+      toast('This phone can now edit people and bookings.');
+    } finally { pasting = false; }
   }
 
   async function load() {
@@ -684,6 +693,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function renderPeople() {
     const card = $('people-card');
     card.hidden = !isAdmin();
+    $('key-line').hidden = isAdmin();                    // any phone without the key can paste it here
     if (card.hidden) return;
     $('people-rows').innerHTML = S.people.map((p) => `<tr>
         <td>${esc(p.nick || p.name)}</td>
@@ -797,7 +807,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function setBusy(on) {
     busy = on;
-    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn')) b.disabled = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn')) b.disabled = on;
   }
 
   // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is

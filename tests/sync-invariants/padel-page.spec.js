@@ -659,6 +659,9 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       expect(await page.evaluate(() => localStorage.getItem('padel.admin'))).toBeNull();
       await expect(row.locator('[data-paid-open]')).toHaveCount(0);
       await expect(page.locator('#people-card')).toBeHidden();
+      await page.locator('#check-now').click();                         // the refused key is not sent again
+      await expect.poll(() => store.headers.length).toBeGreaterThan(0);
+      expect(store.headers.at(-1)['x-admin-key']).toBeUndefined();
       // The key as it is sent (a #admin= link) works as well as the bare key.
       await page.evaluate((k) => navigator.clipboard.writeText('https://padel.runpreneur.org.uk/#admin=' + k), ADMIN_KEY);
       await row.locator('[data-paste-key]').click();
@@ -672,6 +675,22 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       expect(store.headers.at(-1)['x-admin-key']).toBe(ADMIN_KEY);
     });
 
+    test('Kevin\'s app without the key when someone else booked: Paste key at the foot of the page', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, booked: [bookedRow(tomorrow)] });   // Test Bob booked it
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+      await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${tomorrow}"]`).click();
+      await expect(page.locator('#row-19 [data-paste-key]')).toHaveCount(0);
+      await expect(page.locator('#key-line')).toBeVisible();
+      await page.evaluate((k) => navigator.clipboard.writeText(k), ADMIN_KEY);
+      await page.locator('#key-line [data-paste-key]').click();
+      await expect(page.locator('#people-card')).toBeVisible();
+      await expect(page.locator('#row-19 [data-paid-open]')).toBeVisible();
+      await expect(page.locator('#key-line')).toBeHidden();
+    });
+
     test('someone who did not book that game sees no Paste key', async ({ page }) => {
       const tomorrow = londonDates(Date.now())[1];
       await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, booked: [bookedRow(tomorrow, { person_id: 1 })] });
@@ -679,7 +698,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await page.goto(PAGE);
       await page.locator(`[data-day="${tomorrow}"]`).click();
       await expect(page.locator('#row-19 .booked-line')).toBeVisible();
-      await expect(page.locator('[data-paste-key]')).toHaveCount(0);
+      await expect(page.locator('#row-19 [data-paste-key]')).toHaveCount(0);   // only the footer's, which every keyless phone has
     });
 
     test('a #admin= link keeps the key on this phone, drops it from the address bar, and opens the People screen; a real name replaces the nickname and its initials', async ({ page }) => {
