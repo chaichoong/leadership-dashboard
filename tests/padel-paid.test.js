@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
-  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, PER_PERSON_SHOWN,
+  description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown,
 } from '../scripts/padel-paid.mjs';
 
 const require_ = createRequire(import.meta.url);
@@ -134,7 +134,9 @@ describe('the pure parts', () => {
     expect(plan.confirm.selector).toBe('text="Tue 3 Nov, Testford, 19:30, 90 min"');
     expect(plan.steps.find((s) => s.selector === "input[placeholder='0.00']")).toEqual({ do: 'fill', selector: "input[placeholder='0.00']", value: '36.00', typed: true });
     // Save only once the form shows a real share per person (5 Nov 2026: "£0.00/person" at 06:00).
-    expect(plan.steps[plan.steps.length - 2]).toEqual({ do: 'wait', for: PER_PERSON_SHOWN, ms: 15000 });
+    expect(plan.steps[plan.steps.length - 2]).toEqual({ do: 'wait', for: 'text=/\\(£(12\\.00)\\/person\\)/', ms: 15000 });   // £36 for 3
+    expect(perPersonShown(3460, 7)).toBe('text=/\\(£(4\\.94)\\/person\\)/');                     // Tue 10 Nov: £34.60 for seven
+    expect(perPersonShown(1000, 6)).toBe('text=/\\(£(1\\.66|1\\.67)\\/person\\)/');            // rounded down or to the nearest
   });
   it('checks an entry against the booking: total, exactly the players owing, paid by Kevin', () => {
     const d = description(b);
@@ -483,14 +485,14 @@ box.addEventListener('keyup', () => {
 });
 document.getElementById('save').addEventListener('click', () => { document.getElementById('out').textContent = 'Saved'; });
 </script>`);
-  const run = async (typed) => {
+  const run = async (typed, value = '34.60') => {
     const browser = await chromium.launch();
     const page = await browser.newPage();
     try {
       await page.goto('file://' + form);
       const steps = [
-        { do: 'fill', selector: "input[placeholder='0.00']", value: '34.60', ...(typed ? { typed: true } : {}) },
-        { do: 'wait', for: PER_PERSON_SHOWN, ms: 2000 },
+        { do: 'fill', selector: "input[placeholder='0.00']", value, ...(typed ? { typed: true } : {}) },
+        { do: 'wait', for: perPersonShown(3460, 7), ms: 2000 },
         { do: 'submit', selector: '#save' },
       ];
       const r = await ab.runSteps(page, steps, true, { selector: 'text=Saved', timeoutMs: 3000 }).then(() => 'saved', (e) => String(e.message));
@@ -505,5 +507,10 @@ document.getElementById('save').addEventListener('click', () => { document.getEl
     expect(r.details).toBe('(£0.00/person)');
     expect(r.out).toBe('');
     expect(r.r).toMatch(/Timeout|waiting for/);
+  });
+  it('a wrong amount in the box (a dropped keystroke) shows a different share, and Save is never pressed', async () => {
+    const r = await run(true, '3.60');
+    expect(r.details).toBe('(£0.51/person)');
+    expect(r.out).toBe('');
   });
 });

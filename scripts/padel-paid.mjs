@@ -101,8 +101,13 @@ export function sameBooking(expense, b) {
   const th = '(st|nd|rd|th)?';
   return new RegExp(`\\b0?${day}${th}(\\s+of)?\\s*${mon}\\b|\\b${mon}\\.?\\s*0?${day}${th}\\b`, 'i').test(d);
 }
-// "(£4.94/person)" under the amount, never "(£0.00/person)": the form has taken the amount.
-export const PER_PERSON_SHOWN = 'text=/\\(£(?!0\\.00\\/)[\\d,]+\\.\\d\\d\\/person\\)/';
+// "(£4.94/person)" under the amount: the form has taken THIS amount for THESE players (a dropped
+// keystroke, 3.60 for 34.60, shows a different share). Splitwise's rounding is not documented, so
+// the share rounded down and rounded to the nearest penny both count.
+export function perPersonShown(pricePence, players) {
+  const shares = [...new Set([Math.floor(pricePence / players), Math.round(pricePence / players)])].map((p) => money(p).replace('.', '\\.'));
+  return `text=/\\(£(${shares.join('|')})\\/person\\)/`;
+}
 // The Splitwise form, as agent-browser plan steps. Everyone in the group who is not playing is
 // unticked under "equally", by the Splitwise id on his or her row; the players stay ticked.
 export function buildPlan(b, groupId, memberIds, playerIds) {
@@ -125,7 +130,7 @@ export function buildPlan(b, groupId, memberIds, playerIds) {
       { do: 'wait', for: '.split_method.equal .person' },
       ...out.map((id) => ({ do: 'click', selector: `.split_method.equal .person[data-id='${id}'] input.share` })),
       // ...and Save is pressed only once the form shows a real share per person.
-      { do: 'wait', for: PER_PERSON_SHOWN, ms: 15000 },
+      { do: 'wait', for: perPersonShown(b.pricePence, playerIds.length), ms: 15000 },
       { do: 'submit', selector: "button.submit:has-text('Save')" },
     ],
     confirm: { selector: `text="${desc}"`, timeoutMs: 20000 },
