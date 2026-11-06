@@ -67,10 +67,18 @@ function estate(opts = {}) {
   return { agents, skills, tasks, brain, repo, claudeMd, memory };
 }
 
+// The staleness downgrade (CANNOT VERIFY before the 06:45 sweep has written) is judged on
+// the real clock in production. Pin it here, or every clean-run case below exits 2 between
+// 00:00 and 06:59 London and the whole gate is red overnight — which is what refused PR #884
+// at 01:21 on 5 Nov 2026 (finding 20261105-agent-dispatch-1210). The window itself is still
+// proven, on fixed timestamps, in "the pre-sweep window is judged on the clock" below.
+const DAYTIME = '2026-09-07T12:00:00';
+
 function run(e, extra = []) {
+  const pinned = extra.includes('--now') ? [] : ['--now', DAYTIME];
   const r = spawnSync('python3', [SCRIPT, '--json', '--agents', e.agents, '--skills', e.skills,
     '--tasks', e.tasks, '--brain', e.brain, '--repo', e.repo,
-    '--claude-md', e.claudeMd, '--memory', e.memory, ...extra], { encoding: 'utf8' });
+    '--claude-md', e.claudeMd, '--memory', e.memory, ...pinned, ...extra], { encoding: 'utf8' });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch (_) { /* cannot verify path prints no JSON body */ }
   return { code: r.status, json, stderr: r.stderr, stdout: r.stdout };
@@ -435,6 +443,26 @@ print(json.dumps({
     // being fixed.
     const main = SRC.slice(SRC.indexOf('def main('));
     expect(main).toMatch(/if stale and code == 0:/);
+  });
+
+  // THE REGRESSION (finding 20261105-agent-dispatch-1210): the downgrade was judged on the
+  // real clock inside main() with no way to pin it, so every clean-run case in this file
+  // exited 2 between 00:00 and 06:59 London. npm test was red overnight and merge-pr.py
+  // refused PR #884 at 01:21 on 5 Nov 2026. These two drive main() end to end on pinned
+  // clocks, so the suite's verdict no longer depends on the hour it runs at.
+  it('THE REGRESSION: a clean estate on a pinned daytime clock exits 0 whatever the hour now is', () => {
+    const r = run(estate(), ['--now', '2026-09-07T12:00:00']);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.json.rulings_behind).toEqual([]);
+  });
+
+  it('CONTROL: the same clean estate on a pinned pre-sweep clock still exits 2', () => {
+    // Back-test for the line above: if --now were ignored, this would read 0 and the
+    // pre-sweep guard would be gone rather than pinned.
+    const r = run(estate(), ['--now', '2026-11-05T01:21:00']);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.stderr).toMatch(/CANNOT VERIFY/);
+    expect(r.stderr).toMatch(/01:21/);
   });
 
   it('the installed slot time is later than the sweep that writes the rulings', () => {

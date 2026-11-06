@@ -347,6 +347,36 @@ def last_scheduled(expr, ref=None, lookback_days=400):
     return None
 
 
+# How far before its own cron a trigger may fire and still be judged against THAT
+# occurrence rather than the previous one (finding 20261106-phase-2-1212).
+EARLY_GRACE_MINUTES = 120
+
+
+def next_scheduled(expr, ref=None, lookahead_days=400):
+    """Earliest moment this cron should fire AFTER ref, or None.
+
+    The mirror of last_scheduled, and for the same reason: whole days first,
+    then the matching hours and minutes, so a monthly or quarterly cron is
+    found in at most 400 cheap iterations.
+    """
+    ref = (ref or datetime.now()).replace(second=0, microsecond=0)
+    minutes = sorted(_expand(expr.split()[0], 0, 59))
+    hours = sorted(_expand(expr.split()[1], 0, 23))
+    if not minutes or not hours:
+        return None
+
+    day = ref
+    for _ in range(lookahead_days + 1):
+        if day_matches(expr, day):
+            for h in hours:
+                for m in minutes:
+                    candidate = day.replace(hour=h, minute=m)
+                    if candidate > ref:
+                        return candidate
+        day = (day + timedelta(days=1)).replace(hour=0, minute=0)
+    return None
+
+
 def staleness(job, schedule, ref=None):
     """(is_stale, minutes_late, reason). Unknown jobs are never skipped: a job
     missing from the config is a config bug, and silently dropping it would
@@ -360,7 +390,29 @@ def staleness(job, schedule, ref=None):
     due = last_scheduled(cfg["cron"], ref=ref)
     if due is None:
         return False, None, "no occurrence found in lookback"
-    late = ((ref or datetime.now()) - due).total_seconds() / 60.0
+    now = (ref or datetime.now()).replace(second=0, microsecond=0)
+    late = (now - due).total_seconds() / 60.0
+    # A run that fires BEFORE its own occurrence is early, not a day late.
+    #
+    # Findings 20261106-phase-2-1212 and 20260821-job-digest-304, the same mechanism twice.
+    # estate-drift's cron moved to 07:00 on 1 Nov 2026 but its installed launchd trigger
+    # still fired at 06:25, so last_scheduled returned YESTERDAY's 07:00, the run made
+    # itself 1405 minutes late, and the 600-minute ceiling refused it. The daily estate
+    # guard then did not run for a whole day and the only trace was one SKIPPED line in its
+    # own log. Judge lateness on the NEAREST occurrence: when the next one is closer than
+    # the last one is late, this is an early run of the next, which should run.
+    # The grace is bounded on purpose. Without a bound, "nearest occurrence wins" would read
+    # a 20:00 run of a 07:00 job as 11 hours EARLY for tomorrow and the stale guard would be
+    # inert for half of every day. A trigger firing up to two hours before its own cron is a
+    # schedule misalignment; anything further back is judged against the last occurrence as
+    # before.
+    grace = cfg.get("earlyGraceMinutes", EARLY_GRACE_MINUTES)
+    upcoming = next_scheduled(cfg["cron"], ref=now)
+    if upcoming is not None and late > 0:
+        early = (upcoming - now).total_seconds() / 60.0
+        if early <= grace and early < late:
+            return False, round(-early, 1), "early for %s, %.0f min to go" % (
+                upcoming.strftime("%Y-%m-%d %H:%M"), early)
     if late > max_late:
         return True, round(late, 1), "due %s, %.0f min late, limit %s" % (
             due.strftime("%Y-%m-%d %H:%M"), late, max_late)
