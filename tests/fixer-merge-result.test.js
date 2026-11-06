@@ -305,3 +305,51 @@ print(json.dumps({"code": code, "out": json.loads(buf.getvalue()), "gate": gate_
     expect(r.destroyed).toEqual([tree]);
   });
 });
+
+// A git error beside merged:true must be nameable, or a half-merge reads like a clean one.
+//
+// Findings 20261025-queue-fixer-1081 (PR #825) and 20261005-daily-ops-749 (PR #690), the same
+// defect twice. Both PRs merged — 90cb8316 and 00726957 are on origin/main — and both gate JSONs
+// carried mergeOutput: "failed to run git: fatal: 'main' is already used by worktree at
+// .claude/worktrees/content-engine-runtime". gh tries to update the local main checkout after a
+// squash merge, and on this Mac it never can: that worktree is pinned to main on purpose for the
+// nightly content-engine jobs and git allows one worktree per branch. So every successful merge
+// carried a git fatal, a genuinely failed merge would look the same, and the one string that
+// should distinguish them did not. DRIVEN against the real function, not grepped.
+describe('a merge that landed is told apart from one that did not (1081, 749)', () => {
+  const verdict = (said, merged) => JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('merge_pr', ${JSON.stringify(join(ROOT, 'scripts/merge-pr.py'))})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+print(json.dumps(m.local_checkout_verdict(${JSON.stringify(said)}, ${merged ? 'True' : 'False'})))
+`], { encoding: 'utf8' }));
+
+  const WORKTREE_FATAL = "failed to run git: fatal: 'main' is already used by worktree at "
+    + "'/Users/kevinbrittain/Projects/leadership-dashboard/.claude/worktrees/content-engine-runtime'";
+
+  it('THE REGRESSION: the worktree-holds-main fatal on a confirmed merge is named benign', () => {
+    const v = verdict(WORKTREE_FATAL, true);
+    expect(v, 'a confirmed merge must say why the git error is harmless').toBeTruthy();
+    expect(v.benign).toBe(true);
+    expect(v.skipped).toMatch(/content-engine-runtime/);
+  });
+
+  it('CONTROL: the SAME string on a merge GitHub did not confirm is never benign', () => {
+    // The half-merge this exists to expose. Calling it benign here would be the worse fault.
+    expect(verdict(WORKTREE_FATAL, false)).toBe(null);
+  });
+
+  it('CONTROL: any other git failure stays an error, merged or not', () => {
+    expect(verdict('fatal: could not read Username for https://github.com', true)).toBe(null);
+    expect(verdict('error: failed to push some refs', true)).toBe(null);
+  });
+
+  it('the gate reports the same verdict, read from the merger rather than re-matched', () => {
+    // One regex, one place. A second copy is a second thing to drift.
+    expect(SRC).toMatch(/def _local_checkout_verdict\(said, merged\)/);
+    expect(SRC).toMatch(/local_checkout_verdict\(said, merged\)/);
+    expect(SRC, 'the gate must not carry its own copy of the pattern')
+      .not.toMatch(/is already used by worktree/);
+  });
+});
