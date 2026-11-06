@@ -65,13 +65,15 @@ JOBS=(
   # check stays as belt and braces. No round brackets in this block: the test that
   # parses this array stops at the first one.
   "prod-sweep-weekly|Sun 11:00|/bin/bash $SLOT prod-sweep-weekly $TASKS/prod-sweep-weekly/SKILL.md"
-  # Hourly, and hourly on purpose: Utilita's login is a rolling ONE HOUR that
-  # only a visit renews, so the read is what holds the session open.
-  # utilita-balance.py sends at most one message a day plus one alarm per flat,
-  # so the other runs are pure keepalive. Recorded here because it was first
-  # installed by hand, and a job that exists only as a plist silently fails to
-  # come back the day these are rebuilt.
-  "utilita-balance|*:05|/bin/bash $REPO/scripts/utilita-balance-run.sh"
+  # Every 30 minutes, on purpose: Utilita's login is a rolling ONE HOUR that
+  # only a visit renews, so the read is what holds the session open. Hourly
+  # reads landed on the expiry itself (4 Nov 2026: the 22:05 read was ~4 s
+  # late and both flats were signed out for 34 hours), so it reads at :05 AND
+  # :35. utilita-balance.py sends at most one message a day plus one alarm per
+  # flat, so the other runs are pure keepalive. Recorded here because it was
+  # first installed by hand, and a job that exists only as a plist silently
+  # fails to come back the day these are rebuilt.
+  "utilita-balance|*:05,*:35|/bin/bash $REPO/scripts/utilita-balance-run.sh"
   # Kevin's weekly payment list. Friday 21:00 LOCAL, moved from 16:00 on
   # 18 Sep 2026 because things often come in late on a Friday. It prepares
   # only: it never pays, sends or agrees anything.
