@@ -653,7 +653,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const st = pd[k].state;
       const cls = st === 'done' ? 'ok' : st === 'failed' ? 'bad' : '';
       const retry = st === 'failed' && isAdmin() ? ` <button type="button" class="btn small" data-retry="${esc(slot + '|' + k)}"${busy ? ' disabled' : ''}>Retry</button>` : '';
-      return `<span class="${cls}">${label}: ${esc(STEP_WORD[k][st] || st)}</span>${retry}`;
+      // Kevin's phone also shows why it failed (6 Nov 2026), e.g. who the robot could not find in Splitwise,
+      // and on a step that went through, what the robot matched for a new player that week ("new: ..."), so he can check it.
+      const note = pd[k].note || '';
+      const shown = st === 'failed' ? note : (note.match(/\bnew: .*/) || [''])[0];
+      const why = isAdmin() && shown ? ` (${esc(shown)})` : '';
+      return `<span class="${cls}">${label}: ${esc(STEP_WORD[k][st] || st)}${why}</span>${retry}`;
     };
     const change = isAdmin() && S.booked[slot] && (!pd.splitwise.state || pd.splitwise.state === 'failed') && !(paidForm && paidForm.slot === slot)
       ? ` <button type="button" class="btn small" data-paid-open="${esc(slot)}"${busy ? ' disabled' : ''}>Change</button>` : '';

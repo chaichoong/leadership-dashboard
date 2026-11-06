@@ -760,13 +760,13 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       const store = await mockPadel(page, {
         siClosedFrom: 7,
         booked: [bookedRow(tomorrow, { price_pence: 3600, players: '[1,2]', paid_at: new Date().toISOString(), splitwise_state: 'claimed' })],
-        earlier: [{ slot: `${yesterday}|20`, day: 'Earlier day', venue: 'Cambridge', start: '20:00', minutes: 60, paid: { price: 3000, players: [1, 2], at: 'x', splitwise: { state: 'failed', at: 'x', note: 'n' }, texts: { state: null, at: null, note: null } } }],
+        earlier: [{ slot: `${yesterday}|20`, day: 'Earlier day', venue: 'Cambridge', start: '20:00', minutes: 60, paid: { price: 3000, players: [1, 2], at: 'x', splitwise: { state: 'failed', at: 'x', note: 'Test Cat: not in the Splitwise group under that name. Fix it, then Retry' }, texts: { state: null, at: null, note: null } } }],
       });
       await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
       await page.goto(PAGE);
       const earlier = page.locator('#earlier');
       await expect(earlier).toContainText('Earlier day, Cambridge 20:00');
-      await expect(earlier).toContainText("Splitwise: couldn't add");
+      await expect(earlier).toContainText("Splitwise: couldn't add (Test Cat: not in the Splitwise group under that name. Fix it, then Retry)");   // the reason, on Kevin's phone
       await earlier.locator('[data-retry]').click();
       expect(store.adminBodies).toEqual([{ action: 'retry', slot: `${yesterday}|20`, step: 'splitwise' }]);
       await page.locator(`[data-day="${tomorrow}"]`).click();
@@ -775,12 +775,24 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(page.locator('#row-19 [data-paid-open]')).toHaveCount(0);
     });
 
+    test('Kevin\'s phone shows what the robot matched for a new player (6 Nov 2026)', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      const booked = [bookedRow(tomorrow, { price_pence: 3600, players: '[1,2]', paid_at: new Date().toISOString(), splitwise_state: 'done', splitwise_note: 'entry 5000; new: Test Bee = Splitwise Test Bee, contact Test Bee' })];
+      await mockPadel(page, { siClosedFrom: 7, booked });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${tomorrow}"]`).click();
+      await expect(page.locator('#row-19 .paid-line')).toContainText('Splitwise: added (new: Test Bee = Splitwise Test Bee, contact Test Bee)');
+      await expect(page.locator('#row-19 .paid-line')).not.toContainText('entry 5000');
+    });
+
     test('a paid booking shows its status to everyone, with no Undo except on Kevin\'s phone', async ({ page }) => {
       const tomorrow = londonDates(Date.now())[1];
       await mockPadel(page, { siClosedFrom: 7, booked: [bookedRow(tomorrow, { price_pence: 3600, players: '[1,2]', paid_at: new Date().toISOString(), splitwise_state: 'done', texts_state: 'failed', texts_note: 'Messages refused' })] });
       await openAsTestAnn(page);
       const row = page.locator('#row-19');
       await expect(row.locator('.paid-line')).toContainText('Paid £36.00, 2 playing (TA TB), £18.00 each. Splitwise: added Texts: couldn\'t send');
+      await expect(row.locator('.paid-line')).not.toContainText('Messages refused');   // the reason is for Kevin's phone only
       await expect(row.locator('[data-unbook]')).toHaveCount(0);
       await expect(row.locator('[data-retry]')).toHaveCount(0);
     });

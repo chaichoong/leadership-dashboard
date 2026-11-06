@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
   description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown, deliveryOf,
+  matchSplitwise, matchPhone, linkPlayer, saveLink, readWhatsapp, newNote,
 } from '../scripts/padel-paid.mjs';
 
 const require_ = createRequire(import.meta.url);
@@ -59,12 +60,13 @@ function worker(bookings, { refuse = () => false, clock = () => AT } = {}) {
 }
 // A fake Splitwise behind agent-browser: read gives the group and its entries; commit saves the plan's
 // entry with the ticked members owing equal shares (what the real form does), unless told to fail.
-function splitwise({ expenses = [], commitCode = 0, groupReadable = true, savedCost = null } = {}) {
+function splitwise({ expenses = [], commitCode = 0, groupReadable = true, savedCost = null, members = MEMBERS.map((id) => ({ id })) } = {}) {
   const calls = [];
+  const memberIds = () => members.map((m) => m.id);   // read live: a test may add a member between runs
   const ab = async (args) => {
     calls.push(args);
     const page = (obj) => ({ code: 0, stdout: JSON.stringify({ text: JSON.stringify(obj) }), stderr: '' });
-    if (args[0] === 'read' && args[2].includes('get_group/')) return groupReadable ? page({ group: { id: GROUP, members: MEMBERS.map((id) => ({ id })) } }) : { code: 1, stdout: '', stderr: 'signed out' };
+    if (args[0] === 'read' && args[2].includes('get_group/')) return groupReadable ? page({ group: { id: GROUP, members } }) : { code: 1, stdout: '', stderr: 'signed out' };
     if (args[0] === 'read' && args[2].includes('get_expenses')) return page({ expenses });
     if (args[0] === 'commit') {
       if (commitCode) return { code: commitCode, stdout: '', stderr: 'BROWSER ERROR' };
@@ -72,7 +74,7 @@ function splitwise({ expenses = [], commitCode = 0, groupReadable = true, savedC
       const desc = plan.steps.find((s) => s.do === 'fill' && s.selector === 'input.description').value;
       const cost = Math.round((savedCost ?? Number(plan.steps.find((s) => s.selector && s.selector.includes('0.00')).value)) * 100);
       const out = plan.steps.filter((s) => s.do === 'click' && s.selector.includes('data-id')).map((s) => Number(/data-id='(\d+)'/.exec(s.selector)[1]));
-      const owing = MEMBERS.filter((id) => !out.includes(id));
+      const owing = memberIds().filter((id) => !out.includes(id));
       const shares = equalShares(cost, owing.length);
       expenses.push(entry(5000 + expenses.length, desc, Object.fromEntries(owing.map((id, i) => [id, shares[i]])), { cost }));
       return { code: 0, stdout: '{}', stderr: '' };
@@ -84,11 +86,16 @@ function splitwise({ expenses = [], commitCode = 0, groupReadable = true, savedC
 const go = (w, s, extra = {}) => {
   const lines = [];
   const sent = [];
+  const saved = [];
   const ledger = extra.ledger || makeLedger(join(tmp(), 'texts.jsonl'));
   const logDir = tmp();                                   // plans and screenshots never land in the robot's real log folder
+  const players = structuredClone(extra.players || PLAYERS);
   return {
-    lines, sent, ledger,
-    run: () => runOnce({ fetchImpl: w.fetchImpl, ab: s.ab, now: () => NOON, log: (l) => lines.push(l), key: 'robot-key-test', players: PLAYERS, ledger, logDir,
+    lines, sent, ledger, saved, players,
+    // The WhatsApp list and the players file are fakes too: a test never reads or writes the real ones.
+    run: () => runOnce({ fetchImpl: w.fetchImpl, ab: s.ab, now: () => NOON, log: (l) => lines.push(l), key: 'robot-key-test', players, ledger, logDir,
+      whatsapp: () => extra.whatsapp || null,
+      save: (id, add) => { saved.push([id, add]); return { ...(players.players[String(id)] || {}), ...add }; },
       textOne: async (number, text) => { sent.push({ number, text }); return (extra.textOk || (() => ({ ok: true, via: 'iMessage' })))(number); },
       ...extra.opts }),
   };
@@ -294,12 +301,15 @@ describe('a run', () => {
     expect(r.lines[0]).toMatch(/^FAILED: padel-paid: 2026-11-03\|19 Splitwise: could not read the Splitwise group/);
   });
 
-  it('a player not in the Splitwise group: the step fails with a count (never a name) and nothing is saved', async () => {
+  it('a player not in the Splitwise group: the step fails naming the player for Kevin (the log says a count), and nothing is saved', async () => {
     const w = worker([booking({ players: [{ id: 1, name: 'Test Payer' }, { id: 9, name: 'Test Out' }] })]);
     const s = splitwise();
-    expect(await go(w, s).run()).toBe(1);
+    const r = go(w, s);
+    expect(await r.run()).toBe(1);
     expect(s.calls.some((c) => c[0] === 'commit')).toBe(false);
-    expect(w.posts.map((p) => [p.state, p.note])).toEqual([['claimed', undefined], ['failed', '1 of the players is not in the Splitwise group']]);
+    expect(w.posts.map((p) => [p.state, p.note])).toEqual([['claimed', undefined], ['failed', 'Test Out: not in the Splitwise group under that name. Fix it, then Retry']]);
+    expect(r.saved).toEqual([]);
+    expect(r.lines.join('\n')).not.toMatch(/Test Out/);
   });
 
   it('a save that does not go through, or saves the wrong thing: failed, and only Kevin\'s Retry tries again', async () => {
@@ -364,6 +374,20 @@ describe('a run', () => {
     await r.run();
     expect(sms).toEqual([]);
     expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (3 not confirmed)' });
+  });
+
+  it('a mobile the robot linked this week is named on the follow-up\'s note too (review, 6 Nov 2026)', async () => {
+    const b = booking({ splitwise: { state: 'done', at: AT, note: 'entry 1' } });
+    const w = worker([b], { clock: () => new Date(NOON).toISOString() });
+    const players = structuredClone(PLAYERS);
+    Object.assign(players.players[3], { mobile_as: 'mobile from your contacts', linked_at: '2026-11-01' });
+    const r = go(w, splitwise({ expenses: [entry(1, description(b), NINES)] }), { players,
+      textOk: () => ({ ok: null, via: 'iMessage (delivery not readable)' }),
+      opts: { delivery: async () => ({ known: false, readable: false }), sendSms: async () => ({ code: 0 }) } });
+    await r.run();
+    expect(w.posts.at(-1)).toMatchObject({ step: 'texts', state: 'claimed' });   // not confirmed yet: no note
+    await r.run();
+    expect(w.posts.at(-1)).toMatchObject({ state: 'done', note: '3 of 3 sent (3 not confirmed); new: Test Cat = Splitwise set by you, mobile from your contacts' });
   });
 
   // Review of PR 887: pending, sent-not-delivered and missing are never a reason for a second text;
@@ -460,6 +484,230 @@ describe('a run', () => {
     const w3 = worker([booking({ splitwise: { state: 'claimed', at: '2026-11-01T11:00:00.000Z', note: null } })]);
     expect(await go(w3, splitwise()).run()).toBe(1);
     expect(w3.posts).toEqual([expect.objectContaining({ step: 'splitwise', state: 'failed', note: 'the robot stopped part-way: check Splitwise before Retry' })]);
+  });
+});
+
+describe("a new player's entry: Kevin sets them up, the robot links them (6 Nov 2026)", () => {
+  // Splitwise members as the group lists them. Every name is invented.
+  const SWM = [
+    { id: 21, first_name: 'Ola', last_name: 'Nordmann' }, { id: 22, first_name: 'Samuel', last_name: 'Fairweather' },
+    { id: 23, first_name: 'Ivo', last_name: 'T' }, { id: 24, first_name: 'Pip', last_name: null },
+    { id: 25, first_name: 'Pat', last_name: 'One' }, { id: 26, first_name: 'Pat', last_name: 'Two' },
+    { id: 27, first_name: 'José', last_name: 'Ávila' },
+  ];
+  // The Padel WhatsApp group as padel-delivery.py writes it.
+  const WA = [
+    { contact: ['Ola Nordmann'], pushname: 'Ola', phones: ['+447700900051'] },
+    { contact: ['Sam Fairweather'], pushname: 'Sammy', phones: ['+447700900052'] },
+    { contact: [], pushname: 'Ivo Testerton', phones: ['+447700900053'] },
+    { contact: ['Ola Nordmann'], pushname: null, phones: ['+447700900051'] },     // the same person under an old id
+    { contact: [], pushname: 'Rich', phones: ['+447700900054'] },
+    { contact: [], pushname: 'Rich', phones: ['+447700900055'] },
+  ];
+
+  it('Splitwise: the full name first, then a longer first name or a surname initial, then a member with no surname; two at one level is never a guess', () => {
+    expect(matchSplitwise(['Ola Nordmann'], SWM)).toEqual({ id: 21, as: 'Ola Nordmann' });
+    expect(matchSplitwise(['Ivo Testerton'], SWM).as).toBe('Ivo T');                 // what Splitwise calls them, for Kevin's note
+    expect(matchSplitwise(['Sam Fairweather'], SWM).id).toBe(22);          // "Sam" starts "Samuel"
+    expect(matchSplitwise(['Ivo Testerton'], SWM).id).toBe(23);            // "Ivo T"
+    expect(matchSplitwise(['Pip Larkin'], SWM).id).toBe(24);               // "Pip", no surname
+    expect(matchSplitwise(['jose avila'], SWM).id).toBe(27);               // accents and case do not matter
+    expect(matchSplitwise(['Pat'], SWM).why).toBe('not in the Splitwise group under that name');   // a first name alone never picks one
+    expect(matchSplitwise(['Pat One', 'Pat Two'], SWM).why).toBe('2 people in the Splitwise group could be them');
+    expect(matchSplitwise(['Al Nordmann'], SWM).why).toBe('not in the Splitwise group under that name');   // two letters is not a first name that fits
+    expect(matchSplitwise(['Una Known'], SWM).why).toBe('not in the Splitwise group under that name');
+  });
+
+  it('Splitwise: never a look-alike (review, 6 Nov 2026): a longer surname, a full name held as a first name, a one-word name over a surname', () => {
+    expect(matchSplitwise(['Tom Smithson'], [{ id: 31, first_name: 'Tom', last_name: 'Smith' }]).why).toBe('not in the Splitwise group under that name');
+    expect(matchSplitwise(['Sam Fox'], [{ id: 32, first_name: 'Sam Fairweather', last_name: null }]).why).toBe('not in the Splitwise group under that name');
+    expect(matchSplitwise(['Sam Fairweather'], [{ id: 32, first_name: 'Sam Fairweather', last_name: null }]).id).toBe(32);
+    expect(matchSplitwise(['Rich', 'Richard Jones'], [{ id: 33, first_name: 'Rich', last_name: null }, { id: 34, first_name: 'Richard', last_name: 'J' }]).id).toBe(34);
+    expect(matchSplitwise(['Lee Drake', 'Leon Drake'], [{ id: 35, first_name: 'Lee', last_name: 'Drake' }, { id: 36, first_name: 'Leon', last_name: 'Drake' }]).why).toBe('2 people in the Splitwise group could be them');   // the app and Kevin's contacts disagree: no guess
+  });
+
+  it("Splitwise: a member another player's entry already has is never picked, even when the name fits", () => {
+    expect(matchSplitwise(['Pip Larkin'], SWM, new Set([24])).why).toBe('not in the Splitwise group under that name');
+    expect(matchSplitwise(['Pat One', 'Pat Two'], SWM, new Set([26])).id).toBe(25);
+  });
+
+  it("mobile: by the name in Kevin's contacts, else the name the person gave WhatsApp; one number, and nobody else's", () => {
+    expect(matchPhone(['Ola Nordmann'], WA)).toMatchObject({ phone: '+447700900051', contact: 'Ola Nordmann' });   // listed twice, one number
+    expect(matchPhone(['Sam Fairweather'], WA)).toMatchObject({ phone: '+447700900052', contact: 'Sam Fairweather' });
+    expect(matchPhone(['Ivo Testerton'], WA)).toEqual({ phone: '+447700900053', contact: null, as: 'mobile from their WhatsApp name' });
+    expect(matchPhone(['Ola Nordmann'], WA).as).toBe('mobile from your contacts');
+    expect(matchPhone(['Rich'], WA).why).toBe('2 mobiles in the Padel WhatsApp group fit that name');
+    expect(matchPhone(['Una Known'], WA).why).toBe('not in the Padel WhatsApp group under that name');
+    expect(matchPhone(['Ola Nordmann'], WA, new Set(['7700900051'])).why).toBe('their mobile is already on another player');
+    // Found by elimination: the contact name comes with THAT number, never the other Rich's.
+    const twoRichs = [{ contact: ['Richard Jones'], pushname: 'Rich', phones: ['+447700900061'] }, { contact: [], pushname: 'Rich', phones: ['+447700900062'] }];
+    expect(matchPhone(['Rich'], twoRichs, new Set(['7700900061']))).toMatchObject({ phone: '+447700900062', contact: null });
+  });
+
+  it('an entry is only ever added to: what is there stays, and a new one gets the name the app shows and the contact name', () => {
+    const players = { players: { 1: { self: true, splitwise_id: 99, phones: ['+447700900001'] }, 5: { page_name: 'Ivo', phones: ['+447700900099'] } } };
+    const today = '2026-11-06';
+    expect(linkPlayer({ id: 5, name: 'Ivo Testerton' }, players, { members: SWM, whatsapp: WA, today }))
+      .toEqual({ add: { splitwise_id: 23, splitwise_as: 'Ivo T', linked_at: today }, problems: [] });
+    expect(linkPlayer({ id: 7, name: 'Sam Fairweather', nick: 'Sammy' }, players, { members: SWM, whatsapp: WA, today }))
+      .toEqual({ add: { phones: ['+447700900052'], mobile_as: 'mobile from your contacts', splitwise_id: 22, splitwise_as: 'Samuel Fairweather', page_name: 'Sammy', contact: 'Sam Fairweather', linked_at: today }, problems: [] });
+    expect(linkPlayer({ id: 8, name: 'Una Known' }, players, { members: SWM, whatsapp: null }))
+      .toEqual({ add: {}, problems: ["couldn't read the Padel WhatsApp group", 'not in the Splitwise group under that name'] });
+    expect(linkPlayer({ id: 1, name: 'Test Payer' }, players, { members: SWM, whatsapp: null })).toEqual({ add: {}, problems: [] });   // complete: nothing looked for
+    const noPhone = { players: { 1: { self: true, splitwise_id: 99 } } };
+    expect(linkPlayer({ id: 1, name: 'Ola Nordmann' }, noPhone, { members: SWM, whatsapp: WA })).toEqual({ add: {}, problems: [] });   // Kevin's own entry is never touched
+    expect(linkPlayer({ id: 9, name: 'Ivo Testerton' }, players, { members: SWM, whatsapp: WA, today }).add)
+      .toEqual({ phones: ['+447700900053'], mobile_as: 'mobile from their WhatsApp name', splitwise_id: 23, splitwise_as: 'Ivo T', page_name: 'Ivo Testerton', linked_at: today });   // no contact name known: none written, so a real one can follow
+  });
+
+  it('the WhatsApp list is used only while padel-delivery.py keeps it fresh (a day)', () => {
+    const file = join(tmp(), 'whatsapp.json');
+    writeFileSync(file, JSON.stringify({ at: NOON - 3600000, members: WA }));
+    expect(readWhatsapp(file, () => NOON)).toEqual(WA);
+    expect(readWhatsapp(file, () => NOON + 25 * 3600000)).toBe(null);
+    writeFileSync(file, JSON.stringify({ at: NOON, members: [] }));
+    expect(readWhatsapp(file, () => NOON)).toBe(null);
+  });
+
+  it('the save reads the file fresh, adds only what is missing, keeps it private, and leaves no temp file', () => {
+    const dir = tmp();
+    const file = join(dir, 'players.json');
+    writeFileSync(file, JSON.stringify({ _note: 'kept', players: { 1: { self: true, splitwise_id: 99 }, 5: { page_name: 'Ivo', phones: ['+447700900099'] } }, splitwise_group: { id: GROUP } }), { mode: 0o644 });
+    saveLink(5, { splitwise_id: 23, splitwise_as: 'Ivo T', phones: ['+447700900053'], mobile_as: 'mobile from your contacts', linked_at: '2026-11-01' }, file);
+    saveLink(7, { phones: ['+447700900052'], splitwise_id: 22, page_name: 'Sammy', contact: 'Sam Fairweather' }, file);
+    const got = JSON.parse(readFileSync(file, 'utf8'));
+    expect(got._note).toBe('kept');
+    expect(got.players[1]).toEqual({ self: true, splitwise_id: 99 });
+    // The number already there stays, and no note is written about a number the robot did not set.
+    expect(got.players[5]).toEqual({ page_name: 'Ivo', phones: ['+447700900099'], splitwise_id: 23, splitwise_as: 'Ivo T', linked_at: '2026-11-01' });
+    saveLink(5, { splitwise_id: 24, splitwise_as: 'Pip', linked_at: '2026-11-09' }, file);   // nothing new written: the day stays too
+    expect(JSON.parse(readFileSync(file, 'utf8')).players[5]).toMatchObject({ splitwise_id: 23, splitwise_as: 'Ivo T', linked_at: '2026-11-01' });
+    saveLink(5, { contact: 'Ivo Testerton', linked_at: '2026-11-09' }, file);                 // something new: the week starts again
+    expect(JSON.parse(readFileSync(file, 'utf8')).players[5]).toMatchObject({ contact: 'Ivo Testerton', linked_at: '2026-11-09' });
+    expect(got.players[7]).toEqual({ phones: ['+447700900052'], splitwise_id: 22, page_name: 'Sammy', contact: 'Sam Fairweather' });
+    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')).players)).toEqual(['1', '5', '7']);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(() => statSync(`${file}.tmp`)).toThrow();
+    expect(readWhatsapp(join(dir, 'missing.json'))).toBe(null);
+  });
+
+  const NEWBIE = [{ id: 1, name: 'Test Payer' }, { id: 2, name: 'Test Bob' }, { id: 7, name: 'Sam Fairweather', nick: 'Sammy' }];
+  const NEW_MEMBERS = [...MEMBERS.map((id) => ({ id })), { id: 22, first_name: 'Samuel', last_name: 'Fairweather' }];
+
+  it('a player with no entry on a paid booking: linked, saved, on the Splitwise entry, and texted; the log names nobody', async () => {
+    const w = worker([booking({ players: NEWBIE, pricePence: 3000 })]);
+    const s = splitwise({ members: NEW_MEMBERS });
+    const r = go(w, s, { whatsapp: WA });
+    expect(await r.run()).toBe(0);
+    expect(r.saved).toEqual([[7, { phones: ['+447700900052'], mobile_as: 'mobile from your contacts', splitwise_id: 22, splitwise_as: 'Samuel Fairweather', page_name: 'Sammy', contact: 'Sam Fairweather', linked_at: '2026-11-01' }]]);
+    expect(w.posts.map((p) => [p.step, p.state])).toEqual([['splitwise', 'claimed'], ['splitwise', 'done']]);
+    expect(w.posts[1].note).toBe('entry 5000; new: Sam Fairweather = Splitwise Samuel Fairweather, mobile from your contacts');   // Kevin sees what the robot matched
+    expect(Object.keys(s.expenses[0].users.filter((u) => Number(u.owed_share) > 0).reduce((a, u) => ({ ...a, [u.user_id]: 1 }), {})).map(Number)).toEqual([11, 12, 22]);
+    expect(await r.run()).toBe(0);                                    // the next run: the texts
+    expect(r.sent.map((x) => x.number)).toEqual(['+447700900002', '+447700900052']);
+    expect(r.lines.join('\n')).not.toMatch(/Sam|Fairweather|7700900052/);
+  });
+
+  it('a new player Kevin has not put in Splitwise: failed with the name and both fixes, nothing on Splitwise, the mobile it found kept', async () => {
+    const w = worker([booking({ players: [{ id: 1, name: 'Test Payer' }, { id: 7, name: 'Sam Fairweather' }] })]);
+    const s = splitwise();
+    const r = go(w, s, { whatsapp: [] });
+    expect(await r.run()).toBe(1);
+    expect(s.calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(w.posts.at(-1).note).toBe('Sam Fairweather: not in the Padel WhatsApp group under that name, not in the Splitwise group under that name. Fix it, then Retry');
+    expect(r.saved).toEqual([]);
+    const r2 = go(worker([booking({ players: [{ id: 1, name: 'Test Payer' }, { id: 7, name: 'Sam Fairweather' }] })]), splitwise(), { whatsapp: WA });
+    expect(await r2.run()).toBe(1);
+    expect(r2.saved).toEqual([[7, { phones: ['+447700900052'], mobile_as: 'mobile from your contacts', page_name: 'Sam Fairweather', contact: 'Sam Fairweather', linked_at: '2026-11-01' }]]);
+  });
+
+  it('a link made in an earlier run that failed is still shown when the step goes through, and only for a week (review, 6 Nov 2026)', async () => {
+    const b = booking({ players: [{ id: 1, name: 'Test Payer' }, { id: 7, name: 'Sam Fairweather' }, { id: 8, name: 'Ola Nordmann' }], pricePence: 3000 });
+    const w = worker([b]);
+    const members = [...NEW_MEMBERS];                                 // Ola is not in Splitwise yet
+    const r = go(w, splitwise({ members }), { whatsapp: WA });
+    expect(await r.run()).toBe(1);
+    expect(w.posts.at(-1).note).toBe('Ola Nordmann: not in the Splitwise group under that name. Fix it, then Retry');
+    members.push({ id: 21, first_name: 'Ola', last_name: 'Nordmann' });   // Kevin adds Ola, then taps Retry
+    b.splitwise = { state: null, at: null, note: null };
+    expect(await r.run()).toBe(0);
+    expect(w.posts.at(-1).note).toBe('entry 5000; new: Sam Fairweather = Splitwise Samuel Fairweather, mobile from your contacts; Ola Nordmann = Splitwise Ola Nordmann, mobile from your contacts');
+    const players = { players: { 7: { linked_at: '2026-11-01', splitwise_as: 'Samuel Fairweather' } } };
+    const one = { players: [{ id: 7, name: 'Sam Fairweather' }] };
+    expect(newNote(one, players, Date.parse('2026-11-07T23:00:00Z'))).toBe('; new: Sam Fairweather = Splitwise Samuel Fairweather, no mobile yet');
+    expect(newNote(one, players, Date.parse('2026-11-08T00:00:01Z'))).toBe('');   // a week from the day it was linked
+  });
+
+  it('a note never runs past the 200 characters the Worker keeps, and a save that fails says so', async () => {
+    const many = [{ id: 1, name: 'Test Payer' }, { id: 7, name: 'Bartholomew Fairweather-Smythe' }, { id: 8, name: 'Maximilian Featherstonehaugh' }];
+    const w = worker([booking({ players: many })]);
+    expect(await go(w, splitwise(), { whatsapp: [] }).run()).toBe(1);
+    const note = w.posts.at(-1).note;
+    expect(note.length).toBeLessThanOrEqual(200);
+    expect(note).toMatch(/^Can't link Bartholomew Fairweather-Smythe, Maximilian Featherstonehaugh: check each is in the Splitwise group/);
+    const w2 = worker([booking({ players: [{ id: 1, name: 'Test Payer' }, { id: 7, name: 'Sam Fairweather' }] })]);
+    const r2 = go(w2, splitwise({ members: NEW_MEMBERS }), { whatsapp: WA, opts: { save: () => { throw Object.assign(new Error('disk'), { code: 'EACCES' }); } } });
+    expect(await r2.run()).toBe(1);
+    expect(w2.posts.at(-1).note).toBe('Sam Fairweather: found, but the entry could not be saved. Fix it, then Retry');
+    expect(r2.lines.join('\n')).toMatch(/could not save a new player's entry \(EACCES\)/);
+  });
+
+  it('texts: a mobile still missing is looked for again; one that cannot be found fails the step by name, and the others still go', async () => {
+    const players = structuredClone(PLAYERS);
+    delete players.players[3].phones;                                 // Test Cat: in Splitwise, no mobile yet
+    const done = { splitwise: { state: 'done', at: AT, note: 'entry 5000' } };
+    const shares = { 11: 900, 12: 900, 13: 900, 14: 900 };
+    const w = worker([booking(done)]);
+    const r = go(w, splitwise({ expenses: [entry(5000, 'Tue 3 Nov, Testford, 19:30, 90 min', shares)] }), { players, whatsapp: [{ contact: ['Test Cat'], pushname: null, phones: ['+447700900033'] }] });
+    expect(await r.run()).toBe(0);
+    expect(r.sent.map((x) => x.number)).toEqual(['+447700900002', '+447700900033', '+447700900004']);
+    expect(r.saved).toEqual([[3, { phones: ['+447700900033'], mobile_as: 'mobile from your contacts', contact: 'Test Cat', linked_at: '2026-11-01' }]]);   // the contact name was missing too
+    expect(w.posts.at(-1).note).toBe('3 of 3 sent; new: Test Cat = Splitwise set by you, mobile from your contacts');
+
+    const w2 = worker([booking(structuredClone(done))]);
+    const r2 = go(w2, splitwise({ expenses: [entry(5000, 'Tue 3 Nov, Testford, 19:30, 90 min', shares)] }), { players, whatsapp: [] });
+    expect(await r2.run()).toBe(1);
+    expect(r2.sent.map((x) => x.number)).toEqual(['+447700900002', '+447700900004']);
+    expect(w2.posts.at(-1)).toMatchObject({ step: 'texts', state: 'failed', note: '2 of 3 sent: no mobile for Test Cat: not in the Padel WhatsApp group under that name. Fix it, then Retry' });
+    expect(r2.lines.join('\n')).toMatch(/2 of 3 sent, 1 with no mobile/);
+    expect(r2.lines.join('\n')).not.toMatch(/Test Cat/);
+  });
+});
+
+describe('padel-delivery.py: the Padel WhatsApp group, names and mobiles only', () => {
+  it("lists every current member by the name in Kevin's contacts, the name they gave WhatsApp and the mobile, privately, and refuses two groups with one name", () => {
+    const dir = tmp();
+    const out = join(dir, 'whatsapp.json');
+    const py = `import sqlite3, sys, os, importlib.util
+d, out = sys.argv[1], sys.argv[2]
+c = sqlite3.connect(os.path.join(d, 'ChatStorage.sqlite'))
+c.executescript("CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZPARTNERNAME TEXT, ZCONTACTJID TEXT); CREATE TABLE ZWAGROUPMEMBER (Z_PK INTEGER PRIMARY KEY, ZCHATSESSION INTEGER, ZMEMBERJID TEXT, ZISACTIVE INTEGER); CREATE TABLE ZWAPROFILEPUSHNAME (ZJID TEXT, ZPUSHNAME TEXT); CREATE TABLE ZWAMESSAGE (ZTEXT TEXT);")
+c.executemany("INSERT INTO ZWACHATSESSION VALUES (?, ?, ?)", [(1, 'Padel', '1203@g.us'), (2, 'Padel', '447700900051@s.whatsapp.net'), (3, 'Golf', '1204@g.us')])
+c.executemany("INSERT INTO ZWAGROUPMEMBER (ZCHATSESSION, ZMEMBERJID, ZISACTIVE) VALUES (?, ?, ?)", [(1, '111@lid', 1), (1, '447700900052@s.whatsapp.net', 1), (1, '447700900056@s.whatsapp.net', 0), (3, '333@lid', 1)])
+c.executemany("INSERT INTO ZWAPROFILEPUSHNAME VALUES (?, ?)", [('111@lid', 'Ola'), ('333@lid', 'Golfer')])
+c.execute("INSERT INTO ZWAMESSAGE VALUES ('secret words')")
+c.commit(); c.close()
+b = sqlite3.connect(os.path.join(d, 'ContactsV2.sqlite'))
+b.executescript("CREATE TABLE ZWAADDRESSBOOKCONTACT (ZFULLNAME TEXT, ZLID TEXT, ZWHATSAPPID TEXT, ZNOTES TEXT);")
+b.executemany("INSERT INTO ZWAADDRESSBOOKCONTACT VALUES (?, ?, ?, ?)", [('Ola Nordmann', '111@lid', '447700900051@s.whatsapp.net', 'a private note'), ('Sam Fairweather', None, '447700900052@s.whatsapp.net', None), ('Golf Pal', '333@lid', '447700900053@s.whatsapp.net', None), ('Gone Player', None, '447700900056@s.whatsapp.net', None)])
+b.commit(); b.close()
+spec = importlib.util.spec_from_file_location('pd', 'scripts/padel-delivery.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.whatsapp(wa_dir=d, out_path=out, now=1000)
+c = sqlite3.connect(os.path.join(d, 'ChatStorage.sqlite')); c.execute("INSERT INTO ZWACHATSESSION VALUES (4, 'Padel', '1205@g.us')"); c.commit(); c.close()
+try:
+    m.whatsapp(wa_dir=d, out_path=out + '.2', now=1000)
+    print('NOT REFUSED')
+except RuntimeError as e:
+    print('refused:', e)`;
+    const said = execFileSync('/usr/bin/python3', ['-c', py, dir, out], { stdio: 'pipe' }).toString();
+    expect(said).toMatch(/refused: 2 WhatsApp groups are called Padel/);
+    const rec = JSON.parse(readFileSync(out, 'utf8'));
+    expect(statSync(out).mode & 0o777).toBe(0o600);
+    expect(rec).toEqual({ at: 1000000, group: 'Padel', members: [
+      { contact: ['Ola Nordmann'], pushname: 'Ola', phones: ['+447700900051'] },
+      { contact: ['Sam Fairweather'], pushname: null, phones: ['+447700900052'] },     // listed by number: still found
+    ] });
+    expect(JSON.stringify(rec)).not.toMatch(/secret|private note|Golf|Gone|7700900056/);   // no words, no other group, nobody who left
   });
 });
 
