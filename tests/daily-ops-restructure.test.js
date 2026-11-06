@@ -78,8 +78,13 @@ describe('the installer and the register cannot drift apart', () => {
       // `5 * * * *`.
       const pairs = times.split(',').map(t => t.split(':'));
       if (pairs[0][0] === '*') {
+        // Every minute of an hourly job, not the first: utilita-balance reads at
+        // `*:05,*:35` = `5,35 * * * *` since 6 Nov 2026.
+        expect(pairs.every(([h]) => h === '*'), `${name}: mixes hourly and fixed-hour times`).toBe(true);
         expect(hour, `${name}: installer says hourly, the register does not`).toBe('*');
-        expect(Number(min)).toBe(Number(pairs[0][1]));
+        const byNum = (a, b) => a - b;
+        expect(min.split(',').map(Number).sort(byNum), `${name}: installer minutes and register cron disagree`)
+          .toEqual(pairs.map(([, m]) => Number(m)).sort(byNum));
       } else {
         const want = new Set();
         for (const h of hour.split(',')) for (const m of min.split(',')) want.add(`${Number(h)}:${Number(m)}`);

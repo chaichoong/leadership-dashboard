@@ -546,7 +546,7 @@ print('SIGNEDIN=' + str(r['signedIn']))
         }
     });
 
-    it('install-slot-jobs.sh recreates this job, hourly, matching the live plist (driven)', () => {
+    it('install-slot-jobs.sh recreates this job, every 30 minutes, matching the live plist (driven)', () => {
         // It was first installed by hand, so the install script did not know
         // about it: a rebuild of the LaunchAgents would silently leave it out
         // and nothing would say so. This RUNS the script's dry-run and reads
@@ -556,7 +556,9 @@ print('SIGNEDIN=' + str(r['signedIn']))
         const block = out.slice(out.indexOf('com.kevinbrittain.utilita-balance</string>'));
         const mine = block.slice(0, block.indexOf('</plist>'));
         // Minute with NO Hour is how launchd expresses "every hour at :05".
+        // Both :05 and :35 (6 Nov 2026): see the read-gap test below for why.
         expect(mine).toMatch(/<dict><key>Minute<\/key><integer>5<\/integer><\/dict>/);
+        expect(mine).toMatch(/<dict><key>Minute<\/key><integer>35<\/integer><\/dict>/);
         expect(mine.match(/<key>StartCalendarInterval<\/key>[\s\S]*?<\/array>/)[0])
             .not.toMatch(/<key>Hour<\/key>/);
         expect(mine).toMatch(/utilita-balance-run\.sh/);
@@ -566,13 +568,40 @@ print('SIGNEDIN=' + str(r['signedIn']))
             .toMatch(/<key>Hour<\/key><integer>6<\/integer><key>Minute<\/key>/);
     });
 
-    it('the hourly job is lock-exempt, or a long render lets the session lapse', () => {
+    it('the job is lock-exempt, or a long render lets the session lapse', () => {
         const sched = JSON.parse(readFileSync(resolve(root, 'scripts/job-schedule.json'), 'utf8'));
         expect(sched['utilita-balance'].lockExempt).toBe(true);
-        expect(sched['utilita-balance'].cron).toBe('5 * * * *');
         // Never a day-of-week field: Cloudflare and cron disagree on which day
         // is 1, and this repo has lost a whole weekday to that before.
         expect(sched['utilita-balance'].cron.split(' ')[4]).toBe('*');
+    });
+
+    it('every read lands well inside the one-hour login, so one bad read cannot end it (driven)', () => {
+        // 4 Nov 2026: reads ran hourly at :05 against a login that lasts one hour
+        // from the last visit, so each read landed ON the expiry. The 22:05 read
+        // came ~4 s after the 21:05 visit's hour ran out, saw a page with no
+        // balance, and both flats were signed out for 34 hours. This drives
+        // job-queue.py's own cron matcher over a whole day and measures the
+        // longest gap between reads: it must leave at least half the hour spare,
+        // and a tick allowed to run late must never run into the next one.
+        // Back-tested: with the old '5 * * * *' the gap is 60 and this fails.
+        const sched = JSON.parse(readFileSync(resolve(root, 'scripts/job-schedule.json'), 'utf8'));
+        const cfg = sched['utilita-balance'];
+        const py = [
+            'import importlib.util, json, sys, datetime',
+            'spec = importlib.util.spec_from_file_location("jq", sys.argv[1])',
+            'jq = importlib.util.module_from_spec(spec); spec.loader.exec_module(jq)',
+            'start = datetime.datetime(2026, 11, 6, 0, 0)',
+            'hits = [m for m in range(48 * 60) if jq.cron_matches(sys.argv[2], start + datetime.timedelta(minutes=m))]',
+            'print(json.dumps(hits))',
+        ].join('\n');
+        const hits = JSON.parse(execFileSync('python3', ['-c', py, resolve(root, 'scripts/job-queue.py'), cfg.cron],
+            { encoding: 'utf8' }));
+        expect(hits.length).toBeGreaterThan(0);
+        const gaps = hits.slice(1).map((m, i) => m - hits[i]);
+        const longest = Math.max(...gaps);
+        expect(longest, `longest gap between reads is ${longest} min`).toBeLessThanOrEqual(30);
+        expect(cfg.maxLateMinutes).toBeLessThan(Math.min(...gaps));
     });
 
     it('the relay call carries a User-Agent, or Cloudflare answers 403 error 1010', () => {
