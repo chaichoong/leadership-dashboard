@@ -154,6 +154,35 @@ describe('staleness cut-off', () => {
     expect(onTime).toBe(false);
   });
 
+  // THE REGRESSION (findings 20261106-phase-2-1212 and 20260821-job-digest-304, the same
+  // mechanism twice). estate-drift's cron moved to 07:00 on 1 Nov 2026, but its installed
+  // launchd trigger still fired at 06:25. last_scheduled returned YESTERDAY's 07:00, the run
+  // made itself 1405 minutes late, and the 600-minute ceiling refused it — so the daily
+  // estate guard did not run for a whole day and the only trace was one SKIPPED line in its
+  // own log. A trigger that fires shortly BEFORE its own occurrence is early, not a day late.
+  it('THE REGRESSION: a trigger firing 35 min before its own cron is early, not 1405 min late', () => {
+    const r = py(`list(m.staleness('early-trigger-job',
+                     {'early-trigger-job': {'cron': '0 7 * * *', 'maxLateMinutes': 600}},
+                     ref=datetime.datetime(2026, 11, 6, 6, 25)))`);
+    expect(r[0], 'an early run must not be skipped').toBe(false);
+    expect(r[2]).toMatch(/early for 2026-11-06 07:00/);
+  });
+
+  it('CONTROL: the early grace is bounded, so a genuinely late run is still skipped', () => {
+    // Back-test for the line above. Without the 120-minute bound, "nearest occurrence wins"
+    // reads a 20:00 run of a 07:00 job as 11 hours early for tomorrow and the stale guard is
+    // inert for half of every day.
+    const sch = `{'early-trigger-job': {'cron': '0 7 * * *', 'maxLateMinutes': 600}}`;
+    const at2000 = py(`list(m.staleness('early-trigger-job', ${sch},
+                          ref=datetime.datetime(2026, 11, 6, 20, 0)))`);
+    expect(at2000[0], '13 hours after its slot is late, whatever tomorrow holds').toBe(true);
+    expect(at2000[2]).toMatch(/780 min late/);
+    // And three hours early is beyond the grace, so it is still judged on the last occurrence.
+    const at0400 = py(`list(m.staleness('early-trigger-job', ${sch},
+                          ref=datetime.datetime(2026, 11, 6, 4, 0)))`);
+    expect(at0400[0]).toBe(true);
+  });
+
   it('does not skip a job whose limit is generous', () => {
     const r = run(['acquire', 'forgiving-job']);
     expect(r.code).toBe(0);

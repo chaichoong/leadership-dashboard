@@ -121,6 +121,35 @@ def sent_documents(data, dg):
     return dict(sent) if isinstance(sent, dict) else {}
 
 
+def documents_of_other_sources(data, dg):
+    """Every split filename the ledger records against a source that is NOT this one.
+
+    Finding 20261106-post-manager-weekly-1213. Split/ is one shared folder, so a pass that
+    scans two sources leaves both sources' documents in it. The control below demanded a
+    result for every file in Split/ against ONE source, so with two sources present neither
+    could ever satisfy it: on 6 Nov 2026 all 18 documents emailed cleanly and BOTH archive
+    calls were refused, source A for B's single document and source B for A's seventeen.
+    Those files are accounted for — by the other source's own ledger row — and that source's
+    own archive call clears them.
+    """
+    others = {}
+    for key, entry in (data or {}).items():
+        if key == dg or not isinstance(entry, dict):
+            continue
+        # Only a source that has NOT yet archived. Once a source archives it clears its own
+        # splits, so a file still on disk under its name afterwards is a leftover the control
+        # must still refuse — and split names are document-derived, so two sources CAN produce
+        # the same name. Without this, an archived source's old row would exempt a new
+        # source's unsent document for ever.
+        if entry.get("emailed") or entry.get("date"):
+            continue
+        sent = entry.get("sent")
+        if isinstance(sent, dict):
+            for name in sent:
+                others[name] = entry.get("source") or key[:8]
+    return others
+
+
 def record_sent(names, src, dg, marker, date):
     """Persist each clean send on its own. Called before anything that can refuse."""
     names = [n for n in names if n]
@@ -250,7 +279,12 @@ def cmd_archive(args):
     # archiving over it loses the document silently.
     on_disk = sorted(f for f in os.listdir(split) if not f.startswith(".")) \
         if os.path.isdir(split) else []
-    missing = [f for f in on_disk if f not in results and f not in already]
+    # Per SOURCE, not per FOLDER (finding 20261106-post-manager-weekly-1213): a split that
+    # belongs to another source is accounted for by that source's ledger row, and its own
+    # archive call clears it. Only a split no source has ever tried to send is invisible.
+    elsewhere = documents_of_other_sources(read_marker(args.marker), dg)
+    missing = [f for f in on_disk
+               if f not in results and f not in already and f not in elsewhere]
     if missing:
         print("post-archive: REFUSED — %d document(s) in Split/ have no recorded send: %s. "
               "Send them or remove them before archiving." % (len(missing), ", ".join(missing)))
@@ -288,16 +322,23 @@ def cmd_archive(args):
         return REFUSED
 
     cleared = 0
-    for name in on_disk:
+    # Clear only THIS source's documents. Split/ is shared, so deleting everything in it
+    # would destroy the other source's splits before that source has archived
+    # (finding 20261106-post-manager-weekly-1213).
+    mine = [name for name in on_disk if name in results or name in already]
+    for name in mine:
         try:
             os.unlink(os.path.join(split, name))
             cleared += 1
         except OSError as exc:
             print("post-archive: could not clear %s from Split/ (%s)" % (name, exc))
+    left = [name for name in on_disk if name not in mine]
     print("post-archive: archived %s to Processed/ after %d clean send(s) (%d of them recorded "
-          "by an earlier pass); cleared %d file(s) from Split/"
+          "by an earlier pass); cleared %d file(s) from Split/%s"
           % (os.path.basename(src), len(counted),
-             len([n for n in counted if n not in results]), cleared))
+             len([n for n in counted if n not in results]), cleared,
+             (", left %d belonging to another source (%s)"
+              % (len(left), ", ".join(sorted(left)))) if left else ""))
     return 0
 
 

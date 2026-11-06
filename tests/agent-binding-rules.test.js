@@ -137,7 +137,11 @@ describe('the rules that bind every agent', () => {
   it.skipIf(!existsSync(LIVE))('is run by the daily estate check, not only by hand', () => {
     let out = '';
     try {
-      out = execFileSync('python3', [path.join(ROOT, 'scripts/agent-estate-drift.py')], {
+      // --now pins the pre-sweep staleness window (finding 20261105-agent-dispatch-1210).
+      // Without it this exited 2 between 00:00 and 06:59 London, so the gate was red
+      // overnight for a reason that has nothing to do with the binding rules.
+      out = execFileSync('python3', [path.join(ROOT, 'scripts/agent-estate-drift.py'),
+        '--now', '2026-09-07T12:00:00'], {
         encoding: 'utf8', cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'], timeout: 120000,
       });
     } catch (e) {

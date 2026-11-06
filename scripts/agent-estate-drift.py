@@ -549,13 +549,27 @@ def main(argv=None):
     p.add_argument("--repo", default=REPO)
     p.add_argument("--claude-md", default=CLAUDE_MD)
     p.add_argument("--memory", default=MEMORY)
+    # The clock the "read may be stale" downgrade is judged on. Real time by default, so
+    # production behaviour is unchanged; a test pins it instead of inheriting the hour the
+    # suite happens to run at. Before this existed, every clean-run case in
+    # tests/agent-estate-drift.test.js exited 2 between 00:00 and 06:59 London, so npm test
+    # was red overnight and merge-pr.py refused PR #884 at 01:21 on 5 Nov 2026
+    # (finding 20261105-agent-dispatch-1210).
+    p.add_argument("--now", default=None,
+                   help="ISO timestamp to judge the pre-sweep staleness window on (tests)")
     a = p.parse_args(argv)
+    now = None
+    if a.now:
+        try:
+            now = dt.datetime.fromisoformat(a.now)
+        except ValueError:
+            p.error("--now is not an ISO timestamp: %s" % a.now)
     if a.selftest:
         return selftest()
     code, res = run(a.agents, a.skills, a.tasks, a.brain, a.repo,
                     a.claude_md, a.memory)
     # Before the sweep has written, a clean answer is only an early one (1156).
-    stale = read_may_be_stale()
+    stale = read_may_be_stale(now)
     if stale and code == 0:
         code, res = 2, dict(res, reason=stale)
     if a.json:

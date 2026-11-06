@@ -159,6 +159,74 @@ describe('post-archive, driven against a planted post tree', () => {
     expect(c.out).toContain('ALREADY EMAILED');
   });
 
+  // THE REGRESSION (finding 20261106-post-manager-weekly-1213, 6 Nov 2026). The Post Inbox held
+  // two scans. All 18 documents split into the one shared Split/ folder and all 18 emailed
+  // cleanly, then BOTH archive calls were refused: archiving source A reported 1 document with
+  // no recorded send (B's) and archiving source B reported 17 (A's). The control listed every
+  // file in Split/ and demanded a result for each against ONE source, so with two sources
+  // present neither could ever satisfy it, and both scans stayed in the inbox for the next
+  // pass to find as unarchived. Back-test: drop the `elsewhere` exemption and the first
+  // expectation below reads 2 again.
+  it('THE REGRESSION: two sources sharing Split/ can both archive', () => {
+    const p = plant();
+    // A second source, with its own document, split into the same folder.
+    const sourceB = join(p.home, 'scan-b-2026-11-05.pdf');
+    writeFileSync(sourceB, '%PDF-1.4 one document\n');
+    writeFileSync(join(p.split, 'water_bill.pdf'), 'c');
+    const baseB = ['--source', sourceB, '--split', p.split, '--processed', p.processed,
+                   '--marker', p.marker, '--date', '2026-11-06'];
+    // Both sends are recorded first, exactly as the pass does it.
+    expect(run(['sent', '--source', p.source, '--marker', p.marker,
+                '--result', 'hmrc_letter.pdf=0', '--result', 'council_notice.pdf=0']).code).toBe(0);
+    expect(run(['sent', '--source', sourceB, '--marker', p.marker,
+                '--result', 'water_bill.pdf=0']).code).toBe(0);
+
+    const a = run(['archive', ...p.base,
+                   '--result', 'hmrc_letter.pdf=0', '--result', 'council_notice.pdf=0']);
+    expect(a.code, a.out).toBe(0);
+    expect(existsSync(p.source)).toBe(false);
+    // It cleared only its own two, and said so.
+    expect(readdirSync(p.split)).toEqual(['water_bill.pdf']);
+    expect(a.out).toContain('left 1 belonging to another source');
+
+    const b = run(['archive', ...baseB, '--result', 'water_bill.pdf=0']);
+    expect(b.code, b.out).toBe(0);
+    expect(existsSync(sourceB)).toBe(false);
+    expect(readdirSync(p.split)).toEqual([]);
+    expect(readdirSync(p.processed).sort())
+      .toEqual(['scan-2026-10-26.pdf', 'scan-b-2026-11-05.pdf']);
+  });
+
+  it('CONTROL: a split no source has ever tried to send is still refused', () => {
+    // The control the fix must not weaken. An orphan in Split/ belongs to no ledger row, so
+    // archiving over it would lose the document silently.
+    const p = plant();
+    writeFileSync(join(p.split, 'orphan.pdf'), 'x');
+    const r = run(['archive', ...p.base,
+                   '--result', 'hmrc_letter.pdf=0', '--result', 'council_notice.pdf=0']);
+    expect(r.code, r.out).toBe(2);
+    expect(r.out).toContain('orphan.pdf');
+    expect(existsSync(p.source)).toBe(true);
+  });
+
+  it('CONTROL: an ARCHIVED source does not exempt a later source\'s unsent document', () => {
+    // Split names are document-derived, so two scans can produce the same filename. Once a
+    // source has archived it has cleared its own splits, so a file back on disk under that
+    // name belongs to whoever is archiving now and still needs a result.
+    const p = plant();
+    expect(run(['archive', ...p.base, '--result', 'hmrc_letter.pdf=0',
+                '--result', 'council_notice.pdf=0']).code).toBe(0);
+    const sourceB = join(p.home, 'scan-b.pdf');
+    writeFileSync(sourceB, '%PDF-1.4 a different scan\n');
+    writeFileSync(join(p.split, 'hmrc_letter.pdf'), 'a2');
+    writeFileSync(join(p.split, 'council_notice.pdf'), 'b2');
+    const r = run(['archive', '--source', sourceB, '--split', p.split,
+                   '--processed', p.processed, '--marker', p.marker, '--date', '2026-11-06',
+                   '--result', 'hmrc_letter.pdf=0']);
+    expect(r.code, r.out).toBe(2);
+    expect(r.out).toContain('council_notice.pdf');
+  });
+
   it('check reads the content, so a renamed copy of an emailed source is still caught', () => {
     const p = plant();
     run(['archive', ...p.base,
