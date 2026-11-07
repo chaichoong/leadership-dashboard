@@ -1176,6 +1176,32 @@ def delete_remote_branch(facts):
     return False, said or "gh api exited %d" % r.returncode
 
 
+# gh's squash merge tries to update the local checkout afterwards. On this Mac it never can:
+# .claude/worktrees/content-engine-runtime is pinned to main on purpose for the nightly
+# content-engine jobs (CLAUDE.md: never remove it) and git allows one worktree per branch. So a
+# SUCCESSFUL merge has always carried "fatal: 'main' is already used by worktree at ..." in its
+# output beside merged:true, and a genuinely failed merge looked exactly the same — the one
+# string that should distinguish them did not (findings 20261025-queue-fixer-1081 and
+# 20261005-daily-ops-749). Name it instead of leaving it to be read as an error.
+WORKTREE_HOLDS_MAIN = re.compile(
+    r"fatal: '(?:main|master)' is already used by worktree at", re.I)
+
+
+def local_checkout_verdict(said, merged):
+    """{"skipped": why} when the only trouble was the local checkout, else None.
+
+    Only for a merge that GitHub confirms landed: on a merge that did not land this string
+    explains nothing, and calling it benign would be the half-merge this exists to expose.
+    """
+    if not merged or not WORKTREE_HOLDS_MAIN.search(said or ""):
+        return None
+    return {"skipped": "gh could not update the local main checkout, which it never can on this "
+                       "Mac: a worktree holds main by design (.claude/worktrees/"
+                       "content-engine-runtime). The squash merge landed on GitHub, confirmed by "
+                       "the API, and nothing local was needed.",
+            "benign": True}
+
+
 def do_merge(pr, facts, head, title=None):
     args = ["gh", "pr", "merge", str(pr), "--squash"]
     if head:
@@ -1201,6 +1227,12 @@ def do_merge(pr, facts, head, title=None):
         said += " | could not confirm the PR state: %s" % e
     merged = isinstance(state, dict) and state.get("state") == "MERGED"
     out = {"merged": merged, "mergeOutput": tail(said, 300)}
+    local = local_checkout_verdict(said, merged)
+    out["localCheckout"] = local or {"benign": False}
+    if local:
+        # So a reader, and the fixer's JSON, can tell this apart from a half-merge without
+        # parsing the git text themselves.
+        out["mergeOutputBenign"] = True
     if merged:
         out["branchDeleted"], out["branchWhy"] = delete_remote_branch(facts)
     return out
