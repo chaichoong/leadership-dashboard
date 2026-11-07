@@ -1152,6 +1152,55 @@ def log_started_run(job, lease_minutes):
         pass
 
 
+def log_finished_run(job, code, started, reason=None):
+    """Append a DONE line to the job's runs.log when the run ends.
+
+    WHY (finding 20261023-queue-fixer-1054). A START line went in on finding
+    1173, and nothing ever wrote the other end of it. compound-brain ran and
+    succeeded every night, and its own runs.log held a START with no outcome —
+    so the per-job log, which is where a human looks FIRST, could not say
+    whether the job finished, failed, or is still holding the queue right now.
+    Read on 7 Nov 2026: compliance-watch's newest two lines were both STARTs.
+
+    A run that ends writes how it ended and how long it took, on every path:
+    this is called from run()'s `finally`, so no exit route can skip it, which
+    is exactly how the missing end line survived the 1173 fix.
+
+    Never raises: a logging failure must not change what the queue does."""
+    if code is None:
+        label = "DONE (the command never started)"
+    elif code == 0:
+        label = "DONE ok"
+    else:
+        label = "DONE exit %s" % code
+    took = ""
+    if started is not None:
+        took = ", took %s" % human_seconds(now() - started)
+    try:
+        d = os.path.join(HOME, "knowledge-os/logs", job)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "runs.log"), "a") as fh:
+            fh.write("=== %s %s%s%s ===\n"
+                     % (iso(), label, took,
+                        (": %s" % reason) if reason else ""))
+    except OSError:
+        pass
+
+
+def human_seconds(secs):
+    """"93.4 s" or "2h 11m" — a hold a human reads at a glance."""
+    try:
+        secs = float(secs)
+    except (TypeError, ValueError):
+        return "unknown"
+    if secs < 120:
+        return "%.1f s" % secs
+    mins = int(secs // 60)
+    if mins < 120:
+        return "%d min" % mins
+    return "%dh %02dm" % (mins // 60, mins % 60)
+
+
 # ─── A HUNG CHILD IS NOT WORK, AND MUST NOT KEEP THE LEASE ALIVE ────────────
 #
 # Finding 20261103-phase-5-1173, measured. audiobook-backfill's grandchild
@@ -1711,6 +1760,15 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
     """
     if lease_minutes == DEFAULT_LEASE_MIN:
         lease_minutes = WRAPPED_LEASE_MIN
+    # WHEN THE JOB WAS CALLED, not when it got the lock (finding
+    # 20261029-phase-2-1120). The slot runners label their report from the wall
+    # clock at run start, which is AFTER the queue wait: on 28 Oct 2026 the
+    # 13:20 task-manager slot acquired at 15:15 and headed its report "17:00
+    # slot", overwrote that slot's report file, and the log then showed two
+    # 17:00 rounds and no midday one. The trigger time is known only here, so
+    # it is handed to the child and nothing downstream has to guess.
+    queued_at = now()
+    os.environ["JOB_QUEUE_QUEUED_AT"] = iso(queued_at)
     code = acquire(job, mode="wrapped", lease_minutes=lease_minutes,
                    timeout_minutes=timeout_minutes, check_stale=check_stale,
                    ready_wait_minutes=ready_wait_minutes)
@@ -1724,6 +1782,7 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
     # The hold is written where this job's own history is kept, as it STARTS
     # (finding 20261103-phase-5-1173), not only when it ends.
     log_started_run(job, lease_minutes)
+    started_at = now()
 
     # ─── THE WHOLE TREE, NOT JUST THE WRAPPER (finding 20260904-content-engine-459)
     #
@@ -1944,6 +2003,11 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
         return code
     finally:
         stop.set()
+        # THE OTHER END OF THE START LINE (finding 20261023-queue-fixer-1054).
+        # In the `finally` on purpose: a return path added later cannot forget
+        # it, which is how the missing done line outlived the START-line fix.
+        log_finished_run(job, running["code"], started_at,
+                         running["ceiling"] or running["lost"] or None)
         if running["ceiling"]:
             release(job, quiet=True, outcome="failed", reason=running["ceiling"])
         elif not running["lost"]:

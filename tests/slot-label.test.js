@@ -56,6 +56,58 @@ describe('slot-label', () => {
     }
   });
 
+  // ─── THE TRIGGER'S CLOCK, NOT THE LOCK'S (finding 20261029-phase-2-1120) ──
+  //
+  // A nearest-hour rule only survives a short wait. On 28 Oct 2026 the 13:20
+  // task-manager slot waited 6,910s behind inbound-triage, acquired the lock at
+  // 15:15:11, read the wall clock and called itself the 17:00 slot: it wrote
+  // report-2026-10-28-17.md, the real 17:20 run found that name taken, and
+  // runs.log read "09:00, 17:00, 17:00" with no midday round for a day on which
+  // all three ran. job-queue.py now hands the trigger time down.
+  describe('a long queue wait cannot rename the slot', () => {
+    const withQueued = (iso) =>
+      execFileSync('python3', [SCRIPT], {
+        encoding: 'utf8',
+        env: { ...process.env, JOB_QUEUE_QUEUED_AT: iso, TZ: 'Europe/London' },
+      }).trim();
+
+    it('the 28 Oct 13:20 slot that acquired at 15:15 is still the 13:00 slot', () => {
+      // GMT in late October, so 13:20Z is 13:20 London.
+      expect(withQueued('2026-10-28T13:20:00Z')).toBe('13:00');
+    });
+
+    it('a 09:20 trigger held until the afternoon is still the 09:00 slot', () => {
+      expect(withQueued('2026-10-28T09:20:05Z')).toBe('09:00');
+    });
+
+    it('the stamp is read in London time, not as UTC through BST', () => {
+      // 1 Jul is BST (+1): 12:20Z is 13:20 London, which is the 13:00 slot.
+      // Reading it as UTC would answer 13:00 too, so use a case that differs:
+      // 08:20Z in BST is 09:20 London (09:00 slot); as UTC it is 08:20, which
+      // the nearest-hour rule also calls 09:00 — so test the real boundary.
+      // 11:10Z in BST is 12:10 London -> 13:00; as UTC 11:10 -> 09:00.
+      expect(withQueued('2026-07-01T11:10:00Z')).toBe('13:00');
+    });
+
+    it('an unreadable stamp falls back to the wall clock, never to blank', () => {
+      for (const bad of ['nonsense', '2026-10-28 13:20', '']) {
+        expect(withQueued(bad), `no label for ${JSON.stringify(bad)}`)
+          .toMatch(/^(09|13|17):00$/);
+      }
+    });
+
+    it('job-queue.py hands the trigger time down BEFORE it starts waiting', () => {
+      // The whole mechanism: a stamp taken after acquire() would carry the
+      // lock time and reproduce the bug exactly.
+      const src = readFileSync(resolve(__dirname, '../scripts/job-queue.py'), 'utf8');
+      const stamp = src.indexOf('JOB_QUEUE_QUEUED_AT');
+      const acquire = src.indexOf('code = acquire(job, mode="wrapped"');
+      expect(stamp, 'job-queue.py never exports the trigger time').toBeGreaterThan(-1);
+      expect(stamp, 'the trigger time is stamped after the queue wait')
+        .toBeLessThan(acquire);
+    });
+  });
+
   it('rejects a malformed --at rather than silently defaulting', () => {
     // THE CONTROL. A helper that answers "09:00" to anything is the bug again.
     let code = 0;
