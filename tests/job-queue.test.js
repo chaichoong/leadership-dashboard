@@ -250,6 +250,51 @@ describe('staleness cut-off', () => {
     expect(log, 'and say how long the lease it holds is').toMatch(/lease .* min/);
     expect(log).toMatch(/pid \d+/);
   });
+
+  // ─── AND THE OTHER END OF IT (finding 20261023-queue-fixer-1054) ──────────
+  //
+  // The START line above shipped on its own. Read on 7 Nov 2026, the newest two
+  // lines in compliance-watch's runs.log were both STARTs and compound-brain's
+  // held a START with no outcome: the per-job log, the first place a human
+  // looks, could not say whether a nightly job finished, failed, or is holding
+  // the queue right now. It ran and succeeded every night and read as dead.
+  it("writes a DONE line with the outcome and the duration when the run ends", () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'ends-ok': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped' },
+    }));
+    expect(run(['run', 'ends-ok', '--', 'true'], { env: { HOME: fakeHome } }).code).toBe(0);
+    const log = readFileSync(join(fakeHome, 'knowledge-os/logs/ends-ok/runs.log'), 'utf8');
+    expect(log).toContain('START');
+    expect(log, 'a run that ended must say so in its own log').toMatch(/DONE ok/);
+    expect(log, 'and how long it took').toMatch(/took .*s|took \d+ min/);
+  });
+
+  it("a failing run's DONE line carries its exit code, not just a start", () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'ends-bad': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped' },
+    }));
+    const r = run(['run', 'ends-bad', '--', 'sh', '-c', 'exit 3'],
+                  { env: { HOME: fakeHome } });
+    expect(r.code).toBe(3);
+    const log = readFileSync(join(fakeHome, 'knowledge-os/logs/ends-bad/runs.log'), 'utf8');
+    expect(log).toMatch(/DONE exit 3/);
+  });
+
+  it('a command that cannot start still ends the START line it wrote', () => {
+    // The worst case for a reader: a START with nothing after it looks exactly
+    // like a job still holding the queue. Every path writes an end.
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'ends-never': { cron: '* * * * *', maxLateMinutes: 1440, mode: 'wrapped' },
+    }));
+    run(['run', 'ends-never', '--', join(ROOT, 'no-such-command-at-all')],
+        { env: { HOME: fakeHome } });
+    const log = readFileSync(join(fakeHome, 'knowledge-os/logs/ends-never/runs.log'), 'utf8');
+    expect(log).toContain('START');
+    expect(log).toMatch(/DONE/);
+  });
 });
 
 // ---------------------------------------------------------------------------

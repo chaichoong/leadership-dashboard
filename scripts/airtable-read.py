@@ -42,13 +42,71 @@ import urllib.request
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appnqjDpqDniH3IRl")
 PAT_FILE = os.environ.get("AIRTABLE_PAT_FILE",
                           os.path.expanduser("~/.config/od/airtable_pat"))
-API = "https://api.airtable.com/v0"
+# An env override so the TESTS can drive the real CLI end to end against a
+# local stub. Without it the only thing a test can reach is an internal
+# function, and a test that never runs the command is theatre.
+#
+# LOOPBACK ONLY, and that is not belt-and-braces: this file sends the live
+# Airtable token as a Bearer header on every request, so an env var that could
+# name any host would be a way to post the token to one. A non-loopback value
+# is ignored and said on stderr, never obeyed quietly.
+def _api_base():
+    raw = (os.environ.get("AIRTABLE_API") or "").strip()
+    if not raw:
+        return "https://api.airtable.com/v0"
+    host = urllib.parse.urlparse(raw).hostname or ""
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return raw
+    print("IGNORING AIRTABLE_API=%r: only a loopback host is allowed, because "
+          "this reader sends the live token as a Bearer header. Reading the "
+          "real Airtable instead." % raw, file=sys.stderr)
+    return "https://api.airtable.com/v0"
+
+
+API = _api_base()
 PAGE_SIZE = 100
+
+# ─── A LANE NAME IS NOT A TABLE NAME ──────────────────────────────────────
+#
+# Findings 20261102-ceo-huddle-1163 and 20261106-phase-2-1215. The board's
+# Finance lane is told to read "the Payment Run". There is no table of that
+# name in the base: the list lives in Dashboard Invoices. For two working days
+# the head got a bare "HTTP 403", decided that was a reason to SUBSTITUTE
+# another table, and the brief Kevin reads carried "3 unpaid bills totalling
+# GBP 516" with nothing saying it came from somewhere else. That is the
+# "a wrong query still returns 200" failure wearing a 403: a refused read must
+# never be answered by quietly reading something else.
+#
+# Two rules, both here because this is the one door every head reads through:
+#   * A NAME WE KNOW resolves, and the output SAYS it resolved (resolvedFrom).
+#     Loud, not silent — the caller can see which table the rows came from.
+#   * A NAME WE DO NOT KNOW names the base's real tables in the error, so the
+#     head reports the names instead of guessing one.
+TABLE_ALIASES = {
+    # Kevin's words for the Friday payment list -> the table that holds it.
+    # Confirmed against scripts/check-data-invariants.py INVOICES
+    # (tblkOTKIG2Tyiy9aM, "Dashboard Invoices (the Payment Run list)").
+    "payment run": "Dashboard Invoices",
+    "payment run list": "Dashboard Invoices",
+    "payments": "Dashboard Invoices",
+}
+
+
+
+# Set while read_schema() is itself reading, so a schema read that fails can
+# never recurse into "let me read the schema to explain this".
+_RESOLVING = {"on": False}
 
 
 def die(reason, detail=""):
-    """Plain English on stdout as JSON, so a head can report it verbatim."""
-    print(json.dumps({"ok": False, "error": reason, "detail": detail}, indent=2))
+    """Plain English on stdout as JSON, so a head can report it verbatim.
+
+    SILENT while a resolver read is in flight. The schema read behind an error
+    message, or behind a cheap count, is not the caller's read: printing its own
+    failure would put TWO JSON objects on stdout and the head parses the first
+    one it finds. The resolver turns the SystemExit into its own plain line."""
+    if not _RESOLVING["on"]:
+        print(json.dumps({"ok": False, "error": reason, "detail": detail}, indent=2))
     sys.exit(2)
 
 
@@ -63,7 +121,7 @@ def token():
     return pat
 
 
-def get(url, pat):
+def get(url, pat, table=None):
     req = urllib.request.Request(url, headers={"Authorization": "Bearer %s" % pat})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
@@ -75,11 +133,76 @@ def get(url, pat):
             body = (e.read() or b"").decode("utf-8", "replace")[:300]
         except Exception:
             pass
+        if table and e.code in (403, 404) and not _RESOLVING["on"]:
+            # The commonest cause by far is a name that is not a table. Say
+            # which tables DO exist, so the caller reports a name rather than
+            # substituting a source of its own (findings 1163 and 1215).
+            die("Airtable refused the read of table %r (HTTP %s). %s"
+                % (table, e.code, real_table_hint(table)), body)
         die("Airtable refused the read (HTTP %s)" % e.code, body)
     except urllib.error.URLError as e:
         die("cannot reach Airtable", str(e.reason))
     except Exception as e:  # never swallow: say what broke
         die("the read failed", "%s: %s" % (type(e).__name__, e))
+
+
+def resolve_table(table):
+    """(name to read, the name asked for when it was an alias).
+
+    Never silent: the caller prints `resolvedFrom` so a reader of the output can
+    see the rows did not come from the name in the request."""
+    key = " ".join((table or "").split()).lower()
+    target = TABLE_ALIASES.get(key)
+    if target and target.lower() != key:
+        return target, table
+    return table, None
+
+
+def real_table_hint(asked):
+    """The base's real table names, for an error about a name that is not one.
+
+    A failed schema read is said plainly and never guessed at: the point of
+    this line is to replace a guess, so it must not make one."""
+    _RESOLVING["on"] = True
+    try:
+        tables = read_schema()
+    except SystemExit:
+        return ("The base's table list could not be read, so the real names "
+                "are NOT CHECKED. Do NOT read a different table instead.")
+    finally:
+        _RESOLVING["on"] = False
+    names = sorted(t.get("name") or "" for t in tables)
+    close = [n for n in names
+             if n and (n.lower() in (asked or "").lower()
+                       or (asked or "").lower() in n.lower())]
+    line = "The base's tables are: %s." % ", ".join(n for n in names if n)
+    if close:
+        line += " Closest by name: %s." % ", ".join(close)
+    line += (" Read one of those by name, or say NOT CHECKED. Never answer a "
+             "refused read by reading a different table.")
+    return line
+
+
+def primary_field(table):
+    """The table's first field name, or None when the schema cannot be read.
+
+    Used to make a count cheap: one small field per row instead of every field
+    (finding 20261102-ceo-huddle-1163 — a Transactions --count-only ran past
+    120 s and the Finance lane went NOT CHECKED for a second day)."""
+    _RESOLVING["on"] = True
+    try:
+        tables = read_schema()
+    except SystemExit:
+        return None
+    finally:
+        _RESOLVING["on"] = False
+    for t in tables:
+        if (t.get("name") or "").lower() == (table or "").lower() \
+                or t.get("id") == table:
+            for f in t.get("fields") or []:
+                if f.get("name"):
+                    return f["name"]
+    return None
 
 
 def read_table(table, formula=None, fields=None, view=None, sort=None,
@@ -103,7 +226,7 @@ def read_table(table, formula=None, fields=None, view=None, sort=None,
             q.append(("offset", offset))
         url = "%s/%s/%s?%s" % (API, BASE_ID, urllib.parse.quote(table),
                                urllib.parse.urlencode(q))
-        page = get(url, pat)
+        page = get(url, pat, table=table)
         # NO RECORDS KEY IS AN ERROR, NOT AN EMPTY TABLE (4 Nov 2026, finding
         # 20261104-phase-2-1187). `page.get("records") or []` reads a reply that
         # carries no records at all as zero rows, and a zero is what gets acted
@@ -155,12 +278,13 @@ def selftest():
     """Drive the real read_table over a stubbed `get`. No network, no token."""
     g, failed, checks = globals(), [], 0
     saved = (g["get"], g["token"])
+    saved_get = g["get"]
     g["token"] = lambda: "stub"
 
     def run(pages):
         """pages: the replies `get` hands back, in order."""
         seq = list(pages)
-        g["get"] = lambda url, pat: seq.pop(0)
+        g["get"] = lambda url, pat, table=None: seq.pop(0)
         return read_table("Tasks")
 
     def check(name, ok):
@@ -187,6 +311,88 @@ def selftest():
             except SystemExit as e:
                 check("a reply with no records list is refused: %r" % (reply,),
                       e.code == 2)
+        # findings 20261102-ceo-huddle-1163 / 20261106-phase-2-1215: a lane
+        # name resolves to a real table, and the caller is TOLD it did.
+        check("a lane name resolves to its real table",
+              resolve_table("Payment Run") == ("Dashboard Invoices", "Payment Run"))
+        check("the alias match ignores case and spacing",
+              resolve_table("  payment   RUN ") == ("Dashboard Invoices",
+                                                    "  payment   RUN "))
+        check("an ordinary table name is left exactly alone",
+              resolve_table("Tasks") == ("Tasks", None))
+        check("a name that IS the target is not reported as resolved",
+              resolve_table("Dashboard Invoices") == ("Dashboard Invoices", None))
+        # A 403/404 on a table read names the base's real tables instead of
+        # leaving the caller to substitute a source of its own. Stubbed at
+        # urlopen so the REAL get() error path runs, not a stand-in for it.
+        class _Resp:
+            def __init__(self, body):
+                self._b = json.dumps(body).encode()
+
+            def read(self):
+                return self._b
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def urlopen_stub(code):
+            def _open(req, timeout=None):
+                url = req.full_url if hasattr(req, "full_url") else str(req)
+                if "/meta/" in url:
+                    return _Resp({"tables": [
+                        {"id": "tbl1", "name": "Dashboard Invoices",
+                         "fields": [{"name": "Invoice"}]},
+                        {"id": "tbl2", "name": "Tasks",
+                         "fields": [{"name": "Task Name"}]}]})
+                raise urllib.error.HTTPError(url, code, "no", None, None)
+            return _open
+
+        saved_open = urllib.request.urlopen
+        g["get"] = saved_get
+        try:
+            for code in (403, 404):
+                urllib.request.urlopen = urlopen_stub(code)
+                try:
+                    read_table("Payment Run")
+                    check("a %s on a table read is refused loudly" % code, False)
+                except SystemExit as e:
+                    check("a %s on a table read is refused loudly" % code,
+                          e.code == 2)
+            urllib.request.urlopen = urlopen_stub(403)
+            hint = real_table_hint("Payment Run")
+            check("the error names the base's real tables",
+                  "Dashboard Invoices" in hint and "Tasks" in hint)
+            check("the error forbids reading a different table instead",
+                  "Never answer a refused read by reading a different table" in hint)
+            check("the schema read is not itself re-explained (no recursion)",
+                  _RESOLVING["on"] is False)
+        finally:
+            urllib.request.urlopen = saved_open
+        # A count asks for one field, so a big table does not time out.
+        g["get"] = lambda url, pat, table=None: (
+            {"tables": [{"id": "tbl3", "name": "Transactions",
+                         "fields": [{"name": "Name"}, {"name": "Amount"}]}]}
+            if "/meta/" in url else {"records": []})
+        check("a count reads the table's first field only",
+              primary_field("Transactions") == "Name")
+        saved_open = urllib.request.urlopen
+        g["get"] = saved_get
+        try:
+            def _dead(req, timeout=None):
+                url = req.full_url if hasattr(req, "full_url") else str(req)
+                raise urllib.error.HTTPError(url, 500, "no", None, None)
+            urllib.request.urlopen = _dead
+            check("an unreadable schema gives no field rather than a guess",
+                  primary_field("Transactions") is None)
+        except SystemExit:
+            check("an unreadable schema gives no field rather than a guess", False)
+        finally:
+            urllib.request.urlopen = saved_open
+        check("a failed schema read leaves the recursion guard off",
+              _RESOLVING["on"] is False)
     finally:
         g["get"], g["token"] = saved
     print(json.dumps({"checks": checks, "failed": failed}, indent=2))
@@ -231,13 +437,36 @@ def main(argv=None):
         return 0
 
     fields = [f.strip() for f in (a.fields or "").split(",") if f.strip()]
-    rows, pages = read_table(a.table, formula=a.formula, fields=fields,
+    table, asked_as = resolve_table(a.table)
+    # A COUNT DOES NOT NEED THE ROWS. Transactions is 8,000+ rows, so 87 pages
+    # of every field timed the Finance lane out at 120 s with nothing printed.
+    # One field per row makes the same count cheap. If the schema cannot be
+    # read we fall back to the full read and SAY so, rather than guess a field
+    # name (an unknown field name is a 422, which would lose the count).
+    light = False
+    if a.count_only and not fields:
+        pf = primary_field(table)
+        if pf:
+            fields, light = [pf], True
+    rows, pages = read_table(table, formula=a.formula, fields=fields,
                              view=a.view, sort=a.sort, limit=a.limit,
                              by_field_id=a.by_field_id)
-    out = {"ok": True, "table": a.table, "count": len(rows), "pages": pages}
+    out = {"ok": True, "table": table, "count": len(rows), "pages": pages}
+    if asked_as:
+        # NEVER a silent substitution (findings 1163, 1215): the output names
+        # the table the rows came from AND the name that was asked for.
+        out["resolvedFrom"] = asked_as
+        out["note"] = ("%r is not a table in this base; it is the name for %r, "
+                       "which is what was read." % (asked_as, table))
     if a.formula:
         out["formula"] = a.formula
-    if not a.count_only:
+    if a.count_only:
+        out["lightCount"] = light
+        if not light:
+            out["lightCountNote"] = ("the table's field list could not be read, "
+                                     "so every field was fetched; the count is "
+                                     "right but the read was slow")
+    else:
         out["records"] = rows
     print(json.dumps(out, indent=2))
     return 0
