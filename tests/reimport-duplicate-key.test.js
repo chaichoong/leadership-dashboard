@@ -145,3 +145,68 @@ describe('no-reimport-duplicates keys on the bank transaction id', () => {
     expect(r.control).toBe(0);
   });
 });
+
+// The pair must NAME an account a human can go and look at.
+//
+// Regression origin: 7 Nov 2026 (finding 20261107-phase-2-1235). The duplicate
+// halves sit on two DIFFERENT Airtable Account records for one real bank account,
+// and only one of them carries an alias. The check read the alias off copies[0]
+// alone, so 20 of the 36 reported pairs printed "(unknown account)" and nobody
+// could tell which account to open. Back-tested: restoring `copies[0]` makes the
+// first test below return "(unknown account)" and this block goes red.
+const SPLIT_ACCOUNT_PAIR = [
+  {
+    // The aliasless Account record comes FIRST, which is what broke it.
+    id: 'recNOALIAS0001',
+    fields: {
+      '**Raw': raw('cccccccc-3333-3333-3333-cccccccccccc', -12.5, '2026-10-02'),
+      '**Plaid TX ID': 'acctA--cccccccc-3333-3333-3333-cccccccccccc',
+      '**Account': ['recACCOUNTNOALIAS'],
+      '**GBP': -12.5,
+      '**Date': '2026-10-02',
+    },
+  },
+  {
+    id: 'recHASALIAS0001',
+    fields: {
+      '**Raw': raw('cccccccc-3333-3333-3333-cccccccccccc', -12.5, '2026-10-02'),
+      '**Plaid TX ID': 'acctB--cccccccc-3333-3333-3333-cccccccccccc',
+      'Account Alias (from **Account)': ['Monzo CB'],
+      '**Account': ['recACCOUNTWITHALIAS'],
+      '**GBP': -12.5,
+      '**Date': '2026-10-02',
+    },
+  },
+];
+
+describe('no-reimport-duplicates names an account a human can open', () => {
+  it('takes the alias from the copy that HAS one, not from the first copy', async () => {
+    const r = await checkAgainst(SPLIT_ACCOUNT_PAIR);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0].account).toBe('Monzo CB');
+  });
+
+  it('falls back to the Account record ids when no copy carries an alias', async () => {
+    const neither = SPLIT_ACCOUNT_PAIR.map((rec) => ({
+      ...rec,
+      fields: { ...rec.fields, 'Account Alias (from **Account)': undefined },
+    }));
+    const r = await checkAgainst(neither);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0].account).toContain('recACCOUNTNOALIAS');
+    expect(r.violations[0].account).toContain('recACCOUNTWITHALIAS');
+    expect(r.violations[0].account).not.toBe('(unknown account)');
+  });
+
+  it('still says (unknown account) when there is no account link at all', async () => {
+    const unlinked = SPLIT_ACCOUNT_PAIR.map((rec) => {
+      const fields = { ...rec.fields };
+      delete fields['Account Alias (from **Account)'];
+      delete fields['**Account'];
+      return { ...rec, fields };
+    });
+    const r = await checkAgainst(unlinked);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0].account).toBe('(unknown account)');
+  });
+});

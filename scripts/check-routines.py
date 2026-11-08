@@ -180,6 +180,126 @@ DEFAULT_WINDOW_HOURS = 26
 # have gone from "starved" to "apparently never ran", which is a worse lie.
 RAN_STATES = ("acquired", "started", "mark", "ran-unlocked")
 
+# ─── THE DECLARED TIME IS NOT THE INSTALLED TIME ─────────────────────
+#
+# Finding 20261107-daily-ops-1233. On 1 Nov 2026 estate-drift was moved from
+# 06:25 to 07:00, because at 06:25 it read the Drive Decisions folder 25 minutes
+# BEFORE the 06:45 CEO memory sweep wrote that day's rulings, printed "0 rulings
+# behind" and exited 0. The move landed in job-schedule.json, in
+# install-slot-jobs.sh and in CLAUDE.md, and a test asserts all three agree.
+#
+# It did not land on the Mac. Nothing reinstalls a plist, so
+# ~/Library/LaunchAgents/com.kevinbrittain.estate-drift.plist still fired at
+# 06:25 for six more days, and every surface that reads the repo said 07:00. A
+# declared time only matters if it is the one launchd uses, so what is INSTALLED
+# is compared against what is DECLARED, every morning, here.
+#
+# This cannot be a fixture test: the repo is already self-consistent and the
+# fault is host state. An unreadable plist folder is UNCHECKED, never clean.
+LAUNCH_AGENTS = os.environ.get(
+    "LAUNCH_AGENTS_DIR", os.path.join(HOME, "Library/LaunchAgents"))
+INSTALLER = os.environ.get(
+    "SLOT_INSTALLER",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "install-slot-jobs.sh"))
+LAUNCHD_PREFIX = "com.kevinbrittain."
+
+
+def _declared_times():
+    """{job: {(hour, minute), ...}} from install-slot-jobs.sh's JOBS array.
+
+    Returns (times, error). `*:05` means every hour at :05, so the hour is None.
+    A weekday prefix ("Sun 11:00") is dropped: this compares times of day, which
+    is where the drift was, and the weekday has its own test.
+    """
+    try:
+        with open(INSTALLER) as fh:
+            text = fh.read()
+    except OSError as e:
+        return None, "cannot read %s (%s)" % (INSTALLER, e)
+    block = re.search(r"^JOBS=\((.*?)^\)", text, re.S | re.M)
+    if not block:
+        return None, "no JOBS=( ... ) array in %s" % INSTALLER
+    out = {}
+    for line in block.group(1).split("\n"):
+        line = line.strip()
+        if not line.startswith('"'):
+            continue                      # a comment, or the closing paren
+        parts = line.strip('"').split("|")
+        if len(parts) < 2:
+            continue
+        name, when = parts[0], parts[1]
+        slots = set()
+        for piece in when.split(","):
+            piece = piece.strip()
+            piece = re.sub(r"^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+", "", piece)
+            m = re.match(r"^(\*|\d{1,2}):(\d{1,2})$", piece)
+            if not m:
+                slots = None
+                break
+            hour = None if m.group(1) == "*" else int(m.group(1))
+            slots.add((hour, int(m.group(2))))
+        if slots:
+            out[name] = slots
+    if not out:
+        return None, "parsed no jobs out of %s" % INSTALLER
+    return out, None
+
+
+def _installed_times(job):
+    """{(hour, minute), ...} from the installed plist, or (None, why)."""
+    import plistlib
+    path = os.path.join(LAUNCH_AGENTS, "%s%s.plist" % (LAUNCHD_PREFIX, job))
+    if not os.path.exists(path):
+        return None, "not installed"
+    try:
+        with open(path, "rb") as fh:
+            plist = plistlib.load(fh)
+    except Exception as e:                      # a corrupt plist is unchecked
+        return None, "unreadable (%s)" % e
+    cal = plist.get("StartCalendarInterval")
+    if cal is None:
+        return None, None                       # not a calendar job: nothing to compare
+    if isinstance(cal, dict):
+        cal = [cal]
+    slots = set()
+    for entry in cal:
+        if not isinstance(entry, dict) or "Minute" not in entry:
+            return None, "a StartCalendarInterval entry carries no Minute"
+        slots.add((entry.get("Hour"), int(entry["Minute"])))
+    return slots, None
+
+
+def _fmt_slots(slots):
+    return ", ".join("%s:%02d" % ("every hour" if h is None else "%02d" % h, m)
+                     for h, m in sorted(slots, key=lambda s: (s[0] is not None, s)))
+
+
+def plist_drift():
+    """Jobs whose installed firing times differ from the declared ones.
+
+    Returns (drifted, unchecked): drifted is a list of plain lines, unchecked a
+    list of "<job>: <why>". A folder that cannot be read lands in unchecked, so
+    it is never reported as agreeing.
+    """
+    declared, err = _declared_times()
+    if declared is None:
+        return [], ["every job: %s" % err]
+    if not os.path.isdir(LAUNCH_AGENTS):
+        return [], ["every job: cannot read %s" % LAUNCH_AGENTS]
+    drifted, unchecked = [], []
+    for job in sorted(declared):
+        installed, why = _installed_times(job)
+        if installed is None:
+            if why:
+                unchecked.append("%s: %s" % (job, why))
+            continue
+        if installed != declared[job]:
+            drifted.append(
+                "%s runs at %s on this Mac but is declared at %s — launchd uses "
+                "the installed time, so reinstall it (scripts/install-slot-jobs.sh "
+                "--install)" % (job, _fmt_slots(installed), _fmt_slots(declared[job])))
+    return drifted, unchecked
+
 
 def known_routines():
     """Every routine name the Mac knows about, from the folders on disk."""
@@ -576,7 +696,16 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
     lanes = lane_health(window_hours)
     lane_problems = broken_lanes(lanes)
 
+    # A job firing at a time nobody declared is a different fault from a job
+    # stacking, so it gets its own lines and does not move the exit code — the
+    # same shape as MISSED SLOT RUNS (5 Sep 2026). It is reported at EVERY exit
+    # code, including 0, because "nothing is stacking" was always true while
+    # estate-drift fired 35 minutes early for six days (finding 20261107-daily-ops-1233).
+    drifted, drift_unchecked = plist_drift()
+
     result = {
+        "plist_drift": drifted,
+        "plist_unchecked": drift_unchecked,
         "slot_attendance": attendance,
         "slot_shortfalls": sorted(shortfalls),
         "lane_health": lanes,
@@ -672,12 +801,20 @@ def main():
         # into the stacking verdict (5 Sep 2026).
         if missed:
             print("MISSED SLOT RUNS: %s" % missed, file=sys.stderr)
+        for line in result.get("plist_drift", []):
+            print("INSTALLED AT THE WRONG TIME: %s" % line, file=sys.stderr)
+        for line in result.get("plist_unchecked", []):
+            print("JOB TIME NOT CHECKED: %s" % line, file=sys.stderr)
         for line in result.get("broken_lanes", []):
             print("BROKEN LANE: %s" % line, file=sys.stderr)
     else:
         print("ROUTINE STACKING: %s" % result["reason"], file=sys.stderr)
         if missed:
             print("MISSED SLOT RUNS: %s" % missed, file=sys.stderr)
+        for line in result.get("plist_drift", []):
+            print("INSTALLED AT THE WRONG TIME: %s" % line, file=sys.stderr)
+        for line in result.get("plist_unchecked", []):
+            print("JOB TIME NOT CHECKED: %s" % line, file=sys.stderr)
         for line in result.get("broken_lanes", []):
             print("BROKEN LANE: %s" % line, file=sys.stderr)
         if result.get("detail"):
