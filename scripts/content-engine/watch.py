@@ -530,16 +530,18 @@ def find_record(file_id, day):
     return None, None
 
 
-def list_clips(batch=None, since=None, root=None, gaps=None, skipped=None):
+def list_clips(batch=None, since=None, root=None, gaps=None, skipped=None, errors=None):
     """Every clip under the raw folder, however deep: the 2026 batches sit under "2026/", the 2025 months
     under "2025/<month>/Ep NNNN - date/" (8 Sep 2026). `batch` matches the folder path relative to the root.
     Clips older than `since` are skipped unless their day is on Kevin's gap list. A day-numbered clip whose name
-    parse_clip cannot read is appended to `skipped` (its path under the root), never dropped in silence."""
+    parse_clip cannot read is appended to `skipped` (its path under the root), never dropped in silence.
+    A folder Drive would not list is appended to `errors` (the OSError): os.walk drops those without a word,
+    which is how an unreadable raw folder read as an empty one on 7 Nov 2026."""
     since = since or since_for_start_day()
     root = root or RAW_ROOT
     gaps = gap_days() if gaps is None else gaps
     out = []
-    for dirpath, dirs, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(root, onerror=(errors.append if errors is not None else None)):
         rel = os.path.relpath(dirpath, root)
         dirs[:] = sorted(d for d in dirs if not any(s in d for s in SKIP_DIRS))
         if rel != "." and any(s in rel for s in SKIP_DIRS): continue
@@ -558,7 +560,103 @@ def list_clips(batch=None, since=None, root=None, gaps=None, skipped=None):
     return sorted(out, key=lambda c: (c["date"], c["hms"]))
 
 
-def scan(create=False, batch=None, since=None):
+# A SCAN THAT FINDS NOTHING WAITS FOR DRIVE BEFORE IT GIVES UP THE NIGHT (8 Nov 2026). The 7 Nov 22:00 run passed the
+# queue's Drive probe, then found no clips in 0.7 s and exited 1: no render, no episode cards on 8 Nov. It FAILED rather
+# than deferred, so retry-deferred never came back for it, and the only trace was a pop-up on the Mac. Now an empty walk
+# is walked again for half an hour, the run says whether Drive would not serve the folder or it listed empty, and a night
+# still lost leaves a marker that opens the 08:00 content line (content_report.lost_night_line) plus ONE finding for the
+# fixer. The finding alone would not reach Kevin: the digest names only the three oldest of ~190 open high findings. The
+# raw folder has held clips every night since September, so an empty answer is Drive, not footage. A --batch scan is a
+# hand run and gets no wait.
+SCAN_RETRY_WAITS = (60, 120, 300, 600, 720)   # seconds between walks: 30 min in all, far inside the 04:00 last start
+LOST_NIGHT_TITLE = "Content Engine lost a night: the raw video folder on Drive could not be read, so no episodes were made"
+
+
+def empty_scan_reason(errors):
+    """Why a walk found no clips, in words: the folders Drive would not serve, or an empty listing."""
+    if not errors:
+        return "the folder listed but held no clips"
+    first = errors[0]
+    where = os.path.relpath(first.filename, RAW_ROOT) if getattr(first, "filename", None) else "?"
+    return "Drive would not serve %d folder%s (first: %s: %s)" % (
+        len(errors), "" if len(errors) == 1 else "s", where, first.strerror or first)
+
+
+def list_clips_patiently(batch, since, skipped, waits=SCAN_RETRY_WAITS, sleep=time.sleep, lister=None):
+    """(clips, why, partial): walk the raw folder, and while it yields nothing wait `waits` seconds in turn and walk
+    again. `why` is None once clips come back, else the last walk's reason. `partial` is the reason some folders went
+    unread on the walk that found clips (None when every folder listed). `skipped` holds the last walk's names."""
+    lister = lister or list_clips
+    why = None
+    for n, wait in enumerate((0,) + tuple(waits)):
+        if wait:
+            print("scan: no clips yet (%s); walking the folder again in %d min (try %d of %d)"
+                  % (why, max(1, wait // 60), n + 1, len(waits) + 1), flush=True)
+            sleep(wait)
+        del skipped[:]
+        errors = []
+        clips = lister(batch, since, skipped=skipped, errors=errors)
+        if clips:
+            partial = empty_scan_reason(errors) if errors else None
+            if partial:
+                print("scan: %d clips found, but %s; those are read on a later night" % (len(clips), partial))
+            return clips, None, partial
+        why = empty_scan_reason(errors)
+    return [], why, None
+
+
+def lost_night_path():
+    """Beside the ledger, worked out at call time, so a test that points LEDGER at scratch never writes the real one."""
+    return os.path.join(os.path.dirname(LEDGER), "lost_night.json")
+
+
+def lost_night(path=None):
+    """{"at", "why"} for the last night the scan gave up on, or None. Cleared by the next whole-folder scan that
+    finds clips, so the 08:00 content line names a lost night until a night reads the folder again."""
+    try: rec = json.load(open(path or lost_night_path()))
+    except FileNotFoundError: return None
+    except (OSError, ValueError) as ex:
+        print("lost-night marker unreadable (%s)" % ex, file=sys.stderr); return None
+    return rec if isinstance(rec, dict) and rec.get("at") else None
+
+
+def save_lost_night(why, path=None):
+    path = path or lost_night_path()
+    tmp = path + ".tmp"
+    json.dump({"at": dt.datetime.now().isoformat(timespec="seconds"), "why": why}, open(tmp, "w"), indent=1)
+    os.replace(tmp, path)
+
+
+def clear_lost_night(path=None):
+    """Never stops a night that found its clips: a marker that will not go is said and left."""
+    try: os.remove(path or lost_night_path())
+    except FileNotFoundError: pass
+    except OSError as ex: print("scan: could not clear the lost-night marker (%s)" % ex, file=sys.stderr)
+
+
+def file_lost_night(why, tries, minutes, run=None):
+    """File ONE finding for a night the scan gave up on, for the fixer (Kevin hears of it from the 08:00 line, which
+    reads the marker). The title never changes, so a second lost night recurs on the same finding. A failure to file
+    is printed."""
+    cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "findings.py"), "add",
+           "--routine", "content-engine", "--severity", "high",
+           "--title", LOST_NIGHT_TITLE,
+           "--where", "scripts/content-engine/watch.py scan (the nightly content-engine run)",
+           "--detail", "%s: the night's scan walked the raw folder %d times over %d min and found no clips: %s. Nothing "
+                       "was rendered, so no episode cards follow from this night." % (
+                           dt.datetime.now().strftime("%Y-%m-%d %H:%M"), tries, minutes, why),
+           "--fix", "From a session on the Mac mini, list the raw video folder and its batch folders (ls) so Drive "
+                    "serves them again, then read the next 22:00 run's scan line in "
+                    "~/knowledge-os/logs/content-engine.last.log."]
+    try:
+        r = (run or subprocess.run)(cmd, capture_output=True, text=True, timeout=120)
+        if getattr(r, "returncode", 1) != 0:
+            print("scan: could not file the lost-night finding (%s)" % (r.stderr or "")[-200:], file=sys.stderr)
+    except (OSError, subprocess.SubprocessError) as ex:
+        print("scan: could not file the lost-night finding (%s)" % str(ex)[-200:], file=sys.stderr)
+
+
+def scan(create=False, batch=None, since=None, waits=None, sleep=time.sleep):
     ledger = load_ledger()
     why = {}
     stale = repair_stale_pulls(ledger, why=why)
@@ -567,12 +665,22 @@ def scan(create=False, batch=None, since=None):
     for k in back: print("scan: %s put back in the queue for one more try (failed last time)" % k)
     if stale or back: save_ledger(ledger)
     skipped = []
-    clips = list_clips(batch, since, skipped=skipped)
+    waits = (() if batch else SCAN_RETRY_WAITS) if waits is None else waits
+    clips, empty_why, partial = list_clips_patiently(batch, since, skipped, waits=waits, sleep=sleep)
     if not clips:
-        raise SystemExit("scan: no clips found under %s (batch=%s since=%s) - is Drive mounted?" % (RAW_ROOT, batch, since))
-    if batch is None:                                        # a whole-folder walk: the list is complete, so the report may show it
+        if batch is None:
+            try: save_lost_night(empty_why)
+            except OSError as ex: print("scan: could not write the lost-night marker (%s)" % ex, file=sys.stderr)
+            file_lost_night(empty_why, len(waits) + 1, sum(waits) // 60)
+        raise SystemExit("scan: no clips found under %s (batch=%s since=%s) - %s; the night's render did not run"
+                         % (RAW_ROOT, batch, since, empty_why))
+    if batch is None:
+        clear_lost_night()                                   # clips came back, so the night runs
+    if batch is None and not partial:                        # a whole-folder walk: the list is complete, so the report may show it
         save_skipped_names(skipped)
         if skipped: print("scan: %d day-numbered clip%s skipped, the name cannot be read: %s" % (len(skipped), "" if len(skipped) == 1 else "s", "; ".join(skipped)))
+    elif batch is None:
+        print("scan: the skipped-names list is kept from the last complete walk; this one missed folders")
     added = created = linked = 0
     for c in clips:
         key = c["name"]

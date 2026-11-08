@@ -306,3 +306,139 @@ echo "unexpected: python3 $*" >&2; exit 9
     expect(states[states.length - 1]).toBe('released');
   });
 });
+
+// 8 Nov 2026: the 7 Nov 22:00 run passed the queue's Drive probe, then os.walk dropped every folder Drive would not
+// serve, the scan read "no clips" in 0.7 s and the night was lost: no render, no episode cards, only a Mac pop-up.
+// These run the REAL watch.scan on a scratch raw folder with one batch folder locked (chmod 000, which os.walk meets
+// exactly as it met Drive's refusal) and only the waits stood in. Every write goes to scratch: the ledger, the skipped
+// list, the lost-night marker and the findings queue. Back-tested on the old scan: it exits at once with no wait, no
+// marker and no finding.
+describe('content-engine scan: a raw folder Drive will not serve', () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, chmodSync, rmSync } = require('node:fs');
+  const { tmpdir } = require('node:os');
+  const CE = path.join(ROOT, 'scripts', 'content-engine');
+  const CLIP = 'VID_20260601_090000_00_001.insv';   // invented
+
+  // scenario: 'locked' | 'comes-back' | 'empty' | 'partial' (2026 locked, 2025 readable with a clip)
+  function scanIn(scenario) {
+    const home = mkdtempSync(path.join(tmpdir(), 'ce-scan-'));
+    const batch = path.join(home, 'raw', '2026', 'batch');
+    mkdirSync(batch, { recursive: true });
+    if (scenario !== 'empty') writeFileSync(path.join(batch, CLIP), 'x');
+    if (scenario === 'partial') {
+      mkdirSync(path.join(home, 'raw', '2025', 'older'), { recursive: true });
+      writeFileSync(path.join(home, 'raw', '2025', 'older', 'VID_20260501_090000_00_002.insv'), 'x');   // invented
+    }
+    // a marker from an earlier lost night, and an earlier complete skipped list, so clearing and keeping both show
+    writeFileSync(path.join(home, 'lost_night.json'), JSON.stringify({ at: '2026-11-01T22:30:00', why: 'earlier' }));
+    writeFileSync(path.join(home, 'skipped_names.json'), JSON.stringify({ at: '2026-11-01T22:00:00', names: ['earlier'] }));
+    if (scenario !== 'empty') chmodSync(path.join(home, 'raw', '2026'), 0o000);
+    const driver = path.join(home, 'driver.py');
+    writeFileSync(driver, `
+import datetime as dt, json, os, sys
+sys.path.insert(0, ${JSON.stringify(CE)})
+import watch as w
+home = ${JSON.stringify(home)}
+w.RAW_ROOT = os.path.join(home, "raw")
+w.LEDGER = os.path.join(home, "ledger.json")
+w.SKIPPED_NAMES_FILE = os.path.join(home, "skipped_names.json")
+w.drive_id = lambda p: None
+locked = os.path.join(w.RAW_ROOT, "2026")
+sleeps = []
+def sleep(s):
+    sleeps.append(s)
+    if ${JSON.stringify(scenario)} == "comes-back" and len(sleeps) == 2: os.chmod(locked, 0o755)
+code = 0
+try:
+    w.scan(create=False, since=dt.date(2026, 1, 1), waits=(60, 120, 300), sleep=sleep)
+except SystemExit as e:
+    code = 1; print(e)
+finally:
+    os.chmod(locked, 0o755)
+print("RESULT " + json.dumps({"code": code, "sleeps": sleeps, "lost": w.lost_night(), "ledger": sorted(w.load_ledger()),
+                              "skipped": json.load(open(w.SKIPPED_NAMES_FILE))["names"]}))
+`);
+    const findings = path.join(home, 'findings.jsonl');
+    const out = execFileSync('python3', [driver], { encoding: 'utf8', env: { ...process.env,
+      FINDINGS_FILE: findings, FINDINGS_OVERFLOW_FILE: path.join(home, 'overflow.jsonl'),
+      FINDINGS_AGENTS_CACHE: path.join(home, 'agents-cache.json'), FINDINGS_AGENT: '' } });
+    const result = JSON.parse(out.split('RESULT ')[1]);
+    const filed = existsSync(findings)
+      ? readFileSync(findings, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+    rmSync(home, { recursive: true, force: true });
+    return { out, result, filed };
+  }
+
+  it('an unreadable folder is walked again on every wait, then the night is given up with one finding and a marker', () => {
+    const { out, result, filed } = scanIn('locked');
+    expect(result.code).toBe(1);
+    expect(result.sleeps).toEqual([60, 120, 300]);                       // three waits, four walks
+    expect(out).toMatch(/Drive would not serve 1 folder \(first: 2026: /);
+    expect(out).toContain("the night's render did not run");
+    const adds = filed.filter((f) => f.op === 'add');
+    expect(adds).toHaveLength(1);
+    expect(adds[0].routine).toBe('content-engine');
+    expect(adds[0].severity).toBe('high');
+    expect(adds[0].detail).toMatch(/walked the raw folder 4 times over 8 min/);
+    expect(result.lost.why).toMatch(/Drive would not serve 1 folder/);
+  });
+
+  it('a folder that comes back during the wait is read, its clip is seen and no finding is filed', () => {
+    const { out, result, filed } = scanIn('comes-back');
+    expect(result.code).toBe(0);
+    expect(result.sleeps).toEqual([60, 120]);                            // the third walk read it
+    expect(result.ledger).toEqual([CLIP]);
+    expect(out).toMatch(/scan: 1 clips seen, 1 new/);
+    expect(result.lost).toBeNull();                                     // the earlier lost night is cleared
+    expect(result.skipped).toEqual([]);                                 // a complete walk rewrites the list
+    expect(filed).toEqual([]);
+  });
+
+  it('a walk that finds clips but misses a folder runs the night, and keeps the last complete skipped list', () => {
+    const { out, result, filed } = scanIn('partial');
+    expect(result.code).toBe(0);
+    expect(result.sleeps).toEqual([]);                                  // clips came back: no wait
+    expect(result.ledger).toEqual(['VID_20260501_090000_00_002.insv']);
+    expect(out).toMatch(/1 clips found, but Drive would not serve 1 folder \(first: 2026: /);
+    expect(result.skipped).toEqual(['earlier']);                        // not overwritten by an incomplete walk
+    expect(result.lost).toBeNull();
+    expect(filed).toEqual([]);
+  });
+
+  it('an empty listing is named as empty, not as unreadable', () => {
+    const { result, filed } = scanIn('empty');
+    expect(result.code).toBe(1);
+    expect(result.lost.why).toBe('the folder listed but held no clips');
+    expect(filed.filter((f) => f.op === 'add')).toHaveLength(1);
+  });
+
+  it("the 08:00 content line opens with the lost night, from the marker the live writer reads", () => {
+    const out = execFileSync('python3', ['-c', `
+import datetime as dt, json, sys
+sys.path.insert(0, ${JSON.stringify(CE)})
+import content_report as cr, watch, publish, approval, runpreneur_sync
+rec = {"at": "2026-11-07T22:30:05", "why": "Drive would not serve 3 folders (first: 2026: Resource deadlock avoided)"}
+watch.lost_night = lambda path=None: rec
+watch.load_ledger = lambda: {}
+watch.skipped_names = lambda path=None, ruled=None: []
+watch.skipped_ruled = lambda *a, **k: []
+publish.load_state = lambda *a, **k: {}
+publish.held_days = lambda *a, **k: {}
+approval.load_state = lambda *a, **k: {}
+runpreneur_sync.load_state = lambda *a, **k: {}
+cr.live_overlay = lambda st, ap, now, rp, rc: (st, ap, {})
+now = dt.datetime(2026, 11, 8, 8, 0, tzinfo=dt.timezone.utc)
+live = cr.build_live(now)
+plain = cr.build(now, {}, {}, {}, {}, plan=[], skipped=[], holds={})
+late = cr.lost_night_line({"at": "2026-11-08T00:50:00", "why": "w"})
+day = cr.lost_night_line({"at": "2026-11-08T10:15:00", "why": "w"})
+print(json.dumps({"live": live["headline"], "plain": plain["headline"], "late": late, "day": day}))
+`], { encoding: 'utf8' });
+    const { live, plain, late, day } = JSON.parse(out.trim().split('\n').pop());
+    expect(live.startsWith('Content: The Sat 7 Nov night render did not run (Drive would not serve 3 folders')).toBe(true);
+    expect(live).toContain('so it made no new episodes. NOTHING went out yesterday.');
+    expect(plain.startsWith('Content: NOTHING went out yesterday.')).toBe(true);   // no marker, no line
+    expect(late).toBe('The Sat 7 Nov night render did not run (w), so it made no new episodes');   // after midnight: the evening before
+    expect(day).toBe('The raw video scan at 10:15 on Sun 8 Nov found no clips (w)');               // a hand run is not a night
+  });
+});
