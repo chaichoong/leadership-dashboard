@@ -4,7 +4,10 @@
 // WHAT IT DOES
 // ------------
 // When Kevin saves Booked and paid on his phone (the price and who is playing), the padel Worker
-// lists that booking at /api/robot/paid. Every 15 minutes, right after the court read, this job:
+// lists that booking at /api/robot/paid. Since 8 Nov 2026 the venue's booking email does it too:
+// scripts/padel-emails.py reads it, and emailStep (below) has the Worker mark the hour and, when the
+// email carries the price (Pulse; not Matchi), pay it with the players the app has for that hour,
+// held EMAIL_HOLD_MS so Kevin can Change them. Every 15 minutes, right after the court read, this job:
 //   1. SPLITWISE: adds one expense in Kevin's "Padel" Splitwise group, paid by Kevin and split
 //      equally among the players on the booking, named "Tue 3 Nov, Cambridge, 19:30, 90 min".
 //      Splitwise notifies the players itself. Splitwise's API needs a Pro account, so the robot
@@ -55,7 +58,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { londonParts, dayLabel } from '../workers/padel/padel.js';
+import { londonParts, londonDates, dayLabel } from '../workers/padel/padel.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PAID_URL = 'https://padel.runpreneur.org.uk/api/robot/paid';
@@ -70,6 +73,11 @@ export const TEXT_FROM = '07:30';                   // texts go out between thes
 export const TEXT_UNTIL = '21:30';
 export const TEXT_LAST_START = '21:00';
 export const DELIVERY_WAIT_MS = 20000;              // how long an iMessage has to show it was delivered
+export const BOOKING_URL = 'https://padel.runpreneur.org.uk/api/robot/booking';
+export const EMAILS_FILE = join(LOG_DIR, 'emails.json');            // written each run by scripts/padel-emails.py
+export const EMAILS_DONE_FILE = join(LOG_DIR, 'emails-done.json');  // each booking email carried out, once
+export const EMAILS_FRESH_MS = 60 * 60 * 1000;      // an older list means padel-emails.py has stopped: use nothing
+export const EMAIL_HOLD_MS = 30 * 60 * 1000;        // a booking paid from an email waits this long, so Kevin can Change the players
 
 // ── Pure parts ──
 export const money = (pence) => (pence / 100).toFixed(2);
@@ -359,6 +367,75 @@ export function readWhatsapp(file = WHATSAPP_FILE, now = Date.now) {
     return Array.isArray(r.members) && r.members.length && now() - r.at <= WHATSAPP_FRESH_MS ? r.members : null;
   } catch { return null; }
 }
+// The venues' booking emails as scripts/padel-emails.py read them this run: an older list means that
+// script has stopped, so nothing is used rather than an old view.
+export function readEmails(file = EMAILS_FILE, now = Date.now) {
+  try {
+    const r = JSON.parse(readFileSync(file, 'utf8'));
+    return Array.isArray(r.bookings) && now() - r.at <= EMAILS_FRESH_MS ? r.bookings : null;
+  } catch { return null; }
+}
+// Each booking email the robot has carried out, by Gmail id, so an email is acted on once: an hour
+// Kevin un-marks is never marked again from the same email. Written whole and private.
+export function makeEmailLedger(file = EMAILS_DONE_FILE) {
+  const read = () => {
+    try { return JSON.parse(readFileSync(file, 'utf8')); }
+    catch (e) { if (e.code === 'ENOENT') return {}; throw e; }     // unreadable: stop, never act twice
+  };
+  return {
+    read,
+    add(id, row) {
+      const cur = read();
+      cur[id] = row;
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, JSON.stringify(cur), { mode: 0o600 });
+      chmodSync(tmp, 0o600);
+      renameSync(tmp, file);
+    },
+  };
+}
+// One booking email: the Worker marks the hour booked (if nobody has) and, with a price and none yet,
+// pays it with the players the app has for that hour. A 400 (the hour is outside the page's window, or
+// a value it refuses) is recorded so it is not sent again, and fails the run once so it is seen. Any
+// other answer (404 from a Worker without the route, no such person, a 5xx, no answer) is tried again
+// next run. An hour already marked at another venue is recorded and reported: Kevin's court there is
+// not on the page.
+export async function emailStep(emails, { fetchImpl, headers, kevinId, ledger, now }) {
+  const done = ledger.read();
+  const today = londonDates(now())[0];
+  const counts = { marked: 0, paid: 0, refused: 0 };
+  const problems = [];
+  const paidSlots = new Set();                                      // held this run even if the ledger write fails
+  // A ledger line that cannot be written is reported, never fatal: the Worker's answer still counts.
+  const record = (id, slot, row) => { try { ledger.add(id, row); } catch (err) { problems.push(`${slot}: the booking email could not be recorded (${err.code || err.name})`); } };
+  for (const e of emails) {
+    if (done[e.id] || !e.date || e.date < today) continue;
+    const slot = `${e.date}|${e.start.slice(0, 2)}`;
+    const body = { slot, venue: e.venue, start: e.start, minutes: e.minutes, person_id: kevinId, price_pence: e.price_pence ?? null };
+    const r = await fetchImpl(BOOKING_URL, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) }).catch(() => null);
+    if (!r) { problems.push(`${slot}: the Worker did not answer the booking email`); continue; }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 200) {
+      if (j.paid) paidSlots.add(slot);
+      record(e.id, slot, { slot, at: now(), booked: !!j.booked, paid: !!j.paid, ...(j.venue && j.venue !== e.venue ? { other_venue: j.venue } : {}) });
+      if (j.booked) counts.marked += 1;
+      if (j.paid) counts.paid += 1;
+      if (j.venue && j.venue !== e.venue) problems.push(`${slot}: the booking email is for ${e.venue}, but that hour is marked at ${j.venue}`);
+    } else if (r.status === 400) {
+      const why = String(j.error || r.status).slice(0, 80);
+      record(e.id, slot, { slot, at: now(), refused: why });
+      counts.refused += 1;
+      problems.push(`${slot}: the Worker refused the booking email (${why})`);
+    } else {
+      problems.push(`${slot}: the Worker answered ${r.status} to the booking email`);
+    }
+  }
+  return { counts, problems, paidSlots };
+}
+// A booking the robot paid from an email waits EMAIL_HOLD_MS before Splitwise and the texts, so Kevin
+// can Change the players the app ticked.
+export const heldByEmail = (slot, done, nowMs) => Object.values(done).some((r) => r.slot === slot && r.paid && nowMs - r.at < EMAIL_HOLD_MS);
 // Adds what the robot found to one player's entry in the private file: read fresh from disk, only
 // fields that are missing, written whole (a temp file, then renamed) and private.
 export function saveLink(id, add, file = PLAYERS_FILE) {
@@ -392,15 +469,41 @@ export function makeLedger(file = join(LOG_DIR, 'texts.jsonl')) {
 
 export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now = Date.now, log = (l) => process.stdout.write(`${l}\n`),
   key = readKey(), players = readPlayers(), textOne = texted, ledger = makeLedger(), logDir = LOG_DIR,
-  delivery = deliveryOf, sendSms = (number, text) => sendMessage(number, text, 'SMS'), whatsapp = readWhatsapp, save = saveLink } = {}) {
+  delivery = deliveryOf, sendSms = (number, text) => sendMessage(number, text, 'SMS'), whatsapp = readWhatsapp, save = saveLink,
+  emails = readEmails, emailLedger = makeEmailLedger() } = {}) {
   if (!key) { log(`FAILED: padel-paid: no robot key at ${KEY_FILE}`); return 1; }
   const headers = { 'X-Robot-Key': key, 'Content-Type': 'application/json' };
+  const problems = [];
+  // The venues' booking emails first (8 Nov 2026): an hour booked by email is marked, and paid when the
+  // email carries the price, before the paid list below is read.
+  // A fault here (an unreadable ledger) is reported and the email work skipped: the bookings priced on
+  // Kevin's phone below still go to Splitwise and the texts.
+  let emailDone = {};
+  let paidNow = new Set();
+  try {
+    const found = emails(EMAILS_FILE, now);
+    if (found && found.length) {
+      const kevinRow = players && players.players ? Object.entries(players.players).find(([, p]) => p.self) : null;
+      if (!kevinRow) problems.push('booking emails: no row marked as Kevin in the players file');
+      else {
+        const r = await emailStep(found, { fetchImpl, headers, kevinId: Number(kevinRow[0]), ledger: emailLedger, now });
+        paidNow = r.paidSlots;
+        problems.push(...r.problems);
+        if (r.counts.marked || r.counts.paid || r.counts.refused) log(`padel-paid: booking emails: ${r.counts.marked} marked booked, ${r.counts.paid} paid, ${r.counts.refused} refused`);
+      }
+    }
+    emailDone = emailLedger.read();
+  } catch (e) {
+    problems.push(`booking emails skipped: ${e.code || e.name} reading ${EMAILS_DONE_FILE}`);
+  }
   const get = await fetchImpl(PAID_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
   if (!get || get.status !== 200) { log(`FAILED: padel-paid: the Worker answered ${get ? get.status : 'nothing'}`); return 1; }
   const { bookings = [] } = await get.json();
-  if (!bookings.length) return 0;                                   // nothing paid and waiting: silent
+  if (!bookings.length) {                                           // nothing paid and waiting: silent
+    if (problems.length) { log(`FAILED: padel-paid: ${problems.join('; ')}`); return 1; }
+    return 0;
+  }
   if (!players || !players.players || !players.splitwise_group) { log(`FAILED: padel-paid: no players file at ${PLAYERS_FILE}`); return 1; }
-  const problems = [];
   // A claim that does not win is normal (another run has it, or the booking changed). A done or
   // failed the Worker did not record is not: it is reported, and the claim goes stale for Kevin.
   const mark = async (b, step, state, note) => {
@@ -443,6 +546,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
     if (stale) continue;
     if (b.splitwise.state === null) {
       if (!textStart(now())) continue;                              // Splitwise pings the players too: daytime only
+      if (paidNow.has(b.slot) || heldByEmail(b.slot, emailDone, now())) continue;   // paid from an email: Kevin's half hour to Change the players
       const r = await splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir, link });
       if (r) problems.push(`${b.slot} Splitwise: ${r}`);
     } else if (b.splitwise.state === 'done' && b.texts.state === null) {

@@ -29,6 +29,9 @@
 //   GET  /api/robot/paid  (X-Robot-Key)     -> { ok, bookings }   paid bookings with a step still to do
 //   POST /api/robot/paid  (X-Robot-Key)     -> { ok, changed }    { slot, step, state, note, paidAt }: claimed,
 //        then done or failed; a step is claimed once and never again unless Kevin taps Retry.
+//   POST /api/robot/booking (X-Robot-Key) -> { ok, booked, paid, venue, alreadyPaid }   { slot, venue, start,
+//        minutes, person_id, price_pence? }: a venue's booking email (8 Nov 2026). Marks an unmarked hour
+//        booked; with a price and no price yet, pays it, players from the votes at that moment.
 //   TWO RULES, IN THE DATABASE (review of PR #858): (1) once the robot has claimed the Splitwise step,
 //   nothing changes or removes that booking, Kevin's phone included, until that step has failed; (2) the
 //   texts can be claimed only after the Splitwise entry is done, and a claim names the paid_at it read, so
@@ -807,6 +810,20 @@ export function makeRepo(db) {
       ]);
       return (a.meta?.changes || 0) === 1 && (b.meta?.changes || 0) === 1;
     },
+    // A venue's booking email (8 Nov 2026): marks an hour only if nobody has, and pays it only if it has
+    // no price yet, is at the email's venue and has its start and length. Each check is in its statement,
+    // so a phone save landing at the same moment always wins.
+    async markFromEmail(slot, personId, venue, details, nowIso) {
+      const r = await db.prepare('INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6) ON CONFLICT(slot) DO NOTHING')
+        .bind(slot, personId, venue, details.start, details.minutes, nowIso).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    async payFromEmail(slot, venue, pricePence, players, nowIso) {
+      const r = await db.prepare(`UPDATE booked SET price_pence = ?3, players = ?4, paid_at = ?5 WHERE slot = ?1 AND venue = ?2 AND paid_at IS NULL
+        AND start IS NOT NULL AND minutes IS NOT NULL AND splitwise_state IS NULL AND texts_state IS NULL`)
+        .bind(slot, venue, pricePence, JSON.stringify(players), nowIso).run();
+      return (r.meta?.changes || 0) === 1;
+    },
     // "Booked 2nd court": the court count alone, which the robot never reads, so anyone may set it.
     async setCourts(slot, courts) {
       const r = await db.prepare('UPDATE booked SET courts = ? WHERE slot = ?').bind(courts, slot).run();
@@ -1225,6 +1242,50 @@ async function handleRobotPaid(request, env, repo, nowMs) {
   return json({ ok: true, changed: await repo.markStep(slot, step, state, note, nowIso, paidAt) });
 }
 
+// Who plays, as the app has it at that moment: everyone who said they can play that hour and can get to
+// that venue, and whoever booked it. The page's price boxes tick the same people (defaultPlayers there).
+export function playersFor(slot, venue, bookerId, votes, people) {
+  const can = new Map(people.map((p) => [p.id, p.venues.includes(venue)]));
+  const ids = votes.filter((v) => v.slot === slot && can.get(v.person_id)).map((v) => v.person_id);
+  if (bookerId && can.has(bookerId) && !ids.includes(bookerId)) ids.push(bookerId);
+  return ids;
+}
+
+// A venue's booking email, read on the Mac (scripts/padel-emails.py), carried out by the robot (Kevin,
+// 8 Nov 2026: "do it all from the booking confirmation email and the information on the app at that
+// time"). An hour nobody marked is marked booked by Kevin; with a price, and no price yet, it is paid,
+// players from the votes at that moment. A booking someone already marked keeps its venue and times,
+// and a price already there is never replaced: whatever was typed on a phone wins.
+async function handleRobotBooking(request, env, repo, nowMs) {
+  if (!keyOk(request.headers.get('X-Robot-Key'), env.ROBOT_KEY)) return fail('Robot key needed', 401);
+  if (request.method !== 'POST') return fail('Not found', 404);
+  const parsed = await readBody(request);
+  if (parsed.error) return fail(parsed.error, parsed.status);
+  const body = parsed.body;
+  const dates = londonDates(nowMs);
+  const nowIso = new Date(nowMs).toISOString();
+  const clean = cleanSlots([body.slot], dates);
+  if (clean.error || !clean.slots.length) return fail(clean.error || 'That hour has passed', 400);
+  const slot = clean.slots[0];
+  if (!VENUES.includes(body.venue)) return fail('Unknown venue', 400);
+  const details = cleanBooking({ start: body.start, minutes: body.minutes }, slot);
+  if (details.error || !details.start || !details.minutes) return fail(details.error || 'start and minutes are needed', 400);
+  const id = intId(body.person_id);
+  if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
+  const pricePence = body.price_pence == null ? null : Number(body.price_pence);
+  if (pricePence !== null && !(Number.isInteger(pricePence) && pricePence >= 1 && pricePence <= MAX_PRICE_POUNDS * 100)) return fail('price_pence is a whole number of pence', 400);
+  const booked = await repo.markFromEmail(slot, id, body.venue, details, nowIso);
+  const existing = await repo.getBooked(slot);
+  let paid = false;
+  // The email's price is for the email's court: a booking marked at another venue is never paid from it.
+  if (existing && pricePence !== null && !existing.paid_at && existing.venue === body.venue) {
+    const players = playersFor(slot, existing.venue, existing.person_id, await repo.listVotes(dates[0]), await repo.listPeople());
+    if (players.length) paid = await repo.payFromEmail(slot, body.venue, pricePence, players, nowIso);
+  }
+  const now = existing || {};
+  return json({ ok: true, booked, paid, venue: now.venue || null, alreadyPaid: !!(now.paid_at && !paid) });
+}
+
 // Paid bookings from the last week the robot has not finished: the page lists them for Kevin's Retry.
 async function earlierPaid(env, repo, today) {
   const cfg = venueConfig(env);
@@ -1343,6 +1404,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     if (path === '/api/health' && request.method === 'GET') return json({ ok: true, version: VERSION });
     if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
     if (path === '/api/robot/paid') return await handleRobotPaid(request, env, repo, nowMs);
+    if (path === '/api/robot/booking') return await handleRobotBooking(request, env, repo, nowMs);
     const admin = isAdmin(request, env);
 
     if (path === '/api/state' && request.method === 'GET') {
