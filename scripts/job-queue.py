@@ -1116,9 +1116,46 @@ def note_refusal(job, code, reason):
     return code
 
 
+def log_status_row(job, code, reason, seconds=0):
+    """Append an ok:false row to job-status.jsonl for a run that never started.
+
+    WHY (findings 20260905-daily-ops-461 and 20261106-phase-2-1214). job-status.jsonl
+    is written by ~/tools/run-job.sh, and run-job.sh sits INSIDE the queue wrapper:
+    launchd calls `job-queue.py run <job> -- run-job.sh <job> ...`. So when the queue
+    refuses the run, run-job.sh never executes and no status row is ever written. The
+    give-up reached the job's own runs.log and nowhere else, and runs.log is not what
+    the morning routine or the CEO brief read.
+
+    On 5 Nov 2026 the task-manager 17:20 slot was starved out behind
+    content-engine-publish and 2 of 3 daily board passes ran. Nothing raised it:
+    job-status.jsonl held no row for the lost pass, so every arrivals-shaped surface
+    read the day as complete. A pass that was dropped says so where absence is read.
+
+    The shape matches run-job.sh exactly (ts, job, seconds, exit, ok, reason, tail),
+    because morning-digest.py, estate-status.py and ai_team_health.py all parse those
+    keys. Never raises: a logging failure must not change what the queue does."""
+    try:
+        d = os.path.join(HOME, "knowledge-os/logs")
+        os.makedirs(d, exist_ok=True)
+        rec = {
+            "ts": iso(),
+            "job": job,
+            "seconds": int(seconds),
+            "exit": int(code),
+            "ok": False,
+            "reason": reason or "the queue refused the run (exit %s)" % code,
+            "tail": "the run never started: %s" % (reason or "no reason recorded"),
+        }
+        with open(os.path.join(d, "job-status.jsonl"), "a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def log_skipped_run(job, code, reason):
-    """Append a SKIPPED line to the job's runs.log. Never raises: a logging
-    failure must not change what the queue does."""
+    """Append a SKIPPED line to the job's runs.log, and an ok:false row to
+    job-status.jsonl so a dropped pass is visible where absence is read.
+    Never raises: a logging failure must not change what the queue does."""
     label = {EX_SKIPPED: "SKIPPED", EX_BUSY: "SKIPPED (queue busy)",
              EX_NOTREADY: "SKIPPED (not ready)"}.get(code, "SKIPPED (exit %s)" % code)
     try:
@@ -1128,6 +1165,7 @@ def log_skipped_run(job, code, reason):
             fh.write("=== %s %s: %s ===\n" % (iso(), label, reason or "no reason recorded"))
     except OSError:
         pass
+    log_status_row(job, code, reason)
 
 
 def log_started_run(job, lease_minutes):

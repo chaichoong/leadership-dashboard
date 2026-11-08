@@ -232,6 +232,74 @@ describe('staleness cut-off', () => {
     expect(line).toMatch(/late|stale|min/i);        // the reason, not just the fact
   });
 
+  // ─── A DROPPED PASS IS VISIBLE WHERE ABSENCE IS READ ───────────────────────
+  //
+  // 5 Nov 2026 (finding 20261106-phase-2-1214, the same ask as 20260905-daily-ops-461):
+  // the task-manager 17:20 slot was starved out behind content-engine-publish and 2
+  // of 3 daily board passes ran. The give-up reached the job's own runs.log and
+  // nowhere else. job-status.jsonl is written by ~/tools/run-job.sh, which sits
+  // INSIDE the queue wrapper, so a refused run never writes a status row at all —
+  // and job-status.jsonl is what the morning routine, estate-status and the CEO
+  // brief read. Every arrivals-shaped surface read the day as complete.
+  //
+  // Back-tested: dropping the log_status_row() call from log_skipped_run makes both
+  // tests below red (no job-status.jsonl file is created).
+  const statusRows = (home) => {
+    const p = join(home, 'knowledge-os', 'logs', 'job-status.jsonl');
+    if (!existsSync(p)) return [];
+    return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  };
+
+  it('writes an ok:false job-status row when a wrapped run is refused as stale', () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'always-stale': { cron: '0 2 * * *', maxLateMinutes: 0, mode: 'wrapped' },
+    }));
+    expect(run(['run', 'always-stale', '--', 'true'], { env: { HOME: fakeHome } }).code).toBe(3);
+    const rows = statusRows(fakeHome).filter((r) => r.job === 'always-stale');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ok).toBe(false);
+    expect(rows[0].exit).toBe(3);
+    expect(rows[0].reason).toMatch(/late|stale|min/i);   // the reason, not just the fact
+    // The keys morning-digest.py, estate-status.py and ai_team_health.py parse.
+    for (const k of ['ts', 'job', 'seconds', 'exit', 'ok', 'reason', 'tail']) {
+      expect(rows[0]).toHaveProperty(k);
+    }
+  });
+
+  it('writes an ok:false job-status row when a wrapped run gives up BUSY behind a holder', async () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'long-render': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      'board-pass': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+    }));
+    expect(run(['acquire', 'long-render', '--lease', '90']).code).toBe(0);
+    const blocked = await runAsync(
+      ['run', 'board-pass', '--timeout', '0.02', '--', 'python3', '-c', 'print("ran")'],
+      { env: { HOME: fakeHome } });
+    expect(blocked.code).toBe(75);
+    expect(blocked.stdout).not.toMatch(/ran/);          // the work genuinely did not happen
+    const rows = statusRows(fakeHome).filter((r) => r.job === 'board-pass');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ok).toBe(false);
+    expect(rows[0].exit).toBe(75);
+    expect(rows[0].reason).toMatch(/gave up/i);
+    expect(rows[0].reason).toContain('long-render');    // names what starved it out
+    run(['release', 'long-render']);
+  }, 60000);
+
+  it('writes no job-status row for a wrapped run that actually starts', async () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'runs-fine': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+    }));
+    const r = await runAsync(['run', 'runs-fine', '--', 'python3', '-c', 'print("ran")'],
+      { env: { HOME: fakeHome } });
+    expect(r.code).toBe(0);
+    // run-job.sh owns the row for a run that started. The queue must not double-write.
+    expect(statusRows(fakeHome).filter((x) => x.job === 'runs-fine')).toHaveLength(0);
+  }, 60000);
+
   // ─── A HOLD THAT IS HAPPENING NOW (finding 20261103-phase-5-1173) ──────────
   //
   // audiobook-backfill took the queue at 05:00:37Z on 3 Nov 2026 and held it for

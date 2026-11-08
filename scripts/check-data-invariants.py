@@ -912,6 +912,35 @@ def scan_all(pat, table, fields):
             return records
 
 
+def _first_alias(copies):
+    """The account alias of the first copy that HAS one, never blindly copies[0].
+
+    Found 2026-11-07 (finding 20261107-phase-2-1235): a duplicate pair sits on two
+    DIFFERENT Airtable Account records for one real bank account, and only one of
+    them carries an alias. Reading copies[0] alone made 20 of 36 reported pairs read
+    "(unknown account)", so the operator could not tell which account to go and look
+    at. Fall back to the **Account record ids, which are always present on a linked
+    row, rather than to a word that names nothing.
+    """
+    for copy in copies:
+        alias = copy["fields"].get("Account Alias (from **Account)")
+        if isinstance(alias, list):
+            alias = next((a for a in alias if a), None)
+        if alias:
+            return alias
+    account_ids = []
+    for copy in copies:
+        linked = copy["fields"].get("**Account") or []
+        if isinstance(linked, str):
+            linked = [linked]
+        for rec in linked:
+            if rec and rec not in account_ids:
+                account_ids.append(rec)
+    if account_ids:
+        return "(no alias; account " + ", ".join(account_ids) + ")"
+    return "(unknown account)"
+
+
 def _bank_tx_id(record):
     """The bank's own transaction id, read out of the raw open-banking payload.
 
@@ -950,7 +979,8 @@ def check_reimport_duplicates(pat):
     Returns (violations, control_population).
     """
     records = scan_all(pat, TX, ["**Raw", "**Plaid TX ID",
-                                 "Account Alias (from **Account)", "**GBP", "**Date"])
+                                 "Account Alias (from **Account)", "**Account",
+                                 "**GBP", "**Date"])
     by_bank_id = {}
     control = 0
     for r in records:
@@ -964,8 +994,7 @@ def check_reimport_duplicates(pat):
     for bank_id, copies in by_bank_id.items():
         if len(copies) < 2:
             continue
-        alias = copies[0]["fields"].get("Account Alias (from **Account)")
-        alias = (alias[0] if isinstance(alias, list) and alias else alias) or "(unknown account)"
+        alias = _first_alias(copies)
         violations.append({
             "account": alias,
             "date": copies[0]["fields"].get("**Date"),

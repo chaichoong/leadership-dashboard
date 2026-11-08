@@ -50,7 +50,7 @@ function writeEvents(rows) {
   })).join('\n') + '\n');
 }
 
-function guard(windowHours = 26) {
+function guard(windowHours = 26, extraEnv = {}) {
   // The module reads both paths from the environment at import, so the env
   // below is all the isolation needed — no monkey-patching of the real file.
   const src = `
@@ -68,8 +68,39 @@ print(json.dumps({"code": code, "res": res}))
       CLAUDE_ROUTINE_DIR: routineDir,
       JOB_SCHEDULE_FILE: schedulePath,
       SLOT_RUNS_LOG_DIR: join(box, 'logs'),
+      // The installed-vs-declared check reads host state (~/Library/LaunchAgents
+      // and the installer script). Every test points it at its own empty box, so
+      // no test can read, or be reddened by, the real Mac's plists.
+      LAUNCH_AGENTS_DIR: join(box, 'LaunchAgents'),
+      SLOT_INSTALLER: join(box, 'install-slot-jobs.sh'),
+      ...extraEnv,
     },
   }).trim());
+}
+
+/** Write a fake install-slot-jobs.sh JOBS array: {job: "6:25"} or {job: "7:30,12:30"}. */
+function writeInstaller(times) {
+  const lines = Object.entries(times).map(([n, t]) => `  "${n}|${t}|/bin/true"`);
+  writeFileSync(join(box, 'install-slot-jobs.sh'),
+    `#!/bin/bash\nJOBS=(\n${lines.join('\n')}\n)\n`);
+}
+
+/** Write a fake installed plist with the given hour:minute firing times. */
+function writePlist(job, slots) {
+  const dir = join(box, 'LaunchAgents');
+  mkdirSync(dir, { recursive: true });
+  const entries = slots.map((s) => {
+    const [h, m] = s.split(':');
+    const hour = h === '*' ? '' : `<key>Hour</key><integer>${Number(h)}</integer>`;
+    return `<dict>${hour}<key>Minute</key><integer>${Number(m)}</integer></dict>`;
+  }).join('');
+  writeFileSync(join(dir, `com.kevinbrittain.${job}.plist`),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.kevinbrittain.${job}</string>
+<key>StartCalendarInterval</key><array>${entries}</array>
+</dict></plist>\n`);
 }
 
 /** The job register. An approved slot MUST appear here too — an allowlist entry
@@ -650,5 +681,95 @@ print(json.dumps({"slots": m.APPROVED_SLOTS, "sched": m.read_schedule()
     // would make the loop above vacuous and read as a pass for ever.
     expect(checked.length).toBeGreaterThanOrEqual(3);   // 3 on 23 Oct 2026
     expect(checked).toContain('prod-sweep-weekly');
+  });
+});
+
+// ─── THE DECLARED TIME IS NOT THE INSTALLED TIME ────────────────────────────
+//
+// Finding 20261107-daily-ops-1233. estate-drift was moved from 06:25 to 07:00 on
+// 1 Nov 2026, because at 06:25 it read the Drive Decisions folder 25 minutes
+// before the 06:45 CEO memory sweep wrote that day's rulings, so it printed
+// "0 rulings behind" and exited 0 every morning. The move landed in
+// job-schedule.json, in install-slot-jobs.sh and in CLAUDE.md, and a test already
+// asserts those three agree.
+//
+// It never landed on the Mac. Nothing reinstalls a plist, so the installed job
+// kept firing at 06:25 for six more days while every repo surface said 07:00 —
+// and this guard, the thing that runs every morning, had no opinion about it.
+//
+// Proven live when the check was written: it named estate-drift at 06:25 against
+// a declared 07:00 on the real Mac. Back-test below: an agreeing pair reports
+// nothing, so the check cannot be a line that always prints.
+describe('installed firing times against declared ones', () => {
+  beforeEach(() => {
+    writeRoutines(['daily-ops']);
+    writeEvents([{ job: 'daily-ops', state: 'mark' }]);
+  });
+
+  it('THE REGRESSION: names a job installed at 06:25 while declared at 07:00', () => {
+    writeInstaller({ 'estate-drift': '7:00' });
+    writePlist('estate-drift', ['6:25']);
+    const { code, res } = guard();
+    expect(code).toBe(0);                       // nothing is stacking — a different fault
+    expect(res.plist_drift).toHaveLength(1);
+    expect(res.plist_drift[0]).toContain('estate-drift');
+    expect(res.plist_drift[0]).toContain('06:25');
+    expect(res.plist_drift[0]).toContain('07:00');
+    expect(res.plist_unchecked).toEqual([]);
+  });
+
+  it('says nothing when the installed time matches the declared one', () => {
+    writeInstaller({ 'estate-drift': '7:00' });
+    writePlist('estate-drift', ['7:00']);
+    expect(guard().res.plist_drift).toEqual([]);
+  });
+
+  it('compares every firing of a job that runs more than once a day', () => {
+    writeInstaller({ 'rent-check': '7:30,12:30' });
+    writePlist('rent-check', ['7:30', '14:30']);   // second read moved, first intact
+    const drift = guard().res.plist_drift;
+    expect(drift).toHaveLength(1);
+    expect(drift[0]).toContain('14:30');
+  });
+
+  it('matches an hourly job on the minute, with no hour to compare', () => {
+    writeInstaller({ 'utilita-balance': '*:05,*:35' });
+    writePlist('utilita-balance', ['*:05', '*:35']);
+    expect(guard().res.plist_drift).toEqual([]);
+  });
+
+  it('ignores the weekday on a once-a-week job and still checks its time', () => {
+    writeInstaller({ 'payment-run': 'Fri 21:00' });
+    writePlist('payment-run', ['21:00']);
+    expect(guard().res.plist_drift).toEqual([]);
+    writePlist('payment-run', ['16:00']);          // the pre-18 Sep 2026 time
+    expect(guard().res.plist_drift[0]).toContain('16:00');
+  });
+
+  it('reports a job that is not installed as NOT CHECKED, never as agreeing', () => {
+    writeInstaller({ 'estate-drift': '7:00' });
+    mkdirSync(join(box, 'LaunchAgents'), { recursive: true });   // readable, but empty
+    const { res } = guard();
+    expect(res.plist_drift).toEqual([]);
+    expect(res.plist_unchecked.join(' ')).toContain('estate-drift');
+    expect(res.plist_unchecked.join(' ')).toContain('not installed');
+  });
+
+  it('reports an unreadable installer as NOT CHECKED rather than clean', () => {
+    writePlist('estate-drift', ['6:25']);          // no installer written
+    const { res } = guard();
+    expect(res.plist_drift).toEqual([]);
+    expect(res.plist_unchecked).toHaveLength(1);
+    expect(res.plist_unchecked[0]).toContain('cannot read');
+  });
+
+  it('reports a corrupt plist as NOT CHECKED rather than agreeing', () => {
+    writeInstaller({ 'estate-drift': '7:00' });
+    mkdirSync(join(box, 'LaunchAgents'), { recursive: true });
+    writeFileSync(join(box, 'LaunchAgents', 'com.kevinbrittain.estate-drift.plist'),
+      'not a plist at all');
+    const { res } = guard();
+    expect(res.plist_drift).toEqual([]);
+    expect(res.plist_unchecked[0]).toContain('unreadable');
   });
 });
