@@ -114,9 +114,11 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     if (path === '/api/booked') {                                        // the Worker's rule: a detail left out keeps its stored value
       const body = req.postDataJSON();
       store.bookedBodies.push(body);
+      if (body.price !== undefined && !admin) return reply(route, 403, { error: "The price goes in on Kevin's phone" });   // refused before anything changes
       const was = store.booked.find((b) => b.slot === body.slot) || {};
       store.booked = store.booked.filter((b) => b.slot !== body.slot);
-      if (body.booked === true) store.booked.push({ slot: body.slot, person_id: body.person_id, venue: body.venue, start: body.start ?? was.start ?? null, minutes: body.minutes ?? was.minutes ?? null, courts: body.courts ?? was.courts ?? 1 });
+      const paid = body.price !== undefined ? { price_pence: Math.round(body.price * 100), players: JSON.stringify(body.players), paid_at: new Date().toISOString() } : {};
+      if (body.booked === true) store.booked.push({ slot: body.slot, person_id: body.person_id, venue: body.venue, start: body.start ?? was.start ?? null, minutes: body.minutes ?? was.minutes ?? null, courts: body.courts ?? was.courts ?? 1, ...paid });
       return reply(route, 200, { ...state(), admin });
     }
     if (path === '/api/vote') {
@@ -665,13 +667,13 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       // The key as it is sent (a #admin= link) works as well as the bare key.
       await page.evaluate((k) => navigator.clipboard.writeText('https://padel.runpreneur.org.uk/#admin=' + k), ADMIN_KEY);
       await row.locator('[data-paste-key]').click();
-      await expect(row.locator('[data-paid-open]')).toBeVisible();
+      await expect(row.locator('[data-paid-form]')).toBeVisible();        // the price box opens by itself (8 Nov 2026)
       await expect(page.locator('#people-card')).toBeVisible();
       await expect(row.locator('[data-paste-key]')).toHaveCount(0);
       expect(await page.evaluate(() => localStorage.getItem('padel.admin'))).toBe(ADMIN_KEY);
       await page.reload();                                                // kept: the next visit is Kevin's phone too
       await page.locator(`[data-day="${tomorrow}"]`).click();
-      await expect(page.locator('#row-19 [data-paid-open]')).toBeVisible();
+      await expect(page.locator('#row-19 [data-paid-form]')).toBeVisible();
       expect(store.headers.at(-1)['x-admin-key']).toBe(ADMIN_KEY);
     });
 
@@ -687,7 +689,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await page.evaluate((k) => navigator.clipboard.writeText(k), ADMIN_KEY);
       await page.locator('#key-line [data-paste-key]').click();
       await expect(page.locator('#people-card')).toBeVisible();
-      await expect(page.locator('#row-19 [data-paid-open]')).toBeVisible();
+      await expect(page.locator('#row-19 [data-paid-form]')).toBeVisible();
       await expect(page.locator('#key-line')).toBeHidden();
     });
 
@@ -721,15 +723,17 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(page.locator('#people-rows')).toContainText('Test Carl');
     });
 
-    test('Booked and paid: the players who said they were in are ticked, the price splits, and Save sends it', async ({ page }) => {
+    // 8 Nov 2026: a booking marked at 20:41 sat all night with no price because the price was a second
+    // button. On Kevin's phone a booked hour with no price now opens its price box by itself.
+    test('a booked hour with no price opens its price box by itself: players ticked, the price splits, and Save sends it', async ({ page }) => {
       const tomorrow = londonDates(Date.now())[1];
       const store = await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, readyAt: '19', booked: [bookedRow(tomorrow)] });
       await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
       await page.goto(PAGE);
       await page.locator(`[data-day="${tomorrow}"]`).click();
       const row = page.locator('#row-19');
-      await row.locator('[data-paid-open]').click();
       const form = row.locator('[data-paid-form]');
+      await expect(form).toBeVisible();                                   // no button to find first
       // Bob, Cat and Dan said they were in at 19:00 (Ann has not ticked); Bob booked it.
       await expect(form.locator('[data-paid-player][aria-pressed="true"]')).toHaveText(['Test Bob', 'Test Cat', 'Test Dan']);
       await form.locator('[data-paid-player="1"]').click();             // add Ann
@@ -741,6 +745,62 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(row.locator('.paid-line')).toContainText('Splitwise: waiting');
       await expect(row.locator('.paid-line')).toContainText('Texts: waiting');
       expect(store.adminBodies).toEqual([{ action: 'paid', slot: `${tomorrow}|19`, price: 36, players: [2, 3, 4, 1] }]);
+    });
+
+    test('Kevin\'s phone books with the price: Booked? asks for it, ticks who said they can play, and one Save sends the lot', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      const store = await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, readyAt: '19' });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${tomorrow}"]`).click();
+      const row = page.locator('#row-19');
+      await row.locator('[data-mark]').click();
+      const form = row.locator('[data-book-form]');
+      // Bob, Cat and Dan said they can play at 19:00; Ann (this phone) is booking it.
+      await expect(form.locator('[data-book-player][aria-pressed="true"]')).toHaveText(['Test Ann', 'Test Bob', 'Test Cat', 'Test Dan']);
+      await form.locator('button[type="submit"]').click();                // no price yet: refused, nothing sent
+      await expect(page.locator('#toast')).toHaveText('Enter what you paid, in pounds.');
+      expect(store.bookedBodies).toEqual([]);
+      await form.locator('input[name="price"]').fill('40');
+      await expect(form.locator('.note')).toContainText('4 playing, £10.00 each.');
+      await page.locator('#check-now').click();                           // a redraw keeps the typed price and the ticks
+      await expect(form.locator('input[name="price"]')).toHaveValue('40');
+      await form.locator('[data-book-player="4"]').click();               // Dan is not coming
+      await expect(form.locator('.note')).toContainText('3 playing, £13.33 each.');
+      await form.locator('button[type="submit"]').click();
+      await expect(row.locator('.paid-line')).toContainText('Paid £40.00, 3 playing');
+      await expect(row.locator('.paid-line')).toContainText('Splitwise: waiting');
+      await expect(row.locator('[data-paid-form]')).toHaveCount(0);       // nothing left to fill in
+      expect(store.bookedBodies).toEqual([{ slot: `${tomorrow}|19`, person_id: 1, venue: 'si', start: '19:00', minutes: 60, booked: true, price: 40, players: [2, 3, 1] }]);
+      expect(store.adminBodies).toEqual([]);                              // one save, not two
+    });
+
+    test('two days each with a booking and no price: each day opens its own price box (review of the 8 Nov change)', async ({ page }) => {
+      const [, d1, d2] = londonDates(Date.now());
+      await mockPadel(page, { siClosedFrom: 7, booked: [bookedRow(d1), { ...bookedRow(d2), slot: `${d2}|18`, start: '18:00' }] });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${d1}"]`).click();
+      await expect(page.locator('#row-19 [data-paid-form]')).toBeVisible();
+      await page.locator(`[data-day="${d2}"]`).click();
+      await expect(page.locator('#row-18 [data-paid-form]')).toBeVisible();
+      await expect(page.locator('[data-paid-form]')).toHaveCount(1);
+    });
+
+    test('Cancel closes the price box for this visit; Add the price brings it back', async ({ page }) => {
+      const tomorrow = londonDates(Date.now())[1];
+      await mockPadel(page, { siClosedFrom: 7, siFree: { '19:00': { courts: 1, min: 60 } }, booked: [bookedRow(tomorrow)] });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${tomorrow}"]`).click();
+      const row = page.locator('#row-19');
+      await row.locator('[data-paid-cancel]').click();
+      await expect(row.locator('[data-paid-form]')).toHaveCount(0);
+      await page.locator('#check-now').click();                           // a redraw does not reopen it
+      await expect(row.locator('.paid-line')).toContainText('Splitwise and the texts wait for the price.');
+      await expect(row.locator('[data-paid-form]')).toHaveCount(0);
+      await row.locator('[data-paid-open]').click();
+      await expect(row.locator('[data-paid-form]')).toBeVisible();
     });
 
     test('names typed on the People screen survive a redraw; saving one keeps the others (review of PR #858)', async ({ page }) => {
