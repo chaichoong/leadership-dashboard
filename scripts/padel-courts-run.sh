@@ -37,8 +37,12 @@ courts=$?
 # Messages' own record of the players' texts, read under bash: the robot (node) is refused chat.db.
 /usr/bin/python3 "$(dirname "$TARGET")/padel-delivery.py"
 delivery=$?
+# The venues' booking emails (8 Nov 2026): the robot marks and pays a booking from them.
+/usr/bin/python3 "$(dirname "$TARGET")/padel-emails.py"
+emails=$?
 "$NODE" "$(dirname "$TARGET")/padel-paid.mjs" run
 paid=$?
 [ "$courts" -ne 0 ] && exit "$courts"
 [ "$delivery" -ne 0 ] && exit "$delivery"
+[ "$emails" -ne 0 ] && exit "$emails"
 exit "$paid"

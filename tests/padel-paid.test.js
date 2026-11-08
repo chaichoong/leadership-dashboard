@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
   description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown, deliveryOf,
-  matchSplitwise, matchPhone, linkPlayer, saveLink, readWhatsapp, newNote,
+  matchSplitwise, matchPhone, linkPlayer, saveLink, readWhatsapp, newNote, emailStep, heldByEmail, readEmails, makeEmailLedger, BOOKING_URL,
 } from '../scripts/padel-paid.mjs';
 
 const require_ = createRequire(import.meta.url);
@@ -90,11 +90,14 @@ const go = (w, s, extra = {}) => {
   const ledger = extra.ledger || makeLedger(join(tmp(), 'texts.jsonl'));
   const logDir = tmp();                                   // plans and screenshots never land in the robot's real log folder
   const players = structuredClone(extra.players || PLAYERS);
+  const emailLedger = extra.emailLedger || makeEmailLedger(join(tmp(), 'emails-done.json'));
   return {
-    lines, sent, ledger, saved, players,
+    lines, sent, ledger, saved, players, emailLedger,
     // The WhatsApp list and the players file are fakes too: a test never reads or writes the real ones.
     run: () => runOnce({ fetchImpl: w.fetchImpl, ab: s.ab, now: () => NOON, log: (l) => lines.push(l), key: 'robot-key-test', players, ledger, logDir,
       whatsapp: () => extra.whatsapp || null,
+      // The booking emails and their ledger are fakes as well: never the robot's real files.
+      emails: () => extra.emails || null, emailLedger,
       save: (id, add) => { saved.push([id, add]); return { ...(players.players[String(id)] || {}), ...add }; },
       textOne: async (number, text) => { sent.push({ number, text }); return (extra.textOk || (() => ({ ok: true, via: 'iMessage' })))(number); },
       ...extra.opts }),
@@ -918,5 +921,183 @@ document.getElementById('save').addEventListener('click', () => { document.getEl
     const r = await run(true, '3.60');
     expect(r.details).toBe('(£0.51/person)');
     expect(r.out).toBe('');
+  });
+});
+
+// ── Booking emails (Kevin, 8 Nov 2026: "do it all from the booking confirmation email and the information
+// on the app at that time"). A court booked at 20:41 the night before sat with no price and no Splitwise
+// entry because the price was a second button. The emails below have the shape of the real ones read on
+// 8 Nov 2026 (Matchi: no price; Nettla: a Total line); every name and code in them is invented.
+describe('padel-emails.py: what each venue email says, and nothing else', () => {
+  const MATCHI = 'BOOKING CONFIRMATION Hello Test Payer You have booked a time slot at PDL Padel United - Cambridge. Date: 2026-11-08 Time: 16:00-17:00 Court: Court 3 Venue access code: XQZW Player: Test Payer';
+  const NETTLA = (title, when, total) => `Hi Test, you're booked in! IMPORTANT INFORMATION: CAR GATE CODE: XQZW# ${title} ${when} Pulse Padel, Huntingdon Court 1 Reference: testref Entrance Code: XQZW# Payment Court booking £${total} Technology fee £0.30 Total £${total} Paid with Apple Pay`;
+  const msg = (id, from, subject, body, sent = Date.parse('2026-11-07T20:40:02Z')) => ({ id, internalDate: String(sent), headers: { from, subject }, body });
+  it('reads Matchi (no price), a Pulse court (its Total), and skips a public match, a cancellation, Playtomic and a bad weekday', () => {
+    const dir = tmp();
+    const out = join(dir, 'emails.json');
+    const msgs = [
+      msg('m1', 'PDL Padel United - Cambridge <no-reply@matchi.se>', 'Booking confirmation', MATCHI),
+      msg('n1', 'Pulse Padel, Huntingdon <no-reply@nettla.co>', 'Court booking confirmed', NETTLA('Court Booking', 'Tue 10 Nov, 19:30 - 20:30', '34.60'), Date.parse('2026-11-04T22:54:21Z')),
+      msg('n2', 'Pulse Padel, Huntingdon <no-reply@nettla.co>', 'Public match confirmed', NETTLA('Public Match', 'Wed 11 Nov, 12:30 - 13:30', '6.80')),
+      msg('n3', 'Pulse Padel, Huntingdon <no-reply@nettla.co>', 'Public match cancelled', 'Hi Test, your public match has been cancelled Thu 12 Nov, 12:30 - 13:30'),
+      msg('n4', 'Pulse Padel, Huntingdon <no-reply@nettla.co>', 'Court booking confirmed', NETTLA('Court Booking', 'Wed 10 Nov, 19:30 - 20:30', '34.60')),   // 10 Nov 2026 is a Tuesday
+      msg('n5', 'Pulse Padel, Huntingdon <no-reply@nettla.co>', 'Court booking confirmed', NETTLA('Court Booking', 'Sat 2 Jan, 10:00 - 11:30', '40.00'), Date.parse('2026-12-30T09:00:00Z')),   // next year
+      msg('p1', 'Playtomic <no-reply@playtomic.io>', 'Your booking is confirmed', 'Booking at PDL Padel United'),
+    ];
+    const py = `import sys, json, importlib.util
+spec = importlib.util.spec_from_file_location('pe', 'scripts/padel-emails.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+msgs = json.loads(sys.argv[2])
+m.run(out_path=sys.argv[1], now=1000, lister=lambda: msgs)`;
+    execFileSync('/usr/bin/python3', ['-c', py, out, JSON.stringify(msgs)], { stdio: 'pipe' });
+    expect(statSync(out).mode & 0o777).toBe(0o600);
+    const rec = JSON.parse(readFileSync(out, 'utf8'));
+    expect(rec.at).toBe(1000000);
+    expect(rec.bookings).toEqual([
+      { id: 'm1', at: Date.parse('2026-11-07T20:40:02Z'), venue: 'pdl', date: '2026-11-08', start: '16:00', minutes: 60, price_pence: null },
+      { id: 'n1', at: Date.parse('2026-11-04T22:54:21Z'), venue: 'pp', date: '2026-11-10', start: '19:30', minutes: 60, price_pence: 3460 },
+      { id: 'n5', at: Date.parse('2026-12-30T09:00:00Z'), venue: 'pp', date: '2027-01-02', start: '10:00', minutes: 90, price_pence: 4000 },
+    ]);
+    expect(rec.skipped.map((s) => [s.id, s.skip])).toEqual([
+      ['n2', "a public match (Kevin's own place)"],
+      ['n3', "a public match (Kevin's own place)"],
+      ['n4', 'Nettla email not read (date or time missing, or the weekday disagrees)'],
+      ['p1', "unread: Playtomic's format is not known yet"],
+    ]);
+    expect(JSON.stringify(rec)).not.toMatch(/Test Payer|XQZW|testref|Apple Pay/);   // no names, codes or payment words copied
+  });
+  it('a £0.00 total is no price (Kevin types it); a booking email it cannot read fails the run loudly; Playtomic alone does not', () => {
+    const dir = tmp();
+    const run = (msgs) => {
+      const py = `import sys, json, importlib.util
+spec = importlib.util.spec_from_file_location('pe', 'scripts/padel-emails.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+msgs = json.loads(sys.argv[2])
+code = m.main(out_path=sys.argv[1], lister=lambda: msgs)
+print('EXIT', code)`;
+      const said = execFileSync('/usr/bin/python3', ['-c', py, join(dir, 'e.json'), JSON.stringify(msgs)], { stdio: 'pipe' }).toString();
+      return { said, rec: JSON.parse(readFileSync(join(dir, 'e.json'), 'utf8')) };
+    };
+    const credit = run([msg('n1', 'Pulse Padel, Huntingdon <no-reply@nettla.co>', 'Court booking confirmed', NETTLA('Court Booking', 'Tue 10 Nov, 19:30 - 20:30', '0.00'))]);
+    expect(credit.rec.bookings[0]).toMatchObject({ date: '2026-11-10', price_pence: null });
+    expect(credit.said).toMatch(/EXIT 0/);
+    const changed = run([msg('m1', 'PDL Padel United - Cambridge <no-reply@matchi.se>', 'Booking confirmation', MATCHI.replace('Date: 2026-11-08', 'Date: 8 November 2026'))]);
+    expect(changed.said).toMatch(/FAILED: padel-emails: 1 booking email\(s\) not read \(Matchi email not read/);
+    expect(changed.said).toMatch(/EXIT 1/);
+    const otherClub = run([msg('m2', 'Another Club <no-reply@matchi.se>', 'Booking confirmation', MATCHI.replace('PDL Padel United - Cambridge', 'Test Racket Club'))]);
+    expect(otherClub.rec.skipped.map((x) => x.skip)).toEqual(['a Matchi club that is not ours']);
+    expect(otherClub.said).toMatch(/EXIT 0/);                           // not a false alarm
+    const playtomic = run([msg('p1', 'Playtomic <no-reply@playtomic.io>', 'Your booking is confirmed', 'x')]);
+    expect(playtomic.said).toMatch(/1 venue email\(s\) in a format not read yet: Your booking is confirmed\nEXIT 0/);
+  });
+});
+
+describe('the robot carries out each booking email once', () => {
+  const T = Date.parse('2026-11-07T21:00:00Z');
+  const email = (extra = {}) => ({ id: 'm1', at: T - 60000, venue: 'pdl', date: '2026-11-08', start: '16:00', minutes: 60, price_pence: null, ...extra });
+  const workerFor = (reply) => {
+    const posts = [];
+    const fetchImpl = async (url, init = {}) => {
+      if (url !== BOOKING_URL) throw new Error(`unexpected ${url}`);
+      const body = JSON.parse(init.body);
+      posts.push(body);
+      const [status, json] = reply(body);
+      return new Response(JSON.stringify(json), { status });
+    };
+    return { fetchImpl, posts };
+  };
+  it('marks the hour from the email, sends the price when there is one, and never sends the same email twice', async () => {
+    const ledger = makeEmailLedger(join(tmp(), 'emails-done.json'));
+    const w = workerFor(() => [200, { ok: true, booked: true, paid: false }]);
+    const step = () => emailStep([email(), email({ id: 'n1', venue: 'pp', date: '2026-11-10', start: '19:30', price_pence: 3460 })], { fetchImpl: w.fetchImpl, headers: {}, kevinId: 1, ledger, now: () => T });
+    const r = await step();
+    expect(w.posts).toEqual([
+      { slot: '2026-11-08|16', venue: 'pdl', start: '16:00', minutes: 60, person_id: 1, price_pence: null },
+      { slot: '2026-11-10|19', venue: 'pp', start: '19:30', minutes: 60, person_id: 1, price_pence: 3460 },
+    ]);
+    expect(r).toMatchObject({ counts: { marked: 2, paid: 0, refused: 0 }, problems: [] });
+    await step();                                                       // the next run: nothing sent again
+    expect(w.posts).toHaveLength(2);
+    expect(Object.keys(ledger.read())).toEqual(['m1', 'n1']);
+  });
+  it('a refusal the Worker explains is recorded and dropped; no answer is tried again next run; a past game is never sent', async () => {
+    const ledger = makeEmailLedger(join(tmp(), 'emails-done.json'));
+    let down = true;
+    const w = workerFor((b) => (b.slot.endsWith('|22') ? [400, { error: 'Not an hour in the next 14 days' }] : [200, { ok: true, booked: false, paid: true }]));
+    const fetchImpl = async (url, init) => (down && JSON.parse(init.body).slot.endsWith('|16') ? null.x : w.fetchImpl(url, init));
+    const list = [email(), email({ id: 'late', start: '22:00' }), email({ id: 'old', date: '2026-11-06' })];
+    const first = await emailStep(list, { fetchImpl: async (u, i) => { try { return await fetchImpl(u, i); } catch { throw new Error('offline'); } }, headers: {}, kevinId: 1, ledger, now: () => T });
+    expect(first.problems).toEqual(['2026-11-08|16: the Worker did not answer the booking email', '2026-11-08|22: the Worker refused the booking email (Not an hour in the next 14 days)']);
+    expect(first.counts).toEqual({ marked: 0, paid: 0, refused: 1 });
+    expect(ledger.read().late).toMatchObject({ slot: '2026-11-08|22', refused: 'Not an hour in the next 14 days' });
+    expect(ledger.read().m1).toBeUndefined();                          // tried again next run
+    expect(w.posts.some((p) => p.slot.startsWith('2026-11-06'))).toBe(false);
+    down = false;
+    const second = await emailStep(list, { fetchImpl, headers: {}, kevinId: 1, ledger, now: () => T });
+    expect(second).toMatchObject({ counts: { marked: 0, paid: 1, refused: 0 }, problems: [] });
+    expect([...second.paidSlots]).toEqual(['2026-11-08|16']);
+  });
+  it('a 404 (a Worker without the route, or no such person) is tried again next run, never recorded as done', async () => {
+    const ledger = makeEmailLedger(join(tmp(), 'emails-done.json'));
+    let up = false;
+    const w = workerFor(() => (up ? [200, { ok: true, booked: true, paid: false, venue: 'pdl' }] : [404, { error: 'Not found' }]));
+    const first = await emailStep([email()], { fetchImpl: w.fetchImpl, headers: {}, kevinId: 1, ledger, now: () => T });
+    expect(first.problems).toEqual(['2026-11-08|16: the Worker answered 404 to the booking email']);
+    expect(ledger.read()).toEqual({});
+    up = true;
+    expect((await emailStep([email()], { fetchImpl: w.fetchImpl, headers: {}, kevinId: 1, ledger, now: () => T })).counts.marked).toBe(1);
+  });
+  it('an hour already marked at another venue is reported once, so the court in the email is not lost without a word', async () => {
+    const ledger = makeEmailLedger(join(tmp(), 'emails-done.json'));
+    const w = workerFor(() => [200, { ok: true, booked: false, paid: false, venue: 'si' }]);
+    const r = await emailStep([email()], { fetchImpl: w.fetchImpl, headers: {}, kevinId: 1, ledger, now: () => T });
+    expect(r.problems).toEqual(['2026-11-08|16: the booking email is for pdl, but that hour is marked at si']);
+    expect(ledger.read().m1).toMatchObject({ other_venue: 'si' });
+    expect((await emailStep([email()], { fetchImpl: w.fetchImpl, headers: {}, kevinId: 1, ledger, now: () => T })).problems).toEqual([]);   // once
+  });
+  it('an unreadable email ledger is reported, and a booking priced on Kevin\'s phone still goes to Splitwise', async () => {
+    const file = join(tmp(), 'emails-done.json');
+    writeFileSync(file, '{not json');
+    const w = worker([booking()]);
+    const s = splitwise();
+    const h = go({ fetchImpl: async (url, init) => (url === BOOKING_URL ? new Response('{}', { status: 500 }) : w.fetchImpl(url, init)) }, s, { emails: [email()], emailLedger: makeEmailLedger(file) });
+    expect(await h.run()).toBe(1);
+    expect(h.lines.at(-1)).toMatch(/^FAILED: padel-paid: booking emails skipped: SyntaxError reading /);
+    expect(s.calls.some((c) => c[0] === 'commit')).toBe(true);           // the Splitwise entry was still made
+  });
+  it('a booking paid from an email this run is held even when its ledger line could not be written', async () => {
+    const b = booking();
+    const fetchImpl = async (url, init = {}) => (url === BOOKING_URL ? new Response(JSON.stringify({ ok: true, booked: false, paid: true, venue: 'pdl' }), { status: 200 }) : worker([b]).fetchImpl(url, init));
+    const s = splitwise();
+    const broken = { read: () => ({}), add: () => { const e = new Error('disk full'); e.code = 'ENOSPC'; throw e; } };
+    const h = go({ fetchImpl }, s, { emails: [email({ id: 'e1', date: '2026-11-03', start: '19:30', price_pence: 3600 })], emailLedger: broken });
+    expect(await h.run()).toBe(1);                                      // the failed write is reported...
+    expect(s.calls).toEqual([]);                                        // ...and the booking is still held
+  });
+  it('a booking paid from an email waits half an hour before Splitwise; one Kevin paid himself does not', () => {
+    const done = { m1: { slot: '2026-11-03|19', at: NOON - 10 * 60000, booked: true, paid: true }, m2: { slot: '2026-11-04|19', at: NOON - 10 * 60000, booked: true, paid: false } };
+    expect(heldByEmail('2026-11-03|19', done, NOON)).toBe(true);
+    expect(heldByEmail('2026-11-03|19', done, NOON + 21 * 60000)).toBe(false);
+    expect(heldByEmail('2026-11-04|19', done, NOON)).toBe(false);      // marked from the email, priced on Kevin's phone
+  });
+  it('runOnce: the email goes to the Worker first, and the booking it paid is held, not sent to Splitwise', async () => {
+    const b = booking();
+    const posts = [];
+    const fetchImpl = async (url, init = {}) => {
+      if (url === BOOKING_URL) { posts.push(JSON.parse(init.body)); return new Response(JSON.stringify({ ok: true, booked: false, paid: true }), { status: 200 }); }
+      return worker([b]).fetchImpl(url, init);
+    };
+    const s = splitwise();
+    const h = go({ fetchImpl }, s, { emails: [email({ id: 'e1', date: '2026-11-03', start: '19:30', price_pence: 3600 })] });
+    expect(await h.run()).toBe(0);
+    expect(posts).toEqual([{ slot: '2026-11-03|19', venue: 'pdl', start: '19:30', minutes: 60, person_id: 1, price_pence: 3600 }]);
+    expect(s.calls).toEqual([]);                                        // held: no Splitwise yet
+    expect(h.lines).toEqual(['padel-paid: booking emails: 0 marked booked, 1 paid, 0 refused']);
+    expect(JSON.stringify(h.lines)).not.toMatch(/Test /);              // counts only, never a name
+  });
+  it('readEmails uses a list padel-emails.py wrote this hour, and nothing older', () => {
+    const file = join(tmp(), 'emails.json');
+    writeFileSync(file, JSON.stringify({ at: NOON, bookings: [email()] }));
+    expect(readEmails(file, () => NOON + 59 * 60000)).toHaveLength(1);
+    expect(readEmails(file, () => NOON + 61 * 60000)).toBeNull();
+    expect(readEmails(join(tmp(), 'missing.json'), () => NOON)).toBeNull();
   });
 });

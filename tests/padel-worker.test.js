@@ -432,6 +432,17 @@ function mapRepo() {
         await this.setBooked(slot, person_id, venue, now, d, true);
         return this.setPaid(slot, price, players, now);
       },
+      async markFromEmail(slot, person_id, venue, d, now) {
+        if (booked.has(slot)) return false;
+        booked.set(slot, { slot, person_id, venue, created_at: now, start: d.start, minutes: d.minutes, courts: 1 });
+        return true;
+      },
+      async payFromEmail(slot, venue, price, players, now) {
+        const b = booked.get(slot);
+        if (!b || b.venue !== venue || b.paid_at || !b.start || !b.minutes || b.splitwise_state != null || b.texts_state != null) return false;
+        Object.assign(b, { price_pence: price, players: JSON.stringify(players), paid_at: now });
+        return true;
+      },
       async setCourts(slot, courts) { const b = booked.get(slot); if (!b) return false; b.courts = courts; return true; },
       async clearBooked(slot, admin = false) {
         const b = booked.get(slot);
@@ -1292,6 +1303,38 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       await t.call('/api/robot/paid', { slot: SLOT, step: 'splitwise', state: 'claimed', paidAt: iso(NOW) }, { robot: ROBOT });
       expect((await t.call('/api/booked', { slot: SLOT, person_id: a, venue: 'pdl', booked: true, start: '19:30', minutes: 90, price: 50, players: [a] }, { admin: ADMIN })).status).toBe(409);
       expect((await t.call('/api/state')).json.booked[SLOT].paid).toMatchObject({ price: 4000, players: [a, b] });
+    });
+    // Kevin, 8 Nov 2026: "do it all from the booking confirmation email and the information on the app at
+    // that time". The Mac reads the venue's email; this route marks the hour and, with a price, pays it.
+    it('a booking email marks an unmarked hour and, with a price, pays it with the players the app has; it never overrides a phone', async () => {
+      const [k, b, c, d] = await t.addPeople(['Test Kev', 'Test Bob', 'Test Cat', 'Test Dan']);
+      await t.call('/api/person', { id: d, venues: ['si'] });                                  // Dan cannot get to Huntingdon
+      for (const id of [b, c, d]) await t.call('/api/vote', { person_id: id, add: [SLOT] });
+      const email = (body) => t.call('/api/robot/booking', { slot: SLOT, venue: 'pp', start: '19:30', minutes: 60, person_id: k, ...body }, { robot: ROBOT });
+      expect((await t.call('/api/robot/booking', { slot: SLOT, venue: 'pp', start: '19:30', minutes: 60, person_id: k })).status).toBe(401);
+      for (const bad of [{ venue: 'xx' }, { start: '18:30' }, { minutes: undefined }, { price_pence: 0 }, { price_pence: 12.5 }, { slot: '2026-10-20|19' }]) expect((await email(bad)).status).toBe(400);
+      expect((await email({ person_id: 999 })).status).toBe(404);
+      expect((await t.call('/api/state')).json.booked[SLOT]).toBeUndefined();                  // nothing written by a refusal
+      const r = await email({ price_pence: 3460 });
+      expect(r.json).toEqual({ ok: true, booked: true, paid: true, venue: 'pp', alreadyPaid: false });
+      const s = (await t.call('/api/state')).json.booked[SLOT];
+      expect(s).toMatchObject({ person_id: k, venue: 'pp', start: '19:30', minutes: 60 });
+      expect(s.paid).toMatchObject({ price: 3460, players: [b, c, k] });                        // who said 19:00 and can get there, then Kevin
+      expect((await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings.map((x) => x.slot)).toEqual([SLOT]);
+      expect((await email({ price_pence: 9999 })).json).toEqual({ ok: true, booked: false, paid: false, venue: 'pp', alreadyPaid: true });   // a price already there stays
+      expect((await t.call('/api/state')).json.booked[SLOT].paid.price).toBe(3460);
+    });
+    it('a booking email for an hour already marked on a phone keeps that venue and times, and a Matchi email (no price) leaves the price to Kevin', async () => {
+      const [k, b] = await t.addPeople(['Test Kev', 'Test Bob']);
+      await book(b);                                                                          // Bob marked it: Cambridge 19:30, 90 min
+      expect((await t.call('/api/robot/booking', { slot: SLOT, venue: 'pp', start: '19:00', minutes: 60, person_id: k }, { robot: ROBOT })).json).toEqual({ ok: true, booked: false, paid: false, venue: 'pdl', alreadyPaid: false });
+      expect((await t.call('/api/state')).json.booked[SLOT]).toMatchObject({ person_id: b, venue: 'pdl', start: '19:30', minutes: 90 });
+      expect((await t.call('/api/state')).json.booked[SLOT].paid).toBeUndefined();
+      // ...and an email WITH a price for another venue never pays Bob's Cambridge booking.
+      expect((await t.call('/api/robot/booking', { slot: SLOT, venue: 'pp', start: '19:30', minutes: 60, person_id: k, price_pence: 3460 }, { robot: ROBOT })).json).toMatchObject({ booked: false, paid: false, venue: 'pdl' });
+      expect((await t.call('/api/state')).json.booked[SLOT].paid).toBeUndefined();
+      // The same venue's email does pay it: Bob's hour, priced from Kevin's email.
+      expect((await t.call('/api/robot/booking', { slot: SLOT, venue: 'pdl', start: '19:30', minutes: 90, person_id: k, price_pence: 3600 }, { robot: ROBOT })).json).toMatchObject({ booked: false, paid: true, venue: 'pdl' });
     });
     it('the robot claims each step once: done or failed only from claimed, nothing after a claim until Kevin retries a failure', async () => {
       const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
