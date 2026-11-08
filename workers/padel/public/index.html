@@ -293,8 +293,9 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let saveTry = 0;                            // failed saves in a row
   let backoffUntil = 0;
   let busy = false;
-  let bookForm = null;                        // { slot, venue, start, minutes } while the Booked picker is open
-  let paidForm = null;                        // { slot, price, players: Set } while the Booked and paid panel is open
+  let bookForm = null;                        // { slot, venue, start, minutes, and on Kevin's phone price, players: Set, picked } while the Booked picker is open
+  let paidForm = null;                        // { slot, price, players: Set } while the price box is open
+  const paidDismissed = new Set();            // booked hours whose price box Kevin closed on this visit, so it does not open itself again
   const peopleDraft = new Map();              // real names typed on the People screen and not saved yet, by person id
   // Kevin's phone key (30 Oct 2026): set once from a #admin= link, kept on this phone only, sent as a
   // header. The Worker decides; the page only hides what this phone may not do.
@@ -395,7 +396,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const el = document.activeElement;
     if (!el || el === document.body || !el.dataset) return null;
     if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
-    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName']) {
+    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'bookPlayer', 'bookPrice', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName']) {
       if (el.dataset[k]) return '[data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()) + '="' + CSS.escape(el.dataset[k]) + '"]';
     }
     return el.id ? '#' + CSS.escape(el.id) : null;
@@ -575,6 +576,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
 
   function renderGrid() {
+    autoPaidForm();
     // A venue we could not read still gets its booking link, so the group can look by hand.
     const note = [];
     for (const code of CODES) {
@@ -631,7 +633,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     let html = `<p class="booked-line"><span>&#10003; Booked by ${esc(who)}: ${esc(where)}${when ? ' ' + esc(when) : ''}${esc(courts)}</span>
         ${undo}</p>`;
     if (b.paid) html += paidLine(slot, b);
-    else if (isAdmin() && !(paidForm && paidForm.slot === slot)) html += `<p class="paid-line"><button type="button" class="btn small" data-paid-open="${esc(slot)}"${busy ? ' disabled' : ''}>Booked and paid</button></p>`;
+    else if (isAdmin() && !(paidForm && paidForm.slot === slot)) html += `<p class="paid-line"><span>Splitwise and the texts wait for the price.</span> <button type="button" class="btn small primary" data-paid-open="${esc(slot)}"${busy ? ' disabled' : ''}>Add the price</button></p>`;
     else if (!isAdmin() && me && me === b.person_id) html += `<p class="paid-line"><span>The price and players go in on Kevin's phone. Is this it?</span> <button type="button" class="btn small" data-paste-key${busy ? ' disabled' : ''}>Paste key</button></p>`;
     if (paidForm && paidForm.slot === slot) html += paidFormHtml(slot, b);
     if (b.second) {
@@ -667,28 +669,42 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function paidFormHtml(slot, b) {
     const f = paidForm;
     const picks = S.people.map((p) => `<button type="button" class="pick" data-paid-player="${esc(p.id)}" aria-pressed="${f.players.has(p.id)}">${esc(p.name)}</button>`).join('');
-    const n = f.players.size;
-    const price = Number(f.price);
-    const each = n && price > 0 ? `${n} playing, ${money(Math.round(price * 100 / n))} each.` : `${n} playing.`;
-    return `<form class="book-form" data-paid-form="${esc(slot)}" aria-label="Booked and paid">
+    return `<form class="book-form" data-paid-form="${esc(slot)}" aria-label="Price and players">
         <label>Total paid (£) <input name="price" type="number" inputmode="decimal" min="0.01" max="1000" step="0.01" value="${esc(f.price)}" data-paid-price="1"></label>
         <div class="picks" role="group" aria-label="Who is playing">${picks}</div>
-        <p class="note" style="flex-basis:100%;margin:0">${esc(each)} Saving puts it in Splitwise and texts the players.</p>
-        <button type="submit" class="btn small primary"${busy ? ' disabled' : ''}>Save booked and paid</button>
+        <p class="note" style="flex-basis:100%;margin:0">${esc(eachNote(Number(f.price), f.players.size))}</p>
+        <button type="submit" class="btn small primary"${busy ? ' disabled' : ''}>Save price</button>
         <button type="button" class="btn small" data-paid-cancel="${esc(slot)}">Cancel</button>
       </form>`;
   }
-  function openPaidForm(slot) {
+  // "4 playing, £8.00 each." under a price box, from what is typed and ticked.
+  function eachNote(price, n) {
+    return (n && price > 0 ? `${n} playing, ${money(Math.round(price * 100 / n))} each.` : `${n} playing.`) + ' Saving puts it in Splitwise and texts the players.';
+  }
+  // Who plays, as the app has it at that moment: everyone who said they can play that hour and can get
+  // to that venue, and whoever booked it.
+  function defaultPlayers(slot, venue, bookerId) {
+    const players = new Set((S.votes[slot] || []).filter((id) => { const p = person(id); return p && p.venues.includes(venue); }));
+    if (bookerId) players.add(bookerId);
+    return players;
+  }
+  function paidDraft(slot) {
     const b = S.booked[slot];
-    if (!b) return;
-    let players;
-    if (b.paid) players = new Set(b.paid.players);
-    else {
-      // Everyone who said they were in for that hour and can get to that venue, and whoever booked it.
-      players = new Set((S.votes[slot] || []).filter((id) => { const p = person(id); return p && p.venues.includes(b.venue); }));
-      if (b.person_id) players.add(b.person_id);
-    }
-    paidForm = { slot, price: b.paid ? (b.paid.price / 100).toFixed(2) : '', players };
+    return { slot, price: b.paid ? (b.paid.price / 100).toFixed(2) : '', players: b.paid ? new Set(b.paid.players) : defaultPlayers(slot, b.venue, b.person_id) };
+  }
+  // Kevin's phone (8 Nov 2026, Kevin: "there should be no need to have a separate paid element"): a booked
+  // hour on the shown day with no price opens its price box by itself, players already ticked.
+  function autoPaidForm() {
+    // A box left open, untouched, on another day gives way to this day's.
+    if (paidForm && day && !paidForm.slot.startsWith(day + '|') && !paidForm.price) paidForm = null;
+    if (!isAdmin() || paidForm || !day) return;
+    const nowH = day === S.today ? londonHour() : -1;            // only an hour the grid still shows
+    const slot = Object.keys(S.booked).sort().find((s) => s.startsWith(day + '|') && Number(s.slice(-2)) >= nowH && !S.booked[s].paid && !paidDismissed.has(s));
+    if (slot) paidForm = paidDraft(slot);
+  }
+  function openPaidForm(slot) {
+    if (!S.booked[slot]) return;
+    paidForm = paidDraft(slot);
     keepFocus(renderGrid);
     const input = document.querySelector('[data-paid-form="' + CSS.escape(slot) + '"] input[name="price"]');
     if (input) input.focus({ preventScroll: true });
@@ -733,10 +749,15 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const fits = i >= 0 && m >= h.mins[i] && m <= (h.maxs || h.mins)[i];
       return `<option value="${m}"${m === f.minutes ? ' selected' : ''}>${m} min${fits ? ' (free)' : ''}</option>`;
     }).join('');
+    // Kevin's phone: the price and the players go in with the booking, so one Save does everything (8 Nov 2026).
+    const paid = f.players ? `<label>Total paid (£) <input name="price" type="number" inputmode="decimal" min="0.01" max="1000" step="0.01" value="${esc(f.price)}" data-book-price="1"></label>
+        <div class="picks" role="group" aria-label="Who is playing">${S.people.map((p) => `<button type="button" class="pick" data-book-player="${esc(p.id)}" aria-pressed="${f.players.has(p.id)}">${esc(p.name)}</button>`).join('')}</div>
+        <p class="note" style="flex-basis:100%;margin:0">${esc(eachNote(Number(f.price), f.players.size))}</p>` : '';
     return `<form class="book-form" data-book-form="${esc(slot)}" aria-label="Mark this hour as booked">
         <label>Where <select name="venue" data-book-field="venue">${venues}</select></label>
         <label>From <select name="start" data-book-field="start">${starts}</select></label>
         <label>For <select name="minutes" data-book-field="minutes">${lens}</select></label>
+        ${paid}
         <button type="submit" class="btn small primary"${busy ? ' disabled' : ''}>Save</button>
         <button type="button" class="btn small" data-book-cancel="${esc(slot)}">Cancel</button>
       </form>`;
@@ -748,7 +769,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!start) start = h ? h.starts[0] : hh + ':00';
     if (!minutes) { const i = h ? h.starts.indexOf(start) : -1; minutes = i >= 0 ? h.mins[i] : 60; }
     bookForm = { slot, venue, start, minutes: Number(minutes) };
-    gotoSlot(slot);                             // draws the picker in its row and scrolls the row into view
+    if (isAdmin()) Object.assign(bookForm, { price: '', players: defaultPlayers(slot, venue, me), picked: false });
+    gotoSlot(slot);                            // draws the picker in its row and scrolls the row into view
     const sel = document.querySelector('[data-book-form="' + CSS.escape(slot) + '"] select');
     if (sel) sel.focus({ preventScroll: true });
   }
@@ -1001,10 +1023,13 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (t.dataset.unbook) postAndApply('/api/booked', { slot: t.dataset.unbook, booked: false }, 'Booking mark removed.');
     else if (t.dataset.paidOpen) openPaidForm(t.dataset.paidOpen);
     else if (t.dataset.pasteKey !== undefined) pasteKey();
-    else if (t.dataset.paidCancel) { paidForm = null; keepFocus(renderGrid); }
-    else if (t.dataset.paidPlayer) {
-      const id = Number(t.dataset.paidPlayer);
-      if (paidForm.players.has(id)) paidForm.players.delete(id); else paidForm.players.add(id);
+    else if (t.dataset.paidCancel) { paidDismissed.add(t.dataset.paidCancel); paidForm = null; keepFocus(renderGrid); }
+    else if (t.dataset.paidPlayer || t.dataset.bookPlayer) {
+      const f = t.dataset.paidPlayer ? paidForm : bookForm;
+      if (!f || !f.players) return;
+      const id = Number(t.dataset.paidPlayer || t.dataset.bookPlayer);
+      if (f.players.has(id)) f.players.delete(id); else f.players.add(id);
+      if (f === bookForm) f.picked = true;
       keepFocus(renderGrid);
     }
     else if (t.dataset.retry) { const [d, hh, step] = t.dataset.retry.split('|'); postAndApply('/api/admin', { action: 'retry', slot: d + '|' + hh, step }, 'The robot will try again within 15 minutes.'); }
@@ -1026,8 +1051,17 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!form) return;
     ev.preventDefault();
     const fd = new FormData(form);
+    const body = { slot: form.dataset.bookForm, person_id: me, venue: String(fd.get('venue')), start: String(fd.get('start')), minutes: Number(fd.get('minutes')), booked: true };
+    let done = 'Marked as booked. Thanks.';
+    if (bookForm && bookForm.players) {
+      const price = Number(fd.get('price'));
+      if (!(price > 0)) { toast('Enter what you paid, in pounds.'); return; }
+      if (!bookForm.players.size) { toast('Pick who is playing.'); return; }
+      Object.assign(body, { price, players: [...bookForm.players] });
+      done = 'Booked. Splitwise and the texts follow within 15 minutes.';
+    }
     // The picker stays open until the reply shows the hour booked (apply() closes it), so a failed save keeps the choices.
-    postAndApply('/api/booked', { slot: form.dataset.bookForm, person_id: me, venue: String(fd.get('venue')), start: String(fd.get('start')), minutes: Number(fd.get('minutes')), booked: true }, 'Marked as booked. Thanks.');
+    postAndApply('/api/booked', body, done);
   });
   // Booked and paid: the price and the players go to the Worker; the robot does Splitwise and the texts.
   document.addEventListener('submit', (ev) => {
@@ -1044,12 +1078,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   });
   document.addEventListener('input', (ev) => {
     if (ev.target.dataset && ev.target.dataset.realName) peopleDraft.set(Number(ev.target.dataset.realName), ev.target.value);
-    if (ev.target.dataset && ev.target.dataset.paidPrice && paidForm) {
-      paidForm.price = ev.target.value;
-      const n = paidForm.players.size;
+    // A price box's draft is kept as it is typed, so a redraw (a poll, a tick) never loses it.
+    const draft = ev.target.dataset && ev.target.dataset.paidPrice ? paidForm : ev.target.dataset && ev.target.dataset.bookPrice ? bookForm : null;
+    if (draft) {
+      draft.price = ev.target.value;
       const note = ev.target.closest('form').querySelector('.note');
-      const price = Number(paidForm.price);
-      if (note) note.textContent = (n && price > 0 ? `${n} playing, ${money(Math.round(price * 100 / n))} each.` : `${n} playing.`) + ' Saving puts it in Splitwise and texts the players.';
+      if (note) note.textContent = eachNote(Number(draft.price), draft.players.size);
     }
   });
   $('add-player-form').addEventListener('submit', async (ev) => {
@@ -1074,6 +1108,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const f = ev.target.closest('[data-book-field]');
     if (!f || !bookForm) return;
     bookForm[f.dataset.bookField] = f.dataset.bookField === 'minutes' ? Number(f.value) : f.value;
+    // Another venue means other people can get there: the ticks follow, until Kevin has ticked by hand.
+    if (f.dataset.bookField === 'venue' && bookForm.players && !bookForm.picked) bookForm.players = defaultPlayers(bookForm.slot, bookForm.venue, me);
     if (f.dataset.bookField !== 'minutes') keepFocus(renderGrid);
   });
   document.addEventListener('visibilitychange', () => {

@@ -18,6 +18,8 @@
 //   POST /api/booked  { slot, person_id, venue, booked, start?, minutes?, courts? } -> state
 //        A booking carries its start ("19:30"), length in minutes and courts (1, or 2 when the group
 //        booked a second court); a day with a booking shows no other ready hour (Kevin, 29 Oct 2026).
+//        Kevin's phone also sends { price, players } (8 Nov 2026): booked and paid in one save and one
+//        transaction; any other phone sending a price gets 403.
 //   POST /api/refresh                       -> state + { refreshed }  "Check now" (Pulse only)
 //   POST /api/admin   (X-Admin-Key)         -> state   Kevin's phone only (Kevin, 30 Oct 2026):
 //        { action: 'name', id, real_name }            a player's real name (shown with its initials everywhere)
@@ -697,6 +699,17 @@ const toPerson = (r) => {
   return p;
 };
 const PEOPLE_COLS = 'id, name, venues, votes_at, real_name';
+// Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it failed).
+const SET_PAID_SQL = `UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
+  texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`;
+// A booking, or a change to it. A detail left out keeps its stored value; a paid booking changes only by
+// Kevin's phone, and only before the robot starts on Splitwise.
+const SET_BOOKED_SQL = `INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 1), ?7)
+  ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at,
+    paid_at = CASE WHEN booked.paid_at IS NULL THEN NULL ELSE excluded.created_at END   -- a re-marked paid booking is a new version: a robot holding the old one cannot claim it
+  WHERE booked.paid_at IS NULL OR (?8 = 1 AND COALESCE(booked.splitwise_state, '') IN ('', 'failed'))`;
+const bookedArgs = (slot, personId, venue, nowIso, details = {}, admin = false) =>
+  [slot, personId, venue, details.start ?? null, details.minutes ?? null, details.courts ?? null, nowIso, admin ? 1 : 0];
 const BOOKED_COLS = 'slot, person_id, venue, start, minutes, courts, created_at, price_pence, players, paid_at, splitwise_state, splitwise_at, splitwise_note, texts_state, texts_at, texts_note';
 export function makeRepo(db) {
   return {
@@ -750,9 +763,7 @@ export function makeRepo(db) {
     // Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it
     // failed), so a price or player change can never race an entry already made.
     async setPaid(slot, pricePence, players, nowIso) {
-      const r = await db.prepare(`UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
-        texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`)
-        .bind(slot, pricePence, JSON.stringify(players), nowIso).run();
+      const r = await db.prepare(SET_PAID_SQL).bind(slot, pricePence, JSON.stringify(players), nowIso).run();
       return (r.meta?.changes || 0) === 1;
     },
     async clearPaid(slot) {
@@ -782,12 +793,19 @@ export function makeRepo(db) {
     // A paid booking changes only by Kevin's phone, and only before the robot starts on Splitwise:
     // the check is in the statement, so no read-then-write race can get round it.
     async setBooked(slot, personId, venue, nowIso, details = {}, admin = false) {
-      const r = await db.prepare(`INSERT INTO booked (slot, person_id, venue, start, minutes, courts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 1), ?7)
-        ON CONFLICT(slot) DO UPDATE SET person_id = excluded.person_id, venue = excluded.venue, start = COALESCE(excluded.start, booked.start), minutes = COALESCE(excluded.minutes, booked.minutes), courts = COALESCE(?6, booked.courts), created_at = excluded.created_at,
-          paid_at = CASE WHEN booked.paid_at IS NULL THEN NULL ELSE excluded.created_at END   -- a re-marked paid booking is a new version: a robot holding the old one cannot claim it
-        WHERE booked.paid_at IS NULL OR (?8 = 1 AND COALESCE(booked.splitwise_state, '') IN ('', 'failed'))`)
-        .bind(slot, personId, venue, details.start ?? null, details.minutes ?? null, details.courts ?? null, nowIso, admin ? 1 : 0).run();
+      const r = await db.prepare(SET_BOOKED_SQL).bind(...bookedArgs(slot, personId, venue, nowIso, details, admin)).run();
       return (r.meta?.changes || 0) === 1;
+    },
+    // Kevin's phone books with the price (8 Nov 2026): both writes in one transaction, so the robot never
+    // reads a booking between them. A batch rolls back only on an error, not on an update that matches
+    // nothing; the two cannot split all the same, because the booking write is refused in exactly the
+    // cases the price write is (the robot has started on Splitwise), so false always means nothing written.
+    async setBookedPaid(slot, personId, venue, nowIso, details, pricePence, players) {
+      const [a, b] = await db.batch([
+        db.prepare(SET_BOOKED_SQL).bind(...bookedArgs(slot, personId, venue, nowIso, details, true)),
+        db.prepare(SET_PAID_SQL).bind(slot, pricePence, JSON.stringify(players), nowIso),
+      ]);
+      return (a.meta?.changes || 0) === 1 && (b.meta?.changes || 0) === 1;
     },
     // "Booked 2nd court": the court count alone, which the robot never reads, so anyone may set it.
     async setCourts(slot, courts) {
@@ -1415,8 +1433,17 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
         if (!VENUES.includes(body.venue)) return fail('Unknown venue', 400);
         const details = cleanBooking(body, slot);
         if (details.error) return fail(details.error, 400);
-        const courtsOnly = existing?.paid_at && details.courts !== undefined && details.start === undefined && details.minutes === undefined && body.venue === existing.venue;
+        // Kevin's phone sends the price and the players with the booking (8 Nov 2026: one Save does
+        // everything). Checked before anything is written, so a bad price never leaves half a save.
+        const withPaid = body.price !== undefined || body.players !== undefined;
+        if (withPaid && !admin) return fail("The price goes in on Kevin's phone", 403);
+        const paid = withPaid ? cleanPaid(body, await repo.listPeople()) : null;
+        if (paid && paid.error) return fail(paid.error, 400);
+        // A price needs the start and the length, as Booked and paid always did: the robot's entry and texts say them.
+        if (paid && !((details.start ?? existing?.start) && (details.minutes ?? existing?.minutes))) return fail('Mark the hour as booked with its start and length', 400);
+        const courtsOnly = !paid && existing?.paid_at && details.courts !== undefined && details.start === undefined && details.minutes === undefined && body.venue === existing.venue;
         if (courtsOnly) await repo.setCourts(slot, details.courts);
+        else if (paid) { if (!(await repo.setBookedPaid(slot, id, body.venue, nowIso, details, paid.pricePence, paid.players))) return fail(paidRefusal, 409); }
         else if (!(await repo.setBooked(slot, id, body.venue, nowIso, details, admin))) return fail(paidRefusal, 409);
       } else {
         return fail('booked must be true or false', 400);
