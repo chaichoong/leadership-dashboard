@@ -139,7 +139,8 @@ def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0
     return [r for r in rows if r["why"] != NOT_RENDERED]
 
 
-def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None, skipped=None, holds=None, skipped_ruled=None):
+def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None, skipped=None, holds=None, skipped_ruled=None,
+          lost_night=None):
     now = now or dt.datetime.now(dt.timezone.utc)
     state = publish.load_state() if state is None else state
     approvals = approval.load_state() if approvals is None else approvals
@@ -240,6 +241,7 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         "scheduled": scheduled[:40], "nextInOrder": ready, "leftBehind": behind, "waitingForKevin": waiting_cards, "qaBlocked": blocked,
         "sentBack": sent_back, "teaserOnly": teaser_only, "skippedNames": skipped, "skippedRuled": len(skipped_ruled or []),
         "tonight": tonight, "failedRenders": failed, "retryTonight": retrying, "renderedNoCard": no_card, "incomplete": incomplete,
+        "lostNight": lost_night,
         "strava": {"lastPush": strava_at, "day": sync_state.get("day"), "lastRunKm": (sync_state.get("last_activity") or {}).get("km"),
                    "renamed": bool(lp.get("renamed"))},
     }
@@ -263,8 +265,23 @@ def fmt_when(iso):
     return t.astimezone(LONDON).strftime("%H:%M") if t else "?"
 
 
+def lost_night_line(rec):
+    """The night the render's scan gave up on (watch.lost_night), in words for the 08:00 line, or ''. A give-up after
+    midnight (a late re-run) belongs to the evening before, hence the seven hours."""
+    if not rec: return ""
+    why = str(rec.get("why") or "no reason recorded")[:140]
+    try: at = dt.datetime.fromisoformat(rec["at"])
+    except (KeyError, TypeError, ValueError): at = None
+    if at and 7 <= at.hour < 22:                             # a hand run of the scan in the day: no night render was lost
+        return "The raw video scan at %s found no clips (%s)" % (at.strftime("%H:%M on %a %-d %b"), why)
+    night = (at - dt.timedelta(hours=7)).strftime("%a %-d %b") if at else "a recent"
+    return "The %s night render did not run (%s), so it made no new episodes" % (night, why)
+
+
 def headline(r):
-    """One line for the 08:00 DM. It names yesterday even when nothing went out: absence is the news."""
+    """One line for the 08:00 DM. It names yesterday even when nothing went out: absence is the news. A night the
+    render lost comes first (8 Nov 2026): the 7 Nov loss reached only a pop-up on the Mac, and the cards it never
+    made were noticed by Kevin, not by the report."""
     y = r["history"][1] if len(r["history"]) > 1 else {"episodes": []}
     if y["episodes"]:
         out = "; ".join("Episode %d out, %d of %d sections%s" % (e["day"], e["done"], e.get("owed", 7), (" (missing: " + ", ".join(e["missing"]) + ")") if e["missing"] else "")
@@ -284,7 +301,8 @@ def headline(r):
     others = [b for b in r.get("leftBehind") or [] if b["day"] not in {s["day"] for s in sent}]
     if others: ask += "; " + "; ".join("Episode %d not out yet (%s)" % (b["day"], b["why"]) for b in others[:HEADLINE_BEHIND])
     if len(others) > HEADLINE_BEHIND: ask += "; and %d more not out yet (the Publishing page lists them)" % (len(others) - HEADLINE_BEHIND)
-    return "Content: %s. %s. %s." % (out, nxt, ask)
+    lost = lost_night_line(r.get("lostNight"))
+    return "Content: %s%s. %s. %s." % ((lost + ". ") if lost else "", out, nxt, ask)
 
 
 HEADLINE_BEHIND = 4          # the 08:00 line is cut at 900 characters; the page carries the whole list
@@ -509,7 +527,7 @@ def build_live(now=None, read_post=None, read_card=None):
     without it put an approved card back to 'waiting' until the next ten-minute check."""
     now = now or dt.datetime.now(dt.timezone.utc)
     st, ap, info = live_overlay(publish.load_state(), approval.load_state(), now, read_post, read_card)
-    report = build(now, st, ap)
+    report = build(now, st, ap, lost_night=watch.lost_night())
     report["live"] = info
     return report
 
