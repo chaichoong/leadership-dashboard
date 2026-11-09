@@ -106,7 +106,14 @@ TK = dict(rc.TK, agentOutput="fldzswp8fx6PqpLQ5", approvalOutcome="fldrHBSr6qoUf
           approvalFeedback="fldtI7SJI4gEohHD1", feedbackHistory="fldOzsq68lhfprKJu")
 REC_RE = re.compile(r"rec[A-Za-z0-9]{14}")
 # The subject of a change is a tenancy, or for Onboard the agreement's Gmail message id (16 hex characters).
-CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14}|[0-9a-f]{12,24})\s+"
+# A card writes the line as its own paragraph OR as a bullet in a list of changes, so the
+# pattern takes an optional list marker ('- ', '* ', '• ', '1. ') and leading indent. Without it
+# the Helen Webbe DWP card of 3 Nov 2026 parsed as "no RECORD CHANGE line" and the approved
+# Payment Status was never written (finding 20261104-agent-dispatch-1194). The marker is the ONLY
+# thing allowed before 'RECORD CHANGE:': prose on the line still refuses, and a line in agent-written
+# Your step text is cut off before this runs by approved_original().
+CHANGE_BULLET = r"[ \t]*(?:[-*•–][ \t]+|\d+[.)][ \t]+)?"
+CHANGE_RE = re.compile(rf"^{CHANGE_BULLET}RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{{14}}|[0-9a-f]{{12,24}})\s+"
                        r"(?P<label>Payment Status|Due Day|Set-off|Onboard|Rent change)\s*=\s*(?P<value>[^\n]+?)\s*$", re.M)
 # Kept identical to scripts/agent-dispatch.py (tests/tenancy-record.test.js reads both). `block --kind KEVIN --steps`
 # puts agent-written steps ON TOP of an approved card's Agent Output and keeps the approval (review round 3,

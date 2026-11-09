@@ -136,6 +136,43 @@ describe('notes for Kevin under a second --- line', () => {
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/tier-1 banner/);
   });
+
+  // THE REGRESSION (20261103-agent-dispatch-1180). On 3 Nov 2026 an approved message carried the
+  // declared KEVIN ONLY step after the signature. strip_carry_out_line removes the closing line and
+  // nothing read this one, so the recipient would have been sent Kevin's payee, amount and reference.
+  // Back-test: delete the KEVIN_ONLY_STEP_RE check and every case below is sent.
+  it('a declared KEVIN ONLY step left inside the email is refused: the payee and reference are his alone (1180)', () => {
+    for (const line of ['KEVIN ONLY: payment: pay Example Water £84.20, reference 1234567890',
+                        '**KEVIN ONLY: payment:** pay Example Water £84.20, reference 1234567890',
+                        '> KEVIN ONLY: signature - sign the agreement in the Adobe boxes',
+                        '  KEVIN ONLY: credential: sign the robot into the council portal']) {
+      const r = parse(HEAD + EMAIL + '\n\n' + line + CARRY);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/KEVIN ONLY line sits inside the email/);
+    }
+  });
+
+  // CONTROL: the line is read in CAPITALS at a line start, so the email's own words about Kevin are
+  // untouched. Without this the check would refuse ordinary prose and every such card would stall.
+  it("the email's own words about Kevin are never read as his step (1180)", () => {
+    for (const sentence of ['Kevin only wanted the short version, so the full report is attached.',
+                            'We will send this to Kevin only after the inspection.',
+                            'Our records show kevin only: the account has no second name on it.']) {
+      const r = parse(HEAD + EMAIL + '\n\n' + sentence + CARRY);
+      expect(r.ok).toBe(true);
+      expect(r.mail.body).toContain(sentence);
+    }
+  });
+
+  // CONTROL: the right shape still works. The approval card needs the declared step, so it goes with
+  // the closing line, which strip_carry_out_line already takes off the email. A check that refused it
+  // there too would leave the agent nowhere to write it.
+  it('a KEVIN ONLY step under the closing line is the card, and the email goes out clean (1180)', () => {
+    const r = parse(HEAD + EMAIL + CARRY + '\nKEVIN ONLY: payment: pay Example Water £84.20, reference 1234567890');
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(EMAIL);
+    expect(r.mail.body).not.toContain('KEVIN ONLY');
+  });
 });
 
 describe('the shapes that were already right stay right', () => {

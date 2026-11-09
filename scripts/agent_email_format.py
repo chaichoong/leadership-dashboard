@@ -220,6 +220,14 @@ KEVIN_ONLY_RE = re.compile(r"not for sending|not part of the email"
                            r"|^[ \t>*_#]*(?:AGENT NOTES?|NOTES? FOR KEVIN(?:'S REVIEW)?(?: ONLY)?)\b[^\n:(]{0,40}[:(]", re.M | re.I)
 UNDERSCORE_LINE_RE = re.compile(r"^[ \t]*_{3,}[ \t]*$", re.M)
 TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*TIER[ -]?1\b", re.M)   # capitals only
+# The DECLARED step of Kevin's (agent-dispatch.py KEVIN_ONLY_LINE_RE). It is written for the approval
+# card, and it names what only he does: a payee, an amount and a reference, a signature, a credential.
+# On 3 Nov 2026 an approved message carried one after the signature: the send path strips the
+# Carrying-this-out line but nothing read this, so a tenant would have received Kevin's bank steps
+# (finding 20261103-agent-dispatch-1180). Capitals at a line start, like TIER1_LEFT_RE and for the same
+# reason: "kevin only wanted the short version" is the email's own words, and this pattern carries no
+# re.I so it cannot reach them.
+KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
 
 
 def clean_email_body(body):
@@ -494,6 +502,11 @@ def parse_output(output):
     if kevin_only:
         raise EmailFormatError(f"the email holds a note written for Kevin ({kevin_only.group(0).strip()!r}): "
                                "notes for Kevin go ABOVE the headers, never in the email")
+    if KEVIN_ONLY_STEP_RE.search(body):
+        raise EmailFormatError("a KEVIN ONLY line sits inside the email: it names the step only Kevin does "
+                               "(a payee, an amount and a reference, a signature, a credential) and the recipient "
+                               "must never read it. Put it with the closing line, under "
+                               "'Carrying this out will involve:', which the send path takes off")
 
     if not to and not to_each:
         raise EmailFormatError("no TO recipient")
