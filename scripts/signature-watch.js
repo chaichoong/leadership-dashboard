@@ -194,6 +194,34 @@ async function cmdPoll() {
   if (handoff.failed) process.exit(1);
 }
 
+// WHY A PYTHON FAILURE IS READ FROM THE END (20261014-defects-cleanup-881). On 14 Oct 2026 the
+// append failed on task recP4BGhCqJUrIZYn and the log said only "Traceback (most recent call last):
+// File .../adobe_audit.py, line 158". Python prints the exception LAST, so taking the first 200
+// characters of stderr keeps the frames and throws away the one line that says what went wrong, and
+// the defect could not be diagnosed at all. This keeps the exception, then as much of the newest
+// frame as fits. A reason that names nothing is the same as a swallowed error.
+const FAIL_REASON_MAX = 300;
+
+function failureReason(r) {
+  const lines = String((r && (r.stderr || r.stdout)) || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return `exited ${r && r.status !== undefined ? r.status : '?'} with no output`;
+  // Walk back from the end over Python's frame lines to the exception itself.
+  const isFrame = (l) => /^File ["']/.test(l);
+  const isHeader = (l) => /^Traceback \(most recent call last\)/.test(l);
+  let i = lines.length - 1;
+  while (i > 0 && (isFrame(lines[i]) || isHeader(lines[i]))) i -= 1;
+  // A traceback cut off before its exception leaves only frames. Say so and give the newest frame,
+  // because the header on its own names nothing at all — which is the bug this function exists for.
+  if (isHeader(lines[i])) {
+    const newest = lines.slice(1).reverse().find(isFrame);
+    return newest ? `no exception line in the output; newest frame: ${newest}` : lines[i];
+  }
+  const reason = lines[i];
+  const frame = lines.slice(0, i).reverse().find(isFrame);
+  const full = frame ? `${reason} (${frame})` : reason;
+  return full.length > FAIL_REASON_MAX ? full.slice(0, FAIL_REASON_MAX - 1) + '…' : full;
+}
+
 // The audit report: Adobe's agreement view offers "Download Audit Report"
 // (under the document's actions, sometimes behind a "…" menu). Best effort
 // and honest: ok:false with the reason when it cannot be found, never a
@@ -227,7 +255,7 @@ async function downloadAuditReport(page, item, signedPdf) {
     return { ok: false, note: 'audit report download failed: ' + (e.message || e) };
   }
   const r = spawnSync('python3', [path.join(REPO, 'scripts', 'adobe_audit.py'), 'append', signedPdf, auditPath], { encoding: 'utf8' });
-  if (r.status !== 0) return { ok: false, note: 'audit report saved but not appended: ' + (r.stderr || r.stdout || '').trim().slice(0, 200) };
+  if (r.status !== 0) return { ok: false, note: 'audit report saved but not appended: ' + failureReason(r) };
   return { ok: true, note: (r.stdout || '').trim() };
 }
 
@@ -287,4 +315,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((e) => { console.error('ERROR', e.message); process.exit(1); });
-module.exports = { pending, safeName, unhandedSigned, LEDGER, OUT_DIR, COMPLETED_URL };
+module.exports = { pending, safeName, unhandedSigned, failureReason, LEDGER, OUT_DIR, COMPLETED_URL };
