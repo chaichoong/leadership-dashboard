@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const WATCH = resolve(ROOT, 'scripts/signature-watch.js');
@@ -86,5 +87,55 @@ describe('signature-watch', () => {
   it('names the downloaded file by task, not by Adobe filename', () => {
     const src = readFileSync(WATCH, 'utf8');
     expect(src).toMatch(/signed_\$\{item\.task\}/);
+  });
+});
+
+// THE REGRESSION (20261014-defects-cleanup-881). On 14 Oct 2026 the audit-report append failed for
+// task recP4BGhCqJUrIZYn and the note read only "Traceback (most recent call last): File
+// .../adobe_audit.py, line 158". Python prints the exception LAST, so the old `.slice(0, 200)` kept
+// the frames and cut off the one line saying what broke: the defect could not be diagnosed at all.
+// Drives the real exported function; back-test by returning `stderr.trim().slice(0, 200)`, which
+// fails the first case.
+describe('a failed append says what went wrong, not just where (881)', () => {
+  const { failureReason } = createRequire(import.meta.url)(WATCH);
+  const TRACEBACK = [
+    'Traceback (most recent call last):',
+    '  File "/Users/x/scripts/adobe_audit.py", line 201, in <module>',
+    '    main()',
+    '  File "/Users/x/scripts/adobe_audit.py", line 158, in main',
+    '    out, n = append_audit(signed, audit)',
+    'ValueError: The length of the provided data is not a multiple of the block length.',
+  ].join('\n');
+
+  it('keeps the exception line from the end of a Python traceback', () => {
+    const r = failureReason({ status: 1, stderr: TRACEBACK });
+    expect(r).toContain('ValueError: The length of the provided data is not a multiple of the block length.');
+    expect(r).toContain('line 158');
+  });
+
+  it('a traceback with no exception line still names the newest frame, never an empty reason', () => {
+    const r = failureReason({ status: 1, stderr: 'Traceback (most recent call last):\n  File "a.py", line 3, in main' });
+    expect(r).toContain('line 3');
+    expect(r.trim()).not.toBe('');
+  });
+
+  // CONTROL: a script that fails with nothing on either stream must still give a reason. A blank note
+  // is what sent this finding round the houses in the first place.
+  it('no output at all is reported as the exit code, not as a blank note', () => {
+    expect(failureReason({ status: 3, stderr: '', stdout: '' })).toBe('exited 3 with no output');
+    expect(failureReason({ status: 2, stderr: '   \n\n' })).toBe('exited 2 with no output');
+  });
+
+  // CONTROL: a plain one-line error (adobe_audit.py's own sys.exit message) is passed through whole,
+  // and the note stays short enough to live in a ledger row.
+  it('a plain error message is passed through, and a long one is capped', () => {
+    expect(failureReason({ status: 1, stderr: 'ERROR: no audit report in that PDF' }))
+      .toBe('ERROR: no audit report in that PDF');
+    expect(failureReason({ status: 1, stderr: 'E'.repeat(900) }).length).toBeLessThanOrEqual(300);
+  });
+
+  it('falls back to stdout when stderr is empty', () => {
+    expect(failureReason({ status: 1, stderr: '', stdout: 'RuntimeError: pikepdf is not installed' }))
+      .toBe('RuntimeError: pikepdf is not installed');
   });
 });
