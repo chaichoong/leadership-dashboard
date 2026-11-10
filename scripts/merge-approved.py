@@ -325,7 +325,67 @@ def _merge_locked(card, attempts):
                     % (pr, sha[:12], (c.stderr or c.stdout or "").strip()[-300:]), merged=True)
     attempts[str(pr)] = {"result": "merged", "sha": sha, "approvedAt": card["approvedAt"], "at": now_iso()}
     save_attempts(attempts)
-    return {"pr": pr, "task": task, "result": "merged", "sha": sha, "deploy": deploy, "findings": landed}
+    # The card is closed and the findings have landed, so the workspace is debris.
+    # Last, and after the card: a teardown that broke must never cost the merge.
+    workspace = teardown_worktree(pr)
+    return {"pr": pr, "task": task, "result": "merged", "sha": sha, "deploy": deploy,
+            "findings": landed, "workspace": workspace}
+
+
+# ─── tear the merged workspace down ───────────────────────────────────────
+#
+# Finding 20261109-queue-fixer-1250. queue-fixer STEP 5b removes its workspace
+# after a SELF-merge, and a protected PR never self-merges: it waits for Kevin's
+# MERGE card and lands here instead, so nothing ever took its worktree down. By
+# 9 Nov 2026 five clean protected workspaces had piled up in .claude/worktrees,
+# each a checkout something could be run from by mistake (finding
+# 20260909-queue-fixer-504 is exactly that: content-engine ran from a worktree
+# five commits behind main).
+#
+# worktree.sh done already REFUSES while anything would be lost — uncommitted
+# files, commits that exist nowhere else, a branch not merged into origin/main —
+# so its refusal is reported, never forced past. Nothing here ever passes
+# --force.
+# content-engine-runtime is pinned to main for the nightly jobs, and main-checkout
+# is the branch the main checkout itself sits on. Neither is ever removed, whatever
+# a branch name implies.
+PINNED_WORKTREES = ("content-engine-runtime", "main-checkout", "main")
+
+
+def branch_topic(branch):
+    """The worktree topic a branch belongs to, or "" when it is not one of ours.
+
+    worktree.sh names the branch <kind>/<topic>, so the topic is what follows the
+    first slash. A branch with no slash (main, a hand-made branch) gets nothing:
+    guessing a topic is how the pinned main worktree would be removed."""
+    branch = (branch or "").strip()
+    if "/" not in branch:
+        return ""
+    topic = branch.split("/", 1)[1].strip().strip("/")
+    if not topic or "/" in topic or topic in PINNED_WORKTREES:
+        return ""
+    return topic
+
+
+def teardown_worktree(pr):
+    """Remove the merged PR's workspace. Returns a line for the result, never raises."""
+    try:
+        r = sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "-q", ".headRefName"])
+        branch = (r.stdout or "").strip() if r.returncode == 0 else ""
+        topic = branch_topic(branch)
+        if not topic:
+            return "no workspace to remove (branch %r)" % (branch or "unreadable")
+        path = os.path.join(REPO, ".claude", "worktrees", topic)
+        if not os.path.isdir(path):
+            return "no workspace for %s" % topic
+        d = sh([os.path.join(REPO, "scripts", "worktree.sh"), "done", topic], timeout=300)
+        if d.returncode != 0:
+            # A refusal is information: something would be lost, so it stays.
+            return "workspace %s kept: %s" % (
+                topic, ((d.stderr or d.stdout or "").strip()[-200:] or "worktree.sh refused"))
+        return "workspace %s removed" % topic
+    except Exception as e:  # noqa: BLE001 — teardown never fails a merge that landed
+        return "workspace not removed: %s: %s" % (type(e).__name__, str(e)[:120])
 
 
 def send_back(card, task_line, approve_line):

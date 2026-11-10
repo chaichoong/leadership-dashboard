@@ -678,3 +678,50 @@ describe('the hand-back poll starts it, with no model', () => {
     expect(merge).toBeLessThan(sh.indexOf('"$CLAUDE" -p'));
   });
 });
+
+// Finding 20261109-queue-fixer-1250: queue-fixer STEP 5b tears its workspace down
+// after a SELF-merge, and a protected PR never self-merges — it waits for Kevin's
+// MERGE card and lands in merge-approved.py, which removed nothing. Five clean
+// protected workspaces had piled up in .claude/worktrees by 9 Nov 2026, each a
+// checkout something could be run from by mistake.
+describe('a merged MERGE card takes its workspace down (1250)', () => {
+  const topic = (branch) => run(`${load('ma', 'merge-approved.py')}
+print(json.dumps({"topic": ma.branch_topic(${JSON.stringify(branch)})}))`).topic;
+
+  it('reads the topic off the branch worktree.sh named it after', () => {
+    expect(topic('fix/queue-fixes-2026-11-09-protected')).toBe('queue-fixes-2026-11-09-protected');
+    expect(topic('feature/health-bar')).toBe('health-bar');
+  });
+
+  it('THE CONTROL: never derives a topic that could remove a pinned workspace', () => {
+    // content-engine-runtime is pinned to main for the nightly jobs and
+    // main-checkout is the main checkout's own branch. A guess here does not
+    // leave debris behind, it breaks two jobs and raises no error.
+    expect(topic('main'), 'main would be treated as a topic').toBe('');
+    expect(topic('chore/main-checkout')).toBe('');
+    expect(topic('x/content-engine-runtime')).toBe('');
+    expect(topic(''), 'an unreadable branch would be treated as a topic').toBe('');
+    expect(topic('fix/'), 'an empty topic would be passed to worktree.sh').toBe('');
+    expect(topic('a/b/c'), 'a nested ref would be read as a topic').toBe('');
+  });
+
+  it('a workspace that does not exist is reported, not an error', () => {
+    const r = run(`${load('ma', 'merge-approved.py')}
+ma.sh = lambda args, timeout=120: argparse.Namespace(returncode=0, stdout="fix/no-such-topic-xyz", stderr="")
+print(json.dumps({"line": ma.teardown_worktree(9999)}))`);
+    expect(r.line).toMatch(/no workspace for no-such-topic-xyz/);
+  });
+
+  it('worktree.sh REFUSING leaves the workspace alone and says so', () => {
+    // The refusal is the safety: it fires while anything would be lost. Nothing
+    // here may ever pass --force.
+    const src = readFileSync(S('merge-approved.py'), 'utf8');
+    const fn = src.slice(src.indexOf('def teardown_worktree'), src.indexOf('def send_back'));
+    expect(fn, 'teardown forces past worktree.sh').not.toMatch(/--force/);
+    expect(fn, 'a refusal is not reported').toMatch(/kept:/);
+    // And it runs AFTER the card is closed, so a broken teardown cannot cost a merge.
+    const locked = src.slice(src.indexOf('def _merge_locked'));
+    expect(locked.indexOf('teardown_worktree(pr)'))
+      .toBeGreaterThan(locked.indexOf('"complete", task'));
+  });
+});
