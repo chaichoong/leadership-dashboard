@@ -259,6 +259,30 @@ describe('sport and site options', () => {
     });
 });
 
+// Kevin, 10 Nov 2026: after Wearing this on Padel, the layers worn today went in the wash (limit 1), so the
+// card swapped in a clean twin skin and dropped the warm-up top. The outfit worn today shows what is on.
+describe('layers worn today stay on the outfit worn today', () => {
+    const wornWashed = { lastWorn: TODAY, wears: 1, inWashSince: TODAY };
+    const items = () => Object.fromEntries([
+        item('runTee', 'Tee', wornWashed), item('shorts', 'Shorts', { washEvery: 1, ...wornWashed }), item('padelShoes', 'Shoes', { lastWorn: TODAY }),
+        item('thermalA', 'Tee', { layerRole: 'Thermal top skin', ...wornWashed }), item('thermalB', 'Tee', { layerRole: 'Thermal top skin' }),
+        item('legs', 'Lounge', { layerRole: 'Bottom skin', washEvery: 1, ...wornWashed }),
+        item('quarter', 'Lounge', { layerRole: 'Sport warm-up top', washEvery: 1, ...wornWashed }),
+        item('polo', 'Tee'), item('trackies', 'Lounge', { washEvery: 3 }), item('astro', 'Shoes'),
+    ].map(i => [i.id, i]));
+    const outfits = [outfit('P', 'Padel', ['runTee', 'shorts', 'padelShoes'], TODAY), outfit('F', 'Football training', ['polo', 'trackies', 'astro'])];
+    const cold = { feelsMin: 5, rainChance: 0 };
+    it('the padel card worn today keeps the thermal skin, bottom skin and warm-up top that were logged', () => {
+        const p = P.pickOutfits(outfits, items(), cold, D).find(x => x.option === 'Padel');
+        expect(p.items.map(i => i.id)).toEqual(['runTee', 'shorts', 'padelShoes', 'thermalA', 'legs', 'quarter']);
+    });
+    it('another option still gets a clean layer, never the one worn today and now in the wash', () => {
+        const f = P.pickOutfits(outfits, items(), cold, D).find(x => x.option === 'Football training');
+        expect(f.items.map(i => i.id)).toContain('thermalB');
+        expect(f.items.map(i => i.id)).not.toContain('thermalA');
+    });
+});
+
 describe('touchline outfit that already has a jacket', () => {
     it('gets no second jacket when cold', () => {
         const items = Object.fromEntries([item('polo', 'Tee'), item('rainJ', 'Jacket', { layerRole: 'Touchline rain jacket' }), item('mgr', 'Coat', { layerRole: 'Touchline coat' })].map(i => [i.id, i]));

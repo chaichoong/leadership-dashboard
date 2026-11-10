@@ -176,7 +176,11 @@
         const rainy = known(wx.rainChance) && wx.rainChance >= RAIN_PCT;
         const cold = known(wx.feelsMin);   // an unknown low adds nothing, never every layer
         const add = (it, why) => { if (it && !items.includes(it)) { items.push(it); added.push({ item: it, why }); } };
-        const role = (r, prefer) => byRole(itemsById, r, prefer, today);
+        // The outfit worn today shows the layer logged today, even though a limit-1 layer went in the wash
+        // the moment it was logged (Kevin, 10 Nov 2026); every other card still gets a clean one.
+        const wornToday = !!today && base.lastWorn === today;
+        const loggedLayer = (r) => wornToday ? Object.values(itemsById).find(it => owned(it) && it.layerRole === r && it.lastWorn === today) : null;
+        const role = (r, prefer) => loggedLayer(r) || byRole(itemsById, r, prefer, today);
         if (option === 'Football training') {
             if (!items.some(isOuter)) {   // an outfit that already has a jacket gets no second one
                 if (cold && wx.feelsMin < TOUCHLINE_COAT_BELOW) add(role('Touchline coat'), 'cold');
@@ -199,22 +203,22 @@
         if (!items.some(isOuter) && cold) {
             if (casual && wx.feelsMin < JACKET_BELOW) {
                 // No rain jacket owned: the casual jacket still goes on, never nothing.
-                const jacket = rainy ? (byRole(itemsById, 'Rain jacket', null, today) || byRole(itemsById, 'Casual jacket', null, today)) : byRole(itemsById, 'Casual jacket', null, today);
+                const jacket = rainy ? (role('Rain jacket', null) || role('Casual jacket', null)) : role('Casual jacket', null);
                 add(jacket, rainy ? 'rain' : 'cold');
             } else if (!casual && wx.feelsMin < COAT_BELOW) {
-                add(byRole(itemsById, 'Smart coat', null, today), 'cold');
+                add(role('Smart coat', null), 'cold');
             }
         }
         if (rainy && !site) {   // site shoes stay site shoes: the leather boots are for days out
             const shoe = items.find(it => it.type === 'Shoes');
-            const boots = byRole(itemsById, casual ? 'Leather boots casual' : 'Leather boots smart', null, today);
+            const boots = role(casual ? 'Leather boots casual' : 'Leather boots smart', null);
             if (boots && shoe && !/^Leather boots/.test(shoe.layerRole || '')) {
                 items.splice(items.indexOf(shoe), 1, boots);
                 added.push({ item: boots, why: 'rain', replaces: shoe });
             }
         }
-        if (cold && wx.feelsMin <= BEANIE_AT) add(byRole(itemsById, 'Beanie', casual ? 'Work' : 'Evening', today), 'cold');
-        if (cold && wx.feelsMin <= SCARF_AT) add(byRole(itemsById, 'Scarf', null, today), 'cold');
+        if (cold && wx.feelsMin <= BEANIE_AT) add(role('Beanie', casual ? 'Work' : 'Evening'), 'cold');
+        if (cold && wx.feelsMin <= SCARF_AT) add(role('Scarf', null), 'cold');
         return { items, added };
     }
 
