@@ -94,18 +94,87 @@ MIN_FILES = 20
 # into the stale window can never again read as a clean estate.
 SWEEP_WRITES_BY_HOUR = 7       # London; the ceo-agent slot is 06:45 and takes minutes
 
+# THE CLOCK IS THE FALLBACK, NOT THE TEST (findings 20261109-ceo-huddle-1247 and
+# 20261108-ceo-agent-1244). An hour test cannot answer "has the sweep written
+# yet", only "is it usually finished by now", and the slot does not keep to the
+# hour: on 9 Nov 2026 ceo-agent finished at 07:01:19Z, so a 07:00 estate-drift
+# run passed the hour test and still read the folder before that day's notes
+# existed — the very failure the hour test was added for. And Step 0 of the
+# 06:45 slot itself can never pass an hour test, so the CEO's own drift check
+# read CANNOT VERIFY every weekday.
+#
+# The real record is job-status.jsonl: the wrapped ceo-agent job writes one line
+# per run with its own timestamp. Unreadable is NOT "it ran" — the clock decides
+# then, so a missing log can never turn a stale read green.
+JOB_STATUS = os.path.join(HOME, "knowledge-os/logs/job-status.jsonl")
+SWEEP_JOB = "ceo-agent"
+# The slot exports this once its own memory sweep has written, so Step 0 run
+# from inside the slot can verify without waiting for the slot to end.
+SWEEP_DONE_ENV = "ESTATE_DRIFT_SWEEP_DONE"
 
-def read_may_be_stale(now=None):
+
+def sweep_ran_today(now, status_path=None, env=None):
+    """(True/False/None, how we know). None means the record could not be read."""
+    env = os.environ if env is None else env
+    if (env.get(SWEEP_DONE_ENV) or "").strip() not in ("", "0", "false", "False"):
+        return True, "the slot said its memory sweep has written (%s)" % SWEEP_DONE_ENV
+    path = status_path or JOB_STATUS
+    today = now.date()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError as e:
+        return None, "%s could not be read (%s)" % (path.replace(HOME, "~"), e)
+    seen = False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue            # one bad line is not a verdict about the rest
+        if rec.get("job") != SWEEP_JOB:
+            continue
+        raw = (rec.get("ts") or "").replace("Z", "+00:00")
+        try:
+            when = dt.datetime.fromisoformat(raw)
+        except ValueError:
+            continue
+        seen = True
+        local = when.astimezone().replace(tzinfo=None)
+        # On this day AND already finished by the moment being judged. The date
+        # alone is not enough: a 01:21 run would otherwise be cleared by the
+        # slot that went on to finish at 06:51 the same morning, which is the
+        # overnight-red regression (finding 20261105-agent-dispatch-1210).
+        if local.date() == today and local <= now:
+            return True, "the %s slot finished today at %s" % (
+                SWEEP_JOB, local.strftime("%H:%M"))
+    if not seen:
+        # No line for this job in the whole log: that is a broken read of the
+        # record, not proof the slot never runs.
+        return None, "%s holds no %s line at all" % (path.replace(HOME, "~"), SWEEP_JOB)
+    return False, "the %s slot has not finished today" % SWEEP_JOB
+
+
+def read_may_be_stale(now=None, status_path=None, env=None):
     """The reason this read may predate today's rulings, or "" when it cannot.
 
     Local time on purpose: the slot times are London times, and this is the same
     clock the sweep that writes the rulings runs on."""
     now = now or dt.datetime.now()
+    ran, how = sweep_ran_today(now, status_path, env)
+    if ran:
+        return ""
+    if ran is False:
+        return ("this run started at %s and %s, so today's ruling notes are not in the "
+                "Decisions folder yet and '0 rulings behind' would only mean "
+                "'not yet written'" % (now.strftime("%H:%M"), how))
+    # The record could not be read. Fall back to the clock, and say which.
     if now.hour < SWEEP_WRITES_BY_HOUR:
         return ("this run started at %s, before the CEO memory sweep (the ceo-agent slot, "
-                "06:45) has written today's ruling notes to the Decisions folder, so "
-                "'0 rulings behind' would only mean 'not yet written'"
-                % now.strftime("%H:%M"))
+                "06:45) is normally finished, and %s, so '0 rulings behind' would only "
+                "mean 'not yet written'" % (now.strftime("%H:%M"), how))
     return ""
 
 # (regex, retired on, what replaced it). Keep each pattern specific enough that

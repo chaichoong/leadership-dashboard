@@ -168,6 +168,7 @@ Run this as one subagent with the prompt: "Read the results of this morning's th
    - **Run the dedupe read with `python3 scripts/airtable-read.py`, never a hand-rolled curl** (4 Nov 2026, finding 20261104-phase-2-1187). The reader paginates, states its count, and now REFUSES a reply that carries no `records` list rather than reading it as zero rows. A hand-rolled curl does none of that: an unknown `fields[]` name returns 422, and a count read off the reply sees "no duplicates". On 4 Nov that nearly created one.
    - **Match on the SUBJECT, not the invariant slug.** Open tasks are named with a `DATA CHECK:` prefix or a plain subject line, never the invariant's internal name, so `{Task Name}` matched against the slug returns zero on a board that already carries the task. Search the subject words (`SEARCH("duplicate", LOWER({Task Name}))` and the like) and read the rows back before deciding it is new. That was the other half of what happened on 4 Nov: two matching tasks were already open and the query reported none.
    - **Who owns it: the AI Analyst, always** (Kevin, 15 Oct 2026). Raise each task with `python3 scripts/create-agent-task.py create --owner worker-analyst --fields-json '<json>'` and put NO Team Member in the JSON: `--owner` reads the Analyst's Team Members row from the dispatcher's roster and checks it live, so nobody types an id. Never the AI Bookkeeper: it is the Reconciliation tab's matcher and no robot works its tasks. Five invariant tasks raised between 30 Sep and 15 Oct went to it, and each waited until the Task Board Manager moved it (up to seven days). The gate now moves such a task to a working agent itself and says so in a `rerouted` line: report it. A `holderCheck` line saying NOT CHECKED means the task was created but its owner was not confirmed: say that too.
+   - **Never quote the matched text verbatim in the card you raise about it** (9 Nov 2026, finding 20261109-phase-2-1248). An invariant that matches on free text matches your card too. On 8 Nov the card for `stamped-letter-deadline-is-the-due-date` quoted the offending task's `DEADLINE FROM THE LETTER: 2026-11-05` line as its evidence, so from 9 Nov the check counted the card itself and could never clear: two violations where there was one real one. Name the field and the value apart ("its stamped letter date reads 2026-11-05"), or put the quote in a working file outside Airtable. The same holds for any invariant keyed on a phrase in a record.
    - CONTROL_FAILED on any invariant is a broken check, not a clean population.
 
 **3. Drive auth** — `scripts/drive-auth-check.py` already ran at 06:50. BROKEN is one of the few things allowed to DM Kevin directly.
@@ -294,6 +295,8 @@ If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the sent
 
 NOT CHECKED: {name, why it could not be read}   (leave out if none; never folded into "Everything else ran")
 
+WAITING ROOM: N fixes refused since {date}, nobody has sorted them.   (leave out when none; "could not be read" when the log will not open)
+
 Everything else ran.   (or: "{Name} did not run: {why, plainly}.")
 ```
 
@@ -301,6 +304,14 @@ Rules for the summary block:
 
 - NEEDS YOU is only for things Kevin himself must do: a decision, an approval, a signature, a payment, a call only he can make. **Unmerged fix PRs belong here** whenever three or more are open — that is the drain on the whole fix queue and only he can clear it.
 - STUCK keeps the order loop-health printed. Strip the `rec...` IDs and field names from the summary block (they belong in the detail below it).
+- **The WAITING ROOM line names the findings the cap refused**, from
+  `python3 scripts/findings.py overflow count` (`--json` for the figures). Until 10 Nov 2026 the
+  report named the queue every morning and never the refusals beside it, so 270 findings going
+  back to 26 Aug were invisible to everyone, Kevin included (finding 20261107-daily-ops-1238). It
+  sits BELOW the `*STUCK` heading on purpose: `parse_needs_you` in `scripts/estate-status.py`
+  reads the region above it, and a non-item line there would be glued onto the last NEEDS YOU
+  item. An unreadable log is never a zero, and the count is never put on NEEDS YOU — sorting the
+  waiting room is the fixer's job, not Kevin's.
 - **A slot that did not run is named on the "Everything else ran" line.** This is the half that cannot be seen from an arrivals list, and it is the reason phase 2 reads absence rather than successes.
 - Never present a partial run as a complete one.
 

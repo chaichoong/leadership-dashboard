@@ -136,3 +136,44 @@ describe('the runners use it instead of asking the agent', () => {
     });
   }
 });
+
+describe('inbound-triage.py names its own slot from the trigger time', () => {
+  // Finding 20261107-queue-fixer-1239: the runner shell was fixed to hand the
+  // label down, but inbound-triage.py's own _slot_now() still called
+  // mod.label(datetime.now()), so a slot that waited behind the lock labelled
+  // its inbox card with the round it was RUNNING in, not the one it was
+  // triggered for. Back-tested by putting datetime.now() back: this fails.
+  const slotNow = (queuedAt) => execFileSync('python3', ['-c', [
+    'import importlib.util',
+    "spec = importlib.util.spec_from_file_location('od_triage', 'scripts/inbound-triage.py')",
+    'mod = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(mod)',
+    'print(mod._slot_now())',
+  ].join('\n')], {
+    encoding: 'utf8',
+    cwd: resolve(__dirname, '..'),
+    env: { ...process.env, JOB_QUEUE_QUEUED_AT: queuedAt },
+  }).trim();
+
+  it('reads the queued stamp, not the wall clock', () => {
+    // Each stamp is far from the others, so whatever hour the suite runs in,
+    // at least two of these three disagree with the wall clock.
+    const today = new Date().toISOString().slice(0, 10);
+    expect(slotNow(`${today}T09:02:00Z`)).toBe('09:00');
+    expect(slotNow(`${today}T13:02:00Z`)).toBe('13:00');
+    expect(slotNow(`${today}T16:55:00Z`)).toBe('17:00');
+  });
+
+  it('falls back to the wall clock when the queue handed nothing down', () => {
+    // THE CONTROL. A helper that answers from the env alone would throw or
+    // return nothing here, and a slot started outside the queue must still
+    // get a label.
+    expect(slotNow('')).toMatch(/^(09|13|17):00$/);
+  });
+
+  it('never calls label() on the bare wall clock', () => {
+    const src = readFileSync(resolve(__dirname, '../scripts/inbound-triage.py'), 'utf8');
+    expect(src, '_slot_now() labels the wall clock again')
+      .not.toMatch(/mod\.label\(datetime\.now\(\)\)/);
+  });
+});

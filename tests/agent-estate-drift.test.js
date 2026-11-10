@@ -437,6 +437,38 @@ print(json.dumps({
     expect(r.at0713, 'CONTROL — the hand-run that found the truth is a valid read').toBe('');
   });
 
+  // THE REGRESSION (findings 20261109-ceo-huddle-1247 and 20261108-ceo-agent-1244): the
+  // guard asked the CLOCK whether the sweep had written, and the slot does not keep to
+  // the hour. On 9 Nov 2026 ceo-agent finished at 07:01:19Z, so the 07:00 estate-drift
+  // run passed the hour test and still read the Decisions folder before that day's notes
+  // existed — the exact failure 1156 added the guard for. The other way round, Step 0 of
+  // the 06:45 slot itself could never pass an hour test, so the CEO's own drift check
+  // read CANNOT VERIFY every weekday. It now asks the record: has the slot finished YET.
+  it('THE REGRESSION: a slot that finishes at 07:01 leaves the 07:00 run unable to verify', () => {
+    const r = py(`
+import tempfile, os
+log = os.path.join(tempfile.mkdtemp(), "job-status.jsonl")
+with open(log, "w") as fh:
+    fh.write(json.dumps({"ts": "2026-11-09T07:01:19Z", "job": "ceo-agent", "exit": 0}) + "\\n")
+at = lambda h, mi: datetime.datetime(2026, 11, 9, h, mi)
+print(json.dumps({
+  "before": m.read_may_be_stale(at(7, 0), status_path=log, env={}),
+  "after": m.read_may_be_stale(at(7, 30), status_path=log, env={}),
+  "flagged": m.read_may_be_stale(at(6, 45), status_path=log,
+                                 env={"ESTATE_DRIFT_SWEEP_DONE": "1"}),
+  "noLog": m.read_may_be_stale(at(6, 45), status_path="/nope/job-status.jsonl", env={}),
+  "noLogLate": m.read_may_be_stale(at(9, 0), status_path="/nope/job-status.jsonl", env={}),
+}))`);
+    expect(r.before, 'a run that beat the slot read as clean').toBeTruthy();
+    expect(r.before).toMatch(/has not finished today/);
+    expect(r.after, 'CONTROL — once the slot has finished, the read is valid').toBe('');
+    expect(r.flagged, 'the slot could not clear its own Step 0 with the flag').toBe('');
+    // An unreadable record is never "it ran": the clock decides, and says so.
+    expect(r.noLog, 'an unreadable record turned a pre-sweep read clean').toBeTruthy();
+    expect(r.noLog).toMatch(/could not be read/);
+    expect(r.noLogLate, 'CONTROL — an unreadable record after 07:00 falls back to clean').toBe('');
+  });
+
   it('a stale read can only downgrade a clean answer, never hide a red one', () => {
     // A ruling that IS behind must still be reported as behind, whatever the hour:
     // turning a real red into "cannot verify" would be a worse fault than the one
