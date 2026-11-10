@@ -276,6 +276,20 @@ describe('layers worn today stay on the outfit worn today', () => {
         const p = P.pickOutfits(outfits, items(), cold, D).find(x => x.option === 'Padel');
         expect(p.items.map(i => i.id)).toEqual(['runTee', 'shorts', 'padelShoes', 'thermalA', 'legs', 'quarter']);
     });
+    it('a planned piece or layer left off is not shown: only what was logged today', () => {
+        const its = { ...items(), hoodie: item('hoodie', 'Lounge', { washEvery: 3 }), legs: item('legs', 'Lounge', { layerRole: 'Bottom skin', washEvery: 1 }),
+            quarter: item('quarter', 'Lounge', { layerRole: 'Sport warm-up top', washEvery: 1 }) };
+        const os = [outfit('P', 'Padel', ['runTee', 'shorts', 'hoodie', 'padelShoes'], TODAY), outfits[1]];
+        const p = P.pickOutfits(os, its, cold, D).find(x => x.option === 'Padel');
+        expect(p.items.map(i => i.id)).toEqual(['runTee', 'shorts', 'padelShoes', 'thermalA']);
+    });
+    it('rain boots logged instead of the planned trainers show as the swap', () => {
+        const its = { tee: item('tee', 'Tee', { lastWorn: TODAY }), jeans: item('jeans', 'Trousers', { lastWorn: TODAY }), trainers: item('trainers', 'Shoes'),
+            boots: item('boots', 'Shoes', { layerRole: 'Leather boots casual', lastWorn: TODAY }) };
+        const p = P.pickOutfits([outfit('C', 'Out casual', ['tee', 'jeans', 'trainers'], TODAY)], its, { feelsMin: 15, rainChance: 80 }, D).find(x => x.option === 'Out casual');
+        expect(p.items.map(i => i.id)).toEqual(['tee', 'jeans', 'boots']);
+        expect(p.added.find(a => a.item.id === 'boots').replaces.id).toBe('trainers');
+    });
     it('another option still gets a clean layer, never the one worn today and now in the wash', () => {
         const f = P.pickOutfits(outfits, items(), cold, D).find(x => x.option === 'Football training');
         expect(f.items.map(i => i.id)).toContain('thermalB');
