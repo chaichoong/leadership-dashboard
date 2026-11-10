@@ -16,17 +16,31 @@ You are a WRAPPED SLOT JOB, not a second Claude routine. You hold the queue lock
 for the length of this run and you heartbeat, so if the Mac sleeps mid-run the
 lease lapses in about five minutes rather than blocking everything for hours.
 
-## Step 0: is the CEO current?
+## Step 0: is the CEO current? (run it LAST, after step 2)
 
-Run `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-estate-drift.py`
-before the huddle. It scans the CEO, the heads, the workers, the CEO skills, these slot
-instructions, the five brain files the CEO loads and the 09:00 brief worker for wording a
-dated ruling has retired, and it fails if a ruling in the brain's Decisions/ folder is newer
-than `~/.claude/agents/ESTATE.md`. It also runs on its own at 06:25. If it is red, still run
-the huddle (the newest Decisions/ files, which the huddle reads in its step 2, carry the truth)
-and put ONE line in your closing report naming the stale file, so daily-ops carries it to
-Kevin's report. Never silence it; a stale prompt is the CEO being outdated, which is the
-reason Kevin stopped using him on 7 Sep 2026.
+**Run this check AFTER the memory sweep (step 2 below), not before the huddle**, and run it
+like this:
+
+```
+ESTATE_DRIFT_SWEEP_DONE=1 python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-estate-drift.py
+```
+
+It scans the CEO, the heads, the workers, the CEO skills, these slot instructions, the five
+brain files the CEO loads and the 09:00 brief worker for wording a dated ruling has retired,
+and it fails if a ruling in the brain's Decisions/ folder is newer than
+`~/.claude/agents/ESTATE.md`. It also runs on its own at 07:00.
+
+**Why it moved (findings 20261108-ceo-agent-1244 and 20261109-ceo-huddle-1247).** The rulings
+this check reads are written by the memory sweep in step 2 of THIS slot. Run first, it read a
+folder that did not yet hold today's notes, so the check refused to answer and returned
+CANNOT VERIFY every weekday — the CEO's own freshness check told him nothing for weeks. Run
+after the sweep, with the flag saying the sweep has written, it gives a real answer. The flag
+is only true once step 2 has finished: never export it earlier.
+
+If it is red, still run the huddle (the newest Decisions/ files, which the huddle reads in its
+step 2, carry the truth) and put ONE line in your closing report naming the stale file, so
+daily-ops carries it to Kevin's report. Never silence it; a stale prompt is the CEO being
+outdated, which is the reason Kevin stopped using him on 7 Sep 2026.
 
 ## Order, and why
 
@@ -54,6 +68,10 @@ take the huddle's own late path and say plainly in your report that you did.
 Follow it in full, and tell the subagent explicitly: **it distils YESTERDAY**, a
 complete day, not the part-day in progress. That was the reason it moved off its
 old 21:30 slot and the reason it stays in the morning now.
+
+### 3. Then step 0's drift check
+
+Only now, with the sweep's ruling notes written, run the Step 0 command above.
 
 One correction it needs, from finding `20260826-ceo-memory-sweep-375`: its two
 named sources were empty two days running while the real rulings sat in Claude

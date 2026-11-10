@@ -24,6 +24,7 @@ Usage
     findings.py undupe <id> --note "..."                    # take a merge back
     findings.py retag <id> --code|--not-code --note "..."   # correct the filer's guess
     findings.py escalate <id> --severity critical --why "..." [--by task-manager]
+    findings.py overflow count [--json]   # how many refusals nobody has sorted
     findings.py overflow list|sort [--apply]|promote <ref>|dismiss <ref> --note "..."
     findings.py overflow fold <ref> --into <finding id | ofl- ref>   # a reader's match
     findings.py count                 # the BACKLOG: open + claimed + pending
@@ -1425,6 +1426,29 @@ def cmd_overflow(a):
     """Read the refusals: list them, sort them against the queue, promote one
     into the queue or dismiss it. Every read is a ledger line, so the Defects
     card's "refused, unread" count only falls when someone actually decided."""
+    if a.action == "count":
+        # One machine-readable line for the morning report and for
+        # estate-status.py (finding 20261107-daily-ops-1238: the report named
+        # the queue every day and never the 270 refusals beside it, so nothing
+        # Kevin reads has ever said they exist). An unreadable log is NOT a
+        # zero: `refused` comes back null and `error` carries the reason, the
+        # same way print_overflow refuses to invent a count.
+        rows = overflow_state()
+        n, err = refused_unread(rows)
+        unread = [r for r in rows if not r.get("read")]
+        out = {"refused": n, "error": err, "lines": len(unread),
+               "sorted": len(rows) - len(unread),
+               "oldest": (min((r.get("ts") or "?") for r in unread)[:10] if unread and not err else ""),
+               "log": OVERFLOW}
+        if a.json:
+            print(json.dumps(out))
+        elif err:
+            print("OVERFLOW: NOT READ — %s" % err)
+        elif not n:
+            print("OVERFLOW: nothing refused and unsorted.")
+        else:
+            print("OVERFLOW: %d refused and unsorted, oldest %s." % (n, out["oldest"]))
+        return 0
     if a.action in ("list", "sort"):
         rows = overflow_state()
         unread = [r for r in rows if not r.get("read")]
@@ -1571,7 +1595,7 @@ def main(argv=None):
     sp.set_defaults(fn=cmd_retag)
 
     sp = sub.add_parser("overflow", help="read what the cap refused")
-    sp.add_argument("action", choices=["list", "sort", "promote", "dismiss", "fold"])
+    sp.add_argument("action", choices=["count", "list", "sort", "promote", "dismiss", "fold"])
     sp.add_argument("ref", nargs="?")
     sp.add_argument("--into", default="", help="fold: the finding id (open or closed) or the ofl- ref it repeats")
     sp.add_argument("--all", action="store_true", help="list: include rows already sorted")

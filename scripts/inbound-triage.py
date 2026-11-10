@@ -1560,7 +1560,11 @@ def _slot_now():
     spec = importlib.util.spec_from_file_location("od_slot_label", p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.label(datetime.now())
+    # The trigger time the queue handed down, the wall clock only when there is
+    # none. A slot that waited an hour behind the lock named itself from the
+    # clock and reported the wrong round (finding 20261107-queue-fixer-1239);
+    # slot-label.py's own main() has always done it this way.
+    return mod.label(mod.queued_at() or datetime.now())
 
 
 def open_inbox_cards(ad):

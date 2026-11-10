@@ -395,8 +395,18 @@ INVARIANTS = [
         "table": TASKS,
         "incident": "23 Oct 2026 — four open tasks stamped 2026-10-27 and 2026-11-04 from the letter and held Due Date 2026-10-23, the day they were created",
         "asserts": "open task carrying a DEADLINE FROM THE LETTER line => its Due Date is that date",
+        # A card RAISED ABOUT this invariant quotes the stamped line verbatim as
+        # its evidence, so it joins the population it reports on and the check
+        # can never clear (finding 20261109-phase-2-1248: recU4TebZkJOD8skY,
+        # raised 8 Nov, quoted recypOxnK6GYf1pAK's stamp and was flagged itself
+        # from 9 Nov). The meta-task is taken OUT of the violation, not matched
+        # more loosely: every phase-2 card carries both of these headers and
+        # nothing else does, so a real post task cannot be excused by accident.
+        # The control still counts it, so a typo in the stamp still fails loudly.
         "violation": (
             "AND(FIND('DEADLINE FROM THE LETTER: 20', {Description}) > 0, "
+            "NOT(AND(FIND('Raised by daily-ops phase 2', {Description}) > 0, "
+            "FIND('THE INVARIANT asserts', {Description}) > 0)), "
             "{Status} != 'Completed', {Status} != 'Cancelled', "
             "OR({Due Date} = BLANK(), "
             "MID({Description}, FIND('DEADLINE FROM THE LETTER: ', {Description}) + 26, 10) "
