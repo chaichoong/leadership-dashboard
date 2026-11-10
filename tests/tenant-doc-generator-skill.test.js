@@ -33,6 +33,8 @@ const CLAUSES = [
   ['set Payment Status to CFV Actioned', 'the status move after the UC47'],
   ['stay retired: a missed payment is arrears', 'the limit on the one UC check'],
   ['Ask Kevin every time whether to include the authority to act', 'the authority question on every pack'],
+  ['scripts/adobe-send.js', 'the one send route, which refuses robots and a tenant-first draft (10 Nov 2026)'],
+  ['Never tick a "Save" box', 'typing Roy Lavin must not replace Kevin\'s saved signature (10 Nov 2026)'],
 ];
 
 describe('tenant-doc-generator reviewed skill', () => {
