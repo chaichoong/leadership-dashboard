@@ -73,10 +73,20 @@ signing order on and send, or change something. Nothing is sent without his yes.
 
 ## Step 4: send
 
-- Agreement: switch "Recipients must complete in order" ON (Kevin, 28 Sep 2026), then Send.
+Run it, one draft at a time, only after Kevin's yes in this chat (10 Nov 2026):
+
+```bash
+node scripts/adobe-send.js --title "AST_<Name>_<Property>" --shot "<folder>/sent-AST.png"
+node scripts/adobe-send.js --title "Proof_of_Residency_<Name>" --shot "<folder>/sent-PoR.png"
+```
+
+- Agreement: the script switches "Recipients must complete in order" ON (Kevin, 28 Sep 2026)
+  and refuses to send if it will not stay on, or if info@agilelets.co.uk is not first.
 - Proof of residency: one recipient, Send.
-- Proof of a send is Adobe's box "<name> was successfully sent for signature", or the name
-  in `#agreement_type=agreement&agreement_state=waiting_for_you`.
+- It refuses robot and unattended runs: only a chat Kevin is in may send.
+- Proof of a send is Adobe's box "<name> was successfully sent for signature" (the script
+  quotes it), or the name in `#agreement_type=agreement&agreement_state=waiting_for_you`.
+  Exit 3 means Send was pressed and that line did not show: do not run it again.
 - **A weak confirmation is never a reason to press Send again.** Read `waiting_for_you` and
   `completed` for the name first. Adobe's drafts list lags behind a send. On 28 Sep 2026 a
   retry made a second proof of residency after Kevin had already signed the first. Cancel a
@@ -90,7 +100,10 @@ With order on, the tenant's link goes out only once info@ has signed.
   View & Sign > "Click for Next Field" > Enter applies the account's saved signature > move
   the mouse off the tooltip > Submit.
 - The saved signature is Kevin's. For a box signed as Roy Lavin, type "Roy Lavin" (Kevin,
-  28 Sep 2026).
+  28 Sep 2026). Measured 10 Nov 2026: the first click on the box puts the saved signature in;
+  click the box again to open the change dialog, pick the Type tab, type "Roy Lavin", Apply.
+  Never tick a "Save" box in that dialog (the Image tab shows one): it would replace Kevin's
+  saved signature on the account.
 - Proof: the agreement moves to `agreement_state=waiting_for_others` and reads
   "Out for signature, 1 of 2 completed".
 
