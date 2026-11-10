@@ -169,18 +169,21 @@
     }
 
     function applyWeather(base, itemsById, option, wx, today) {
-        const items = base.itemIds.map(id => (today && standIn(itemsById, id, today, base.lastWorn === today)) || itemsById[id]);
+        // The outfit worn today shows what was logged today and nothing else (Kevin, 10 Nov 2026): a planned
+        // piece left off is dropped, and each weather layer is the one logged, even though a limit-1 layer
+        // went in the wash the moment it was logged. Every other card still gets clean pieces.
+        const wornToday = !!today && base.lastWorn === today;
+        const planned = base.itemIds.map(id => (today && standIn(itemsById, id, today, wornToday)) || itemsById[id]);
+        const logged = wornToday ? planned.filter(it => it && it.lastWorn === today) : planned;
+        const items = logged.length ? logged : planned;   // an outfit date with nothing logged still shows the outfit
         const added = [];
         if (option === 'Stay at home') return { items, added };
         const known = (v) => typeof v === 'number' && isFinite(v);
         const rainy = known(wx.rainChance) && wx.rainChance >= RAIN_PCT;
         const cold = known(wx.feelsMin);   // an unknown low adds nothing, never every layer
         const add = (it, why) => { if (it && !items.includes(it)) { items.push(it); added.push({ item: it, why }); } };
-        // The outfit worn today shows the layer logged today, even though a limit-1 layer went in the wash
-        // the moment it was logged (Kevin, 10 Nov 2026); every other card still gets a clean one.
-        const wornToday = !!today && base.lastWorn === today;
-        const loggedLayer = (r) => wornToday ? Object.values(itemsById).find(it => owned(it) && it.layerRole === r && it.lastWorn === today) : null;
-        const role = (r, prefer) => loggedLayer(r) || byRole(itemsById, r, prefer, today);
+        const loggedLayer = (r) => Object.values(itemsById).find(it => owned(it) && it.layerRole === r && it.lastWorn === today) || null;
+        const role = (r, prefer) => (wornToday ? loggedLayer(r) : byRole(itemsById, r, prefer, today));
         if (option === 'Football training') {
             if (!items.some(isOuter)) {   // an outfit that already has a jacket gets no second one
                 if (cold && wx.feelsMin < TOUCHLINE_COAT_BELOW) add(role('Touchline coat'), 'cold');
@@ -210,10 +213,10 @@
             }
         }
         if (rainy && !site) {   // site shoes stay site shoes: the leather boots are for days out
-            const shoe = items.find(it => it.type === 'Shoes');
+            const shoe = planned.find(it => it && it.type === 'Shoes');   // the planned shoe, even when the boots went on instead
             const boots = role(casual ? 'Leather boots casual' : 'Leather boots smart', null);
-            if (boots && shoe && !/^Leather boots/.test(shoe.layerRole || '')) {
-                items.splice(items.indexOf(shoe), 1, boots);
+            if (boots && shoe && !/^Leather boots/.test(shoe.layerRole || '') && !items.includes(boots)) {
+                if (items.includes(shoe)) items.splice(items.indexOf(shoe), 1, boots); else items.push(boots);
                 added.push({ item: boots, why: 'rain', replaces: shoe });
             }
         }
