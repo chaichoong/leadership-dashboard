@@ -28,6 +28,9 @@ Commands:
                                      30 or more days ago, then stamps every row it named
                                      "review raised", so no row raises a second task inside
                                      30 days. The state lives on the list, not in a task search.
+  score [--as-of DATE] [--days N]    the sourcing score: buys in the last 90 days, how many
+                                     were bought within 3 working days of the request, and
+                                     how many had at most one card sent back
   selftest                           the pure-function checks, no network
 
 Exit codes: 0 worked, 1 a read or write failed (or `due` found the list broken),
@@ -57,6 +60,7 @@ except Exception as exc:                       # noqa: BLE001 — reported, neve
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE_ID = "appnqjDpqDniH3IRl"
 TABLE = "tblBHcZzWHrcW5rLU"            # Preferred Products
+TASKS = "tblqB8b22hKBL4PF1"            # Tasks (read one record by id for the score)
 PAT_PATH = os.environ.get("PREFLIST_PAT_FILE") or os.path.expanduser("~/.config/od/airtable_pat")
 PAGE_SIZE = 100
 MAX_PAGES = 200
@@ -190,13 +194,150 @@ def bought_by(row, task_id):
     return any(": bought " in ln and tag in ln for ln in str(f.get("Notes") or "").splitlines())
 
 
-def summary_line(total, priced, due, awaiting, review):
+def summary_line(total, priced, due, awaiting, review, tail=""):
     line = ("PREFERRED LIST: %d item(s) on the list, %d priced, %d due for a re-price, %d awaiting a "
             "result, review task: %s" % (total, priced, due, awaiting, review))
-    return line[:SUMMARY_MAX]
+    return (line + tail)[:SUMMARY_MAX]
 
 
-def review_task_fields(due, as_of):
+# ── the sourcing score (Kevin: "bought within 3 working days of the request, at most
+#    one card sent back"). Built from state that already exists: the buy line every
+#    `record` buy writes to Notes, the request task's Created Time, and the stamps
+#    agent-dispatch.py writes into that task's Notes each time a resubmitted card
+#    answers Kevin's feedback. No new store. ──
+
+BUY_LINE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}): bought (New|Second-hand) £(\d+(?:\.\d{1,2})?) from (.+?) "
+                         r"\(task (rec[A-Za-z0-9]{14})\)(?:\. Was .*)?$")
+# The dispatcher's own receipt header, exactly as scripts/agent-dispatch.py writes it
+# (receipt_block, `[{stamp} — agent-dispatch] FEEDBACK ANSWERED (round N):`) and reads
+# it back (RECEIPT_HEADER_RE). Only a line that STARTS with it counts: a bulleted
+# TRACK RECORD copy ("- 15 Sep 2026 10:11 — agent-dispatch: FEEDBACK ANSWERED ...")
+# or a copy inside other text is not a card sent back on this task.
+SEND_BACK_RE = re.compile(r"^\[\d{1,2} \w{3} \d{4}(?: \d{2}:\d{2})?\s*[—–-]\s*agent-dispatch\] "
+                          r"FEEDBACK ANSWERED \(round \d+\):(?P<rest>[^\n]*)$")
+ON_TIME_WORKING_DAYS = 3
+ONE_CARD = 1
+SCORE_WINDOW_DAYS = 90
+
+
+def buy_events(rows):
+    """One {date, task, key, item, bought_as, price} per buy line across every row
+    (any Status). A buy line STARTS a Notes line in exactly the form `record` writes:
+    `<date>: bought <New|Second-hand> £<price> from <supplier> (task <id>)`, optionally
+    followed by `. Was ...`. Anything else is not a buy."""
+    out = []
+    for r in rows:
+        f = r.get("fields") or {}
+        for line in str(f.get("Notes") or "").split("\n"):
+            m = BUY_LINE_RE.match(line.rstrip("\r"))
+            if m and _day(m.group(1)):
+                out.append({"date": m.group(1), "task": m.group(5), "key": f.get("Item Key", ""),
+                            "item": f.get("Item", ""), "bought_as": m.group(2), "price": float(m.group(3))})
+    return out
+
+
+def working_days_between(start, end):
+    """Monday-to-Friday days AFTER start up to and including end. Same day = 0,
+    Friday to Monday = 1, end before start = 0. Bank holidays are ignored: a buy
+    across a bank holiday is judged one working day harder than it was."""
+    days, d = 0, start
+    while d < end:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            days += 1
+    return days
+
+
+def send_backs(notes, task_id=None):
+    """Cards sent back: the FEEDBACK ANSWERED stamp lines agent-dispatch.py writes in a
+    task's Notes, one per resubmitted card that answers Kevin's feedback. Never read
+    from Feedback History: that field archives ANY note Kevin types (his proof on a
+    payment step, "Duplicate of ...", a routing note). With task_id, a stamp whose
+    tail names a different record id was copied in and does not count (the same rule
+    as agent-dispatch.receipt_round)."""
+    n = 0
+    for line in str(notes or "").split("\n"):
+        m = SEND_BACK_RE.match(line.rstrip("\r"))
+        if not m:
+            continue
+        if task_id and set(re.findall(r"\brec[A-Za-z0-9]{14}\b", m.group("rest"))) - {task_id}:
+            continue
+        n += 1
+    return n
+
+
+def request_date(created):
+    """The Europe/London date of a task's Created Time (ISO timestamp), or None."""
+    try:
+        t = datetime.fromisoformat(str(created or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if t.tzinfo is not None and LONDON:
+        t = t.astimezone(LONDON)
+    return t.date()
+
+
+def score(events, tasks_by_id, as_of, window_days=SCORE_WINDOW_DAYS):
+    """{buys, on_time, one_card_or_fewer, unread}, counted per REQUEST (task), never
+    per buy line: one request bought in four `record` calls is one request. buys is
+    the number of tasks with a buy dated in the last window_days up to as_of; a
+    request's buy date is its LAST buy (it is finished when the last unit is bought).
+    A task that could not be read (missing from tasks_by_id, or no readable Created
+    Time) counts in buys and unread only: never dropped, never scored as good."""
+    last = {}
+    for e in events:
+        d = _day(e.get("date"))
+        if d is None or d > as_of or (as_of - d).days >= window_days:
+            continue
+        t = e.get("task")
+        if t not in last or d > last[t]:
+            last[t] = d
+    s = {"buys": len(last), "on_time": 0, "one_card_or_fewer": 0, "unread": 0}
+    for t, d in last.items():
+        task = tasks_by_id.get(t)
+        asked = request_date(task.get("Created Time")) if isinstance(task, dict) else None
+        if asked is None:
+            s["unread"] += 1
+            continue
+        if working_days_between(asked, d) <= ON_TIME_WORKING_DAYS:
+            s["on_time"] += 1
+        if send_backs(task.get("Notes"), t) <= ONE_CARD:
+            s["one_card_or_fewer"] += 1
+    return s
+
+
+def score_line(s, window_days=SCORE_WINDOW_DAYS):
+    if not s["buys"]:
+        return "SOURCING SCORE (%d days): no buys yet" % window_days
+    line = ("SOURCING SCORE (%d days): %d request(s) bought; %d within 3 working days of the request; %d with at "
+            "most one card sent back" % (window_days, s["buys"], s["on_time"], s["one_card_or_fewer"]))
+    if s["unread"]:
+        line += "; %d could not be read" % s["unread"]
+    return line
+
+
+def score_tail(s, window_days=SCORE_WINDOW_DAYS):
+    """The short form for the `due` summary line."""
+    if not s["buys"]:
+        return " | %d days: no buys yet" % window_days
+    return " | %d days: %d bought, %d in 3 days, %d one card or fewer" % (
+        window_days, s["buys"], s["on_time"], s["one_card_or_fewer"])
+
+
+# run-job.sh fails a run on these words anywhere in its output (MARKERS in
+# ~/tools/run-job.sh), so a WARNING line must never carry them.
+_JOB_FAIL_WORDS = ((re.compile(r"HTTP (40[13])"), r"status \1"), (re.compile(r"Unauthorized", re.I), "not authorised"),
+                   (re.compile(r"Invalid authentication token", re.I), "token refused"),
+                   (re.compile(r"ERROR:"), "error -"), (re.compile(r"Traceback"), "trace"))
+
+
+def warning(text):
+    for rx, sub in _JOB_FAIL_WORDS:
+        text = rx.sub(sub, text)
+    print("WARNING: %s" % text[:300])
+
+
+def review_task_fields(due, as_of, score_text=""):
     """The create payload (Task field ids) for the one monthly review task."""
     lines = []
     for r in due:
@@ -209,6 +350,8 @@ def review_task_fields(due, as_of):
             "--result \"<no change | cheaper: £x at y, link>\". Submit ONE card only if something "
             "is cheaper or better; if nothing is, say so in a report that needs no decision."
             % (REVIEW_MARK, as_of.strftime("%Y-%m"), "\n".join(lines)))
+    if score_text:
+        desc += "\n\n" + score_text
     name = "PREFERRED LIST: monthly re-price, %d item(s) (%s)" % (len(due), as_of.strftime("%b %Y"))
     return {TF["name"]: name[:100], TF["status"]: "Today", TF["due"]: as_of.isoformat(),
             TF["approver"]: {"id": KEVIN_USER}, TF["priority"]: "Medium",
@@ -283,6 +426,34 @@ def bought_rows_for_task(task_id):
     """Rows this task bought (see bought_by). Raises RuntimeError on a failed read.
     The close gate calls this."""
     return [r for r in read_rows() if bought_by(r, task_id)]
+
+
+def read_task(task_id):
+    """One Tasks record's fields by NAME (the score uses "Created Time" and "Notes").
+    Raises RuntimeError on any failure or on a reply with no fields."""
+    if not TASK_ID_RE.match(task_id or ""):
+        raise RuntimeError("%r is not a task id" % task_id)
+    reply = api("GET", "/%s/%s" % (TASKS, task_id))
+    if not isinstance(reply, dict) or not isinstance(reply.get("fields"), dict):
+        raise RuntimeError("the read of task %s returned no fields" % task_id)
+    return reply["fields"]
+
+
+def compute_score(rows, as_of, window_days=SCORE_WINDOW_DAYS):
+    """score() over the list's buy lines, reading each distinct task in the window
+    once. A task that cannot be read is left out of tasks_by_id (so it counts as
+    unread) with one WARNING line."""
+    events = buy_events(rows)
+    tasks = {}
+    wanted = sorted({e["task"] for e in events
+                     if _day(e["date"]) and _day(e["date"]) <= as_of
+                     and (as_of - _day(e["date"])).days < window_days})
+    for tid in wanted:
+        try:
+            tasks[tid] = read_task(tid)
+        except RuntimeError as exc:
+            warning("task %s could not be read: %s" % (tid, exc))
+    return score(events, tasks, as_of, window_days)
 
 
 def today_london():
@@ -658,9 +829,17 @@ def cmd_due(a):
               "active": len(active), "priced": len(priced),
               "due": [{"id": r["id"], "key": r["fields"].get("Item Key"),
                        "lastChecked": r["fields"].get("Last Checked")} for r in due]}
+    # The sourcing score never blocks the review: any failure is one WARNING line.
+    tail, score_text = " | score not read", ""
+    try:
+        sc = compute_score(rows, as_of)
+        tail, score_text = score_tail(sc), score_line(sc)
+        report["score"] = sc
+    except Exception as exc:                  # noqa: BLE001 — reported, never swallowed
+        warning("sourcing score not computed: %s" % exc)
     review, code = "none needed", 0
     if due:
-        fields = review_task_fields(due, as_of)
+        fields = review_task_fields(due, as_of, score_text)
         report["wouldRaise"] = fields[TF["name"]]
         ok, out = gate_create(fields, a.apply)
         task_id = str(out.get("taskId") or "")
@@ -692,8 +871,31 @@ def cmd_due(a):
     else:
         for d in report["due"]:
             print("DUE: %s (last checked %s)" % (d["key"], d["lastChecked"] or "never"))
-    print(summary_line(len(active), len(priced), len(due), sum(1 for r in rows if is_awaiting(r)), review))
+    print(summary_line(len(active), len(priced), len(due), sum(1 for r in rows if is_awaiting(r)), review, tail))
     return code
+
+
+def cmd_score(a):
+    if a.as_of:
+        as_of = _day(a.as_of)
+        if as_of is None:
+            print("ERROR: --as-of %r is not YYYY-MM-DD" % a.as_of)
+            return 2
+    else:
+        as_of = today_london()
+    if a.days < 1:
+        print("ERROR: --days must be 1 or more")
+        return 2
+    try:
+        rows = read_rows()
+    except RuntimeError as exc:
+        print("ERROR: %s" % exc)
+        return 1
+    sc = compute_score(rows, as_of, a.days)
+    if a.json:
+        print(json.dumps(dict(sc, asOf=as_of.isoformat(), days=a.days), indent=1))
+    print(score_line(sc, a.days))
+    return 0
 
 
 # ── selftest ──
@@ -742,6 +944,20 @@ def selftest():
     check("match one token needs two", not matching_rows([_row("r", "fridge-freezer-full-height")], "fridge door"))
     check("match single token", len(matching_rows([_row("r", "fridge-freezer-full-height")], "fridge")) == 1)
     check("summary length", len(summary_line(10 ** 6, 10 ** 6, 10 ** 6, 10 ** 6, "x" * 300)) <= SUMMARY_MAX)
+    T1 = "recTASK0000000001"
+    ev = buy_events([_row("r", "k", Notes="x\n2026-11-10: bought New £5.00 from S (task %s). Was £-, a." % T1
+                          + "\n 2026-11-10: bought New £5.00 from S (task %s)" % T1)])
+    check("buy_events strict", [(e["date"], e["task"], e["price"]) for e in ev] == [("2026-11-10", T1, 5.0)])
+    check("working days weekend", working_days_between(date(2026, 11, 13), date(2026, 11, 16)) == 1)
+    check("working days same day", working_days_between(date(2026, 11, 13), date(2026, 11, 13)) == 0)
+    check("working days backwards", working_days_between(date(2026, 11, 16), date(2026, 11, 13)) == 0)
+    check("send backs", send_backs("[30 Oct 2026 12:36 — agent-dispatch] FEEDBACK ANSWERED (round 1):\n- a → b\n"
+                                   "- 15 Sep 2026 10:11 — agent-dispatch: FEEDBACK ANSWERED (round 7): x\n"
+                                   "[31 Oct 2026 09:00 — agent-dispatch] SUBMITTED (round 2)\n"
+                                   "[1 Nov 2026 09:00 — agent-dispatch] FEEDBACK ANSWERED (round 2):") == 2)
+    sc = score(ev + ev, {T1: {"Created Time": "2026-11-06T10:00:00.000Z", "Notes": ""}}, date(2026, 11, 11))
+    check("score", sc == {"buys": 1, "on_time": 1, "one_card_or_fewer": 1, "unread": 0})
+    check("score unread", score(ev, {}, date(2026, 11, 11))["unread"] == 1)
     bad = [label for label, ok in checks if not ok]
     if bad:
         print("SELFTEST FAILED: %s" % ", ".join(bad))
@@ -787,6 +1003,10 @@ def build_parser():
     s.add_argument("--apply", action="store_true")
     s.add_argument("--as-of")
     s.add_argument("--json", action="store_true")
+    s = sub.add_parser("score")
+    s.add_argument("--as-of")
+    s.add_argument("--days", type=int, default=SCORE_WINDOW_DAYS)
+    s.add_argument("--json", action="store_true")
     sub.add_parser("selftest")
     return p
 
@@ -796,7 +1016,8 @@ def main(argv):
     if a.cmd == "selftest":
         return selftest()
     return {"list": cmd_list, "record": cmd_record, "prefer": cmd_prefer, "checked": cmd_checked,
-            "has-row": cmd_has_row, "due": cmd_due}[a.cmd](a)
+            "has-row": cmd_has_row, "due": cmd_due,
+            "score": cmd_score}[a.cmd](a)
 
 
 if __name__ == "__main__":

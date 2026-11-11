@@ -366,7 +366,10 @@ print(json.dumps([m.signin_domain(h) for h in json.loads(sys.argv[1])]))`, JSON.
 // These sites are READ-ONLY: allowed for `read`, never a login site, never in the sign-in list.
 describe('the read-only sourcing sites', () => {
   const HOSTS = ['gumtree.com', 'ebay.co.uk', 'vinted.co.uk', 'screwfix.com', 'toolstation.com',
-                 'diy.com', 'argos.co.uk', 'ao.com', 'currys.co.uk'];
+                 'diy.com', 'argos.co.uk', 'ao.com', 'currys.co.uk',
+                 // Seven more (11 Nov 2026), the same read-only shape.
+                 'wickes.co.uk', 'markselectrical.co.uk', 'appliancecity.co.uk', 'ikea.com', 'dunelm.com',
+                 'travisperkins.co.uk', 'homebase.co.uk'];
   // Hermetic: an empty sites.json, so only the builtins decide.
   const fresh = () => {
     const { mkdtempSync, writeFileSync } = require_('node:fs');

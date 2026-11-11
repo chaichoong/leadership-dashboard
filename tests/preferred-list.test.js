@@ -25,6 +25,15 @@ import { fileURLToPath } from 'node:url';
 //   * future dates allowed                          -> the future --bought-on and --on tests fail
 //   * prefer accepting a not-bought row             -> "refuses a row that has not been bought" and the A-then-R test fail
 //   * prefer writing Full Price                     -> the prefer-fields test and the reviewer's £40/£300 case fail
+// The sourcing score (11 Nov 2026), same method:
+//   * on time at 4 working days instead of 3        -> the score cases fail
+//   * (the Feedback History parser this guarded was replaced by the Notes stamps below)
+//   * a buy line matched anywhere, not at line start -> buy_events fails
+//   * an unread task dropped from buys              -> the score, real-case, command and due tests fail
+//   * a score failure failing the due run           -> "score not read" fails
+// Review of the score (11 Nov 2026), same method:
+//   * send_backs reading Feedback History again     -> "full of payment proof ... IS one card" fails
+//   * scoring per buy line, not per request         -> "four record calls is ONE request" and the score command fail
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(root, 'scripts', 'preferred-list.py');
@@ -39,6 +48,7 @@ pl = importlib.util.module_from_spec(spec); spec.loader.exec_module(pl)
 class Store:
     def __init__(self):
         self.rows = []          # Preferred Products rows, name-keyed
+        self.tasks = {}         # Tasks records by id: fields by name (for the sourcing score)
         self.calls = []         # (method, table, body)
         self.no_records = False
         self.drop = set()       # fields a write silently fails to keep
@@ -51,6 +61,11 @@ def fake_api(method, p, body=None):
     if method == "GET":
         if S.no_records:
             return {"error": "NOT_FOUND"}
+        if table.startswith(pl.TASKS + "/"):
+            tid = table.split("/", 1)[1]
+            if tid not in S.tasks:
+                raise RuntimeError("Airtable GET /%s -> HTTP 404: NOT_FOUND" % table)
+            return {"id": tid, "createdTime": "x", "fields": json.loads(json.dumps(S.tasks[tid]))}
         if table != pl.TABLE:
             raise AssertionError("a read of another table: %s" % table)
         return {"records": json.loads(json.dumps(S.rows))}
@@ -196,7 +211,7 @@ out(dict(res, real=len(real), dry=len([g for g in GATE if "--dry-run" in g["flag
     expect(r.approver).toEqual({ id: 'usrKkopUJSGsBhWMD' });
     expect([r.status, r.due]).toEqual(['Today', '2026-11-11']);
     expect(r.out.trim().split('\n').pop()).toBe(
-      'PREFERRED LIST: 3 item(s) on the list, 3 priced, 2 due for a re-price, 2 awaiting a result, review task: raised recNEWTASK0000001');
+      'PREFERRED LIST: 3 item(s) on the list, 3 priced, 2 due for a re-price, 2 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: no buys yet');
   });
 
   it('after a raise every due row is stamped and read back, and the next day raises nothing', () => {
@@ -217,7 +232,7 @@ out(dict(first=first, stamps=stamps, second=second, gate2=len(GATE),
     expect(r.second.code).toBe(0);
     expect(r.gate2).toBe(0);
     expect(r.second.out.trim().split('\n').pop()).toBe(
-      'PREFERRED LIST: 3 item(s) on the list, 3 priced, 0 due for a re-price, 2 awaiting a result, review task: none needed');
+      'PREFERRED LIST: 3 item(s) on the list, 3 priced, 0 due for a re-price, 2 awaiting a result, review task: none needed | 90 days: no buys yet');
   });
 
   it('a refused create stamps nothing and exits 1', () => {
@@ -229,7 +244,7 @@ out(dict(res, writes=len(writes())))`);
     expect(r.code).toBe(1);
     expect(r.writes).toBe(0);
     expect(r.out).toContain('ERROR: the review task was not raised: refused for the test');
-    expect(r.out.trim().split('\n').pop()).toMatch(/review task: not raised \(gate refused\)$/);
+    expect(r.out.trim().split('\n').pop()).toMatch(/review task: not raised \(gate refused\) \| 90 days: no buys yet$/);
   });
 
   it('a stamp that does not stick exits 1 naming the row', () => {
@@ -244,7 +259,7 @@ out(run("due", "--apply"))`);
   it('a row with a blank Status is due and counted', () => {
     const r = py(`S.rows = [row("r1", "a", Status=None)]\nout(run("due"))`);
     expect(r.out.trim().split('\n').pop()).toBe(
-      'PREFERRED LIST: 1 item(s) on the list, 1 priced, 1 due for a re-price, 0 awaiting a result, review task: would raise (dry run)');
+      'PREFERRED LIST: 1 item(s) on the list, 1 priced, 1 due for a re-price, 0 awaiting a result, review task: would raise (dry run) | 90 days: no buys yet');
   });
 
   it('without --apply it creates nothing and says would raise', () => {
@@ -255,7 +270,7 @@ out(dict(res, real=len([g for g in GATE if "--force" in g["flags"]]), writes=len
     expect(r.real).toBe(0);
     expect(r.writes).toBe(0);
     expect(r.out.trim().split('\n').pop()).toBe(
-      'PREFERRED LIST: 1 item(s) on the list, 1 priced, 1 due for a re-price, 0 awaiting a result, review task: would raise (dry run)');
+      'PREFERRED LIST: 1 item(s) on the list, 1 priced, 1 due for a re-price, 0 awaiting a result, review task: would raise (dry run) | 90 days: no buys yet');
   });
 
   it('nothing due: none needed, and the line stays within 220 characters', () => {
@@ -266,7 +281,7 @@ out(dict(res, gate=len(GATE), long=len(pl.summary_line(99999, 99999, 99999, 9999
     expect(r.gate).toBe(0);
     expect(r.long).toBeLessThanOrEqual(220);
     expect(r.out.trim().split('\n').pop()).toBe(
-      'PREFERRED LIST: 1 item(s) on the list, 1 priced, 0 due for a re-price, 0 awaiting a result, review task: none needed');
+      'PREFERRED LIST: 1 item(s) on the list, 1 priced, 0 due for a re-price, 0 awaiting a result, review task: none needed | 90 days: no buys yet');
   });
 });
 
@@ -319,7 +334,8 @@ run("record", "--task", "${TASK}", "--item", ${JSON.stringify(FRIDGE)}, "--bough
 res = run("due", "--apply", "--as-of", "2026-12-11")
 out(dict(res, real=len([g for g in GATE if "--force" in g["flags"]])))`);
     expect(r.real).toBe(1);
-    expect(r.out).toContain('1 due for a re-price, 1 awaiting a result, review task: raised recNEWTASK0000001');
+    expect(r.out).toContain('1 due for a re-price, 1 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: 1 bought, 0 in 3 days, 0 one card or fewer');
+    expect(r.out).toContain('WARNING: task reck5ZY5MoXulxJz8 could not be read: Airtable GET /tblqB8b22hKBL4PF1/reck5ZY5MoXulxJz8 -> HTTP 404');
   });
 
   it('a new key POSTs; an existing key PATCHes', () => {
@@ -653,6 +669,215 @@ out([run("list", "--item", "freezer fridge"), run("list", "--item", "Washing mac
     expect(r[0].out).toContain('last checked 2026-12-11 (no change)');
     expect(r[0].out).not.toContain('kettle');
     expect(r[1].out.trim()).toBe('BASELINE: none on the list for Washing machine');
+  });
+});
+
+describe('the sourcing score: bought within 3 working days, at most one card sent back', () => {
+  // Every task id below except the real sourcing task is invented. A card sent back is counted from
+  // the dispatcher's own FEEDBACK ANSWERED stamps in the task's Notes (scripts/agent-dispatch.py
+  // receipt_block), never from Feedback History. The real task's Notes are rebuilt from made-up text
+  // in the real shape: six FEEDBACK ANSWERED stamps (rounds 1 to 6), seven SUBMITTED stamps and
+  // other stamp lines.
+  const SCORE_H = `
+T1, T2, T3 = "recSCORETASK00001", "recSCORETASK00002", "recSCORETASK00003"
+def buyrow(rid, key, *lines):
+    return row(rid, key, Notes="\\n".join(lines))
+def stamps(answered, submitted=0, others=True):
+    out = ["Made-up request text for the test."]
+    for i in range(max(answered, submitted)):
+        if i < submitted:
+            out.append("[%d Nov 2026 09:%02d — agent-dispatch] SUBMITTED (round %d): card sent for approval." % (1 + i, i, i + 1))
+        if i < answered:
+            out.append("[%d Nov 2026 14:%02d — agent-dispatch] FEEDBACK ANSWERED (round %d):" % (1 + i, i, i + 1))
+            out.append("- Look at a cheaper option → found one at a made-up shop")
+    if others:
+        out += ["[2 Nov 2026 10:00 — agent-dispatch] BLOCKER OPEN: waiting on a seller reply",
+                "[3 Nov 2026 — agent-dispatch] DUE MOVED to 5 Nov 2026",
+                "[4 Nov 2026 10:00 — agent-dispatch] BLOCKER CLEARED: the seller replied"]
+    return "\\n".join(out)
+PROOF_HISTORY = "\\n".join("[2026-11-0%d 10:00] Done, here is the proof of payment." % d for d in range(1, 7))
+`;
+
+  it('buy_events: a buy line, with a Was tail, and nothing else', () => {
+    const r = py(SCORE_H + `
+rows = [buyrow("r1", "kettle",
+    "2026-11-10: bought New £15.00 from Shop (task " + T1 + ")",
+    "2026-11-12: bought Second-hand £70.00 from Seller (Haverhill) (task " + T2 + "). Was £15.00, New, from Shop.",
+    "2026-11-12: buying rules stored from task " + T3 + ".",
+    "2026-11-12: preferred option set on review (" + T3 + "): £12.00 at X; last buy stays £15.00 from Shop",
+    "review raised 2026-11-12 (task " + T3 + "): awaiting result",
+    "Note: 2026-11-12: bought New £15.00 from Shop (task " + T3 + ")",
+    " 2026-11-12: bought New £15.00 from Shop (task " + T3 + ")",
+    "2026-11-12: bought New £15.00 from Shop (task " + T3 + ") and more"),
+    row("r2", "toaster", Status="Retired", Notes="2026-10-01: bought New £20.00 from S (task " + T3 + ")")]
+out(pl.buy_events(rows))`);
+    expect(r).toEqual([
+      { date: '2026-11-10', task: 'recSCORETASK00001', key: 'kettle', item: 'kettle', bought_as: 'New', price: 15 },
+      { date: '2026-11-12', task: 'recSCORETASK00002', key: 'kettle', item: 'kettle', bought_as: 'Second-hand', price: 70 },
+      { date: '2026-10-01', task: 'recSCORETASK00003', key: 'toaster', item: 'toaster', bought_as: 'New', price: 20 },
+    ]);
+  });
+
+  it('working_days_between: weekend, same day, Friday to Monday, a full week, end before start', () => {
+    const r = py(`
+w = pl.working_days_between
+out([w(date(2026, 11, 13), date(2026, 11, 15)), w(date(2026, 11, 11), date(2026, 11, 11)),
+     w(date(2026, 11, 13), date(2026, 11, 16)), w(date(2026, 11, 9), date(2026, 11, 16)),
+     w(date(2026, 11, 16), date(2026, 11, 13)), w(date(2026, 10, 29), date(2026, 11, 17))])`);
+    expect(r).toEqual([0, 0, 1, 5, 0, 13]);
+  });
+
+  it('send_backs: zero, one, several FEEDBACK ANSWERED stamps; copies and other stamps never count', () => {
+    const r = py(SCORE_H + `
+own = "[30 Oct 2026 12:36 — agent-dispatch] FEEDBACK ANSWERED (round 1):"
+out([pl.send_backs(""), pl.send_backs(None), pl.send_backs(stamps(1)), pl.send_backs(stamps(3, 4)),
+     pl.send_backs(stamps(0, 7)),
+     pl.send_backs("- 15 Sep 2026 10:11 — agent-dispatch: FEEDBACK ANSWERED (round 7): (link)"),
+     pl.send_backs("- " + own),
+     pl.send_backs("A note quoting " + own),
+     pl.send_backs("[30 Oct 2026 12:36 — agent-dispatch] SUBMITTED (round 1): sent"),
+     pl.send_backs(own + " copied from recOTHERTASK00001", "recSCORETASK00001"),
+     pl.send_backs(own + " (recSCORETASK00001)", "recSCORETASK00001")])`);
+    expect(r).toEqual([0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 1]);
+  });
+
+  it('a task whose Feedback History is full of payment proof but whose Notes hold one stamp IS one card', () => {
+    const r = py(SCORE_H + `
+ev = [{"date": "2026-11-11", "task": T1}]
+tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": PROOF_HISTORY, "Notes": stamps(1, 2)}}
+out(pl.score(ev, tasks, date(2026, 11, 17)))`);
+    expect(r).toEqual({ buys: 1, on_time: 1, one_card_or_fewer: 1, unread: 0 });
+  });
+
+  it('score: on time with one send-back, late, three send-backs, unread, and outside the window', () => {
+    const r = py(SCORE_H + `
+T4, T5 = "recSCORETASK00004", "recSCORETASK00005"
+ev = [{"date": "2026-11-11", "task": T1}, {"date": "2026-11-13", "task": T2},
+      {"date": "2026-11-10", "task": T3}, {"date": "2026-11-10", "task": T4},
+      {"date": "2026-07-01", "task": T5}]
+tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(1, 2)},
+         T2: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": ""},
+         T3: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(3, 4)},
+         T5: {"Created Time": "2026-06-30T09:00:00.000Z", "Notes": ""}}
+one = lambda e: pl.score([e], tasks, date(2026, 11, 17))
+out([one(ev[0]), one(ev[1]), one(ev[2]), one(ev[3]), one(ev[4]), pl.score(ev, tasks, date(2026, 11, 17))])`);
+    const s = (buys, on, one, un) => ({ buys, on_time: on, one_card_or_fewer: one, unread: un });
+    expect(r[0]).toEqual(s(1, 1, 1, 0));   // 2 working days, one send-back: counts in both
+    expect(r[1]).toEqual(s(1, 0, 1, 0));   // 4 working days: not on time
+    expect(r[2]).toEqual(s(1, 1, 0, 0));   // three send-backs: not one-card
+    expect(r[3]).toEqual(s(1, 0, 0, 1));   // could not be read: buys and unread only
+    expect(r[4]).toEqual(s(0, 0, 0, 0));   // outside the 90 days: ignored
+    expect(r[5]).toEqual(s(4, 2, 2, 1));
+  });
+
+  it('one request bought in four record calls is ONE request, and its LAST buy decides on time', () => {
+    const r = py(SCORE_H + `
+tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": ""}}
+three = [{"date": d, "task": T1} for d in ("2026-11-09", "2026-11-10", "2026-11-12")]
+out([pl.score(three, tasks, date(2026, 11, 20)),
+     pl.score(three + [{"date": "2026-11-13", "task": T1}], tasks, date(2026, 11, 20)),
+     pl.score([{"date": "2026-11-13", "task": T1}] + three, tasks, date(2026, 11, 20))])`);
+    expect(r[0]).toEqual({ buys: 1, on_time: 1, one_card_or_fewer: 1, unread: 0 });
+    expect(r[1]).toEqual({ buys: 1, on_time: 0, one_card_or_fewer: 1, unread: 0 });   // 4 working days
+    expect(r[2]).toEqual(r[1]);   // order of the lines does not matter
+  });
+
+  it('two tasks buying the same item score as two requests', () => {
+    const r = py(SCORE_H + `
+S.rows = [buyrow("r1", "kettle", "2026-11-10: bought New £15.00 from Shop (task " + T1 + ")",
+                 "2026-11-11: bought New £16.00 from Shop (task " + T2 + "). Was £15.00, New, from Shop.")]
+S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": ""},
+           T2: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(2, 3)}}
+out(run("score"))`);
+    expect(r).toEqual({ code: 0, out: 'SOURCING SCORE (90 days): 2 request(s) bought; 2 within 3 working days of the request; 1 with at most one card sent back\n' });
+  });
+
+  it('the real case: requested 29 Oct, six FEEDBACK ANSWERED stamps, bought 17 Nov: not on time, not one card', () => {
+    const r = py(SCORE_H + `
+notes = stamps(6, 7)
+ev = [{"date": "2026-11-17", "task": "reck5ZY5MoXulxJz8"}]
+tasks = {"reck5ZY5MoXulxJz8": {"Created Time": "2026-10-29T13:27:00.000Z", "Notes": notes}}
+out([pl.send_backs(notes, "reck5ZY5MoXulxJz8"), notes.count("SUBMITTED (round"), pl.score(ev, tasks, date(2026, 11, 17))])`);
+    expect(r[0]).toBe(6);
+    expect(r[1]).toBe(7);
+    expect(r[2]).toEqual({ buys: 1, on_time: 0, one_card_or_fewer: 0, unread: 0 });
+  });
+
+  it('the request date is the Europe/London date of Created Time', () => {
+    const r = py(`out([str(pl.request_date("2026-06-30T23:30:00.000Z")), str(pl.request_date("2026-12-30T23:30:00.000Z")),
+                       pl.request_date("") is None])`);
+    expect(r).toEqual(['2026-07-01', '2026-12-30', true]);
+  });
+
+  it('score command: no buys yet, a scored line, and an unread task with one WARNING', () => {
+    const r = py(SCORE_H + `
+a = run("score")
+S.rows = [buyrow("r1", "kettle", "2026-11-11: bought New £15.00 from Shop (task " + T1 + ")"),
+          buyrow("r2", "toaster", "2026-11-10: bought New £20.00 from Shop (task " + T2 + ")",
+                 "2026-11-11: bought New £21.00 from Shop (task " + T2 + ")")]
+S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(1, 2)}}
+b = run("score")
+task_reads = len([c for c in S.calls if c[1].startswith(pl.TASKS)])
+S.tasks[T2] = {"Created Time": "2026-11-02T09:00:00.000Z", "Notes": stamps(2, 3)}
+c = run("score")
+S.no_records = True
+d = run("score")
+out([a, b, task_reads, c, d])`);
+    expect(r[0]).toEqual({ code: 0, out: 'SOURCING SCORE (90 days): no buys yet\n' });
+    expect(r[1].code).toBe(0);
+    expect(r[1].out).toBe('WARNING: task recSCORETASK00002 could not be read: Airtable GET /tblqB8b22hKBL4PF1/recSCORETASK00002 -> HTTP 404: NOT_FOUND\n'
+      + 'SOURCING SCORE (90 days): 2 request(s) bought; 1 within 3 working days of the request; 1 with at most one card sent back; 1 could not be read\n');
+    expect(r[2]).toBe(2);   // each distinct task read once
+    expect(r[3]).toEqual({ code: 0,
+      out: 'SOURCING SCORE (90 days): 2 request(s) bought; 1 within 3 working days of the request; 1 with at most one card sent back\n' });
+    expect(r[4].code).toBe(1);
+    expect(r[4].out).toMatch(/^ERROR: /);
+  });
+
+  it('a WARNING never carries the words run-job.sh fails a run on', () => {
+    const r = py(`
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    pl.warning("task x could not be read: Airtable GET /t -> HTTP 403: Unauthorized ERROR: Invalid authentication token")
+out(buf.getvalue())`);
+    expect(r).toMatch(/^WARNING: /);
+    expect(r).not.toMatch(/Traceback \(most recent call last\)|^ERROR:|HTTP 40[13]|Unauthorized|Invalid authentication token/m);
+  });
+
+  it('due: the score on the summary line and in the review task Description', () => {
+    const r = py(SCORE_H + `
+S.rows = [buyrow("r1", "kettle", "2026-11-11: bought New £15.00 from Shop (task " + T1 + ")")]
+S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(1, 2)}}
+res = run("due", "--apply", "--as-of", "2026-12-11")
+desc = [g for g in GATE if "--force" in g["flags"]][0]["fields"][pl.TF["desc"]]
+out(dict(res, desc=desc))`);
+    expect(r.code).toBe(0);
+    expect(r.out.trim().split('\n').pop()).toBe('PREFERRED LIST: 1 item(s) on the list, 1 priced, 1 due for a re-price, '
+      + '1 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: 1 bought, 1 in 3 days, 1 one card or fewer');
+    expect(r.desc.split('\n')[0]).toBe('PREFLIST-REVIEW 2026-12');
+    expect(r.desc).toContain('\n\nSOURCING SCORE (90 days): 1 request(s) bought; 1 within 3 working days of the request; 1 with at most one card sent back');
+  });
+
+  it('due: the summary stays within 220 characters with large numbers', () => {
+    const r = py(`
+big = {"buys": 999999, "on_time": 999999, "one_card_or_fewer": 999999, "unread": 999999}
+line = pl.summary_line(999999, 999999, 999999, 999999, "raised recNEWTASK0000001", pl.score_tail(big))
+out([len(line), line])`);
+    expect(r[0]).toBeLessThanOrEqual(220);
+    expect(r[1]).toMatch(/^PREFERRED LIST: 999999 item\(s\)/);
+  });
+
+  it('due: a score that cannot be computed leaves exit 0 and says score not read', () => {
+    const r = py(`
+S.rows = [row("r1", "a", **{"Last Checked": "2026-11-01"})]
+def broken(*a, **k):
+    raise ValueError("the buy lines could not be parsed")
+pl.compute_score = broken
+out(run("due", "--apply"))`);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('WARNING: sourcing score not computed: the buy lines could not be parsed\n');
+    expect(r.out.trim().split('\n').pop()).toBe('PREFERRED LIST: 1 item(s) on the list, 1 priced, 0 due for a re-price, '
+      + '0 awaiting a result, review task: none needed | score not read');
   });
 });
 
