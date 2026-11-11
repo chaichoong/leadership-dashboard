@@ -434,7 +434,9 @@ def plan_record(rows, a, today):
     price, supplier, bought_as = round(float(a.price), 2), a.supplier.strip(), BOUGHT_AS[a.bought_as]
     fields = {"Item": a.item.strip(), "Item Key": key, "Source Task": a.task, "Status": "Active",
               "Bought As": bought_as, "Full Price": price, "Supplier or Seller": supplier, "Link": a.link,
-              "Last Bought": on, "Last Checked": on}
+              "Last Bought": on, "Last Checked": on,
+              # A buy is the newest check: the result must never keep an older review's words.
+              "Last Check Result": "bought %s £%s from %s (task %s)" % (bought_as, money(price), supplier, a.task)}
     if a.cashback:
         fields["Cashback"] = a.cashback.strip()
     if a.rules is not None:
@@ -589,7 +591,10 @@ def _row_lines(r):
         f.get("Supplier or Seller") or "-", f.get("Link") or "-", f.get("Last Bought") or "-",
         f.get("Status") or "-", f.get("Buying Rules") or "-")]
     pref = _price({"Full Price": f.get("Preferred Price")})
-    if pref is not None:
+    # An option preferred on a review counts only while it is NEWER than the last real buy:
+    # once we have bought since, the buy is the price to beat and the old option is history.
+    since, bought = _day(f.get("Preferred Since")), _day(f.get("Last Bought"))
+    if pref is not None and since is not None and (bought is None or since > bought):
         lines.append("PREFERRED ON REVIEW (%s): £%s at %s %s" % (
             f.get("Preferred Since") or "no date", money(pref), f.get("Preferred Supplier") or "-",
             f.get("Preferred Link") or "-"))

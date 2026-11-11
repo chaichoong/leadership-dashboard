@@ -585,6 +585,31 @@ out(run("list", "--item", "kettle")["out"].strip().split("\\n"))`);
     expect(r[3]).toBe('last checked 2026-11-10 (adopted)');
   });
 
+  // Fourth review, 11 Nov 2026: a review preferred £60 at a shop on 10 Nov; a real buy at £50 followed.
+  // The buy is then the price to beat: the old option is not shown and the old review's words are gone.
+  it('a real buy after a review replaces the review as the thing to beat', () => {
+    const r = py(`
+S.rows = [row("recKETTLE00000001", "kettle", **{"Full Price": 40.0, "Last Bought": "2026-10-01",
+          "Preferred Supplier": "A Shop", "Preferred Price": 60.0, "Preferred Link": "https://example.com/new",
+          "Preferred Since": "2026-11-10", "Last Checked": "2026-11-10",
+          "Last Check Result": "adopted on review (recREVIEWTASK0001): £60.00 at A Shop"})]
+before = run("list", "--item", "kettle")["out"]
+buy = run("record", "--task", "${TASK}", "--item", "kettle", "--bought-as", "second-hand", "--price", "50",
+          "--supplier", "Gumtree seller", "--link", "https://example.com/g", "--bought-on", "2026-11-11")
+sent = writes()[-1][1]["records"][0]["fields"]
+out({"before": before, "code": buy["code"], "result": sent.get("Last Check Result"),
+     "preferredSent": [k for k in sent if k.startswith("Preferred")],
+     "after": run("list", "--item", "kettle")["out"]})`);
+    expect(r.before).toContain('PREFERRED ON REVIEW (2026-11-10): £60.00 at A Shop');
+    expect(r.code).toBe(0);
+    expect(r.result).toBe('bought Second-hand £50.00 from Gumtree seller (task ' + TASK + ')');
+    expect(r.preferredSent).toEqual([]);
+    expect(r.after).toContain('£50.00 | Second-hand | Gumtree seller');
+    expect(r.after).not.toContain('PREFERRED ON REVIEW');
+    expect(r.after).toContain('last checked 2026-11-11 (bought Second-hand £50.00 from Gumtree seller');
+    expect(r.after).not.toContain('adopted on review');
+  });
+
   it('list --item prints the baseline with the last check, or the none line', () => {
     const r = py(`
 S.rows = [row("recEXISTING000001", "fridge-freezer-full-height", **{"Last Checked": "2026-12-11",
