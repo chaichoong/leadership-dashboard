@@ -20,10 +20,12 @@ Commands:
   prefer --key K --task rec.. --price N --supplier S --link URL [...]
                                      change the preferred option on review, no buy recorded
   checked --key K --result TEXT      stamp a row as re-priced
-  has-row --task rec..               does a row carry this task? exit 0 yes, 1 no
+  has-row --task rec..               did this task buy a row? (bought_rows_for_task) exit 0 yes, 1 no
   due [--apply] [--as-of DATE]       the daily clock (job `preferred-list`, 06:20): raises
                                      ONE review task when any priced row was last checked
-                                     30 or more days ago and no review task is open
+                                     30 or more days ago, then stamps every row it named
+                                     "review raised", so no row raises a second task inside
+                                     30 days. The state lives on the list, not in a task search.
   selftest                           the pure-function checks, no network
 
 Exit codes: 0 worked, 1 a read or write failed (or `due` found the list broken),
@@ -53,7 +55,6 @@ except Exception as exc:                       # noqa: BLE001 — reported, neve
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE_ID = "appnqjDpqDniH3IRl"
 TABLE = "tblBHcZzWHrcW5rLU"            # Preferred Products
-TASKS = "tblqB8b22hKBL4PF1"            # Tasks
 PAT_PATH = os.environ.get("PREFLIST_PAT_FILE") or os.path.expanduser("~/.config/od/airtable_pat")
 PAGE_SIZE = 100
 MAX_PAGES = 200
@@ -106,7 +107,8 @@ def _day(value):
 
 
 def _active(row):
-    return (row.get("fields") or {}).get("Status") == "Active"
+    """Only "Retired" is not active: a blank Status counts as Active everywhere."""
+    return (row.get("fields") or {}).get("Status") != "Retired"
 
 
 def is_priced(row):
@@ -161,9 +163,33 @@ def money(v):
     return "%.2f" % v if isinstance(v, (int, float)) and not isinstance(v, bool) else "-"
 
 
-def summary_line(total, priced, due, review):
-    line = ("PREFERRED LIST: %d item(s) on the list, %d priced, %d due for a re-price, review task: %s"
-            % (total, priced, due, review))
+AWAITING_PREFIX = "review raised"
+
+
+def is_awaiting(row):
+    """Active and stamped by a raised review that has no result yet."""
+    return _active(row) and str((row.get("fields") or {}).get("Last Check Result") or "").startswith(AWAITING_PREFIX)
+
+
+def awaiting_result(as_of, task_id):
+    return "%s %s (task %s): awaiting result" % (AWAITING_PREFIX, as_of.isoformat(), task_id)
+
+
+def bought_by(row, task_id):
+    """THE one definition of "this task bought this row": the row's Source Task is
+    the task and it is bought (New or Second-hand), OR a Notes line records a buy
+    by the task (`<date>: bought ... (task <id>)`, written on every buy), so a later
+    buy of the same item by another task never strands the first."""
+    f = row.get("fields") or {}
+    if f.get("Source Task") == task_id and f.get("Bought As") in BOUGHT:
+        return True
+    tag = "(task %s)" % task_id
+    return any(": bought " in ln and tag in ln for ln in str(f.get("Notes") or "").splitlines())
+
+
+def summary_line(total, priced, due, awaiting, review):
+    line = ("PREFERRED LIST: %d item(s) on the list, %d priced, %d due for a re-price, %d awaiting a "
+            "result, review task: %s" % (total, priced, due, awaiting, review))
     return line[:SUMMARY_MAX]
 
 
@@ -184,14 +210,6 @@ def review_task_fields(due, as_of):
     return {TF["name"]: name[:100], TF["status"]: "Today", TF["due"]: as_of.isoformat(),
             TF["approver"]: {"id": KEVIN_USER}, TF["priority"]: "Medium",
             TF["taskType"]: "Research", TF["estimate"]: "45 min", TF["desc"]: desc}
-
-
-_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|>~])")
-
-
-def plain_text(text):
-    """Rich text back to plain: Airtable may return the marker as PREFLIST\\-REVIEW."""
-    return _ESCAPE_RE.sub(r"\1", str(text or ""))
 
 
 # ── the network: every Airtable call goes through api() (tests replace it) ──
@@ -258,25 +276,14 @@ def rows_for_task(task_id):
     return [r for r in read_rows() if (r.get("fields") or {}).get("Source Task") == task_id]
 
 
+def bought_rows_for_task(task_id):
+    """Rows this task bought (see bought_by). Raises RuntimeError on a failed read.
+    The close gate calls this."""
+    return [r for r in read_rows() if bought_by(r, task_id)]
+
+
 def today_london():
     return (datetime.now(LONDON) if LONDON else datetime.now()).date()
-
-
-def open_review_tasks():
-    """Open Tasks whose Description carries the review marker. The formula looks
-    for the word without its hyphen (rich text may escape it); Python then checks
-    the marker and the status."""
-    rows = list_records(TASKS, formula="AND(FIND('PREFLIST', {Description}), {Status}!='Completed', "
-                                       "{Status}!='Cancelled')",
-                        fields=["Task Name", "Description", "Status"])
-    out = []
-    for r in rows:
-        f = r.get("fields") or {}
-        status = f.get("Status")
-        status = status.get("name") if isinstance(status, dict) else status
-        if REVIEW_MARK in plain_text(f.get("Description")) and status not in ("Completed", "Cancelled"):
-            out.append(r)
-    return out
 
 
 def _gate(fields, flags):
@@ -300,8 +307,8 @@ def _gate(fields, flags):
 
 def gate_create(fields, apply):
     """Dry run first, then the real create, forced (as certificate_watch.gate_create):
-    the open-task check has already found no review task, so a fold into some other
-    task would hide the marker in the wrong place."""
+    a fold into some other task would hide the review in the wrong place. A review
+    already raised is kept from repeating by the stamps on the rows, not here."""
     ok, out = _gate(fields, ["--dry-run"])
     if not ok:
         return ok, out
@@ -365,11 +372,14 @@ def _one_active(rows, key):
     return hits[0] if hits else None
 
 
-def _assert_name_keyed(row, key):
-    """A read-modify-write uses ONE key style: prove the row came back by NAME."""
-    if (row.get("fields") or {}).get("Item Key") != key:
-        raise RuntimeError("the row read for %s is not keyed by field name; refusing to append "
-                           "to Notes" % key)
+def _valid_on(on, today, flag):
+    """A YYYY-MM-DD date no later than today, or Refused."""
+    d = _day(on)
+    if d is None or len(str(on)) != 10:
+        raise Refused("%s %r is not YYYY-MM-DD" % (flag, on))
+    if d > today:
+        raise Refused("%s %s is after today (%s)" % (flag, on, today.isoformat()))
+    return on
 
 
 def _append(notes, line):
@@ -378,57 +388,63 @@ def _append(notes, line):
 
 
 def plan_record(rows, a, today):
-    """(row_id or None, fields, key). Pure apart from its inputs. Raises Refused."""
+    """(row_id or None, fields, key). Pure apart from its inputs. Raises Refused.
+
+    A BUY (new, second-hand) writes the buy and appends `<date>: bought <As> £<p>
+    from <supplier> (task <id>)` to Notes. NOT-BOUGHT stores an item's rules and
+    nothing else: on an existing row it writes only Item (when blank), Buying Rules,
+    Category and a Notes line, never the task, supplier, link, price, Bought As or
+    dates, so it can neither un-buy a row nor make another task read as its buyer."""
     _validate_task(a.task)
     if a.bought_as not in BOUGHT_AS:
         raise Refused("bought-as must be one of %s" % ", ".join(BOUGHT_AS))
     if a.category is not None and a.category not in CATEGORIES:
         raise Refused("category %r is not one of %s" % (a.category, ", ".join(CATEGORIES)))
-    buying = a.bought_as != "not-bought"
-    if buying:
-        _validate_price(a.price)
-        if not (a.supplier or "").strip():
-            raise Refused("a buy needs --supplier")
-        _validate_link(a.link)
-    else:
-        if a.price is not None:
-            raise Refused("not-bought takes no price; record the buy when it happens")
-        if a.link:
-            _validate_link(a.link)
     key = item_key(a.key or a.item)
     if not key:
         raise Refused("the item %r gives an empty key" % a.item)
-    on = a.bought_on or today.isoformat()
-    if _day(on) is None:
-        raise Refused("--bought-on %r is not YYYY-MM-DD" % on)
     existing = _one_active(rows, key)
-    fields = {"Item": a.item.strip(), "Item Key": key, "Source Task": a.task, "Status": "Active"}
-    if buying:
-        fields.update({"Bought As": BOUGHT_AS[a.bought_as], "Full Price": round(float(a.price), 2),
-                       "Supplier or Seller": a.supplier.strip(), "Link": a.link,
-                       "Last Bought": on, "Last Checked": on})
-    else:
-        if a.supplier:
-            fields["Supplier or Seller"] = a.supplier.strip()
-        if a.link:
-            fields["Link"] = a.link
-        # Storing rules for an item already bought never un-buys it.
-        if not existing or (existing.get("fields") or {}).get("Bought As") not in BOUGHT:
-            fields["Bought As"] = BOUGHT_AS["not-bought"]
+    old = (existing or {}).get("fields") or {}
+    stamp = today.isoformat()
+    if a.bought_as == "not-bought":
+        given = [flag for flag, v in (("--price", a.price), ("--supplier", a.supplier), ("--link", a.link),
+                                      ("--cashback", a.cashback), ("--bought-on", a.bought_on)) if v is not None]
+        if given:
+            raise Refused("not-bought stores rules only; it takes no %s" % ", ".join(given))
+        fields = {}
+        if a.rules is not None:
+            fields["Buying Rules"] = a.rules.strip()
+        if a.category is not None:
+            fields["Category"] = a.category
+        if existing:
+            if not str(old.get("Item") or "").strip():
+                fields["Item"] = a.item.strip()
+            fields["Notes"] = _append(old.get("Notes"), "%s: buying rules stored from task %s." % (stamp, a.task))
+            return existing["id"], fields, key
+        fields.update({"Item": a.item.strip(), "Item Key": key, "Status": "Active",
+                       "Bought As": BOUGHT_AS["not-bought"], "Source Task": a.task})
+        return None, fields, key
+    _validate_price(a.price)
+    if not (a.supplier or "").strip():
+        raise Refused("a buy needs --supplier")
+    _validate_link(a.link)
+    on = _valid_on(a.bought_on or stamp, today, "--bought-on")
+    price, supplier, bought_as = round(float(a.price), 2), a.supplier.strip(), BOUGHT_AS[a.bought_as]
+    fields = {"Item": a.item.strip(), "Item Key": key, "Source Task": a.task, "Status": "Active",
+              "Bought As": bought_as, "Full Price": price, "Supplier or Seller": supplier, "Link": a.link,
+              "Last Bought": on, "Last Checked": on}
     if a.cashback:
         fields["Cashback"] = a.cashback.strip()
     if a.rules is not None:
         fields["Buying Rules"] = a.rules.strip()
     if a.category is not None:
         fields["Category"] = a.category
+    line = "%s: bought %s £%s from %s (task %s)" % (on, bought_as, money(price), supplier, a.task)
     if existing:
-        _assert_name_keyed(existing, key)
-        f = existing["fields"]
-        fields["Notes"] = _append(f.get("Notes"), "%s: updated from task %s. Was £%s, %s, from %s." % (
-            today.isoformat(), a.task, money(_price(f)), f.get("Bought As") or "no Bought As",
-            f.get("Supplier or Seller") or "no supplier"))
-        return existing["id"], fields, key
-    return None, fields, key
+        line += ". Was £%s, %s, from %s." % (money(_price(old)), old.get("Bought As") or "no Bought As",
+                                             old.get("Supplier or Seller") or "no supplier")
+    fields["Notes"] = _append(old.get("Notes"), line)
+    return (existing["id"] if existing else None), fields, key
 
 
 def cmd_record(a):
@@ -470,14 +486,11 @@ def plan_prefer(rows, a, today):
     _validate_link(a.link)
     if a.bought_as is not None and a.bought_as not in ("new", "second-hand"):
         raise Refused("bought-as for prefer must be new or second-hand")
-    on = a.on or today.isoformat()
-    if _day(on) is None:
-        raise Refused("--on %r is not YYYY-MM-DD" % on)
+    on = _valid_on(a.on or today.isoformat(), today, "--on")
     key = item_key(a.key)
     row = _one_active(rows, key)
     if not row:
         raise Refused("no Active row holds the key %s" % key)
-    _assert_name_keyed(row, key)
     f = row["fields"]
     old, new, sup = money(_price(f)), money(round(float(a.price), 2)), a.supplier.strip()
     fields = {"Supplier or Seller": sup, "Link": a.link, "Full Price": round(float(a.price), 2),
@@ -520,12 +533,10 @@ def cmd_prefer(a):
 
 
 def cmd_checked(a):
-    on = a.on or today_london().isoformat()
-    if _day(on) is None:
-        print("ERROR: --on %r is not YYYY-MM-DD" % on)
-        return 2
     key = item_key(a.key)
     try:
+        today = today_london()
+        on = _valid_on(a.on or today.isoformat(), today, "--on")
         row = _one_active(read_rows(), key)
     except Refused as exc:
         print("ERROR: %s" % exc)
@@ -553,14 +564,14 @@ def cmd_has_row(a):
         print("ERROR: task id %r is not rec plus 14 letters or digits" % a.task)
         return 2
     try:
-        hits = rows_for_task(a.task)
+        hits = bought_rows_for_task(a.task)
     except RuntimeError as exc:
         print("ERROR: %s" % exc)
         return 2
     if hits:
-        print(" ".join(r["id"] for r in hits))
+        print("%s (bought by %s)" % (" ".join(r["id"] for r in hits), a.task))
         return 0
-    print("NO ROW for %s" % a.task)
+    print("NO ROW for %s (no row on the list was bought by this task)" % a.task)
     return 1
 
 
@@ -623,37 +634,48 @@ def cmd_due(a):
                        "lastChecked": r["fields"].get("Last Checked")} for r in due]}
     review, code = "none needed", 0
     if due:
-        try:
-            open_tasks = open_review_tasks()
-        except RuntimeError as exc:
-            print("ERROR: %s" % exc)
-            return 1
-        if open_tasks:
-            review = "already open %s" % open_tasks[0]["id"]
+        fields = review_task_fields(due, as_of)
+        report["wouldRaise"] = fields[TF["name"]]
+        ok, out = gate_create(fields, a.apply)
+        task_id = str(out.get("taskId") or "")
+        if ok and a.apply and not TASK_ID_RE.match(task_id):
+            ok, out = False, {"why": "the gate said created but returned no task id (%r)" % task_id}
+        if not ok:
+            print("ERROR: the review task was not raised: %s" % str(out.get("why") or out)[:300])
+            review, code = "not raised (gate refused)", 1
+        elif not a.apply:
+            review = "would raise (dry run)"
         else:
-            fields = review_task_fields(due, as_of)
-            report["wouldRaise"] = fields[TF["name"]]
-            ok, out = gate_create(fields, a.apply)
-            if not ok:
-                print("ERROR: the review task was not raised: %s" % str(out.get("why") or out)[:300])
-                review, code = "not raised (gate refused)", 1
-            elif a.apply:
-                review = "raised %s" % out.get("taskId", "")
-            else:
-                review = "would raise (dry run)"
+            review = "raised %s" % task_id
+            # The state lives on the list: every row the task names is stamped, so
+            # tomorrow it is not due and no row raises a second task inside 30 days.
+            stamp = {"Last Checked": as_of.isoformat(), "Last Check Result": awaiting_result(as_of, task_id)}
+            for r in due:
+                try:
+                    _, bad = write_and_verify(r["id"], stamp)
+                except RuntimeError as exc:
+                    bad = [str(exc)[:200]]
+                if bad:
+                    print("ERROR: review task %s raised but row %s (%s) was not stamped: %s" % (
+                        task_id, r["id"], r["fields"].get("Item Key"), ", ".join(bad)))
+                    code = 1
+                else:
+                    r["fields"].update(stamp)
     if a.json:
         print(json.dumps(report, indent=1))
     else:
         for d in report["due"]:
             print("DUE: %s (last checked %s)" % (d["key"], d["lastChecked"] or "never"))
-    print(summary_line(len(active), len(priced), len(due), review))
+    print(summary_line(len(active), len(priced), len(due), sum(1 for r in rows if is_awaiting(r)), review))
     return code
 
 
 # ── selftest ──
 
 def _row(rid, key, status="Active", bought="Second-hand", price=70.0, checked=None, **extra):
-    f = {"Item": key, "Item Key": key, "Status": status, "Bought As": bought}
+    f = {"Item": key, "Item Key": key, "Bought As": bought}
+    if status:
+        f["Status"] = status
     if price is not None:
         f["Full Price"] = price
     if checked:
@@ -684,11 +706,16 @@ def selftest():
     check("not bought not due", "rec6" not in due)
     check("retired not due", "rec7" not in due)
     check("zero price not due", "rec8" not in due)
+    check("blank status due", [r["id"] for r in due_rows([_row("recB", "i", status=None)], T)] == ["recB"])
     check("duplicate keys", duplicate_keys(rows + [_row("rec9", "a"), _row("recA", "b", status="Retired")]) == ["a"])
+    nb = _row("recC", "j", bought="Not bought yet", price=None, **{"Source Task": "recT"})
+    check("not bought is not bought by its task", not bought_by(nb, "recT"))
+    check("bought by notes line", bought_by(_row("recD", "k", **{"Source Task": "recU",
+          "Notes": "2026-11-01: bought New £5.00 from S (task recT)"}), "recT"))
     check("match two tokens", len(matching_rows([_row("r", "fridge-freezer-full-height")], "freezer fridge")) == 1)
     check("match one token needs two", not matching_rows([_row("r", "fridge-freezer-full-height")], "fridge door"))
     check("match single token", len(matching_rows([_row("r", "fridge-freezer-full-height")], "fridge")) == 1)
-    check("summary length", len(summary_line(10 ** 6, 10 ** 6, 10 ** 6, "x" * 300)) <= SUMMARY_MAX)
+    check("summary length", len(summary_line(10 ** 6, 10 ** 6, 10 ** 6, 10 ** 6, "x" * 300)) <= SUMMARY_MAX)
     bad = [label for label, ok in checks if not ok]
     if bad:
         print("SELFTEST FAILED: %s" % ", ".join(bad))

@@ -160,9 +160,11 @@ describe('the sourcing card shape', () => {
     expect(problem(swap(FRIDGES, 'PROVEN:', 'PROVEN:'))).toMatch(/PROVEN line is missing or empty/);
   });
 
-  it('the SOURCING line must carry the quantity', () => {
+  it('the SOURCING line must carry the quantity as x <N> for', () => {
     expect(problem(swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts for 4 Abington Place')))
-      .toMatch(/SOURCING line must say how many/);
+      .toMatch(/SOURCING line must read <item> x <number> for <property>/);
+    expect(problem(swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts x 1')))
+      .toMatch(/SOURCING line must read <item> x <number> for <property>/);
     expect(problem(swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts x 0 for 4 Abington Place')))
       .toMatch(/1 or more/);
   });
@@ -190,24 +192,89 @@ describe('the sourcing card shape', () => {
     expect(problem(swap(FRIDGES, 'NEW FOR COMPARISON:', 'NEW FOR COMPARISON: Beko | £399'))).toMatch(/three parts/);
   });
 
-  it('the nine-link rule: qty + 3 listing links pass, qty + 4 are refused', () => {
-    // Qty 4: four picks, two reserves = 6 links. One more is 7 (= qty + 3), two more is 8.
-    const plus = (n) => FRIDGES.replace('TRACK RECORD:', Array.from({ length: n }, (_, i) =>
-      `Also seen: ${fb(100 + i)}`).join('\n') + '\nTRACK RECORD:');
-    expect(problem(plus(1))).toBe('');
-    expect(problem(plus(2))).toMatch(/8 listing links and a quantity of 4 allows 7/);
-    expect(problem(plus(2))).toMatch(/the rest is your working, not Kevin's/);
-    // The same listing written twice, or with a different query string, is one link.
-    expect(problem(FRIDGES.replace('TRACK RECORD:', `Again: ${fb(1)}\nAgain: ${fb(1).replace('www.', '')}?ref=search\nTRACK RECORD:`))).toBe('');
-    // Gumtree, eBay and Vinted count; a shop link does not.
-    const mixed = FENCE.replace('PAY BY:', [
-      'Seen: https://www.gumtree.com/p/a/1', 'Seen: https://www.ebay.co.uk/itm/2', 'Seen: https://www.vinted.co.uk/items/3',
-      'Seen: https://www.diy.com/p/4', 'PAY BY:'].join('\n'));
-    expect(problem(mixed)).toBe('');
-    const four = mixed.replace('PAY BY:', 'Seen: https://www.gumtree.com/p/a/5\nPAY BY:');
-    expect(problem(four)).toBe('');                         // qty 1: four listing links is the limit
-    expect(problem(four.replace('PAY BY:', 'Seen: https://www.gumtree.com/p/a/6\nPAY BY:')))
-      .toMatch(/5 listing links and a quantity of 1 allows 4/);
+  it('the quantity is the first x <N> for, never a later size', () => {
+    const rug = swap(FENCE, 'SOURCING:', 'SOURCING: Rug x 1 for lounge, 160 x 230');
+    expect(problem(rug)).toBe('');
+    expect(parse(rug).qty).toBe(1);
+    expect(parse(rug).item).toBe('Rug');
+  });
+
+  const addBefore = (text, anchor, lines) => text.replace(anchor, lines.join('\n') + '\n' + anchor);
+
+  it('the link cap: qty + 3 links pass, qty + 4 are refused, with the new sentence', () => {
+    // Qty 4: four picks, two reserves and one comparison = 7 links (= qty + 3). One more is 8.
+    expect(problem(FRIDGES)).toBe('');
+    const over = addBefore(FRIDGES, 'TRACK RECORD:', [`Also seen: ${fb(100)}`]);
+    expect(problem(over)).toMatch(/8 links and a quantity of 4 allows 7/);
+    expect(problem(over)).toMatch(/name the sites you searched in words, and keep ruled-out items as words without links/);
+  });
+
+  it('the cap counts shop links too', () => {
+    // FENCE (qty 1) has two links; two more shop links reach 4, a third is 5.
+    const four = addBefore(FENCE, 'PAY BY:', ['Seen: https://www.diy.com/p/4', 'Seen: https://www.argos.co.uk/product/5']);
+    expect(problem(four)).toBe('');
+    expect(problem(addBefore(four, 'PAY BY:', ['Seen: https://ao.com/product/6'])))
+      .toMatch(/5 links and a quantity of 1 allows 4/);
+  });
+
+  it('the cap ignores Gmail, Airtable and TopCashback links, and counts one page once', () => {
+    const refs = addBefore(FENCE, 'PAY BY:', [
+      'Thread: https://mail.google.com/mail/u/0/#all/1a0496b9df667238',
+      'Task: https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/reck5ZY5MoXulxJz8',
+      'Rate page: https://www.topcashback.co.uk/screwfix/',
+      'Again: https://www.screwfix.com/c/outdoor-gardening/fence-posts/cat000000?tc=search#reviews.',
+      'Again: https://screwfix.com/c/outdoor-gardening/fence-posts/cat000000/',
+      'Seen: https://www.diy.com/p/4', 'Seen: https://www.argos.co.uk/product/5']);
+    expect(problem(refs)).toBe('');
+  });
+
+  it('pasted search links trip the cap: 6 searches plus 3 items for qty 1 is refused', () => {
+    const card = [
+      'SOURCING: Washing machine x 1 for 5 Dalham Place',
+      'BASELINE: none on the list',
+      `PICK: Bosch Serie 4 | second-hand | £120 | ${fb(1)}`,
+      `RESERVE 1: Beko 8 kg | second-hand | £90 | ${fb(2)}`,
+      `RESERVE 2: Hotpoint 7 kg | second-hand | £80 | ${fb(3)}`,
+      'NEW FOR COMPARISON: not found: no shop page opened',
+      'CASHBACK: n/a',
+      'PROVEN: drum and door seal shown in photos',
+      'NOT PROVEN: nothing',
+      'SAVING: no baseline',
+      'PAY BY: seller: cash on collection',
+      'SEARCHED: https://www.facebook.com/marketplace/haverhill/search?query=washing%20machine '
+        + 'https://www.gumtree.com/search?q=washing+machine https://www.ebay.co.uk/sch/i.html?_nkw=washing+machine '
+        + 'https://www.vinted.co.uk/catalog?search_text=washing https://www.currys.co.uk/search?q=washing '
+        + 'https://ao.com/search?q=washing',
+      'SPEND: £120 (one-off)',
+      CLOSING,
+    ].join('\n');
+    expect(problem(card)).toMatch(/9 links and a quantity of 1 allows 4/);
+    expect(problem(card)).toMatch(/name the sites you searched in words/);
+    expect(problem(swap(card, 'SEARCHED:', 'SEARCHED: Facebook Marketplace, Gumtree, eBay, Vinted, Currys, AO'))).toBe('');
+  });
+
+  it.each([
+    ['bold with the colon inside', (l) => l.replace(/^([A-Z0-9 ]+):/, '**$1:**')],
+    ['bold with the colon outside', (l) => l.replace(/^([A-Z0-9 ]+):/, '**$1**:')],
+    ['a dash bullet', (l) => '- ' + l],
+    ['a star bullet and bold', (l) => l.replace(/^([A-Z0-9 ]+):/, '* **$1:**')],
+    ['a dot bullet and spaces', (l) => '  • ' + l],
+    ['a quote marker', (l) => '> ' + l],
+  ])('keys written with %s read like the plain form', (_label, dress) => {
+    const KEYS = /^(SOURCING|BASELINE|PICK|RESERVE|NEW FOR COMPARISON|CASHBACK|PROVEN|NOT PROVEN|SAVING|PAY BY|SEARCHED|SPEND)/;
+    const dressed = (text) => text.split('\n').map((l) => (KEYS.test(l) ? dress(l) : l)).join('\n');
+    expect(parse(dressed(FRIDGES))).toEqual(parse(FRIDGES));
+    expect(parse(dressed(FENCE))).toEqual(parse(FENCE));
+    // Still judged: a dressed card missing a line is refused the same way.
+    expect(problem(dressed(drop(FENCE, 'SEARCHED:')))).toMatch(/SEARCHED line is missing/);
+  });
+
+  it('a bold **SOURCING:** card is still judged, and a bold **SPEND:** still counts', () => {
+    const bold = (text) => swap(text, 'SOURCING:', text.split('\n').find((l) => l.startsWith('SOURCING:'))
+      .replace('SOURCING:', '**SOURCING:**'));
+    expect(problem(bold(drop(FENCE, 'RESERVE 2:')))).toMatch(/RESERVE 2 line is missing/);
+    expect(problem(swap(FENCE, 'SPEND:', '* **SPEND:** £148.90 (one-off)'))).toBe('');
+    expect(parse(swap(FENCE, 'SPEND:', '* **SPEND:** £148.90 (one-off)')).spend).toBe(148.9);
   });
 
   it('the SPEND pattern is the same one agent-dispatch.py uses', () => {
@@ -230,8 +297,20 @@ describe('a listing to buy without the shape', () => {
   it('does not fire for a room advert link with no SPEND line', () => {
     expect(backstop('Advert is live: https://www.gumtree.com/p/rooms-to-rent/double-room-haverhill/1800000000\n' + CLOSING)).toBe('');
   });
-  it('does not fire for a sourcing card', () => {
+  it('does not fire for a sourcing card, even a bold one', () => {
     expect(backstop(FRIDGES)).toBe('');
+    expect(backstop(FRIDGES.replace('SOURCING:', '**SOURCING:**'))).toBe('');
+  });
+  it.each([
+    ['an eBay order page', 'https://www.ebay.co.uk/vod/FetchOrderDetails?itemid=1234&transid=5678'],
+    ['a Gumtree post-an-advert page', 'https://www.gumtree.com/postad'],
+    ['a search', 'https://www.facebook.com/marketplace/haverhill/search?query=fridge%20freezer'],
+  ])('does not fire for %s with a SPEND line', (_label, url) => {
+    expect(backstop(`See: ${url}\nSPEND: £40 (one-off)\n${CLOSING}`)).toBe('');
+  });
+  it('fires on an item page on any subdomain, with a bulleted bold SPEND line', () => {
+    expect(backstop(`See: https://m.ebay.co.uk/itm/123456\n- **SPEND:** £40 (one-off)\n${CLOSING}`)).not.toBe('');
+    expect(backstop(`See: https://www.vinted.co.uk/items/987-lamp\nSPEND: £12 (one-off)\n${CLOSING}`)).not.toBe('');
   });
 });
 
@@ -288,13 +367,66 @@ describe('cmd_submit runs the sourcing gate', () => {
   });
 });
 
+// The whole submit, with Airtable stubbed: get_task returns what patch_task wrote, as Airtable would.
+// The task is inbound so a CHECKED trigger=none report would normally file itself as Completed.
+function fullSubmit(output) {
+  return py(DISPATCH, `
+import tempfile, os, types, io, contextlib
+AF = m.AF
+state = {AF["name"]: "INBOUND: Fence posts for 4 Abington Place", AF["inboundTask"]: True, AF["status"]: "Today"}
+m.get_task = lambda t: {"id": t, "createdTime": "2026-11-11T09:00:00.000Z", "fields": dict(state)}
+def patch(t, f):
+    state.update(f)
+    return {"id": t}
+m.patch_task = patch
+fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False); fh.write(P["o"]); fh.close()
+args = types.SimpleNamespace(task="recSourcingTest01", agent=sorted(m.AGENTS)[0], type="Admin", output_file=fh.name, tier1=False)
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        m.cmd_submit(args)
+    out = {"result": "submitted"}
+except SystemExit as e:
+    out = {"result": "refused", "error": str(e)}
+finally:
+    os.unlink(fh.name)
+out["status"] = str(state.get(AF["status"]))
+out["notes"] = str(state.get(AF["notes"]) or "")
+out["mark"] = m.SOURCING_SUBMITTED_MARK
+print(json.dumps(out))`, { o: output });
+}
+
+const NOTHING_TO_DECIDE = [
+  'CHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=none',
+  '',
+  FENCE.replace(CLOSING, 'TRACK RECORD: none found (searched tasks and Gmail for ref "fence posts")'),
+  '',
+  '**Carrying this out will involve:** nothing happens on approval; this is a report.',
+].join('\n');
+
+describe('a submitted sourcing card goes to Kevin and marks the task', () => {
+  it('a sourcing card with trigger=none does not file itself, and the submit stamp is written', () => {
+    const r = fullSubmit(NOTHING_TO_DECIDE);
+    expect(r.result).toBe('submitted');
+    expect(r.status).toBe('Approval');
+    expect(r.notes).toContain(r.mark);
+    expect(r.mark).toBe('SOURCING CARD SUBMITTED');
+  });
+  it('CONTROL: the same report without the SOURCING line files itself, with no stamp', () => {
+    const plain = NOTHING_TO_DECIDE.split('\n').filter((l) => !l.startsWith('SOURCING:')).join('\n')
+      .replace(/^SPEND:.*$/m, '');
+    const r = fullSubmit(plain);
+    expect(r.status).toBe('Completed');
+    expect(r.notes).not.toContain('SOURCING CARD SUBMITTED');
+  });
+});
+
 // cmd_complete is driven for real with get_task, patch_task and the list read stubbed.
-function complete({ output, rows = [], readError = '', notBought = '', keepOpen = false }) {
+function complete({ output, rows = [], readError = '', notBought = '', keepOpen = false, notes = '' }) {
   return py(DISPATCH, `
 import types, io, contextlib
 AF = m.AF
 state = {AF["name"]: "INBOUND: Fridge freezers for Haverhill", AF["status"]: "Today",
-         AF["approvalOutcome"]: "Approved as-is", AF["taskType"]: "Admin", AF["notes"]: "",
+         AF["approvalOutcome"]: "Approved as-is", AF["taskType"]: "Admin", AF["notes"]: P["notes"],
          AF["agentOutput"]: P["output"]}
 m.get_task = lambda t: {"id": t, "createdTime": "2026-11-11T09:00:00.000Z", "fields": dict(state)}
 def patch(t, f):
@@ -310,7 +442,7 @@ def rows(task):
     if P["readError"]:
         raise RuntimeError(P["readError"])
     return P["rows"]
-m._preferred_rows_for_task = rows
+m._preferred_bought_rows_for_task = rows
 try:
     with contextlib.redirect_stdout(io.StringIO()):
         m.cmd_complete(types.SimpleNamespace(task="reck5ZY5MoXulxJz8", keep_open=P["keepOpen"], note="", no_certificate="",
@@ -318,7 +450,7 @@ try:
                                              not_bought=P["notBought"]))
     print(json.dumps({"status": state.get(AF["status"]), "notes": state.get(AF["notes"]), "calls": calls}))
 except SystemExit as e:
-    print(json.dumps({"exit": str(e), "calls": calls}))`, { output, rows, readError, notBought, keepOpen });
+    print(json.dumps({"exit": str(e), "calls": calls}))`, { output, rows, readError, notBought, keepOpen, notes });
 }
 
 describe('cmd_complete closes a sourcing card only once the buy is on the list', () => {
@@ -329,19 +461,41 @@ describe('cmd_complete closes a sourcing card only once the buy is on the list',
     expect(r.exit).toMatch(/--not-bought "<why>"/);
     expect(r.calls).toEqual(['reck5ZY5MoXulxJz8']);
   });
+  // What counts as bought is preferred-list.py's bought_rows_for_task, defined once there; the gate
+  // closes on any row it returns and never re-filters.
   it('closes with a bought row from this task', () => {
-    for (const as of ['New', 'Second-hand']) {
-      expect(complete({ output: FRIDGES, rows: [{ id: 'recPref1', fields: { 'Source Task': 'reck5ZY5MoXulxJz8', 'Bought As': as } }] }).status)
-        .toBe('Completed');
-    }
+    expect(complete({ output: FRIDGES, rows: [{ id: 'recPref1', fields: { 'Source Task': 'reck5ZY5MoXulxJz8' } }] }).status)
+      .toBe('Completed');
   });
-  // The live list's first row is exactly this: the fridge freezer RULES, saved from the task before
-  // anything was bought. A rules-only row must never close the card as if the buy had happened.
-  it('a rules-only row ("Not bought yet") is not a buy and does not close the card', () => {
-    const r = complete({ output: FRIDGES, rows: [{ id: 'recPref1', fields: { 'Source Task': 'reck5ZY5MoXulxJz8', 'Bought As': 'Not bought yet' } }] });
+  it('fires on a task whose output is no longer a sourcing card but whose Notes carry the submit mark', () => {
+    const notes = '[11 Nov 2026 10:13 — agent-dispatch] SOURCING CARD SUBMITTED (round 1): closes only on a bought row or --not-bought';
+    const r = complete({ output: 'A plain revised report.\n' + CLOSING, notes });
     expect(r.exit).toMatch(/no bought row from this task/);
-    expect(complete({ output: FRIDGES, rows: [{ id: 'recPref1', fields: { 'Source Task': 'reck5ZY5MoXulxJz8' } }] }).exit)
-      .toMatch(/no bought row from this task/);
+    expect(r.calls).toEqual(['reck5ZY5MoXulxJz8']);
+    expect(complete({ output: 'A plain revised report.\n' + CLOSING, notes, notBought: 'Kevin chose not to buy' }).status)
+      .toBe('Completed');
+  });
+  it('the loader is _preferred_bought_rows_for_task and calls bought_rows_for_task in preferred-list.py', () => {
+    const r = py(DISPATCH, `
+import tempfile, os
+d = tempfile.mkdtemp()
+fake = os.path.join(d, "preferred-list.py")
+open(fake, "w").write("def bought_rows_for_task(t):\\n    return [{'id': 'recBought', 'task': t}]\\n"
+                      "def rows_for_task(t):\\n    raise AssertionError('the any-row reader was called')\\n")
+real = importlib.util.spec_from_file_location
+seen = []
+def redirect(name, path, *a, **k):
+    seen.append(os.path.basename(path))
+    return real(name, fake if os.path.basename(path) == "preferred-list.py" else path, *a, **k)
+importlib.util.spec_from_file_location = redirect
+try:
+    rows = m._preferred_bought_rows_for_task("reck5ZY5MoXulxJz8")
+finally:
+    importlib.util.spec_from_file_location = real
+print(json.dumps({"rows": rows, "seen": seen, "old": hasattr(m, "_preferred_rows_for_task")}))`);
+    expect(r.rows).toEqual([{ id: 'recBought', task: 'reck5ZY5MoXulxJz8' }]);
+    expect(r.seen).toEqual(['preferred-list.py']);
+    expect(r.old).toBe(false);
   });
   it('closes with --not-bought and the reason on the record, without reading the list', () => {
     const r = complete({ output: FRIDGES, notBought: 'every seller sold before Kevin approved' });

@@ -126,8 +126,8 @@ from agent_email_format import (  # noqa: E402
 from agent_calendar_format import (calendar_ref_problem, calendar_submit_problem,  # noqa: E402
                                    diary_written, is_calendar)
 # The SOURCING card (Kevin, 11 Nov 2026): one pick per unit, two reserves, facts on fixed lines.
-from agent_sourcing_format import (SHAPE as SOURCING_SHAPE, is_sourcing,  # noqa: E402
-                                   listing_without_shape_problem, sourcing_problem)
+from agent_sourcing_format import (SHAPE as SOURCING_SHAPE, SOURCING_SUBMITTED_MARK,  # noqa: E402
+                                   is_sourcing, listing_without_shape_problem, sourcing_problem)
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -5623,6 +5623,10 @@ def cmd_submit(args):
     stamps = ([superseded_stamp(n) for n in dropped]
               + [attached_stamp(n, f"with this submission (round {round_no})") for n in uploaded]
               + [submitted_stamp(round_no, args.type, round_files)])
+    # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
+    if is_sourcing(output):
+        stamps.append(note_line("agent-dispatch", f"{SOURCING_SUBMITTED_MARK} (round {round_no}): "
+                                                  "closes only on a bought row or --not-bought"))
     tf[AF["notes"]] = append_notes(tf.get(AF["notes"]), *stamps)
     tf["_receiptAdded"] = True
 
@@ -5644,6 +5648,9 @@ def cmd_submit(args):
     # approval writes the cost and `complete` checks it was written.
     cost_owed = task_owes_cost(args.task, {"agentOutput": output, "notes": tf.get(AF["notes"])})
     if cost_owed:
+        files_itself = False
+    # A sourcing card never files itself: filing sets Completed and would skip the preferred-list gate.
+    if is_sourcing(output):
         files_itself = False
     if files_itself:
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
@@ -8154,9 +8161,10 @@ COST_NOT_WRITTEN_MARK = "COST NOT WRITTEN:"
 NOT_BOUGHT_MARK = "NOT BOUGHT:"
 
 
-def _preferred_rows_for_task(task_id):
-    """The Preferred Products rows whose Source Task is this task, read through
-    scripts/preferred-list.py (rows_for_task raises RuntimeError on a failed read).
+def _preferred_bought_rows_for_task(task_id):
+    """The Preferred Products rows that record a BUY by this task, read through
+    scripts/preferred-list.py (bought_rows_for_task raises RuntimeError on a failed read).
+    What counts as bought is defined there, once.
     Loaded lazily so a broken list module never stops agent-dispatch loading.
     Tests replace this one function."""
     import importlib.util
@@ -8164,7 +8172,7 @@ def _preferred_rows_for_task(task_id):
     spec = importlib.util.spec_from_file_location("od_preferred_list", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.rows_for_task(task_id)
+    return mod.bought_rows_for_task(task_id)
 
 
 def task_owes_cost(task_id, t, fetch_costs=None):
@@ -8412,21 +8420,18 @@ def cmd_complete(args):
     # to beat, or the agent says on the record why nothing was bought. A list that cannot be read is
     # a refusal, never "no row" and never "row exists".
     not_bought = " ".join(str(getattr(args, "not_bought", "") or "").split())
-    if is_sourcing(t["agentOutput"]):
+    if is_sourcing(t["agentOutput"]) or SOURCING_SUBMITTED_MARK in str(t["notes"] or ""):
         if not_bought:
             sign_note = ((sign_note + "\n\n") if sign_note else "") + (
                 f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] {NOT_BOUGHT_MARK} {not_bought[:600]}")
         else:
             try:
-                rows = _preferred_rows_for_task(args.task)
+                rows = _preferred_bought_rows_for_task(args.task)
             except Exception as exc:                      # noqa: BLE001
                 sys.exit(f"ERROR: refusing to complete {args.task}: it is a sourcing card and the Preferred "
                          f"Products list could not be read to check the buy was recorded ({str(exc)[:160]}).\n"
                          "       Try again once the list reads. Nothing was closed.")
-            # A row that only stores the item's rules ("Not bought yet") is not a buy.
-            bought = [r for r in rows or []
-                      if ((r or {}).get("fields") or {}).get("Bought As") in ("New", "Second-hand")]
-            if not bought:
+            if not rows:
                 sys.exit(
                     f"ERROR: refusing to complete {args.task}: it is a sourcing card and the Preferred Products "
                     "list has no bought row from this task.\n"

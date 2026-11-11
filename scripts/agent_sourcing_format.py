@@ -47,17 +47,24 @@ SPEND_LINE_RE = re.compile(
     r"(?:month|week|year|quarter|annum|recurring|monthly|weekly|annually|yearly)\b)?",
     re.I | re.M)
 
-SOURCING_RE = re.compile(r"^\s*SOURCING\s*:", re.I | re.M)
+# Written on the task's Notes by agent-dispatch.py submit when it accepts a sourcing card, so the
+# close gate still fires after a later output on the same task drops the SOURCING line.
+SOURCING_SUBMITTED_MARK = "SOURCING CARD SUBMITTED"
 
-# One pattern for every key. NOT PROVEN is listed before PROVEN so a line that
-# starts "NOT PROVEN:" is never read as PROVEN.
+# One pattern for every key, read leniently (11 Nov 2026 review): spaces, a bullet (- * • >) and
+# markdown bold may come before the key, and the colon may sit inside or outside the bold, so
+# `**SOURCING:** x`, `- PICK: x`, `**PICK 2**: x` and `* **SPEND:** £70` read like the plain form.
+# NOT PROVEN is listed before PROVEN so a line that starts "NOT PROVEN:" is never read as PROVEN.
+_BOLD = r"(?:\*\*|__)?"
 KEY_RE = re.compile(
-    r"^\s*(?P<key>SOURCING|BASELINE|PICK(?:\s+(?P<picknum>\d+))?|RESERVE\s+(?P<resnum>\d+)"
+    r"^\s*(?:[-*•>]\s*)*" + _BOLD + r"\s*"
+    r"(?P<key>SOURCING|BASELINE|PICK(?:\s+(?P<picknum>\d+))?|RESERVE\s+(?P<resnum>\d+)"
     r"|NEW\s+FOR\s+COMPARISON|CASHBACK|NOT\s+PROVEN|PROVEN|SAVING|PAY\s+BY|SEARCHED|SPEND)"
-    r"\s*:\s*(?P<value>.*?)\s*$",
+    r"\s*" + _BOLD + r"\s*:\s*" + _BOLD + r"\s*(?P<value>.*?)\s*" + _BOLD + r"\s*$",
     re.I)
 
-QTY_RE = re.compile(r"\s[x×]\s*(\d+)(?=\s|$)", re.I)
+# The quantity is the first ` x <N> for ` on the SOURCING line, never a later size (160 x 230).
+QTY_RE = re.compile(r"(?:^|\s)[x×]\s*(\d+)\s+for\b", re.I)
 PRICE_RE = re.compile(r"^£\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)$")
 LINK_RE = re.compile(r"^https?://\S+$", re.I)
 URL_RE = re.compile(r"https?://[^\s<>()\[\]\"'`]+", re.I)
@@ -84,13 +91,30 @@ SHAPE = (
 )
 
 
+def key_lines(output):
+    """Every keyed line of the output as (KEY, value, match), through the one lenient
+    reader. KEY is upper case with single spaces (PICK 2, RESERVE 1, NOT PROVEN)."""
+    out = []
+    for line in str(output or "").splitlines():
+        m = KEY_RE.match(line)
+        if m:
+            out.append((" ".join(m.group("key").upper().split()), m.group("value"), m))
+    return out
+
+
 def is_sourcing(output):
-    """True when a line of this output starts `SOURCING:` (any case)."""
-    return bool(SOURCING_RE.search(output or ""))
+    """True when a line of this output carries the SOURCING key (any case, bullets and bold allowed)."""
+    return any(k == "SOURCING" for k, _v, _m in key_lines(output))
 
 
-def _norm_key(key):
-    return " ".join(key.upper().split())
+def spend_amount(output):
+    """The amount on the first SPEND line read through the lenient reader, or None."""
+    for key, value, _m in key_lines(output):
+        if key == "SPEND":
+            sm = SPEND_LINE_RE.match("SPEND: " + value)
+            if sm:
+                return float(sm.group("amount").replace(",", ""))
+    return None
 
 
 def _price(value, where):
@@ -128,36 +152,56 @@ def _item(value, where):
             "link": _link(link, where)}
 
 
-def _norm_url(url):
+# Links the cap never counts: the email thread, the task record and the cashback page are
+# references, not things Kevin is asked to vet.
+UNCOUNTED_HOSTS = ("mail.google.com", "airtable.com", "topcashback.co.uk")
+
+# A marketplace ITEM page, the only kind of link the backstop reads as an offer to buy.
+ITEM_PAGES = (("facebook.com", "/marketplace/item/"), ("gumtree.com", "/p/"),
+              ("ebay.co.uk", "/itm/"), ("vinted.co.uk", "/items/"))
+
+
+def _on(host, domain):
+    return host == domain or host.endswith("." + domain)
+
+
+def _split_url(url):
+    """(host, path) with trailing punctuation, the query string and the fragment gone."""
     url = url.rstrip(".,;:!?*_")
     try:
         parts = urlsplit(url)
     except ValueError:
-        return None, ""
+        return "", ""
     host = (parts.hostname or "").lower()
-    for prefix in ("www.", "m."):
-        if host.startswith(prefix):
-            host = host[len(prefix):]
+    if host.startswith("www."):
+        host = host[4:]
     return host, parts.path.rstrip("/")
 
 
-def _is_listing(host, path):
-    if host == "facebook.com" or host.endswith(".facebook.com"):
-        return path.lower().startswith("/marketplace")
-    return any(host == d or host.endswith("." + d) for d in ("gumtree.com", "ebay.co.uk", "vinted.co.uk"))
-
-
-def listing_links(output):
-    """The distinct marketplace listing links in the output, in first-seen order.
-    A listing link is a URL on facebook.com/marketplace, gumtree.com, ebay.co.uk
-    or vinted.co.uk; the same listing written twice counts once."""
+def card_links(output):
+    """The distinct links the cap counts, in first-seen order: every http(s) link except
+    those on UNCOUNTED_HOSTS. The same page twice (another query string, a trailing
+    slash or full stop) counts once."""
     seen = []
     for raw in URL_RE.findall(output or ""):
-        host, path = _norm_url(raw)
-        if host and _is_listing(host, path):
-            key = host + path
-            if key not in seen:
-                seen.append(key)
+        host, path = _split_url(raw)
+        if not host or any(_on(host, d) for d in UNCOUNTED_HOSTS):
+            continue
+        if host + path not in seen:
+            seen.append(host + path)
+    return seen
+
+
+def item_links(output):
+    """The distinct marketplace item links (facebook.com/marketplace/item/, gumtree.com/p/,
+    ebay.co.uk/itm/, vinted.co.uk/items/, any subdomain). An order page, a post-an-advert
+    page or a search is not an item."""
+    seen = []
+    for raw in URL_RE.findall(output or ""):
+        host, path = _split_url(raw)
+        if any(_on(host, d) and (path + "/").lower().startswith(prefix) for d, prefix in ITEM_PAGES):
+            if host + path not in seen:
+                seen.append(host + path)
     return seen
 
 
@@ -170,12 +214,7 @@ def parse_sourcing(output):
     text = output or ""
     fields = {}
     picks = {}
-    for line in text.splitlines():
-        m = KEY_RE.match(line)
-        if not m:
-            continue
-        key = _norm_key(m.group("key"))
-        value = m.group("value")
+    for key, value, m in key_lines(text):
         if key.startswith("PICK"):
             num = int(m.group("picknum") or 1)
             if num in picks:
@@ -193,15 +232,15 @@ def parse_sourcing(output):
         fields[key] = value
 
     sourcing = fields.get("SOURCING", "")
-    qm = list(QTY_RE.finditer(" " + sourcing))
+    qm = QTY_RE.search(sourcing)
     if not qm:
         raise SourcingFormatError(
-            "the SOURCING line must say how many are needed as ' x <number>', "
+            "the SOURCING line must read <item> x <number> for <property>, "
             "for example SOURCING: Fridge freezer x 4 for 13 Chedburgh Place")
-    qty = int(qm[-1].group(1))
+    qty = int(qm.group(1))
     if qty < 1:
         raise SourcingFormatError("the quantity on the SOURCING line must be 1 or more")
-    item = sourcing[:qm[-1].start()].strip()
+    item = sourcing[:qm.start()].strip()
 
     for key in REQUIRED_TEXT:
         if not fields.get(key, "").strip():
@@ -267,18 +306,17 @@ def parse_sourcing(output):
     if cb.startswith("not checked") and not cb[len("not checked"):].strip(" :").strip():
         raise SourcingFormatError("CASHBACK: not checked must say why, for example not checked: site refused the robot")
 
-    sm = SPEND_LINE_RE.search(text)
-    if not sm:
+    spend = spend_amount(text)
+    if spend is None:
         raise SourcingFormatError(
             "there is no SPEND line with an amount; write SPEND: £<total> (one-off)")
-    spend = float(sm.group("amount").replace(",", ""))
 
-    links = listing_links(text)
+    links = card_links(text)
     if len(links) > qty + 3:
         raise SourcingFormatError(
-            f"the card carries {len(links)} listing links and a quantity of {qty} allows {qty + 3}; a sourcing "
-            "card offers the pick(s), two reserves and at most one comparison, and the rest is your working, "
-            "not Kevin's")
+            f"the card carries {len(links)} links and a quantity of {qty} allows {qty + 3}; a sourcing card "
+            "carries the pick(s), two reserves and at most one comparison link; name the sites you searched "
+            "in words, and keep ruled-out items as words without links")
 
     return {"qty": qty, "item": item, "picks": parsed_picks, "reserves": reserves,
             "any_second_hand": any_second_hand, "any_new": any_new, "spend": spend}
@@ -296,14 +334,15 @@ def sourcing_problem(output):
 
 
 def listing_without_shape_problem(output):
-    """'' unless the output offers a marketplace listing to buy (a listing link and a
-    SPEND line) without the SOURCING shape. A room advert on Gumtree or Facebook in
-    another card carries no SPEND line, so it is never caught."""
+    """'' unless the output offers a marketplace item to buy (an item link and a SPEND
+    line) without the SOURCING shape. A room advert on Gumtree or Facebook in another
+    card carries no SPEND line, and an order page, a post-an-advert page or a search
+    is not an item, so none of them is caught."""
     if is_sourcing(output):
         return ""
-    if not listing_links(output):
+    if not item_links(output):
         return ""
-    if not SPEND_LINE_RE.search(output or ""):
+    if spend_amount(output) is None:
         return ""
     return ("it offers a marketplace listing to buy and spends money, so it must use the SOURCING card shape: "
             "one pick per unit needed, two reserves and the facts on fixed lines")
