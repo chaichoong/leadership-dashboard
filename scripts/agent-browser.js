@@ -265,6 +265,28 @@ const BUILTIN_SITES = {
   // link. The show page lists them all, but only once a browser has run its script. Read-only, no login:
   // the content engine reads it with `read --links /episode/`.
   'open.spotify.com':           { label: 'Spotify (public show pages)', login: false },
+  // Product and materials sourcing (11 Nov 2026). The Inbox Response agent reads listings and prices
+  // here for a SOURCING card (scripts/agent_sourcing_format.py). Read-only on purpose: no loginUrl, so
+  // none of them reaches the Robot sign-in app or the keep-alive, and `login` refuses to record one.
+  // On 2 Nov eBay was "NOT CHECKED" because the robot refused it; these entries end that wall.
+  'gumtree.com':                { label: 'Gumtree', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'ebay.co.uk':                 { label: 'eBay UK', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'vinted.co.uk':               { label: 'Vinted UK', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'screwfix.com':               { label: 'Screwfix', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'toolstation.com':            { label: 'Toolstation', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'diy.com':                    { label: 'B&Q', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'argos.co.uk':                { label: 'Argos', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'ao.com':                     { label: 'AO', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'currys.co.uk':               { label: 'Currys', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
   // Short sessions (16 Oct 2026, Kevin: he gives the robot access once, and the estate keeps it).
   // `idleMinutes` is how long the site lets a session sit unused before it signs the robot out on
   // its own servers. The daily 06:40 keep-alive cannot hold a session that short, so the 30-minute

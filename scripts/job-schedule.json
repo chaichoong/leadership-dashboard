@@ -722,6 +722,16 @@
   "retryWhenDeferred": true,
   "note": "The daily certificate watch (Kevin, 7 Oct 2026): scripts/certificate_watch.py daily --apply. Rules only, no model, so no Claude allowance. It reads the compliance book through agent-dispatch.py, every open task and the quarter's Real Estate plan, and raises, through scripts/create-agent-task.py, one task for the Property Administration agent per required certificate with nothing in date on file and no open task (lapsed first, then the plan's order, then soonest expiry), plus a replacement-quote task 30 and 14 days before each landlord insurance renewal (the 30-day one under agent-dispatch's own renewal-task name, so only one is raised) and a Hard Deadline alarm when a renewal passes with nothing open or a recorded premium rises more than 10%. It raises nothing while the agent's register row is not Built or Live. 06:05, before the 06:40 data-invariants run whose missed-compliance-item-has-a-task scan checks what it left behind. It exits 1 when it found any item with no task (the count is the first thing in its last line, which the Estate Status row prints) and when a read or a create failed."
  },
+ "preferred-list": {
+  "cron": "20 6 * * *",
+  "maxLateMinutes": 900,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "note": "The Preferred Products re-price clock (Kevin, 11 Nov 2026): scripts/preferred-list.py due --apply. Rules only, no model, so no Claude allowance. It reads the Preferred Products list (what we buy for the properties, from whom, at what full price) and, when any bought and priced item was last checked 30 or more days ago and no review task is open, raises ONE review task for the Inbox Response agent through scripts/create-agent-task.py, so every priced item is re-priced about monthly. It runs daily rather than monthly because the installer has no day-of-month, and a daily question of 'was anything last checked 30 or more days ago' heals itself after a day the Mac was asleep. It fails loudly (exit 1) when the list reads empty or holds a duplicate item, because a running job is not a working job."
+ },
  "sport-calendar": {
   "cron": "5 6-22 * * *",
   "maxLateMinutes": 50,
