@@ -11732,13 +11732,31 @@ def plan_digest(p):
 
 def find_plan(plans, task_id, creditor):
     """Which page is this matter's page. A page already linked to the task
-    wins outright; otherwise exact case-insensitive creditor name. Oldest
-    page wins when twins exist, so a duplicate created by mistake can never
-    hijack the original's history — and the caller warns about the twins."""
+    wins, but only among pages of the NAMED creditor; otherwise exact
+    case-insensitive creditor name. Oldest page wins when twins exist, so a
+    duplicate created by mistake can never hijack the original's history —
+    and the caller warns about the twins.
+
+    THE NAME IS PART OF THE QUESTION (20261001-inbound-triage-699). The link
+    used to win outright. One task covering TWO creditor matters is linked to
+    both pages, so on 1 Oct 2026 two ledger calls with two different
+    --creditor names both answered with the oldest linked page: the second
+    call overwrote the first matter's Next Step, both exited 0, and the
+    second page never got its note. A task is WHERE the work happened; the
+    creditor is WHICH matter it was about."""
+    name = (creditor or "").strip().lower()
     linked = [p for p in plans if task_id and task_id in p["taskIds"]]
     if linked:
-        return sorted(linked, key=lambda p: p["createdTime"])[0], []
-    name = (creditor or "").strip().lower()
+        same = sorted([p for p in linked
+                       if (p["creditor"] or "").strip().lower() == name],
+                      key=lambda p: p["createdTime"])
+        if same:
+            return same[0], same[1:]
+        # A linked page exists but none of them is this creditor's. Taking one
+        # anyway is the incident, so fall through to the name (and, failing
+        # that, to a new page). The caller says so out loud, because a page
+        # created because a name was typed differently is a visible duplicate
+        # someone can fold, and silently writing on the wrong matter is not.
     named = sorted([p for p in plans
                     if (p["creditor"] or "").strip().lower() == name],
                    key=lambda p: p["createdTime"])
@@ -11790,6 +11808,19 @@ def cmd_ledger(args):
                      "clear it)")
     plans = fetch_plans()
     row, twins = find_plan(plans, args.task, args.creditor)
+    # Said out loud whenever the task's own pages are a different matter: either
+    # this task really covers two creditors (the 1 Oct 2026 case) or the name was
+    # typed differently from the page's. Both want a human eye, and neither may
+    # write on the other matter's page.
+    other = [p for p in plans
+             if args.task in p["taskIds"] and (row is None or p["id"] != row["id"])]
+    if other:
+        print("NOTE: this task is also linked to %s for %s — writing to %s, "
+              "never to another matter's page"
+              % (", ".join(p["id"] for p in other),
+                 ", ".join(sorted({(p["creditor"] or "?") for p in other})),
+                 row["id"] if row else "a new page for '%s'" % args.creditor.strip()),
+              file=sys.stderr)
     for t in twins:
         print(f"WARNING: duplicate page for '{args.creditor}' ({t['id']}) — "
               f"updating the oldest ({row['id']}); fold the twin by hand",
@@ -12011,16 +12042,31 @@ def creditor_ledger_selftest():
                  "awaiting": 1}, s
     assert frag == "ledger: 2 frozen, 2 on plans £25.50/mo, 1 awaiting", frag
 
-    # find_plan: a task link beats a name match; names are case-insensitive;
-    # the OLDEST twin wins and the others are named.
+    # find_plan: a task link beats a name match AMONG THIS CREDITOR'S pages;
+    # names are case-insensitive; the OLDEST twin wins and the others are named.
     old = page(id="recOld", createdTime="2026-08-01T00:00:00.000Z",
                creditor="Fylde Council")
     new = page(id="recNew", createdTime="2026-08-20T00:00:00.000Z",
                creditor="FYLDE COUNCIL")
-    linked = page(id="recLinked", creditor="Someone Else",
-                  taskIds=["recTask1"])
+    linked = page(id="recLinked", createdTime="2026-08-25T00:00:00.000Z",
+                  creditor="Fylde Council", taskIds=["recTask1"])
     hit, twins = find_plan([old, new, linked], "recTask1", "fylde council")
     assert hit["id"] == "recLinked" and twins == [], (hit, twins)
+    # THE REGRESSION (20261001-inbound-triage-699). One task, two matters: the
+    # link must not hand the second creditor the first one's page.
+    other = page(id="recOther", creditor="Someone Else", taskIds=["recTask1"])
+    hit, twins = find_plan([other, linked], "recTask1", "someone else")
+    assert hit["id"] == "recOther", hit
+    hit, twins = find_plan([other, linked], "recTask1", "fylde council")
+    assert hit["id"] == "recLinked", hit
+    # A name on no page of this task at all gets a page of its own, never
+    # another matter's.
+    hit, twins = find_plan([other], "recTask1", "Utilita")
+    assert hit is None and twins == [], (hit, twins)
+    # The unlinked page of the right name still wins over a linked page of the
+    # wrong one: the note belongs to the matter, and the link is then added.
+    hit, twins = find_plan([other, old], "recTask1", "fylde council")
+    assert hit["id"] == "recOld", hit
     hit, twins = find_plan([new, old], "", "fylde council")
     assert hit["id"] == "recOld", hit
     assert [t["id"] for t in twins] == ["recNew"], twins

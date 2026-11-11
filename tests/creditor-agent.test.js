@@ -258,8 +258,8 @@ describe('the creditor record book (revamp, Kevin-approved chain, 1 Sep 2026)', 
                        creditor: 'Fylde Council' });
     const dupe = PAGE({ id: 'recNew', createdTime: '2026-08-20T00:00:00.000Z',
                         creditor: 'FYLDE COUNCIL' });
-    const linked = PAGE({ id: 'recL', creditor: 'Other',
-                          taskIds: ['recTask9'] });
+    const linked = PAGE({ id: 'recL', createdTime: '2026-08-25T00:00:00.000Z',
+                          creditor: 'Fylde Council', taskIds: ['recTask9'] });
     let [hit, twins] = pyEval('mod.find_plan(arg, "recTask9", "fylde council")',
       [dupe, old, linked]);
     expect(hit.id).toBe('recL');
@@ -267,6 +267,36 @@ describe('the creditor record book (revamp, Kevin-approved chain, 1 Sep 2026)', 
       [dupe, old]);
     expect(hit.id).toBe('recOld');           // a twin can never hijack history
     expect(twins.map((t) => t.id)).toEqual(['recNew']);
+  });
+
+  // THE REGRESSION (20261001-inbound-triage-699). On 1 Oct 2026 one task covered two creditor
+  // matters. The task link won outright, so two ledger calls with two different --creditor names
+  // both answered with the oldest linked page: the second call overwrote the first matter's Next
+  // Step, both exited 0, and the second page never got its note. Back-test: return the oldest
+  // linked page before reading the name, and the first expectation below fails.
+  it('one task, two matters: the link never hands a creditor another matter\'s page (699)', () => {
+    const fylde = PAGE({ id: 'recFylde', createdTime: '2026-08-01T00:00:00.000Z',
+                         creditor: 'Fylde Council', taskIds: ['recTask9'] });
+    const bw = PAGE({ id: 'recBW', createdTime: '2026-09-01T00:00:00.000Z',
+                      creditor: 'BW Legal', taskIds: ['recTask9'] });
+    let [hit] = pyEval('mod.find_plan(arg, "recTask9", "BW Legal")', [fylde, bw]);
+    expect(hit.id).toBe('recBW');
+    [hit] = pyEval('mod.find_plan(arg, "recTask9", "Fylde Council")', [fylde, bw]);
+    expect(hit.id).toBe('recFylde');
+  });
+
+  // CONTROL: a creditor with no page on this task gets a page of its own (hit null → cmd_ledger
+  // creates one), and an UNLINKED page of the right name still beats a linked page of the wrong
+  // one. Without both, the fix would either write on the wrong matter or orphan the right one.
+  it('a name on none of the task\'s pages makes its own page, and the right name wins unlinked (699)', () => {
+    const fylde = PAGE({ id: 'recFylde', creditor: 'Fylde Council', taskIds: ['recTask9'] });
+    const utilita = PAGE({ id: 'recUtil', createdTime: '2026-07-01T00:00:00.000Z',
+                           creditor: 'Utilita' });
+    let [hit, twins] = pyEval('mod.find_plan(arg, "recTask9", "Utilita")', [fylde]);
+    expect(hit).toBe(null);
+    expect(twins).toEqual([]);
+    [hit] = pyEval('mod.find_plan(arg, "recTask9", "Utilita")', [fylde, utilita]);
+    expect(hit.id).toBe('recUtil');
   });
 
   it('chase_due fires on or after the date, and can never chase a freeze request (no date = no chase)', () => {
