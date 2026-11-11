@@ -27,10 +27,13 @@ import { fileURLToPath } from 'node:url';
 //   * prefer writing Full Price                     -> the prefer-fields test and the reviewer's £40/£300 case fail
 // The sourcing score (11 Nov 2026), same method:
 //   * on time at 4 working days instead of 3        -> the score cases fail
-//   * "Knocked back to" counted as a send-back      -> send_backs, score and the real case fail
+//   * (the Feedback History parser this guarded was replaced by the Notes stamps below)
 //   * a buy line matched anywhere, not at line start -> buy_events fails
 //   * an unread task dropped from buys              -> the score, real-case, command and due tests fail
 //   * a score failure failing the due run           -> "score not read" fails
+// Review of the score (11 Nov 2026), same method:
+//   * send_backs reading Feedback History again     -> "full of payment proof ... IS one card" fails
+//   * scoring per buy line, not per request         -> "four record calls is ONE request" and the score command fail
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(root, 'scripts', 'preferred-list.py');
@@ -331,7 +334,7 @@ run("record", "--task", "${TASK}", "--item", ${JSON.stringify(FRIDGE)}, "--bough
 res = run("due", "--apply", "--as-of", "2026-12-11")
 out(dict(res, real=len([g for g in GATE if "--force" in g["flags"]])))`);
     expect(r.real).toBe(1);
-    expect(r.out).toContain('1 due for a re-price, 1 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: 1 buys, 0 in 3 days, 0 one card or fewer');
+    expect(r.out).toContain('1 due for a re-price, 1 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: 1 bought, 0 in 3 days, 0 one card or fewer');
     expect(r.out).toContain('WARNING: task reck5ZY5MoXulxJz8 could not be read: Airtable GET /tblqB8b22hKBL4PF1/reck5ZY5MoXulxJz8 -> HTTP 404');
   });
 
@@ -670,19 +673,29 @@ out([run("list", "--item", "freezer fridge"), run("list", "--item", "Washing mac
 });
 
 describe('the sourcing score: bought within 3 working days, at most one card sent back', () => {
-  // Every task id below except the real sourcing task is invented. The real task's Feedback History
-  // is rebuilt from made-up text with the same counts: five notes and eight "Knocked back to" lines.
+  // Every task id below except the real sourcing task is invented. A card sent back is counted from
+  // the dispatcher's own FEEDBACK ANSWERED stamps in the task's Notes (scripts/agent-dispatch.py
+  // receipt_block), never from Feedback History. The real task's Notes are rebuilt from made-up text
+  // in the real shape: six FEEDBACK ANSWERED stamps (rounds 1 to 6), seven SUBMITTED stamps and
+  // other stamp lines.
   const SCORE_H = `
 T1, T2, T3 = "recSCORETASK00001", "recSCORETASK00002", "recSCORETASK00003"
 def buyrow(rid, key, *lines):
     return row(rid, key, Notes="\\n".join(lines))
-def fh(notes, snoozes=0):
-    out = []
-    for i in range(notes):
-        out.append("[2026-11-0%d 10:%02d] Please look again at option %d.\\nA second line of the same note." % (1 + i % 8, i, i))
-    for i in range(snoozes):
-        out.append("[2026-11-0%d 11:%02d] Knocked back to Monday by Kevin." % (1 + i % 8, i))
+def stamps(answered, submitted=0, others=True):
+    out = ["Made-up request text for the test."]
+    for i in range(max(answered, submitted)):
+        if i < submitted:
+            out.append("[%d Nov 2026 09:%02d — agent-dispatch] SUBMITTED (round %d): card sent for approval." % (1 + i, i, i + 1))
+        if i < answered:
+            out.append("[%d Nov 2026 14:%02d — agent-dispatch] FEEDBACK ANSWERED (round %d):" % (1 + i, i, i + 1))
+            out.append("- Look at a cheaper option → found one at a made-up shop")
+    if others:
+        out += ["[2 Nov 2026 10:00 — agent-dispatch] BLOCKER OPEN: waiting on a seller reply",
+                "[3 Nov 2026 — agent-dispatch] DUE MOVED to 5 Nov 2026",
+                "[4 Nov 2026 10:00 — agent-dispatch] BLOCKER CLEARED: the seller replied"]
     return "\\n".join(out)
+PROOF_HISTORY = "\\n".join("[2026-11-0%d 10:00] Done, here is the proof of payment." % d for d in range(1, 7))
 `;
 
   it('buy_events: a buy line, with a Was tail, and nothing else', () => {
@@ -714,12 +727,26 @@ out([w(date(2026, 11, 13), date(2026, 11, 15)), w(date(2026, 11, 11), date(2026,
     expect(r).toEqual([0, 0, 1, 5, 0, 13]);
   });
 
-  it('send_backs: zero, one, several, snoozes ignored, multi-line entries counted once', () => {
+  it('send_backs: zero, one, several FEEDBACK ANSWERED stamps; copies and other stamps never count', () => {
     const r = py(SCORE_H + `
-out([pl.send_backs(""), pl.send_backs(None), pl.send_backs(fh(1)), pl.send_backs(fh(3)),
-     pl.send_backs(fh(0, 4)), pl.send_backs(fh(2, 3)),
-     pl.send_backs("x [2026-11-01 10:00] not at a line start\\n[2026-11-01 10:00]no space")])`);
-    expect(r).toEqual([0, 0, 1, 3, 0, 2, 0]);
+own = "[30 Oct 2026 12:36 — agent-dispatch] FEEDBACK ANSWERED (round 1):"
+out([pl.send_backs(""), pl.send_backs(None), pl.send_backs(stamps(1)), pl.send_backs(stamps(3, 4)),
+     pl.send_backs(stamps(0, 7)),
+     pl.send_backs("- 15 Sep 2026 10:11 — agent-dispatch: FEEDBACK ANSWERED (round 7): (link)"),
+     pl.send_backs("- " + own),
+     pl.send_backs("A note quoting " + own),
+     pl.send_backs("[30 Oct 2026 12:36 — agent-dispatch] SUBMITTED (round 1): sent"),
+     pl.send_backs(own + " copied from recOTHERTASK00001", "recSCORETASK00001"),
+     pl.send_backs(own + " (recSCORETASK00001)", "recSCORETASK00001")])`);
+    expect(r).toEqual([0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 1]);
+  });
+
+  it('a task whose Feedback History is full of payment proof but whose Notes hold one stamp IS one card', () => {
+    const r = py(SCORE_H + `
+ev = [{"date": "2026-11-11", "task": T1}]
+tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": PROOF_HISTORY, "Notes": stamps(1, 2)}}
+out(pl.score(ev, tasks, date(2026, 11, 17)))`);
+    expect(r).toEqual({ buys: 1, on_time: 1, one_card_or_fewer: 1, unread: 0 });
   });
 
   it('score: on time with one send-back, late, three send-backs, unread, and outside the window', () => {
@@ -728,10 +755,10 @@ T4, T5 = "recSCORETASK00004", "recSCORETASK00005"
 ev = [{"date": "2026-11-11", "task": T1}, {"date": "2026-11-13", "task": T2},
       {"date": "2026-11-10", "task": T3}, {"date": "2026-11-10", "task": T4},
       {"date": "2026-07-01", "task": T5}]
-tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": fh(1, 2)},
-         T2: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": ""},
-         T3: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": fh(3)},
-         T5: {"Created Time": "2026-06-30T09:00:00.000Z", "Feedback History": ""}}
+tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(1, 2)},
+         T2: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": ""},
+         T3: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(3, 4)},
+         T5: {"Created Time": "2026-06-30T09:00:00.000Z", "Notes": ""}}
 one = lambda e: pl.score([e], tasks, date(2026, 11, 17))
 out([one(ev[0]), one(ev[1]), one(ev[2]), one(ev[3]), one(ev[4]), pl.score(ev, tasks, date(2026, 11, 17))])`);
     const s = (buys, on, one, un) => ({ buys, on_time: on, one_card_or_fewer: one, unread: un });
@@ -743,13 +770,37 @@ out([one(ev[0]), one(ev[1]), one(ev[2]), one(ev[3]), one(ev[4]), pl.score(ev, ta
     expect(r[5]).toEqual(s(4, 2, 2, 1));
   });
 
-  it('the real case: requested 29 Oct, five notes and eight snoozes, bought 17 Nov: not on time, not one card', () => {
+  it('one request bought in four record calls is ONE request, and its LAST buy decides on time', () => {
     const r = py(SCORE_H + `
+tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": ""}}
+three = [{"date": d, "task": T1} for d in ("2026-11-09", "2026-11-10", "2026-11-12")]
+out([pl.score(three, tasks, date(2026, 11, 20)),
+     pl.score(three + [{"date": "2026-11-13", "task": T1}], tasks, date(2026, 11, 20)),
+     pl.score([{"date": "2026-11-13", "task": T1}] + three, tasks, date(2026, 11, 20))])`);
+    expect(r[0]).toEqual({ buys: 1, on_time: 1, one_card_or_fewer: 1, unread: 0 });
+    expect(r[1]).toEqual({ buys: 1, on_time: 0, one_card_or_fewer: 1, unread: 0 });   // 4 working days
+    expect(r[2]).toEqual(r[1]);   // order of the lines does not matter
+  });
+
+  it('two tasks buying the same item score as two requests', () => {
+    const r = py(SCORE_H + `
+S.rows = [buyrow("r1", "kettle", "2026-11-10: bought New £15.00 from Shop (task " + T1 + ")",
+                 "2026-11-11: bought New £16.00 from Shop (task " + T2 + "). Was £15.00, New, from Shop.")]
+S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": ""},
+           T2: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(2, 3)}}
+out(run("score"))`);
+    expect(r).toEqual({ code: 0, out: 'SOURCING SCORE (90 days): 2 request(s) bought; 2 within 3 working days of the request; 1 with at most one card sent back\n' });
+  });
+
+  it('the real case: requested 29 Oct, six FEEDBACK ANSWERED stamps, bought 17 Nov: not on time, not one card', () => {
+    const r = py(SCORE_H + `
+notes = stamps(6, 7)
 ev = [{"date": "2026-11-17", "task": "reck5ZY5MoXulxJz8"}]
-tasks = {"reck5ZY5MoXulxJz8": {"Created Time": "2026-10-29T13:27:00.000Z", "Feedback History": fh(5, 8)}}
-out([pl.send_backs(fh(5, 8)), pl.score(ev, tasks, date(2026, 11, 17))])`);
-    expect(r[0]).toBe(5);
-    expect(r[1]).toEqual({ buys: 1, on_time: 0, one_card_or_fewer: 0, unread: 0 });
+tasks = {"reck5ZY5MoXulxJz8": {"Created Time": "2026-10-29T13:27:00.000Z", "Notes": notes}}
+out([pl.send_backs(notes, "reck5ZY5MoXulxJz8"), notes.count("SUBMITTED (round"), pl.score(ev, tasks, date(2026, 11, 17))])`);
+    expect(r[0]).toBe(6);
+    expect(r[1]).toBe(7);
+    expect(r[2]).toEqual({ buys: 1, on_time: 0, one_card_or_fewer: 0, unread: 0 });
   });
 
   it('the request date is the Europe/London date of Created Time', () => {
@@ -764,10 +815,10 @@ a = run("score")
 S.rows = [buyrow("r1", "kettle", "2026-11-11: bought New £15.00 from Shop (task " + T1 + ")"),
           buyrow("r2", "toaster", "2026-11-10: bought New £20.00 from Shop (task " + T2 + ")",
                  "2026-11-11: bought New £21.00 from Shop (task " + T2 + ")")]
-S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": fh(1)}}
+S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(1, 2)}}
 b = run("score")
 task_reads = len([c for c in S.calls if c[1].startswith(pl.TASKS)])
-S.tasks[T2] = {"Created Time": "2026-11-02T09:00:00.000Z", "Feedback History": fh(2)}
+S.tasks[T2] = {"Created Time": "2026-11-02T09:00:00.000Z", "Notes": stamps(2, 3)}
 c = run("score")
 S.no_records = True
 d = run("score")
@@ -775,10 +826,10 @@ out([a, b, task_reads, c, d])`);
     expect(r[0]).toEqual({ code: 0, out: 'SOURCING SCORE (90 days): no buys yet\n' });
     expect(r[1].code).toBe(0);
     expect(r[1].out).toBe('WARNING: task recSCORETASK00002 could not be read: Airtable GET /tblqB8b22hKBL4PF1/recSCORETASK00002 -> HTTP 404: NOT_FOUND\n'
-      + 'SOURCING SCORE (90 days): 3 buy(s); 1 within 3 working days of the request; 1 with at most one card sent back; 2 could not be read\n');
+      + 'SOURCING SCORE (90 days): 2 request(s) bought; 1 within 3 working days of the request; 1 with at most one card sent back; 1 could not be read\n');
     expect(r[2]).toBe(2);   // each distinct task read once
     expect(r[3]).toEqual({ code: 0,
-      out: 'SOURCING SCORE (90 days): 3 buy(s); 1 within 3 working days of the request; 1 with at most one card sent back\n' });
+      out: 'SOURCING SCORE (90 days): 2 request(s) bought; 1 within 3 working days of the request; 1 with at most one card sent back\n' });
     expect(r[4].code).toBe(1);
     expect(r[4].out).toMatch(/^ERROR: /);
   });
@@ -796,15 +847,15 @@ out(buf.getvalue())`);
   it('due: the score on the summary line and in the review task Description', () => {
     const r = py(SCORE_H + `
 S.rows = [buyrow("r1", "kettle", "2026-11-11: bought New £15.00 from Shop (task " + T1 + ")")]
-S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Feedback History": fh(1)}}
+S.tasks = {T1: {"Created Time": "2026-11-09T09:00:00.000Z", "Notes": stamps(1, 2)}}
 res = run("due", "--apply", "--as-of", "2026-12-11")
 desc = [g for g in GATE if "--force" in g["flags"]][0]["fields"][pl.TF["desc"]]
 out(dict(res, desc=desc))`);
     expect(r.code).toBe(0);
     expect(r.out.trim().split('\n').pop()).toBe('PREFERRED LIST: 1 item(s) on the list, 1 priced, 1 due for a re-price, '
-      + '1 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: 1 buys, 1 in 3 days, 1 one card or fewer');
+      + '1 awaiting a result, review task: raised recNEWTASK0000001 | 90 days: 1 bought, 1 in 3 days, 1 one card or fewer');
     expect(r.desc.split('\n')[0]).toBe('PREFLIST-REVIEW 2026-12');
-    expect(r.desc).toContain('\n\nSOURCING SCORE (90 days): 1 buy(s); 1 within 3 working days of the request; 1 with at most one card sent back');
+    expect(r.desc).toContain('\n\nSOURCING SCORE (90 days): 1 request(s) bought; 1 within 3 working days of the request; 1 with at most one card sent back');
   });
 
   it('due: the summary stays within 220 characters with large numbers', () => {
