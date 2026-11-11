@@ -43,7 +43,7 @@ const FRIDGES = [
   '',
   '**Approve: the robot messages the four sellers to confirm height and delivery. Nothing is bought.**',
   '',
-  'SOURCING: Fridge freezer, full height x 4 for 13 Chedburgh Place and three more Haverhill HMOs',
+  'SOURCING: Fridge freezer, full height | 4 | 13 Chedburgh Place and three more Haverhill HMOs',
   'BASELINE: none on the list',
   `PICK 1: Hoover low frost, 176 cm | second-hand | £70 | ${fb(1)}`,
   `PICK 2: Beko frost free, 182 cm | second-hand | £60 | ${fb(2)}`,
@@ -101,7 +101,7 @@ const NOV2 = [
 
 // (c) A bulk new order from a shop.
 const FENCE = [
-  'SOURCING: Fence posts and postcrete x 1 for 4 Abington Place',
+  'SOURCING: Fence posts and postcrete | 1 | 4 Abington Place',
   'BASELINE: none on the list',
   'PICK: 10 fence posts 2.4 m and 10 bags of postcrete | new | £148.90 | https://www.screwfix.com/c/outdoor-gardening/fence-posts/cat000000',
   'RESERVE 1: Same order from Toolstation | new | £152.40 | https://www.toolstation.com/fence-posts/c000',
@@ -150,7 +150,7 @@ describe('the sourcing card shape', () => {
     ['RESERVE 2:', /RESERVE 2 line is missing/],
     ['NEW FOR COMPARISON:', /second-hand pick needs a NEW FOR COMPARISON line/],
     ['CASHBACK:', /CASHBACK line is missing/],
-    ['SPEND:', /no SPEND line/],
+    ['SPEND:', /no plain SPEND line/],
     ['PICK', /no PICK line/],
   ])('removing the %s line is refused, naming it', (prefix, msg) => {
     expect(problem(drop(FRIDGES, prefix))).toMatch(msg);
@@ -160,129 +160,129 @@ describe('the sourcing card shape', () => {
     expect(problem(swap(FRIDGES, 'PROVEN:', 'PROVEN:'))).toMatch(/PROVEN line is missing or empty/);
   });
 
-  it('the SOURCING line must carry the quantity as x <N> for', () => {
-    expect(problem(swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts for 4 Abington Place')))
-      .toMatch(/SOURCING line must read <item> x <number> for <property>/);
-    expect(problem(swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts x 1')))
-      .toMatch(/SOURCING line must read <item> x <number> for <property>/);
-    expect(problem(swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts x 0 for 4 Abington Place')))
-      .toMatch(/1 or more/);
+  it('the SOURCING line is item | quantity | property; anything else is refused showing the form', () => {
+    for (const line of ['SOURCING: Fence posts x 1 for 4 Abington Place', 'SOURCING: Fence posts | 1',
+      'SOURCING: Fence posts | one | 4 Abington Place', 'SOURCING: Fence posts | 0 | 4 Abington Place',
+      'SOURCING: Fence posts | 1 | ']) {
+      expect(problem(swap(FENCE, 'SOURCING:', line))).toMatch(/SOURCING: <item> \| <quantity> \| <property>/);
+    }
+  });
+
+  it('the Rug case: a size inside the item never changes the quantity', () => {
+    const rug = swap(FENCE, 'SOURCING:', 'SOURCING: Rug 160 x 230 | 1 | 14 Wentworth Terrace lounge');
+    expect(problem(rug)).toBe('');
+    expect(parse(rug)).toMatchObject({ qty: 1, item: 'Rug 160 x 230', property: '14 Wentworth Terrace lounge' });
   });
 
   it.each([
     ['a link that is not http', 'PICK: Posts | new | £148.90 | www.screwfix.com/posts', /link on PICK must be one http or https address/],
     ['a zero price', 'PICK: Posts | new | £0 | https://www.screwfix.com/p/1', /more than £0/],
-    ['a price with no £', 'PICK: Posts | new | 148.90 | https://www.screwfix.com/p/1', /written as £ and a number/],
+    ['a price with no £', 'PICK: Posts | new | 148.90 | https://www.screwfix.com/p/1', /write the price plain, for example £70\.00/],
+    ['a bold price', 'PICK: Posts | new | **£148.90** | https://www.screwfix.com/p/1', /write the price plain, for example £70\.00/],
     ['a bad kind', 'PICK: Posts | refurbished | £148.90 | https://www.screwfix.com/p/1', /must be new or second-hand/],
-    ['three fields', 'PICK: Posts | new | £148.90', /four parts split by ' \| '.*has 3/],
+    ['three fields', 'PICK: Posts | new | £148.90', /4 parts split by ' \| '; it has 3/],
   ])('a PICK with %s is refused', (_label, line, msg) => {
     expect(problem(swap(FENCE, 'PICK:', line))).toMatch(msg);
   });
 
-  it('more PICK lines than the quantity is refused', () => {
-    const two = FENCE.replace(/^PICK: /m, 'PICK 1: ').replace(/^(PICK 1: .*)$/m,
-      '$1\nPICK 2: Posts again | new | £150 | https://www.diy.com/p/1');
-    expect(problem(two)).toMatch(/2 PICK lines for a quantity of 1/);
+  it('PICK may repeat up to the quantity, plain or numbered; one more is refused', () => {
+    const twoQty = swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts | 2 | 4 Abington Place');
+    const plainTwice = twoQty.replace(/^(PICK: .*)$/m, '$1\nPICK: Posts again | new | £150 | https://www.diy.com/p/1');
+    expect(problem(plainTwice)).toBe('');
+    expect(problem(plainTwice.replace(/^(PICK: .*)$/m, '$1\nPICK 3: More | new | £150 | https://www.diy.com/p/2')))
+      .toMatch(/3 PICK lines for a quantity of 2/);
+  });
+
+  it('any other key written twice is refused', () => {
+    expect(problem(FENCE.replace('SAVING: no baseline', 'SAVING: no baseline\nSAVING: £5'))).toMatch(/SAVING line is written twice/);
   });
 
   it('a malformed reserve or comparison is refused; none found and not found: why are accepted', () => {
-    expect(problem(swap(FENCE, 'RESERVE 1:', 'RESERVE 1: Toolstation | new | £152'))).toMatch(/RESERVE 1 must have four parts/);
+    expect(problem(swap(FENCE, 'RESERVE 1:', 'RESERVE 1: Toolstation | new | £152'))).toMatch(/RESERVE 1 must read/);
     expect(problem(swap(FRIDGES, 'NEW FOR COMPARISON:', 'NEW FOR COMPARISON: not found: no shop lists a full height model under £500'))).toBe('');
     expect(problem(swap(FRIDGES, 'NEW FOR COMPARISON:', 'NEW FOR COMPARISON: not found'))).toMatch(/must say why/);
-    expect(problem(swap(FRIDGES, 'NEW FOR COMPARISON:', 'NEW FOR COMPARISON: Beko | £399'))).toMatch(/three parts/);
-  });
-
-  it('the quantity is the first x <N> for, never a later size', () => {
-    const rug = swap(FENCE, 'SOURCING:', 'SOURCING: Rug x 1 for lounge, 160 x 230');
-    expect(problem(rug)).toBe('');
-    expect(parse(rug).qty).toBe(1);
-    expect(parse(rug).item).toBe('Rug');
+    expect(problem(swap(FRIDGES, 'NEW FOR COMPARISON:', 'NEW FOR COMPARISON: Beko | £399'))).toMatch(/3 parts/);
   });
 
   const addBefore = (text, anchor, lines) => text.replace(anchor, lines.join('\n') + '\n' + anchor);
 
-  it('the link cap: qty + 3 links pass, qty + 4 are refused, with the new sentence', () => {
-    // Qty 4: four picks, two reserves and one comparison = 7 links (= qty + 3). One more is 8.
-    expect(problem(FRIDGES)).toBe('');
-    const over = addBefore(FRIDGES, 'TRACK RECORD:', [`Also seen: ${fb(100)}`]);
-    expect(problem(over)).toMatch(/8 links and a quantity of 4 allows 7/);
-    expect(problem(over)).toMatch(/name the sites you searched in words, and keep ruled-out items as words without links/);
+  it('the cap: qty + 3 marketplace item links pass, qty + 4 are refused', () => {
+    // Qty 4: four picks and two reserves = 6 item links. One more is 7 (= qty + 3), two more is 8.
+    const one = addBefore(FRIDGES, 'TRACK RECORD:', [`Ruled out: ${fb(100)}`]);
+    expect(problem(one)).toBe('');
+    const two = addBefore(one, 'TRACK RECORD:', [`Ruled out: ${fb(101)}`]);
+    expect(problem(two)).toMatch(/8 marketplace listing links and a quantity of 4 allows 7/);
+    expect(problem(two)).toMatch(/keep ruled-out listings as words without links/);
   });
 
-  it('the cap counts shop links too', () => {
-    // FENCE (qty 1) has two links; two more shop links reach 4, a third is 5.
-    const four = addBefore(FENCE, 'PAY BY:', ['Seen: https://www.diy.com/p/4', 'Seen: https://www.argos.co.uk/product/5']);
-    expect(problem(four)).toBe('');
-    expect(problem(addBefore(four, 'PAY BY:', ['Seen: https://ao.com/product/6'])))
-      .toMatch(/5 links and a quantity of 1 allows 4/);
-  });
-
-  it('the cap ignores Gmail, Airtable and TopCashback links, and counts one page once', () => {
-    const refs = addBefore(FENCE, 'PAY BY:', [
+  it('shop, spec, photo and track record links are not counted, and one listing written several ways is one', () => {
+    const extra = addBefore(FENCE, 'PAY BY:', [
+      'Spec: https://www.screwfix.com/p/fence-post-2-4m/12345#specifications',
+      'Photo: https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view',
       'Thread: https://mail.google.com/mail/u/0/#all/1a0496b9df667238',
       'Task: https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/reck5ZY5MoXulxJz8',
-      'Rate page: https://www.topcashback.co.uk/screwfix/',
-      'Again: https://www.screwfix.com/c/outdoor-gardening/fence-posts/cat000000?tc=search#reviews.',
-      'Again: https://screwfix.com/c/outdoor-gardening/fence-posts/cat000000/',
-      'Seen: https://www.diy.com/p/4', 'Seen: https://www.argos.co.uk/product/5']);
-    expect(problem(refs)).toBe('');
+      'Shop: https://www.diy.com/p/4', 'Shop: https://www.argos.co.uk/product/5', 'Shop: https://ao.com/product/6',
+    ]);
+    expect(problem(extra)).toBe('');
+    // FRIDGES at its limit, with pick 1 repeated in the Approve line on m.facebook.com with a query string.
+    const repeat = FRIDGES.replace('Nothing is bought.**', `Pick 1 is ${fb(1).replace('www.', 'm.')}?ref=share. Nothing is bought.**`);
+    expect(problem(addBefore(repeat, 'TRACK RECORD:', [`Ruled out: ${fb(100)}`]))).toBe('');
   });
 
-  it('pasted search links trip the cap: 6 searches plus 3 items for qty 1 is refused', () => {
-    const card = [
-      'SOURCING: Washing machine x 1 for 5 Dalham Place',
-      'BASELINE: none on the list',
-      `PICK: Bosch Serie 4 | second-hand | £120 | ${fb(1)}`,
-      `RESERVE 1: Beko 8 kg | second-hand | £90 | ${fb(2)}`,
-      `RESERVE 2: Hotpoint 7 kg | second-hand | £80 | ${fb(3)}`,
-      'NEW FOR COMPARISON: not found: no shop page opened',
-      'CASHBACK: n/a',
-      'PROVEN: drum and door seal shown in photos',
-      'NOT PROVEN: nothing',
-      'SAVING: no baseline',
-      'PAY BY: seller: cash on collection',
-      'SEARCHED: https://www.facebook.com/marketplace/haverhill/search?query=washing%20machine '
-        + 'https://www.gumtree.com/search?q=washing+machine https://www.ebay.co.uk/sch/i.html?_nkw=washing+machine '
-        + 'https://www.vinted.co.uk/catalog?search_text=washing https://www.currys.co.uk/search?q=washing '
-        + 'https://ao.com/search?q=washing',
-      'SPEND: £120 (one-off)',
-      CLOSING,
-    ].join('\n');
-    expect(problem(card)).toMatch(/9 links and a quantity of 1 allows 4/);
-    expect(problem(card)).toMatch(/name the sites you searched in words/);
-    expect(problem(swap(card, 'SEARCHED:', 'SEARCHED: Facebook Marketplace, Gumtree, eBay, Vinted, Currys, AO'))).toBe('');
+  it('short item links count: fb.me, facebook.com/share and ebay.us', () => {
+    const shorts = addBefore(FRIDGES, 'TRACK RECORD:', ['https://fb.me/abc123', 'https://www.facebook.com/share/1Xyz/', 'https://ebay.us/q1W2e3']);
+    expect(problem(shorts)).toMatch(/9 marketplace listing links and a quantity of 4 allows 7/);
+  });
+
+  it('a pasted search does not count, but the item links beside it do', () => {
+    const card = addBefore(swap(FENCE, 'SEARCHED:', 'SEARCHED: https://www.gumtree.com/search?q=posts https://www.ebay.co.uk/sch/i.html?_nkw=posts'),
+      'PAY BY:', ['https://www.gumtree.com/p/a/1', 'https://www.ebay.co.uk/itm/2', 'https://www.vinted.co.uk/items/3', 'https://www.gumtree.com/p/a/4']);
+    expect(problem(card)).toBe('');
+    expect(problem(addBefore(card, 'PAY BY:', ['https://www.gumtree.com/p/a/5']))).toMatch(/5 marketplace listing links and a quantity of 1 allows 4/);
   });
 
   it.each([
-    ['bold with the colon inside', (l) => l.replace(/^([A-Z0-9 ]+):/, '**$1:**')],
-    ['bold with the colon outside', (l) => l.replace(/^([A-Z0-9 ]+):/, '**$1**:')],
-    ['a dash bullet', (l) => '- ' + l],
-    ['a star bullet and bold', (l) => l.replace(/^([A-Z0-9 ]+):/, '* **$1:**')],
-    ['a dot bullet and spaces', (l) => '  • ' + l],
-    ['a quote marker', (l) => '> ' + l],
-  ])('keys written with %s read like the plain form', (_label, dress) => {
-    const KEYS = /^(SOURCING|BASELINE|PICK|RESERVE|NEW FOR COMPARISON|CASHBACK|PROVEN|NOT PROVEN|SAVING|PAY BY|SEARCHED|SPEND)/;
-    const dressed = (text) => text.split('\n').map((l) => (KEYS.test(l) ? dress(l) : l)).join('\n');
-    expect(parse(dressed(FRIDGES))).toEqual(parse(FRIDGES));
-    expect(parse(dressed(FENCE))).toEqual(parse(FENCE));
-    // Still judged: a dressed card missing a line is refused the same way.
-    expect(problem(dressed(drop(FENCE, 'SEARCHED:')))).toMatch(/SEARCHED line is missing/);
+    ['bold with the colon inside', '**SOURCING:** Fence posts | 1 | 4 Abington Place'],
+    ['bold with the colon outside', '**SOURCING**: Fence posts | 1 | 4 Abington Place'],
+    ['a dash bullet', '- SOURCING: Fence posts | 1 | 4 Abington Place'],
+    ['a star bullet and bold', '* **SOURCING**: Fence posts | 1 | 4 Abington Place'],
+    ['a dot bullet', '• SOURCING: Fence posts | 1 | 4 Abington Place'],
+    ['a leading space', ' SOURCING: Fence posts | 1 | 4 Abington Place'],
+  ])('a SOURCING key written with %s is refused: write the keys plain', (_label, line) => {
+    const card = swap(FENCE, 'SOURCING:', line);
+    expect(problem(card)).toBe("write the SOURCING card's keys plain, at the start of the line, with no bullets and no bold");
   });
 
-  it('a bold **SOURCING:** card is still judged, and a bold **SPEND:** still counts', () => {
-    const bold = (text) => swap(text, 'SOURCING:', text.split('\n').find((l) => l.startsWith('SOURCING:'))
-      .replace('SOURCING:', '**SOURCING:**'));
-    expect(problem(bold(drop(FENCE, 'RESERVE 2:')))).toMatch(/RESERVE 2 line is missing/);
-    expect(problem(swap(FENCE, 'SPEND:', '* **SPEND:** £148.90 (one-off)'))).toBe('');
-    expect(parse(swap(FENCE, 'SPEND:', '* **SPEND:** £148.90 (one-off)')).spend).toBe(148.9);
+  it('other dressed keys on a real card are not keys, so the card is refused for the missing line', () => {
+    expect(problem(swap(FENCE, 'SEARCHED:', '- SEARCHED: Screwfix, Toolstation, B&Q'))).toMatch(/SEARCHED line is missing/);
+    expect(problem(swap(FENCE, 'SPEND:', '**SPEND:** £150'))).toMatch(/no plain SPEND line/);
+    expect(problem(swap(FENCE, 'SPEND:', 'Spend: £150 (one-off)'))).toMatch(/no plain SPEND line/);
+    expect(problem(swap(FENCE, 'SAVING:', 'Saving: no baseline'))).toMatch(/SAVING line is missing/);
+    expect(problem(swap(FENCE, 'SOURCING:', 'Sourcing: Fence posts | 1 | 4 Abington Place'))).toBe('');   // not a card at all
   });
 
-  it('the SPEND pattern is the same one agent-dispatch.py uses', () => {
+  it('prose is never a key: Sourcing in an email card, quoted seller lines and ruled-out bullets', () => {
+    const email = ['TO: supplier@example.com', 'SUBJECT: Parts', '---', '- Sourcing: we need three quotes by Friday',
+      '> Sourcing: we can source the part', 'Thanks', CLOSING].join('\n');
+    expect(problem(email)).toBe('');
+    expect(backstop(email)).toBe('');
+    const chatty = addBefore(FRIDGES, 'TRACK RECORD:', ['> Saving: you a trip, I can deliver', '- Searched: Vinted too, nothing tall',
+      'Saving: words in a sentence', 'Sourcing: more words']);
+    expect(problem(chatty)).toBe('');
+    expect(parse(chatty).qty).toBe(4);
+  });
+
+  it('the SPEND pattern behaves the same as agent-dispatch.py on sample lines', () => {
     const r = py(DISPATCH, `
 spec2 = importlib.util.spec_from_file_location("f", ${JSON.stringify(FORMAT)})
 f = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(f)
-print(json.dumps([m.SPEND_LINE_RE.pattern == f.SPEND_LINE_RE.pattern, m.SPEND_LINE_RE.flags == f.SPEND_LINE_RE.flags]))`);
-    expect(r).toEqual([true, true]);
+lines = ["SPEND: £70 (one-off)", "SPEND: £1,250.50/month", "  spend: 40 per week", "SPEND: £80 a year",
+         "**SPEND:** £150", "- SPEND: £20", "SPEND: none", "SPEND:£9.99", "Nothing to spend"]
+read = lambda rx, l: (lambda mm: [mm.group("amount"), mm.group("recurring")] if mm else None)(rx.search(l))
+print(json.dumps([[read(m.SPEND_LINE_RE, l), read(f.SPEND_LINE_RE, l)] for l in lines]))`);
+    for (const [a, b] of r) expect(b).toEqual(a);
+    expect(r[0][0]).toEqual(['70', null]);
+    expect(r[4][0]).toBeNull();                              // dispatch does not read a bold SPEND, so neither does the card
   });
 });
 
@@ -291,15 +291,14 @@ describe('a listing to buy without the shape', () => {
     expect(backstop(NOV2)).toMatch(/must use the SOURCING card shape/);
     expect(problem(NOV2)).toBe('');                         // not a sourcing card, so the shape gate is quiet
   });
-  it('fires for a marketplace link and a SPEND line', () => {
+  it('fires for a marketplace item link and a SPEND line', () => {
     expect(backstop(`Found one: ${fb(9)}\nSPEND: £40 (one-off)\n${CLOSING}`)).not.toBe('');
   });
   it('does not fire for a room advert link with no SPEND line', () => {
     expect(backstop('Advert is live: https://www.gumtree.com/p/rooms-to-rent/double-room-haverhill/1800000000\n' + CLOSING)).toBe('');
   });
-  it('does not fire for a sourcing card, even a bold one', () => {
+  it('does not fire for a sourcing card', () => {
     expect(backstop(FRIDGES)).toBe('');
-    expect(backstop(FRIDGES.replace('SOURCING:', '**SOURCING:**'))).toBe('');
   });
   it.each([
     ['an eBay order page', 'https://www.ebay.co.uk/vod/FetchOrderDetails?itemid=1234&transid=5678'],
@@ -308,9 +307,11 @@ describe('a listing to buy without the shape', () => {
   ])('does not fire for %s with a SPEND line', (_label, url) => {
     expect(backstop(`See: ${url}\nSPEND: £40 (one-off)\n${CLOSING}`)).toBe('');
   });
-  it('fires on an item page on any subdomain, with a bulleted bold SPEND line', () => {
-    expect(backstop(`See: https://m.ebay.co.uk/itm/123456\n- **SPEND:** £40 (one-off)\n${CLOSING}`)).not.toBe('');
-    expect(backstop(`See: https://www.vinted.co.uk/items/987-lamp\nSPEND: £12 (one-off)\n${CLOSING}`)).not.toBe('');
+  it.each([
+    'https://m.ebay.co.uk/itm/123456', 'https://www.vinted.co.uk/items/987-lamp', 'https://fb.me/abc123',
+    'https://ebay.us/q1W2e3', 'https://mobile.facebook.com/marketplace/item/42/',
+  ])('fires on the item link %s', (url) => {
+    expect(backstop(`See: ${url}\nSPEND: £40 (one-off)\n${CLOSING}`)).not.toBe('');
   });
 });
 
@@ -369,10 +370,19 @@ describe('cmd_submit runs the sourcing gate', () => {
 
 // The whole submit, with Airtable stubbed: get_task returns what patch_task wrote, as Airtable would.
 // The task is inbound so a CHECKED trigger=none report would normally file itself as Completed.
-function fullSubmit(output) {
+function fullSubmit(output, forceLevelA = false) {
   return py(DISPATCH, `
 import tempfile, os, types, io, contextlib
 AF = m.AF
+acted = []
+if P["forceA"]:
+    real_level = m.decision_level
+    m.decision_level = lambda *a, **k: dict(real_level(*a, **k), level=m.AUTONOMY_ACT, category="close",
+                                             carry="close", why="forced Level A in a test")
+    def hwk(args, output, trec, level, to_attach):
+        acted.append(level.get("why"))
+        return 0
+    m.handle_without_kevin = hwk
 state = {AF["name"]: "INBOUND: Fence posts for 4 Abington Place", AF["inboundTask"]: True, AF["status"]: "Today"}
 m.get_task = lambda t: {"id": t, "createdTime": "2026-11-11T09:00:00.000Z", "fields": dict(state)}
 def patch(t, f):
@@ -392,7 +402,8 @@ finally:
 out["status"] = str(state.get(AF["status"]))
 out["notes"] = str(state.get(AF["notes"]) or "")
 out["mark"] = m.SOURCING_SUBMITTED_MARK
-print(json.dumps(out))`, { o: output });
+out["acted"] = acted
+print(json.dumps(out))`, { o: output, forceA: forceLevelA });
 }
 
 const NOTHING_TO_DECIDE = [
@@ -410,6 +421,15 @@ describe('a submitted sourcing card goes to Kevin and marks the task', () => {
     expect(r.status).toBe('Approval');
     expect(r.notes).toContain(r.mark);
     expect(r.mark).toBe('SOURCING CARD SUBMITTED');
+  });
+  it('a sourcing card that would otherwise be a Level A act still lands as a card', () => {
+    const asked = NOTHING_TO_DECIDE.replace('trigger=none', 'trigger=kevin-asked');
+    const r = fullSubmit(asked, true);
+    expect(r.acted).toEqual([]);
+    expect(r.status).toBe('Approval');
+    // CONTROL: the same output without the SOURCING line takes the Level A path.
+    const plain = asked.split('\n').filter((l) => !l.startsWith('SOURCING:')).join('\n').replace(/^SPEND:.*$/m, '');
+    expect(fullSubmit(plain, true).acted).toEqual(['forced Level A in a test']);
   });
   it('CONTROL: the same report without the SOURCING line files itself, with no stamp', () => {
     const plain = NOTHING_TO_DECIDE.split('\n').filter((l) => !l.startsWith('SOURCING:')).join('\n')
@@ -474,6 +494,13 @@ describe('cmd_complete closes a sourcing card only once the buy is on the list',
     expect(r.calls).toEqual(['reck5ZY5MoXulxJz8']);
     expect(complete({ output: 'A plain revised report.\n' + CLOSING, notes, notBought: 'Kevin chose not to buy' }).status)
       .toBe('Completed');
+  });
+  it('a track-record copy of the stamp in Notes (a bulleted line) does not fire the gate', () => {
+    const notes = 'TRACK RECORD:\n- 11 Nov 2026 10:13 — agent-dispatch: [11 Nov 2026 10:13 — agent-dispatch] SOURCING CARD SUBMITTED (round 1)'
+      + '\nAlso mentions SOURCING CARD SUBMITTED in a sentence.';
+    const r = complete({ output: 'A plain report.\n' + CLOSING, notes });
+    expect(r.status).toBe('Completed');
+    expect(r.calls).toEqual([]);
   });
   it('the loader is _preferred_bought_rows_for_task and calls bought_rows_for_task in preferred-list.py', () => {
     const r = py(DISPATCH, `

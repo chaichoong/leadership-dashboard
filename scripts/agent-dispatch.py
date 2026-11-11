@@ -127,7 +127,8 @@ from agent_calendar_format import (calendar_ref_problem, calendar_submit_problem
                                    diary_written, is_calendar)
 # The SOURCING card (Kevin, 11 Nov 2026): one pick per unit, two reserves, facts on fixed lines.
 from agent_sourcing_format import (SHAPE as SOURCING_SHAPE, SOURCING_SUBMITTED_MARK,  # noqa: E402
-                                   is_sourcing, listing_without_shape_problem, sourcing_problem)
+                                   SOURCING_SUBMITTED_RE, is_sourcing, listing_without_shape_problem,
+                                   sourcing_problem)
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -5696,6 +5697,9 @@ def cmd_submit(args):
         level = dict(level, level=AUTONOMY_APPROVE,
                      why="a certificate arrived on this task and is not filed yet")
     level = demote_for_cost(level, cost_owed)
+    # A sourcing card is always a card for Kevin (11 Nov 2026): never a Level A act or an autonomous close.
+    if is_sourcing(output) and level["level"] == AUTONOMY_ACT:
+        level = dict(level, level=AUTONOMY_APPROVE, why="a sourcing card is always Kevin's to approve")
     if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
@@ -8420,7 +8424,7 @@ def cmd_complete(args):
     # to beat, or the agent says on the record why nothing was bought. A list that cannot be read is
     # a refusal, never "no row" and never "row exists".
     not_bought = " ".join(str(getattr(args, "not_bought", "") or "").split())
-    if is_sourcing(t["agentOutput"]) or SOURCING_SUBMITTED_MARK in str(t["notes"] or ""):
+    if is_sourcing(t["agentOutput"]) or SOURCING_SUBMITTED_RE.search(str(t["notes"] or "")):
         if not_bought:
             sign_note = ((sign_note + "\n\n") if sign_note else "") + (
                 f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] {NOT_BOUGHT_MARK} {not_bought[:600]}")

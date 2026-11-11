@@ -18,7 +18,8 @@ Commands:
                                      upsert one row after an approved buy (or store the
                                      item and its rules before anything is bought)
   prefer --key K --task rec.. --price N --supplier S --link URL [...]
-                                     change the preferred option on review, no buy recorded
+                                     change the preferred option of a BOUGHT row on review;
+                                     never writes Bought As, no buy recorded
   checked --key K --result TEXT      stamp a row as re-priced
   has-row --task rec..               did this task buy a row? (bought_rows_for_task) exit 0 yes, 1 no
   due [--apply] [--as-of DATE]       the daily clock (job `preferred-list`, 06:20): raises
@@ -484,22 +485,24 @@ def plan_prefer(rows, a, today):
     if not (a.supplier or "").strip():
         raise Refused("prefer needs --supplier")
     _validate_link(a.link)
-    if a.bought_as is not None and a.bought_as not in ("new", "second-hand"):
-        raise Refused("bought-as for prefer must be new or second-hand")
     on = _valid_on(a.on or today.isoformat(), today, "--on")
     key = item_key(a.key)
     row = _one_active(rows, key)
     if not row:
         raise Refused("no Active row holds the key %s" % key)
     f = row["fields"]
+    # Only a real `record` buy makes a row bought (it sets Source Task and writes the
+    # Notes buy line). prefer never writes Bought As, so a review can never make a
+    # rules-only row read as bought by the task that stored its rules.
+    if f.get("Bought As") not in BOUGHT:
+        raise Refused("prefer changes the preferred option of an item we have bought; this one has "
+                      "not been bought yet")
     old, new, sup = money(_price(f)), money(round(float(a.price), 2)), a.supplier.strip()
     fields = {"Supplier or Seller": sup, "Link": a.link, "Full Price": round(float(a.price), 2),
               "Last Checked": on,
               "Last Check Result": "adopted on review (%s): £%s at %s" % (a.task, new, sup)}
     if a.cashback:
         fields["Cashback"] = a.cashback.strip()
-    if a.bought_as:
-        fields["Bought As"] = BOUGHT_AS[a.bought_as]
     fields["Notes"] = _append(f.get("Notes"), "%s: preferred option changed on review (%s): was £%s at %s, "
                               "now £%s at %s" % (on, a.task, old, f.get("Supplier or Seller") or "no supplier",
                                                  new, sup))
@@ -749,7 +752,6 @@ def build_parser():
     s.add_argument("--price", type=float, required=True)
     s.add_argument("--supplier", required=True)
     s.add_argument("--link", required=True)
-    s.add_argument("--bought-as")
     s.add_argument("--cashback")
     s.add_argument("--on")
     s.add_argument("--dry-run", action="store_true")

@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 //   * due --apply stamping nothing                  -> the stamp, next-day and stamp-failure tests fail
 //   * blank Status read as not active               -> "a row with a blank Status is due" fails
 //   * future dates allowed                          -> the future --bought-on and --on tests fail
+//   * prefer accepting a not-bought row             -> "refuses a row that has not been bought" and the A-then-R test fail
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(root, 'scripts', 'preferred-list.py');
@@ -453,6 +454,28 @@ out(dict(res, keys=sorted(sent), row=S.rows[0]["fields"]))`);
     expect(r.row['Last Check Result']).toBe(`adopted on review (${TASK}): £12.50 at Cheaper Shop`);
     expect(r.row.Notes).toBe(`older line\n2026-11-10: preferred option changed on review (${TASK}): was £15.00 at Shop, now £12.50 at Cheaper Shop`);
     expect(r.out).toContain('PREFERRED: recEXISTING000001 kettle £15.00 -> £12.50 Cheaper Shop');
+  });
+
+  it('refuses a row that has not been bought, and no longer accepts --bought-as', () => {
+    const r = py(`
+S.rows = [row("recEXISTING000001", "kettle", **{"Bought As": "Not bought yet", "Full Price": None})]
+a = run("prefer", *${JSON.stringify(PREF)})
+b = run("prefer", *${JSON.stringify(PREF)}, "--bought-as", "new")
+out([a, b["code"], len(writes())])`);
+    expect(r[0].code).toBe(2);
+    expect(r[0].out).toContain('ERROR: prefer changes the preferred option of an item we have bought; this one has not been bought yet');
+    expect(r[1]).toBe(2);
+    expect(r[2]).toBe(0);
+  });
+
+  it('rules stored by task A, then prefer by review task R, never makes A read as a buyer', () => {
+    const r = py(`
+A, R = "recTASKAAAAAAAAAA", "recTASKRRRRRRRRRR"
+run("record", "--task", A, "--item", "Kettle", "--bought-as", "not-bought", "--rules", "Under £20")
+p = run("prefer", "--key", "kettle", "--task", R, "--price", "12", "--supplier", "Shop", "--link", "https://x.co")
+out([p["code"], S.rows[0]["fields"]["Bought As"], [x["id"] for x in pl.bought_rows_for_task(A)],
+     [x["id"] for x in pl.bought_rows_for_task(R)]])`);
+    expect(r).toEqual([2, 'Not bought yet', [], []]);
   });
 
   it('an unknown key exits 2', () => {
