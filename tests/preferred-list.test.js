@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 //   * blank Status read as not active               -> "a row with a blank Status is due" fails
 //   * future dates allowed                          -> the future --bought-on and --on tests fail
 //   * prefer accepting a not-bought row             -> "refuses a row that has not been bought" and the A-then-R test fail
+//   * prefer writing Full Price                     -> the prefer-fields test and the reviewer's £40/£300 case fail
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(root, 'scripts', 'preferred-list.py');
@@ -350,6 +351,20 @@ out(run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "new",
     expect(r.out).toMatch(/ERROR: .*did not stick.*Full Price/);
   });
 
+  it('record never sends a Preferred field, buy or not-bought, new row or existing', () => {
+    const r = py(`
+S.rows = [row("recKETTLE00000001", "kettle", **{"Preferred Supplier": "A Shop", "Preferred Price": 300.0,
+          "Preferred Link": "https://example.com/new", "Preferred Since": "2026-11-01"})]
+run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "new", "--price", "300",
+    "--supplier", "A Shop", "--link", "https://example.com/new")
+run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "not-bought", "--rules", "Under £400")
+run("record", "--task", "${TASK}", "--item", "Toaster", "--bought-as", "new", "--price", "20",
+    "--supplier", "Shop", "--link", "https://example.com/t")
+sent = [k for m, b in writes() for k in b["records"][0]["fields"]]
+out([len(writes()), [k for k in sent if k.startswith("Preferred")], S.rows[0]["fields"]["Preferred Price"]])`);
+    expect(r).toEqual([3, [], 300]);
+  });
+
   it.each([
     ['a bad task id', ['--task', 'recSHORT', '--bought-as', 'new', '--price', '10', '--supplier', 'S', '--link', 'https://x.co']],
     ['a zero price', ['--task', TASK, '--bought-as', 'new', '--price', '0', '--supplier', 'S', '--link', 'https://x.co']],
@@ -438,7 +453,7 @@ describe('prefer: the monthly review changes the preferred option', () => {
   const PREF = ['--key', 'kettle', '--task', TASK, '--price', '12.50', '--supplier', 'Cheaper Shop',
     '--link', 'https://example.com/k2', '--on', '2026-11-10'];
 
-  it('updates the right fields only and leaves Last Bought, Source Task, rules, category and status alone', () => {
+  it('writes only the Preferred fields, the check and a Notes line; Last Bought, Source Task, rules, category and status stay', () => {
     const r = py(`
 S.rows = [row("recEXISTING000001", "kettle", **{"Full Price": 15.0, "Supplier or Seller": "Shop",
           "Last Bought": "2026-11-11", "Source Task": "recOLDTASK0000001", "Buying Rules": "Under £20",
@@ -447,13 +462,41 @@ res = run("prefer", *${JSON.stringify(PREF)})
 sent = writes()[0][1]["records"][0]["fields"]
 out(dict(res, keys=sorted(sent), row=S.rows[0]["fields"]))`);
     expect(r.code).toBe(0);
-    expect(r.keys).toEqual(['Full Price', 'Last Check Result', 'Last Checked', 'Link', 'Notes', 'Supplier or Seller']);
+    expect(r.keys).toEqual(['Last Check Result', 'Last Checked', 'Notes', 'Preferred Link', 'Preferred Price',
+      'Preferred Since', 'Preferred Supplier']);
     expect(r.row['Last Bought']).toBe('2026-11-11');
     expect(r.row['Source Task']).toBe('recOLDTASK0000001');
     expect(r.row['Buying Rules']).toBe('Under £20');
+    expect(r.row['Preferred Since']).toBe('2026-11-10');
     expect(r.row['Last Check Result']).toBe(`adopted on review (${TASK}): £12.50 at Cheaper Shop`);
-    expect(r.row.Notes).toBe(`older line\n2026-11-10: preferred option changed on review (${TASK}): was £15.00 at Shop, now £12.50 at Cheaper Shop`);
-    expect(r.out).toContain('PREFERRED: recEXISTING000001 kettle £15.00 -> £12.50 Cheaper Shop');
+    expect(r.row.Notes).toBe(`older line\n2026-11-10: preferred option set on review (${TASK}): £12.50 at Cheaper Shop; last buy stays £15.00 from Shop`);
+    expect(r.out).toContain('PREFERRED: recEXISTING000001 kettle £12.50 Cheaper Shop (last buy £15.00 unchanged)');
+  });
+
+  it("the reviewer's case: a second-hand kettle bought at £40, then £300 preferred at a shop, keeps the last buy", () => {
+    const r = py(`
+S.rows = [row("recKETTLE00000001", "kettle", **{"Full Price": 40.0, "Bought As": "Second-hand",
+          "Supplier or Seller": "Marketplace seller", "Link": "https://example.com/used", "Last Bought": "2026-10-01",
+          "Cashback": "none"})]
+before = json.loads(json.dumps(S.rows[0]["fields"]))
+res = run("prefer", "--key", "kettle", "--task", "${TASK}", "--price", "300", "--supplier", "A Shop",
+          "--link", "https://example.com/new")
+after = S.rows[0]["fields"]
+out(dict(res, kept={k: after.get(k) == before.get(k) for k in ("Full Price", "Bought As", "Supplier or Seller",
+         "Link", "Last Bought", "Cashback")},
+         pref=[after.get(k) for k in ("Preferred Supplier", "Preferred Link", "Preferred Price", "Preferred Since")],
+         due=len(pl.due_rows(S.rows, date(2026, 11, 11)))))`);
+    expect(r.code).toBe(0);
+    expect(Object.values(r.kept).every(Boolean)).toBe(true);
+    expect(r.pref).toEqual(['A Shop', 'https://example.com/new', 300, '2026-11-11']);
+    expect(r.due).toBe(0);
+    expect(r.out).toContain('(last buy £40.00 unchanged)');
+  });
+
+  it('no longer accepts --cashback', () => {
+    const r = py(`S.rows = [row("recEXISTING000001", "kettle")]\nres = run("prefer", *${JSON.stringify(PREF)}, "--cashback", "5%")\nout(dict(res, writes=len(writes())))`);
+    expect(r.code).toBe(2);
+    expect(r.writes).toBe(0);
   });
 
   it('refuses a row that has not been bought, and no longer accepts --bought-as', () => {
@@ -491,7 +534,7 @@ out([p["code"], S.rows[0]["fields"]["Bought As"], [x["id"] for x in pl.bought_ro
   });
 
   it('a field that does not stick exits 4', () => {
-    const r = py(`S.rows = [row("recEXISTING000001", "kettle")]\nS.drop = {"Link"}\nout(run("prefer", *${JSON.stringify(PREF)}))`);
+    const r = py(`S.rows = [row("recEXISTING000001", "kettle")]\nS.drop = {"Preferred Link"}\nout(run("prefer", *${JSON.stringify(PREF)}))`);
     expect(r.code).toBe(4);
     expect(r.out).toContain('Link');
   });
@@ -528,6 +571,18 @@ out([run("checked", "--key", "kettle", "--result", "x", "--on", "2026-11-12")["c
      run("prefer", "--key", "kettle", "--task", "${TASK}", "--price", "5", "--supplier", "S",
          "--link", "https://x.co", "--on", "2026-11-12")["code"], len(writes())])`);
     expect(r).toEqual([2, 2, 0]);
+  });
+
+  it('list --item shows the last buy, then the option preferred on review, then the last check', () => {
+    const r = py(`
+S.rows = [row("recKETTLE00000001", "kettle", **{"Full Price": 40.0, "Supplier or Seller": "Marketplace seller",
+          "Preferred Supplier": "A Shop", "Preferred Price": 300.0, "Preferred Link": "https://example.com/new",
+          "Preferred Since": "2026-11-10", "Last Checked": "2026-11-10", "Last Check Result": "adopted"})]
+out(run("list", "--item", "kettle")["out"].strip().split("\\n"))`);
+    expect(r[0]).toBe('BASELINE:');
+    expect(r[1]).toMatch(/^kettle \| kettle \| £40\.00 \| Second-hand \| Marketplace seller \|/);
+    expect(r[2]).toBe('PREFERRED ON REVIEW (2026-11-10): £300.00 at A Shop https://example.com/new');
+    expect(r[3]).toBe('last checked 2026-11-10 (adopted)');
   });
 
   it('list --item prints the baseline with the last check, or the none line', () => {

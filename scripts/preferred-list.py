@@ -18,8 +18,9 @@ Commands:
                                      upsert one row after an approved buy (or store the
                                      item and its rules before anything is bought)
   prefer --key K --task rec.. --price N --supplier S --link URL [...]
-                                     change the preferred option of a BOUGHT row on review;
-                                     never writes Bought As, no buy recorded
+                                     set the option preferred on review (the four Preferred
+                                     fields) of a BOUGHT row; the last-buy fields are only
+                                     ever written by a `record` buy
   checked --key K --result TEXT      stamp a row as re-priced
   has-row --task rec..               did this task buy a row? (bought_rows_for_task) exit 0 yes, 1 no
   due [--apply] [--as-of DATE]       the daily clock (job `preferred-list`, 06:20): raises
@@ -497,16 +498,17 @@ def plan_prefer(rows, a, today):
     if f.get("Bought As") not in BOUGHT:
         raise Refused("prefer changes the preferred option of an item we have bought; this one has "
                       "not been bought yet")
-    old, new, sup = money(_price(f)), money(round(float(a.price), 2)), a.supplier.strip()
-    fields = {"Supplier or Seller": sup, "Link": a.link, "Full Price": round(float(a.price), 2),
-              "Last Checked": on,
+    # The last-buy fields (Supplier or Seller, Link, Full Price, Bought As, Last Bought,
+    # Cashback) describe the LAST REAL BUY and only a `record` buy writes them. The
+    # option approved on a review lives in the four Preferred fields.
+    last, new, sup = money(_price(f)), money(round(float(a.price), 2)), a.supplier.strip()
+    fields = {"Preferred Supplier": sup, "Preferred Link": a.link, "Preferred Price": round(float(a.price), 2),
+              "Preferred Since": on, "Last Checked": on,
               "Last Check Result": "adopted on review (%s): £%s at %s" % (a.task, new, sup)}
-    if a.cashback:
-        fields["Cashback"] = a.cashback.strip()
-    fields["Notes"] = _append(f.get("Notes"), "%s: preferred option changed on review (%s): was £%s at %s, "
-                              "now £%s at %s" % (on, a.task, old, f.get("Supplier or Seller") or "no supplier",
-                                                 new, sup))
-    return row["id"], fields, key, old
+    fields["Notes"] = _append(f.get("Notes"), "%s: preferred option set on review (%s): £%s at %s; last buy "
+                              "stays £%s from %s" % (on, a.task, new, sup, last,
+                                                      f.get("Supplier or Seller") or "no supplier"))
+    return row["id"], fields, key, last
 
 
 def cmd_prefer(a):
@@ -518,7 +520,8 @@ def cmd_prefer(a):
     except RuntimeError as exc:
         print("ERROR: %s" % exc)
         return 1
-    line = "%s %s £%s -> £%s %s" % (row_id, key, old, money(fields["Full Price"]), fields["Supplier or Seller"])
+    line = "%s %s £%s %s (last buy £%s unchanged)" % (row_id, key, money(fields["Preferred Price"]),
+                                                     fields["Preferred Supplier"], old)
     if a.dry_run:
         print(json.dumps({"dryRun": True, "rowId": row_id, "fields": fields}, indent=1))
         print("DRY RUN: would set PREFERRED: %s" % line)
@@ -578,13 +581,21 @@ def cmd_has_row(a):
     return 1
 
 
-def _row_line(r):
+def _row_lines(r):
+    """The last buy, then the option preferred on review (when set), then the last check."""
     f = r.get("fields") or {}
-    return "%s | %s | £%s | %s | %s | %s | last bought %s | last checked %s (%s) | %s | rules: %s" % (
+    lines = ["%s | %s | £%s | %s | %s | %s | last bought %s | %s | rules: %s" % (
         f.get("Item Key", ""), f.get("Item", ""), money(_price(f)), f.get("Bought As") or "-",
         f.get("Supplier or Seller") or "-", f.get("Link") or "-", f.get("Last Bought") or "-",
-        f.get("Last Checked") or "never", f.get("Last Check Result") or "no result recorded",
-        f.get("Status") or "-", f.get("Buying Rules") or "-")
+        f.get("Status") or "-", f.get("Buying Rules") or "-")]
+    pref = _price({"Full Price": f.get("Preferred Price")})
+    if pref is not None:
+        lines.append("PREFERRED ON REVIEW (%s): £%s at %s %s" % (
+            f.get("Preferred Since") or "no date", money(pref), f.get("Preferred Supplier") or "-",
+            f.get("Preferred Link") or "-"))
+    lines.append("last checked %s (%s)" % (f.get("Last Checked") or "never",
+                                         f.get("Last Check Result") or "no result recorded"))
+    return lines
 
 
 def cmd_list(a):
@@ -604,7 +615,7 @@ def cmd_list(a):
     if a.item is not None:
         print("BASELINE:")
     for r in rows:
-        print(_row_line(r))
+        print("\n".join(_row_lines(r)))
     return 0
 
 
@@ -752,7 +763,6 @@ def build_parser():
     s.add_argument("--price", type=float, required=True)
     s.add_argument("--supplier", required=True)
     s.add_argument("--link", required=True)
-    s.add_argument("--cashback")
     s.add_argument("--on")
     s.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("checked")
