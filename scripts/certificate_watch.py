@@ -1075,13 +1075,24 @@ def premium_task_fields(rise, where, today):
 
 
 def watch_summary(found, raised, still, held_back, insurance_raised, premium_unchecked, paused=False,
-                  dry_run=False):
+                  dry_run=False, missed_total=None):
     """The run's last line. The job's Estate Status row prints the last thing a
     failing job said, cut to its LAST 220 characters (estate-status.py
     plain_tail), so the line is kept within that, with the count of items with no
-    task first and the least important parts dropped first."""
-    line = ("COMPLIANCE: %d required item%s had no open task; %d %s, %d still without one"
-            % (found, "" if found == 1 else "s", raised,
+    task first and the least important parts dropped first.
+
+    `missed_total` is how many required items have no in-date certificate today,
+    the population `found` is counted out of. It is named in the line because the
+    bare zero reads as "the estate is compliant" when it means "every item that
+    is missing already has a task": on 10 Nov 2026 that zero was read as a false
+    pass and a critical finding was filed against a mechanism that does not
+    exist (20261110-phase-2-1263 — the watch had found 50 missed items and 41
+    were carried by an open task). A count states the population it came out of.
+    """
+    of_total = "" if missed_total is None else " of %d" % missed_total
+    line = ("COMPLIANCE: %d%s required item%s with no in-date certificate had no open task; "
+            "%d %s, %d still without one"
+            % (found, of_total, "" if found == 1 else "s", raised,
                "would be raised (dry run)" if dry_run else "raised", still))
     parts = []
     if paused:
@@ -1386,7 +1397,7 @@ def cmd_daily(apply):
     still = len(found) - (len(ok_raised) if apply else 0)
     print(watch_summary(len(found), len(ok_raised), still, len(held_back),
                         len([r for r in raised_ins if r["ok"]]), premium_unchecked, paused,
-                        dry_run=not apply))
+                        dry_run=not apply, missed_total=len(items)))
     # Non-zero whenever a required item had no task this morning, even once it is
     # raised: that a task had gone missing is the thing worth seeing on the board.
     return 1 if (found or failures or any(not r["ok"] for r in raised_ins)) else 0

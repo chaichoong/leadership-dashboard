@@ -711,7 +711,7 @@
  },
  "compliance-watch": {
   "completedWhen": "ran",
-  "completedWhenFoundLine": "COMPLIANCE: \\d+ required items? had no open task",
+  "completedWhenFoundLine": "COMPLIANCE: \\d+(?: of \\d+)? required items?(?: with no in-date certificate)? had no open task",
   "completedWhenNote": "compliance-watch EXITS 1 BY DESIGN on any morning it finds a required certificate with no open task, even after it has raised that task: that a task had gone missing is the thing worth seeing, and the job's Estate Status row prints the count only when the run is not clean. It is graded on attendance, as data-invariants is.",
   "cron": "5 6 * * *",
   "maxLateMinutes": 240,

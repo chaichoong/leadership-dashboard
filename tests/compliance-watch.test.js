@@ -641,7 +641,7 @@ describe('the daily pass', () => {
       'COMPLIANCE: GSC expired - 9 Alder Row',
       'COMPLIANCE: EICR missing - 3 Birch Lane']);
     expect(r.code).toBe(1);
-    expect(r.last).toMatch(/^COMPLIANCE: 2 required items had no open task; 2 raised, 0 still without one; insurance: 1 raised/);
+    expect(r.last).toMatch(/^COMPLIANCE: 2 of \d+ required items with no in-date certificate had no open task; 2 raised, 0 still without one; insurance: 1 raised/);
     expect(r.last.length).toBeLessThanOrEqual(220);
   });
   it('control: with everything covered it raises nothing and exits 0', () => {
@@ -651,7 +651,7 @@ describe('the daily pass', () => {
         {'id': 'recCOV3', 'fields': {'fN': 'Electrical inspections: 3 Birch Lane'}}]` });
     expect(r.made).toEqual([]);
     expect(r.code).toBe(0);
-    expect(r.last).toMatch(/^COMPLIANCE: 0 required items had no open task/);
+    expect(r.last).toMatch(/^COMPLIANCE: 0 of \d+ required items with no in-date certificate had no open task/);
   });
   it('a paused agent gets nothing raised, and the run says so and exits 1', () => {
     const r = daily({ paused: true });
@@ -659,7 +659,7 @@ describe('the daily pass', () => {
     expect(r.code).toBe(1);
     expect(r.last).toContain('paused');
     // Three, not two: with nothing raised for the renewal that passed, the expired policy is missed too.
-    expect(r.last).toMatch(/^COMPLIANCE: 3 required items had no open task; 0 raised, 3 still without one/);
+    expect(r.last).toMatch(/^COMPLIANCE: 3 of \d+ required items with no in-date certificate had no open task; 0 raised, 3 still without one/);
   });
   it('a keyed read that misses an open keyed task fails the run: the record of what fired cannot be trusted', () => {
     const r = daily({ openTasks: `[{'id': 'recFILL%03d' % i, 'fields': {'fN': 'filler %d' % i}} for i in range(60)] + [
@@ -684,14 +684,25 @@ describe('the daily pass', () => {
     expect(r.last).toContain('would be raised (dry run)');
   });
   it('the last line keeps the count inside the 220 characters the Estate Status row shows, at its longest', () => {
-    const r = py(`print(json.dumps([cw.watch_summary(60, 0, 60, 3, 0, 12, paused=True),
-                                   cw.watch_summary(160, 160, 0, 30, 12, 26, dry_run=True),
-                                   cw.watch_summary(1000, 1000, 1000, 1000, 100, 100, paused=True, dry_run=True)]))`);
+    const r = py(`print(json.dumps([cw.watch_summary(60, 0, 60, 3, 0, 12, paused=True, missed_total=600),
+                                   cw.watch_summary(160, 160, 0, 30, 12, 26, dry_run=True, missed_total=1600),
+                                   cw.watch_summary(1000, 1000, 1000, 1000, 100, 100, paused=True, dry_run=True,
+                                                    missed_total=10000)]))`);
     for (const line of r) {
       expect(line.length).toBeLessThanOrEqual(220);
     }
-    expect(r[0]).toMatch(/^COMPLIANCE: 60 required items had no open task; 0 raised, 60 still without one/);
-    expect(r[1]).toMatch(/^COMPLIANCE: 160 required items had no open task; 160 would be raised \(dry run\)/);
+    expect(r[0]).toMatch(/^COMPLIANCE: 60 of 600 required items with no in-date certificate had no open task; 0 raised, 60 still without one/);
+    expect(r[1]).toMatch(/^COMPLIANCE: 160 of 1600 required items with no in-date certificate had no open task; 160 would be raised \(dry run\)/);
+  });
+
+  // 20261110-phase-2-1263: the bare zero was read as "the estate is compliant"
+  // and a critical finding was filed on a mechanism that does not exist. The run
+  // that morning had found 50 missed items, 41 of them carried by an open task.
+  it('a zero says what population it came out of, so it cannot be read as a clean estate', () => {
+    const r = daily({});
+    expect(r.last).toMatch(/COMPLIANCE: \d+ of \d+ required items? with no in-date certificate had no open task/);
+    const m = r.last.match(/COMPLIANCE: (\d+) of (\d+) /);
+    expect(Number(m[2])).toBeGreaterThanOrEqual(Number(m[1]));
   });
 });
 

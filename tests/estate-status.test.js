@@ -435,7 +435,7 @@ print("---JSON---"); print(json.dumps({"rows": res, "red": red}))
   const FOUND = {
     digest: { tail: 'Findings waiting for the fixer: 174 (126 high or critical) • plus 48 medium or low' },
     invariants: { tail: "{'id': 'recAAAAAAAAAAAAAA', 'problem': 'an invented row'} ==== RESULT: INVARIANT BROKEN — do not deploy" },
-    compliance: { tail: 'COMPLIANCE: 2 required items had no open task; 2 raised, 0 still without one; insurance: 0 raised.' },
+    compliance: { tail: 'COMPLIANCE: 2 of 40 required items with no in-date certificate had no open task; 2 raised, 0 still without one; insurance: 0 raised.' },
   };
   const r = classifyRows([
     { name: 'digest', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1, FOUND.digest) },
