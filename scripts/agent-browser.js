@@ -287,6 +287,21 @@ const BUILTIN_SITES = {
                                   note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
   'currys.co.uk':               { label: 'Currys', login: false,
                                   note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  // Seven more shops (11 Nov 2026), each loaded by the robot with prices showing before it was added.
+  'wickes.co.uk':               { label: 'Wickes', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'markselectrical.co.uk':      { label: 'Marks Electrical', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'appliancecity.co.uk':        { label: 'Appliance City', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'ikea.com':                   { label: 'IKEA', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'dunelm.com':                 { label: 'Dunelm', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'travisperkins.co.uk':        { label: 'Travis Perkins', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  'homebase.co.uk':             { label: 'Homebase', login: false,
+                                  note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
   // Short sessions (16 Oct 2026, Kevin: he gives the robot access once, and the estate keeps it).
   // `idleMinutes` is how long the site lets a session sit unused before it signs the robot out on
   // its own servers. The daily 06:40 keep-alive cannot hold a session that short, so the 30-minute
