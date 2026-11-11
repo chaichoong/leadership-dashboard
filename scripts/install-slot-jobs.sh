@@ -97,6 +97,11 @@ JOBS=(
   # no open task, and the landlord insurance checkpoints. Writes only through
   # create-agent-task.py. Exits 1 on a morning it found something, by design.
   "compliance-watch|6:05|/usr/bin/python3 $REPO/scripts/certificate_watch.py daily --apply"
+  # The Preferred Products re-price clock (Kevin, 11 Nov 2026). Rules only, no model: when
+  # any bought, priced item was last checked 30 or more days ago and no review task is
+  # open, raises ONE review task for Inbox Response through create-agent-task.py. Daily,
+  # because there is no day-of-month here and a daily check heals after a sleeping Mac.
+  "preferred-list|6:20|/usr/bin/python3 $REPO/scripts/preferred-list.py due --apply"
 )
 
 # launchd's own numbering: Sunday = 0. Mapped here once so no caller ever writes

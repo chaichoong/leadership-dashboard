@@ -57,6 +57,9 @@ const ESTATE_SCRIPTS = [
   'scripts/agent-dispatch.py',
   'scripts/standing_holds.py',
   'scripts/certificate_watch.py',
+  // 11 Nov 2026: the preferred list and the SOURCING card check
+  'scripts/preferred-list.py',
+  'scripts/agent_sourcing_format.py',
   'scripts/reroute-roy-admin.py',
   'scripts/secret_redact.py',
   'scripts/merge_card.py',

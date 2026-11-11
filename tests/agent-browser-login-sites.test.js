@@ -360,3 +360,58 @@ print(json.dumps([m.signin_domain(h) for h in json.loads(sys.argv[1])]))`, JSON.
     });
   });
 });
+
+// Sourcing (11 Nov 2026): the Inbox Response agent reads listings and prices for a SOURCING card
+// (scripts/agent_sourcing_format.py). On 2 Nov eBay was "NOT CHECKED" because the robot refused it.
+// These sites are READ-ONLY: allowed for `read`, never a login site, never in the sign-in list.
+describe('the read-only sourcing sites', () => {
+  const HOSTS = ['gumtree.com', 'ebay.co.uk', 'vinted.co.uk', 'screwfix.com', 'toolstation.com',
+                 'diy.com', 'argos.co.uk', 'ao.com', 'currys.co.uk'];
+  // Hermetic: an empty sites.json, so only the builtins decide.
+  const fresh = () => {
+    const { mkdtempSync, writeFileSync } = require_('node:fs');
+    const { tmpdir } = require_('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-sites-'));
+    const file = join(dir, 'sites.json');
+    writeFileSync(file, '{}');
+    const modPath = join(ROOT, 'scripts', 'agent-browser.js');
+    const prev = process.env.AGENT_BROWSER_SITES_FILE;
+    process.env.AGENT_BROWSER_SITES_FILE = file;
+    delete require_.cache[require_.resolve(modPath)];
+    const mod = require_(modPath);
+    const done = () => {
+      if (prev === undefined) delete process.env.AGENT_BROWSER_SITES_FILE; else process.env.AGENT_BROWSER_SITES_FILE = prev;
+      delete require_.cache[require_.resolve(modPath)];
+      require_('node:fs').rmSync(dir, { recursive: true, force: true });
+    };
+    return { mod, done };
+  };
+
+  it.each(HOSTS)('%s is allowed for read, bare and www., and holds no login', (host) => {
+    const { mod, done } = fresh();
+    try {
+      expect(mod.hostAllowed(`https://${host}/some/listing`)).toBe(true);
+      expect(mod.hostAllowed(`https://www.${host}/some/listing`)).toBe(true);
+      const entry = mod.loadSites()[host];
+      expect(entry.login).toBe(false);
+      expect(entry.loginUrl).toBeUndefined();
+      expect(entry.selfRefresh).toBeUndefined();
+      expect(entry.note).toMatch(/No sign-in, no messages, no buying/);
+    } finally { done(); }
+  });
+
+  it('none of them appears in the Robot sign-in list', () => {
+    const { mod, done } = fresh();
+    try {
+      const listed = mod.signinTargets(mod.loadSites()).map(t => t.host);
+      for (const h of HOSTS) {
+        expect(listed.some(l => l === h || l.endsWith('.' + h))).toBe(false);
+      }
+      // CONTROL: the sign-in list is not simply empty.
+      expect(listed.length).toBeGreaterThan(0);
+      // A look-alike host is still refused: the allowlist matches the host or a subdomain, nothing else.
+      expect(mod.hostAllowed('https://notgumtree.com/p/1')).toBe(false);
+      expect(mod.hostAllowed('https://ebay.co.uk.example.com/itm/1')).toBe(false);
+    } finally { done(); }
+  });
+});

@@ -125,6 +125,9 @@ from agent_email_format import (  # noqa: E402
 # scripts/calendar-write.py — same one-parser rule, same reason.
 from agent_calendar_format import (calendar_ref_problem, calendar_submit_problem,  # noqa: E402
                                    diary_written, is_calendar)
+# The SOURCING card (Kevin, 11 Nov 2026): one pick per unit, two reserves, facts on fixed lines.
+from agent_sourcing_format import (SHAPE as SOURCING_SHAPE, is_sourcing,  # noqa: E402
+                                   listing_without_shape_problem, sourcing_problem)
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -5470,6 +5473,20 @@ def cmd_submit(args):
             "       robot did not write, submit a plain diary block and say in the summary\n"
             "       which entry Kevin should remove himself.")
 
+    # THE SOURCING CARD (Kevin, 11 Nov 2026). On 2 Nov a fridge freezer card reached him with ten
+    # listing links and a wall of text, and he vetted every link himself. A sourcing card offers one
+    # pick per unit needed and two reserves, facts on fixed lines (scripts/agent_sourcing_format.py).
+    # An Inbox Response card that offers a listing to buy without the shape is refused too.
+    src_problem = sourcing_problem(output)
+    if not src_problem and getattr(args, "agent", "") == RESPONSE_REC_ID:
+        src_problem = listing_without_shape_problem(output)
+    if src_problem:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task}: {src_problem}.\n"
+            "       The SOURCING shape is defined in scripts/agent_sourcing_format.py:\n"
+            + "".join(f"         {ln}\n" for ln in SOURCING_SHAPE.splitlines())
+            + "       Kevin decides from the pick and two reserves, never from your working.")
+
     # WHO approves. The task's Approver field decides (set by Inbound Comms at
     # creation: label 8 = Mica, label 12 = Kevin); empty means Kevin. Tier 1
     # ALWAYS diverts to Kevin whatever the field says — his private legal and
@@ -8134,6 +8151,20 @@ def task_fields_owe_certificate(task_id, tf):
 
 
 COST_NOT_WRITTEN_MARK = "COST NOT WRITTEN:"
+NOT_BOUGHT_MARK = "NOT BOUGHT:"
+
+
+def _preferred_rows_for_task(task_id):
+    """The Preferred Products rows whose Source Task is this task, read through
+    scripts/preferred-list.py (rows_for_task raises RuntimeError on a failed read).
+    Loaded lazily so a broken list module never stops agent-dispatch loading.
+    Tests replace this one function."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preferred-list.py")
+    spec = importlib.util.spec_from_file_location("od_preferred_list", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.rows_for_task(task_id)
 
 
 def task_owes_cost(task_id, t, fetch_costs=None):
@@ -8236,9 +8267,10 @@ def cmd_complete(args):
     # machine-readable half — verify re-reads the LIVE record for it, never
     # trusting what the run claimed.
     if args.keep_open and ((getattr(args, "no_certificate", "") or "").strip()
-                           or (getattr(args, "cost_not_written", "") or "").strip()):
-        sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate and --cost-not-written close a task, "
-                 "and --keep-open leaves it open. Use one. The reason would be dropped.")
+                           or (getattr(args, "cost_not_written", "") or "").strip()
+                           or (getattr(args, "not_bought", "") or "").strip()):
+        sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate, --cost-not-written and --not-bought "
+                 "close a task, and --keep-open leaves it open. Use one. The reason would be dropped.")
     if args.keep_open:
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         detail = (args.note or "the approved action").strip()
@@ -8374,6 +8406,35 @@ def cmd_complete(args):
                 "       task as rec...), say so on the record:\n"
                 f"         python3 scripts/agent-dispatch.py complete {args.task} "
                 "--cost-not-written \"<why>\"")
+
+    # THE PREFERRED-LIST GATE (Kevin, 11 Nov 2026). A sourcing card closes only once what was bought
+    # is on the Preferred Products list with this task as its source, so the next card has a baseline
+    # to beat, or the agent says on the record why nothing was bought. A list that cannot be read is
+    # a refusal, never "no row" and never "row exists".
+    not_bought = " ".join(str(getattr(args, "not_bought", "") or "").split())
+    if is_sourcing(t["agentOutput"]):
+        if not_bought:
+            sign_note = ((sign_note + "\n\n") if sign_note else "") + (
+                f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] {NOT_BOUGHT_MARK} {not_bought[:600]}")
+        else:
+            try:
+                rows = _preferred_rows_for_task(args.task)
+            except Exception as exc:                      # noqa: BLE001
+                sys.exit(f"ERROR: refusing to complete {args.task}: it is a sourcing card and the Preferred "
+                         f"Products list could not be read to check the buy was recorded ({str(exc)[:160]}).\n"
+                         "       Try again once the list reads. Nothing was closed.")
+            # A row that only stores the item's rules ("Not bought yet") is not a buy.
+            bought = [r for r in rows or []
+                      if ((r or {}).get("fields") or {}).get("Bought As") in ("New", "Second-hand")]
+            if not bought:
+                sys.exit(
+                    f"ERROR: refusing to complete {args.task}: it is a sourcing card and the Preferred Products "
+                    "list has no bought row from this task.\n"
+                    "       Record what was bought first:\n"
+                    f"         python3 scripts/preferred-list.py record --task {args.task} --item \"<item>\" "
+                    "--bought-as <new|second-hand> --price <n> --supplier \"<who>\" --link <url>\n"
+                    "       or, if nothing was bought, say why on the record:\n"
+                    f"         python3 scripts/agent-dispatch.py complete {args.task} --not-bought \"<why>\"")
 
     # Written with the close, never before it: a refused close leaves no mark.
     evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
@@ -13408,6 +13469,9 @@ def main():
     c.add_argument("--cost-not-written", default="", metavar="REASON",
                    help="the card's RECORD NEW COST line, or a purchase on this task, needs no new cost "
                         "(a one-off, or written on another task): say why; recorded in Notes")
+    c.add_argument("--not-bought", default="", metavar="REASON",
+                   help="a SOURCING card where nothing was bought, so no Preferred Products row: say why; "
+                        "recorded in Notes")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
