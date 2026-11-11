@@ -67,6 +67,7 @@ BOUGHT = ("New", "Second-hand")
 TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 REPRICE_DAYS = 30
 REVIEW_MARK = "PREFLIST-REVIEW"
+PREFERRED_FIELDS = ("Preferred Supplier", "Preferred Link", "Preferred Price", "Preferred Since")
 SUMMARY_MAX = 220   # scripts/estate-status.py plain_tail(limit=220)
 OWNER = "inbound-comms-response"
 
@@ -326,6 +327,8 @@ def gate_create(fields, apply):
 # ── writes ──
 
 def _same(sent, got):
+    if sent is None:                       # a field we cleared reads back absent or empty
+        return got is None or got == ""
     if isinstance(sent, (int, float)) and not isinstance(sent, bool):
         try:
             return got is not None and abs(float(got) - float(sent)) < 0.005
@@ -445,6 +448,12 @@ def plan_record(rows, a, today):
         fields["Category"] = a.category
     line = "%s: bought %s £%s from %s (task %s)" % (on, bought_as, money(price), supplier, a.task)
     if existing:
+        # The buy is now the price to beat. An option preferred on an earlier review is history
+        # (it stays in Notes), so clear it rather than compare dates: whichever of a buy and a
+        # review is written last is the one the row shows.
+        for k in PREFERRED_FIELDS:
+            if old.get(k) not in (None, ""):
+                fields[k] = None
         line += ". Was £%s, %s, from %s." % (money(_price(old)), old.get("Bought As") or "no Bought As",
                                              old.get("Supplier or Seller") or "no supplier")
     fields["Notes"] = _append(old.get("Notes"), line)
@@ -591,10 +600,8 @@ def _row_lines(r):
         f.get("Supplier or Seller") or "-", f.get("Link") or "-", f.get("Last Bought") or "-",
         f.get("Status") or "-", f.get("Buying Rules") or "-")]
     pref = _price({"Full Price": f.get("Preferred Price")})
-    # An option preferred on a review counts only while it is NEWER than the last real buy:
-    # once we have bought since, the buy is the price to beat and the old option is history.
-    since, bought = _day(f.get("Preferred Since")), _day(f.get("Last Bought"))
-    if pref is not None and since is not None and (bought is None or since > bought):
+    # A buy clears the Preferred fields (plan_record), so a set price is always newer than the last buy.
+    if pref is not None:
         lines.append("PREFERRED ON REVIEW (%s): £%s at %s %s" % (
             f.get("Preferred Since") or "no date", money(pref), f.get("Preferred Supplier") or "-",
             f.get("Preferred Link") or "-"))

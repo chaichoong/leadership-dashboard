@@ -66,6 +66,8 @@ def fake_api(method, p, body=None):
     if method == "PATCH":
         row = next(r for r in S.rows if r["id"] == rec["id"])
         row["fields"].update(kept)
+        for k in [k for k, v in row["fields"].items() if v is None]:   # Airtable drops a field set to null
+            del row["fields"][k]
         return {"records": [row]}
     raise AssertionError(method)
 pl.api = fake_api
@@ -351,18 +353,49 @@ out(run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "new",
     expect(r.out).toMatch(/ERROR: .*did not stick.*Full Price/);
   });
 
-  it('record never sends a Preferred field, buy or not-bought, new row or existing', () => {
+  // A buy is the price to beat, so it CLEARS an option preferred on an earlier review (fifth review,
+  // 11 Nov 2026: comparing dates got a same-day buy and review wrong). Nothing else touches those fields.
+  it('a buy clears the Preferred fields on an existing row; not-bought and a new row never send them', () => {
     const r = py(`
 S.rows = [row("recKETTLE00000001", "kettle", **{"Preferred Supplier": "A Shop", "Preferred Price": 300.0,
           "Preferred Link": "https://example.com/new", "Preferred Since": "2026-11-01"})]
-run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "new", "--price", "300",
-    "--supplier", "A Shop", "--link", "https://example.com/new")
 run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "not-bought", "--rules", "Under £400")
+kept = S.rows[0]["fields"].get("Preferred Price")
 run("record", "--task", "${TASK}", "--item", "Toaster", "--bought-as", "new", "--price", "20",
     "--supplier", "Shop", "--link", "https://example.com/t")
-sent = [k for m, b in writes() for k in b["records"][0]["fields"]]
-out([len(writes()), [k for k in sent if k.startswith("Preferred")], S.rows[0]["fields"]["Preferred Price"]])`);
-    expect(r).toEqual([3, [], 300]);
+buy = run("record", "--task", "${TASK}", "--item", "Kettle", "--bought-as", "new", "--price", "250",
+          "--supplier", "B Shop", "--link", "https://example.com/b")
+w = [b["records"][0]["fields"] for m, b in writes()]
+out({"notBought": [k for k in w[0] if k.startswith("Preferred")], "kept": kept,
+     "newRow": [k for k in w[1] if k.startswith("Preferred")],
+     "buy": {k: v for k, v in w[2].items() if k.startswith("Preferred")}, "code": buy["code"],
+     "after": [k for k in S.rows[0]["fields"] if k.startswith("Preferred")]})`);
+    expect(r.notBought).toEqual([]);
+    expect(r.kept).toBe(300);
+    expect(r.newRow).toEqual([]);
+    expect(r.buy).toEqual({ 'Preferred Supplier': null, 'Preferred Link': null, 'Preferred Price': null, 'Preferred Since': null });
+    expect(r.code).toBe(0);                 // the read-back accepts a cleared field
+    expect(r.after).toEqual([]);
+  });
+
+  it('a buy and a review on the same day: whichever is written last is what the row shows', () => {
+    const r = py(`
+def fresh():
+    S.rows = [row("recKETTLE00000001", "kettle", **{"Full Price": 40.0, "Last Bought": "2026-10-01"})]
+    S.calls = []
+buy = lambda: run("record", "--task", "${TASK}", "--item", "kettle", "--bought-as", "second-hand", "--price", "50",
+                  "--supplier", "Gumtree seller", "--link", "https://example.com/g", "--bought-on", "2026-11-11")
+pref = lambda: run("prefer", "--key", "kettle", "--task", "recREVIEWTASK0001", "--price", "45", "--supplier", "A Shop",
+                   "--link", "https://example.com/new", "--on", "2026-11-11")
+fresh(); a = [buy()["code"], pref()["code"]]; buy_then_review = run("list", "--item", "kettle")["out"]
+fresh(); b = [pref()["code"], buy()["code"]]; review_then_buy = run("list", "--item", "kettle")["out"]
+out({"codes": a + b, "buyThenReview": buy_then_review, "reviewThenBuy": review_then_buy})`);
+    expect(r.codes).toEqual([0, 0, 0, 0]);
+    expect(r.buyThenReview).toContain('PREFERRED ON REVIEW (2026-11-11): £45.00 at A Shop');
+    expect(r.buyThenReview).toContain('adopted on review (recREVIEWTASK0001)');
+    expect(r.reviewThenBuy).not.toContain('PREFERRED ON REVIEW');
+    expect(r.reviewThenBuy).not.toContain('adopted on review');
+    expect(r.reviewThenBuy).toContain('last checked 2026-11-11 (bought Second-hand £50.00 from Gumtree seller');
   });
 
   it.each([
@@ -603,7 +636,7 @@ out({"before": before, "code": buy["code"], "result": sent.get("Last Check Resul
     expect(r.before).toContain('PREFERRED ON REVIEW (2026-11-10): £60.00 at A Shop');
     expect(r.code).toBe(0);
     expect(r.result).toBe('bought Second-hand £50.00 from Gumtree seller (task ' + TASK + ')');
-    expect(r.preferredSent).toEqual([]);
+    expect(r.preferredSent.sort()).toEqual(['Preferred Link', 'Preferred Price', 'Preferred Since', 'Preferred Supplier']);
     expect(r.after).toContain('£50.00 | Second-hand | Gumtree seller');
     expect(r.after).not.toContain('PREFERRED ON REVIEW');
     expect(r.after).toContain('last checked 2026-11-11 (bought Second-hand £50.00 from Gumtree seller');
