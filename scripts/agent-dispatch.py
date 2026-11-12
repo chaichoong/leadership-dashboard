@@ -128,7 +128,7 @@ from agent_calendar_format import (calendar_ref_problem, calendar_submit_problem
 # The SOURCING card (Kevin, 11 Nov 2026): one pick per unit, two reserves, facts on fixed lines.
 from agent_sourcing_format import (SHAPE as SOURCING_SHAPE, SOURCING_SUBMITTED_MARK,  # noqa: E402
                                    SOURCING_SUBMITTED_RE, is_sourcing, listing_without_shape_problem,
-                                   sourcing_problem)
+                                   sourcing_problem, sourcing_task)
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -3596,9 +3596,15 @@ def task_lane(t, ctx):
     # British Gas" carries a repair word and "CALENDAR: Gas safety check" a compliance word, but
     # each is a date for Kevin's diary, never a job for Roy or the compliance book.
     diary = _gate().calendar_task(t["name"])
+    # A BUYING TASK stays with Inbox Response (Kevin, 11 Nov 2026: sourcing is that agent's). On
+    # 12 Nov 2026 "SOURCING: mains smoke alarms ..." was about to move to Property Administration
+    # on the words "smoke alarm", an agent with no buying rules; "SOURCING: a replacement boiler"
+    # would have gone to Roy as a repair. The item's name says what is bought, never whose job
+    # the buying is. Tier 1 and the creditor lane still win, as they do for a diary task.
+    buying = sourcing_task(t["name"])
     t["property"] = ("" if (t["tier1"] or t["creditor"] or not ctx["property_ok"]) else
                      property_match(t["name"], t["description"], t["notes"]))
-    if roy_request or diary:
+    if roy_request or diary or buying:
         t["property"] = ""
     # A CEO-lane task the fresh lane cannot place (neither inbound nor
     # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
@@ -3610,7 +3616,7 @@ def task_lane(t, ctx):
     hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
                       or t["property"])
                else roy_match(t["name"], t["description"], t["notes"]))
-    if roy_request or diary:
+    if roy_request or diary or buying:
         hit_roy = ""
     if hit_roy:
         return "royLane", {"royReason": hit_roy}
