@@ -107,6 +107,18 @@ SHAPE = (
 )
 
 
+# A task raised to buy something is NAMED for it. The dispatcher reads this to keep the task with
+# the Inbox Response agent, whose rules hold the sourcing process (Kevin's ruling, 11 Nov 2026:
+# "sourcing requests stay in the Inbox Response lane"). On 12 Nov 2026 the first such task, for
+# mains smoke alarms, was about to move to Property Administration on the words "smoke alarm".
+SOURCING_TASK_PREFIX = "SOURCING:"
+
+
+def sourcing_task(name):
+    """True for a buying task: its name opens with the SOURCING: prefix."""
+    return str(name or "").lstrip().upper().startswith(SOURCING_TASK_PREFIX)
+
+
 def is_sourcing(output):
     """True when a line starts with exactly `SOURCING:` (rule i)."""
     return bool(re.search(r"^SOURCING:", output or "", re.M))
