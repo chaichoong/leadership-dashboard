@@ -22,6 +22,11 @@ ONE MORE, FROM THE ALARM TEST (Kevin, 12 Nov 2026)
       and VAT in). A set of six smoke alarms and one heat alarm passed this
       check with unit prices on its PICK lines and a total nothing had added
       up, so a card with a wrong total would have reached Kevin as checked.
+      Two things keep that sum honest (review, 12 Nov 2026). A line that
+      reads like a PICK key but is not the plain key (`PICK2:`, `Pick 2:`,
+      `- PICK 2:`) is refused, because it would be left out of the sum. And
+      the SPEND line the dispatcher reads (its pattern takes the first match,
+      in any case, after spaces) must be this card's SPEND line.
 
 AGENT OUTPUT FORMAT: the SHAPE text below. Other card text (CHECKED:, the
 bold Approve line, TRACK RECORD, KEVIN ONLY, the closing line) may sit around
@@ -59,6 +64,10 @@ KEY_RE = re.compile(
     r"|NOT PROVEN|PROVEN|SAVING|PAY BY|SEARCHED|SPEND):[ \t]*(?P<value>.*?)[ \t]*$", re.M)
 # The one leniency: a SOURCING key dressed in bullets or bold, so such a card is refused, not skipped.
 DRESSED_SOURCING_RE = re.compile(r"^ *[-*•_ ]+SOURCING[*_ ]*:|^SOURCING[*_ ]+:", re.M)
+
+# A line that reads like a PICK key. Only the plain key is counted, so any other spelling is refused.
+NEAR_PICK_RE = re.compile(r"^[ \t]*[-*•_>\"' \t]*pick[ \t]*\d*[ \t*_]*:", re.I | re.M)
+PLAIN_PICK_RE = re.compile(r"PICK(?: \d+)?:")
 
 PRICE_RE = re.compile(r"^£([0-9][0-9,]*(?:\.[0-9]{1,2})?)$")
 LINK_RE = re.compile(r"^https?://\S+$")
@@ -177,6 +186,12 @@ def parse_sourcing(output):
         if not fields.get(key):
             raise SourcingFormatError(f"the {key} line is missing or empty; write {key}: and what it says on the card shape")
 
+    for m in NEAR_PICK_RE.finditer(text):
+        if not PLAIN_PICK_RE.fullmatch(m.group(0)):
+            raise SourcingFormatError(
+                f"a line starts {m.group(0).strip()!r}, which reads like a PICK key but is not the plain key, so "
+                "its price would be left out of the total; write PICK: or PICK 1: in capitals at the very start "
+                "of the line, or reword the sentence")
     if not picks:
         raise SourcingFormatError("there is no PICK line; write PICK: name | new or second-hand | £full price | link")
     if len(picks) > qty:
@@ -231,6 +246,13 @@ def parse_sourcing(output):
     if not sm:
         raise SourcingFormatError("there is no plain SPEND line with an amount; write SPEND: £<total> (one-off)")
     spend = float(sm.group("amount").replace(",", ""))
+    # The dispatcher takes the FIRST line its pattern matches. That must be this SPEND line, or the
+    # money rule would run on a figure this check never saw.
+    first = SPEND_LINE_RE.search(text)
+    if (first.group("amount"), bool(first.group("recurring"))) != (sm.group("amount"), bool(sm.group("recurring"))):
+        raise SourcingFormatError(
+            f"a line above the SPEND line also reads as a spend (£{first.group('amount')}), and the money rule "
+            "would take that figure; keep one SPEND line and start no other line with the word spend")
     # Rule iv, in whole pence so 0.1 + 0.2 never reads as a mismatch.
     picks_pence = sum(round(p["price"] * 100) for p in parsed_picks)
     if round(spend * 100) != picks_pence:

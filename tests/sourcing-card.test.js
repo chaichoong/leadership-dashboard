@@ -255,6 +255,49 @@ describe('the sourcing card shape', () => {
     expect(problem(swap(big, 'SPEND:', 'SPEND: £1,250 (one-off)'))).toMatch(/SPEND reads £1,250\.00 but the PICK lines add up to £1,250\.50/);
   });
 
+  // Review, 12 Nov 2026: two ways a wrong total could still pass. A PICK line the key pattern does not
+  // read is left out of the sum, and the dispatcher reads the FIRST spend-like line, in any case.
+  it.each([
+    ['PICK2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['Pick 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK 2 : Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['- PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['**PICK 2:** Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['  PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+  ])('a line that reads like a PICK key but is not the plain key is refused: %s', (line) => {
+    const twoQty = swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts | 2 | 4 Abington Place');
+    const card = twoQty.replace(/^(PICK: .*)$/m, `$1\n${line}`);
+    expect(problem(card)).toMatch(/reads like a PICK key but is not the plain key/);
+    // CONTROL: the same second line written plain is counted, so the old total is now refused.
+    const plain = twoQty.replace(/^(PICK: .*)$/m, '$1\nPICK 2: Posts again | new | £150 | https://www.diy.com/p/1');
+    expect(problem(plain)).toMatch(/SPEND reads £148\.90 but the PICK lines add up to £298\.90/);
+  });
+
+  it('prose about picking is not a key: "Picked:", "Picks:" and "pick of the two" pass', () => {
+    const card = FENCE.replace('SAVING: no baseline',
+      'SAVING: no baseline\nPicked: the cheaper of the two.\nPicks: one only.\nThe pick of the two is Screwfix: it is nearer.');
+    expect(problem(card)).toBe('');
+  });
+
+  it.each([
+    [' SPEND: £5 per unit'],
+    ['Spend: £5 a month'],
+    ['spend: £5'],
+  ])('a spend-like line above the SPEND line, which the dispatcher would read first, is refused: %s', (line) => {
+    const card = FENCE.replace('SAVING: no baseline', `SAVING: no baseline\n${line}`);
+    expect(problem(card)).toMatch(/a line above the SPEND line also reads as a spend \(£5\)/);
+    // The dispatcher's own reader agrees it would have taken £5, not £148.90.
+    const read = py(DISPATCH, 'print(json.dumps(m.spend_declared(P["o"])))', { o: card });
+    expect(read[0]).toBe(5);
+  });
+
+  it('a spend-like line BELOW the SPEND line changes nothing the dispatcher reads, and passes', () => {
+    const card = FENCE.replace(CLOSING, `Spend: nothing more is due.\n${CLOSING}`);
+    expect(problem(card)).toBe('');
+    const read = py(DISPATCH, 'print(json.dumps(m.spend_declared(P["o"])))', { o: FENCE });
+    expect(read).toEqual([148.9, false]);
+  });
+
   it('any other key written twice is refused', () => {
     expect(problem(FENCE.replace('SAVING: no baseline', 'SAVING: no baseline\nSAVING: £5'))).toMatch(/SAVING line is written twice/);
   });
