@@ -27,7 +27,8 @@ spec = importlib.util.spec_from_file_location("m", ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 AF = m.AF
 roster = {"${RESPONSE}": {"name": "Inbox Response", "status": "Live", "dispatchable": True},
-          "${PROPERTY}": {"name": "Property Administration", "status": "Live", "dispatchable": True}}
+          "${PROPERTY}": {"name": "Property Administration", "status": "Live", "dispatchable": True},
+          m.CREDITOR_REC_ID: {"name": "Creditor Management", "status": "Live", "dispatchable": True}}
 ctx = m.lane_context([], roster, "", [], {})
 T = {"id": "recSourcingLaneAa", "createdTime": "2026-11-12T09:45:00.000Z",
      "fields": {AF["name"]: ${JSON.stringify(name)}, AF["description"]: ${JSON.stringify(description)},
@@ -36,7 +37,8 @@ T = {"id": "recSourcingLaneAa", "createdTime": "2026-11-12T09:45:00.000Z",
 t = m.task_view(T)
 l, extra = m.task_lane(t, ctx)
 print(json.dumps({"lane": l, "property": t.get("property") or "", "target": t.get("autoTarget") or "",
-                  "tier1": bool(t.get("tier1")), "creditor": bool(t.get("creditor"))}))`], { encoding: 'utf8' });
+                  "tier1": bool(t.get("tier1")), "creditor": bool(t.get("creditor")),
+                  "toCreditor": t.get("autoTarget") == m.CREDITOR_REC_ID}))`], { encoding: 'utf8' });
   return JSON.parse(out.trim().split('\n').pop());
 }
 
@@ -78,9 +80,15 @@ describe('a buying task stays with Inbox Response whatever is being bought', () 
     expect(lane('RESOURCING: smoke alarm rota').lane).toBe('routingNeeded');
   });
 
-  it('tier 1 and the creditor lane still win over a buying task', () => {
-    // A creditor's demand named as a buying task is still the creditor lane's (the steal is by lane, not by words here).
+  it('the creditor lane still takes a buying task that is really a creditor matter', () => {
+    // Review, 12 Nov 2026: the first version of this test passed whatever the lane was.
     const c = lane('SOURCING: final demand from British Gas for the boiler invoice, debt collection');
-    expect(c.creditor || c.tier1 || c.lane !== 'newWork').toBe(true);
+    expect(c.creditor).toBe(true);
+    expect(c.lane).toBe('routingNeeded');
+    expect(c.toCreditor).toBe(true);
+    // CONTROL: an ordinary buying task has no creditor mark and no target.
+    const plain = lane(REAL);
+    expect(plain.creditor).toBe(false);
+    expect(plain.toCreditor).toBe(false);
   });
 });
