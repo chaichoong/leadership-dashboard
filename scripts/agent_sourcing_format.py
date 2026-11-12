@@ -24,10 +24,13 @@ ONE MORE, FROM THE ALARM TEST (Kevin, 12 Nov 2026)
       up, so a card with a wrong total would have reached Kevin as checked.
       Two things keep that sum honest (review, 12 Nov 2026). Any line
       WRITTEN like an item (`... | new | ...` or `... | second-hand | ...`)
-      must start with the plain PICK or RESERVE key, whatever it is called
+      must start with one of the card's plain keys, whatever it is called
       (`PICK2:`, `Pick 2:`, `- PICK 2:`, `1. PICK 2 (promoted):`), because a
-      line the key pattern does not read is left out of the sum. The rule is
-      on the shape of the line, not on a list of misspellings. And the SPEND
+      line the key pattern does not read is left out of the sum. A line
+      under a plain key is accounted for: PICK is summed, RESERVE is parsed,
+      and BASELINE may carry a preferred-list row, which prints the same
+      bars. The rule is on the shape of the line, not on a list of
+      misspellings. And the SPEND
       line the dispatcher reads (its pattern takes the first match, in any
       case, after spaces) must be this card's SPEND line.
 
@@ -68,10 +71,9 @@ KEY_RE = re.compile(
 # The one leniency: a SOURCING key dressed in bullets or bold, so such a card is refused, not skipped.
 DRESSED_SOURCING_RE = re.compile(r"^ *[-*•_ ]+SOURCING[*_ ]*:|^SOURCING[*_ ]+:", re.M)
 
-# A line written like an item: its second field is the kind, between two pipes. Such a line must
-# start with the plain PICK or RESERVE key, or its price is in no total and nothing has checked it.
+# A line written like an item: the kind sits between two pipes. Such a line must start with one of
+# the card's plain keys (KEY_RE), or its price is in no total and nothing has checked it.
 ITEM_SHAPED_RE = re.compile(r"\|[ \t*_]*(?:new|second-hand)[ \t*_]*\|", re.I)
-ITEM_KEY_RE = re.compile(r"(?:PICK(?: \d+)?|RESERVE \d+):")
 
 PRICE_RE = re.compile(r"^£([0-9][0-9,]*(?:\.[0-9]{1,2})?)$")
 LINK_RE = re.compile(r"^https?://\S+$")
@@ -191,7 +193,7 @@ def parse_sourcing(output):
             raise SourcingFormatError(f"the {key} line is missing or empty; write {key}: and what it says on the card shape")
 
     for line in text.splitlines():
-        if ITEM_SHAPED_RE.search(line) and not ITEM_KEY_RE.match(line):
+        if ITEM_SHAPED_RE.search(line) and not KEY_RE.match(line):
             raise SourcingFormatError(
                 f"a line is written like an item but does not start with the plain key, so its price is in no "
                 f"total: {line.strip()[:60]!r}; start it PICK: or PICK 1: (or RESERVE 1:) in capitals at the very "

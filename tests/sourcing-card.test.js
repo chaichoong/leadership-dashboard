@@ -289,6 +289,21 @@ describe('the sourcing card shape', () => {
     expect(problem(card)).toBe('');
   });
 
+  // Review pass 3: `preferred-list.py list` prints a row with the same bars (key | item | £price |
+  // Bought As | ...), and the agent's rules call that row the BASELINE. A line under any plain key
+  // is accounted for, so the pasted row passes, and the total is still checked.
+  it('a preferred-list row pasted as the BASELINE passes, and the total is still checked', () => {
+    const row = 'BASELINE: fence-posts | Fence posts | £139.00 | New | Screwfix | https://www.screwfix.com/p/1 | last bought 2026-10-02 | Active';
+    const card = swap(FENCE, 'BASELINE:', row);
+    expect(problem(card)).toBe('');
+    expect(problem(swap(card, 'BASELINE:', row.replace('| New |', '| Second-hand |')))).toBe('');
+    expect(problem(swap(card, 'SPEND:', 'SPEND: £139.00 (one-off)')))
+      .toMatch(/SPEND reads £139\.00 but the PICK lines add up to £148\.90/);
+    // CONTROL: the same row with no key in front of it is still refused.
+    expect(problem(FENCE.replace('SAVING: no baseline', `SAVING: no baseline\n${row.replace('BASELINE: ', '')}`)))
+      .toMatch(/written like an item but does not start with the plain key/);
+  });
+
   it.each([
     [' SPEND: £5 per unit'],
     ['Spend: £5 a month'],
