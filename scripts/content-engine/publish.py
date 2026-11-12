@@ -1594,6 +1594,27 @@ def published(day=0):
 # put 2059 back in Kevin's queue to approve again. The engine now closes its own card, once, when all seven sections
 # are done, through agent-dispatch's `complete` so its gates (approval, blocker) still apply.
 CARD_CLOSED_STATUSES = ("Completed", "Cancelled")     # agent-dispatch's two closed statuses (CLOSED_KEEPER_STATUSES)
+
+# A REFUSAL SAYS WHAT IS WRONG ON ITS FIRST LINE (finding 20261013-phase-3-849). The close refusal was stored as
+# out[-300:] and the report printed the last 120 characters of that, so a dispatch refusal — whose first line is the
+# reason and whose remaining lines tell the AGENT what to run — reached every reader as a fragment of the instructions:
+# on 11 Oct 2026 the publishing report read "content cards not closed: 2107 (since 2026-10-11:  --output-file <file>",
+# which is the tail of a usage example and says nothing about why the card is open. Same lesson as the share-error
+# head/tail fix of 19 Oct 2026 (see _share one above): take the HEAD of the message, never the tail.
+_REFUSAL_NOISE_RE = re.compile(r"^(usage:|positional arguments|optional arguments|options:|[-{\[]|\w+\.py\s)", re.I)
+_REFUSAL_PREFIX_RE = re.compile(r"^(?:[\w.\-/]+\.py\s*:\s*error\s*:\s*|(?:ERROR|REFUSED|FATAL)\s*[:—-]\s*)+", re.I)
+
+
+def refusal_reason(out, limit=200):
+    """The reason a refusal gives — its first real line, with the ERROR/usage scaffolding off."""
+    for line in str(out or "").replace("\r", "\n").split("\n"):
+        line = " ".join(line.split())
+        if not line or _REFUSAL_NOISE_RE.match(line):
+            continue
+        line = _REFUSAL_PREFIX_RE.sub("", line).strip()
+        if line:
+            return line[:limit]
+    return (" ".join(str(out or "").split()) or "no reason given")[:limit]
 # A clip section with nothing in it is owed only when that clip was made: an episode with no diary section has no
 # Learnings clip, so its Learnings, Short and share sections read "missing" for good (review, 30 Sep 2026).
 CLIP_SECTIONS = {"YouTube Short": ("lfmd",), "Learnings clips": ("lfmd",), "Teaser clips": ("summary",), "Facebook share": ("summary", "lfmd")}
@@ -1675,9 +1696,9 @@ def close_cards(dry_run=False, status_of=card_status, run=dispatch, made=None):
                 # A refusal (approved with edits and no EDITS APPLIED mark, an open blocker, an escalation that wiped
                 # the verdict) is tried every hour, flagged as an ERROR once, and named in the report until it clears.
                 first = not entry.get("card_close_refused")
-                mark_card(day, card_close_refused={"since": (entry.get("card_close_refused") or {}).get("since") or now_utc(), "why": out[-300:]})
-                if first: print("ERROR: episode %d: card %s not closed (status %s): %s" % (day, task, status, out[-300:]))
-                else: print("episode %d: card %s still not closed: %s" % (day, task, out[-200:]), file=sys.stderr)
+                mark_card(day, card_close_refused={"since": (entry.get("card_close_refused") or {}).get("since") or now_utc(), "why": refusal_reason(out, 300)})
+                if first: print("ERROR: episode %d: card %s not closed (status %s): %s" % (day, task, status, refusal_reason(out, 300)))
+                else: print("episode %d: card %s still not closed: %s" % (day, task, refusal_reason(out)), file=sys.stderr)
                 continue
             mark_card(day, card_closed=now_utc(), card_close_refused=None); closed += 1
             print("episode %d: card %s closed" % (day, task))
@@ -1721,7 +1742,7 @@ def report():
                    for p in (e.get("posts") or {}).values() if p.get("status") in ("creating", "unconfirmed")]
     print("content monetisation: %s" % ("every YouTube episode and Short On" if not waiting else "NOT On yet for " + ", ".join(sorted(waiting))))
     print("content posts to check once: %s" % ("none" if not unconfirmed else ", ".join(unconfirmed)))
-    refused = ["%s (since %s: %s)" % (d, (e.get("card_close_refused") or {}).get("since", "")[:10], (e.get("card_close_refused") or {}).get("why", "")[-120:])
+    refused = ["%s (since %s: %s)" % (d, (e.get("card_close_refused") or {}).get("since", "")[:10], refusal_reason((e.get("card_close_refused") or {}).get("why", ""), 120))
                for d, e in sorted(state.items(), key=lambda x: int(x[0])) if e.get("card_close_refused") and not e.get("card_closed")]
     print("content cards not closed: %s" % ("none" if not refused else "; ".join(refused)))
 
@@ -1956,6 +1977,30 @@ def _selftest_never_waits():
         g.update(saved)
 
 
+# The refusal agent-dispatch's MINOR-EDITS GATE really prints, word for word, and the one that held 2107's card open
+# since 11 Oct 2026. Its first line is the reason; everything under it tells the AGENT what to run.
+REAL_EDITS_REFUSAL = (
+    "ERROR: refusing to complete rec2061 \u2014 Kevin approved it WITH EDITS and no edit was applied.\n"
+    "       He asked for: Still need to work a little bit on the stabilisation of the editing, but this is just "
+    "about passable, so we'll let this one through. We just need to check this again in future.\n"
+    "       Apply it to the Agent Output, then run:\n"
+    "         python3 scripts/agent-dispatch.py revise rec2061 --output-file <file>\n"
+    "       and carry out the REVISED text. Completing without it sends the version he asked to change.")
+
+
+def _selftest_refusal_reason():
+    """Back-test of finding 20261013-phase-3-849: the tail of this refusal is a fragment of a usage example."""
+    assert REAL_EDITS_REFUSAL[-300:][-120:].strip().startswith("--output-file"), "the old tail really did land here"
+    r = refusal_reason(REAL_EDITS_REFUSAL)
+    assert r == "refusing to complete rec2061 \u2014 Kevin approved it WITH EDITS and no edit was applied.", r
+    assert refusal_reason("usage: agent-dispatch.py [-h] {add,close}\n  -h, --help\nagent-dispatch.py: error: invalid choice: 'nope'") \
+        == "invalid choice: 'nope'", "argparse's usage block is not a reason"
+    assert refusal_reason("REFUSED: an open BLOCKER sits on this task") == "an open BLOCKER sits on this task"
+    assert refusal_reason("") == "no reason given" and refusal_reason(None) == "no reason given"
+    assert refusal_reason("  \n\n  HTTP 422 Unprocessable Entity  ") == "HTTP 422 Unprocessable Entity"
+    assert len(refusal_reason("x" * 500, 120)) == 120, "a long single-line reason is cut from the front"
+
+
 def _selftest_close_cards():
     """30 Sep 2026: 2059-2077 were live on all seven sections and their approved cards sat open at "Today" for up to
     two weeks, so the Task Manager asked Kevin to approve 2059 again. Drives close_cards end to end on fakes."""
@@ -1985,7 +2030,7 @@ def _selftest_close_cards():
     def run_(*args):
         calls.append(args)
         if args[:2] == ("complete", "rec2063"): disk["2078"]["fill_attempts"] = 1   # another writer, mid-run
-        if args[:2] == ("complete", "rec2061"): return 1, "ERROR: refusing to complete rec2061 - Kevin approved it WITH EDITS and no edit was applied."
+        if args[:2] == ("complete", "rec2061"): return 1, REAL_EDITS_REFUSAL
         if args[:2] == ("annotate", "rec2068"): return 1, "HTTP 422"
         return 0, "{}"
     g = globals(); saved = {k: g[k] for k in ("load_state", "save_state", "approval")}
@@ -2009,6 +2054,10 @@ def _selftest_close_cards():
         assert disk["2065"]["card_closed"].endswith("Z"), "an episode with no diary section closes on the sections it has"
         assert "card_closed" not in disk["2066"], "a Learnings clip that was made but never posted keeps the card open"
         assert "card_closed" not in disk["2061"] and "WITH EDITS" in disk["2061"]["card_close_refused"]["why"], "a refused close is recorded, never as closed"
+        why = disk["2061"]["card_close_refused"]["why"]
+        assert why.startswith("refusing to complete rec2061") and "--output-file" not in why, \
+            "the REASON is stored, never the tail of the instructions under it: %r" % why
+        assert "--output-file" not in out and "WITH EDITS" in out, "the ERROR line says why, not how to run revise: %s" % out
         assert out.count("ERROR: episode 2061") == 1, "a refusal is flagged as an ERROR the first time: %s" % out
         assert "2068" in err and "note was not written" in err and disk["2068"]["card_closed"].endswith("Z"), "a failed note is said, and the card still counts as closed"
         assert "card_closed" not in disk["2078"] and "card_closed" not in disk["2062"], "an episode not out everywhere, or not approved, stays open"
@@ -2389,6 +2438,7 @@ def selftest():
     _selftest_placeholder_folder()
     _selftest_one_episode_fails()
     _selftest_never_waits()
+    _selftest_refusal_reason()
     _selftest_close_cards()
     import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state, clip=clip)"), "monetisation is checked every sync"
     msrc = _i5.getsource(monetise_long_video)

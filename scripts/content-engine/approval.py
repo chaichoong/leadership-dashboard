@@ -382,6 +382,43 @@ def with_edits_block(original, lines, stamp):
     return original[:i].rstrip() + "\n\n" + block + "\n\n" + original[i:]
 
 
+# AN APPROVAL THAT ASKS FOR NOTHING ON THIS EPISODE (finding 20261013-phase-3-849). Episode 2107's card sat open from
+# 11 Oct 2026 because Kevin's note read "this is just about passable, so we'll let this one through. We just need to
+# check this again in future." That is an approval with a comment about LATER episodes, and the receipt the gate waits
+# for could never honestly be written, because he asked for no change to 2107. The episode was finished, approved, and
+# could not go out. 2055 is the same shape ("no amendments for today, but this feedback needs to be taken into
+# consideration moving forwards").
+#
+# It FAILS CLOSED, and the three tests are deliberately all required:
+#   * he must SAY this one needs nothing (LET_THROUGH_RE) — "this is all good" and "I think this is good now" are not
+#     on the list, because 2090 and 2194 both open that way and then ask for work on the episode itself;
+#   * the note must look past this episode (FORWARD_RE);
+#   * and ANY concrete ask of the reader refuses it (ASK_RE), whatever the other two say.
+# "We need to get that timing right" and "Still need to work a little bit on the stabilisation" are NOT asks: they are
+# what the forward-looking half of both real notes says, so "need to" can never be the thing that blocks this.
+# Back-tested on every stored with-edits note (approval.py selftest): it fires on 2055 and 2107 and on nothing else.
+LET_THROUGH_RE = re.compile(
+    r"let (?:this|that|it) (?:one )?(?:go )?through|no amendments?\b|no changes? (?:to|for|on) (?:this|these|it)"
+    r"|nothing (?:to change|needs changing) (?:on|for|to) (?:this|these|it)|leave (?:this|it) (?:one )?as is"
+    r"|happy with this one|this one (?:is|'s) fine", re.I)
+FORWARD_RE = re.compile(r"in (?:the )?future|next time|going forward|moving forwards?|from now on|future (?:episodes|ones)"
+                        r"|for the next|next one", re.I)
+ASK_RE = re.compile(r"\bcan you\b|\bcould you\b|\bwould you\b|\bplease\b|\bensure\b|\bmake sure\b|\bupload it\b"
+                    r"|\bre-?render\b|\bre-?do\b|\bre-?cut\b|\bre-?post\b|\bre-?upload\b|\breplace\b|\bconfirm when\b"
+                    r"|\bchange the\b|\bremove the\b|\badd the\b|\bfix the\b|\bcheck the raw\b|\bsend it\b"
+                    r"|\bif that'?s done\b|\bwe need to look at\b|\bhave a look at\b|\bgo back and\b", re.I)
+NO_CHANGE_DONE = "no change was asked of this episode; your note is recorded here for future episodes"
+NO_CHANGE_RECEIPT = "no-change note"   # stands in for a receipt's mtime, so a refused no-change record is not retried
+
+
+def nothing_asked_of_this_episode(feedback):
+    """Does this with-edits note ask for nothing to be changed on THIS episode? Said, never guessed."""
+    text = " ".join(str(feedback or "").split())
+    if not text or ASK_RE.search(text):
+        return False
+    return bool(LET_THROUGH_RE.search(text) and FORWARD_RE.search(text))
+
+
 def revise_minor_edits(state=None, root=None, episodes=None, read=None, run=None, now=None):
     """An episode Kevin approved WITH EDITS publishes on his yes, but agent-dispatch refuses to complete its card until
     `revise` records the edit (2090, 6 Oct 2026: out on every section, card open since). Nothing in the engine acts on
@@ -404,16 +441,28 @@ def revise_minor_edits(state=None, root=None, episodes=None, read=None, run=None
         pub = episodes.get(str(d)) or {}
         if pub.get("card_closed"): continue
         path = os.path.join(root, "%s.md" % d)
-        if not os.path.exists(path):
+        points = render.feedback_points(e["feedback"])
+        if os.path.exists(path):
+            lines = render.receipt_lines(open(path).read())
+            if not lines or len(lines) < len(points):
+                print("episode %s: the receipt at %s answers %d point(s) but Kevin made %d; one '- <his point> → <what was done>' line each"
+                      % (d, path, len(lines), len(points))); continue
+            if (e.get("revise_refused") or {}).get("receipt") == os.path.getmtime(path):
+                print("episode %s: edits not recorded, the same receipt was refused before: %s" % (d, e["revise_refused"].get("why", "")[-160:])); continue
+        elif nothing_asked_of_this_episode(e.get("feedback")):
+            if (e.get("revise_refused") or {}).get("receipt") == NO_CHANGE_RECEIPT:
+                print("episode %s: a no-change record was refused before, so nothing is retried: %s"
+                      % (d, (e.get("revise_refused") or {}).get("why", "")[-160:])); continue
+            # A receipt nobody can honestly write is not a gate, it is a stuck card. The note is recorded as what it
+            # is, and the card closes (finding 20261013-phase-3-849).
+            lines = [(p, NO_CHANGE_DONE) for p in points]
+            print("episode %s: your note asks for no change to this episode, so it is recorded against future episodes "
+                  "and the card closes" % d)
+        else:
             if pub.get("card_close_refused"):
                 print("episode %s: approved with your edits; its card stays open until a receipt of what was done is written to %s" % (d, path))
             continue
-        lines, points = render.receipt_lines(open(path).read()), render.feedback_points(e["feedback"])
-        if not lines or len(lines) < len(points):
-            print("episode %s: the receipt at %s answers %d point(s) but Kevin made %d; one '- <his point> → <what was done>' line each"
-                  % (d, path, len(lines), len(points))); continue
-        if (e.get("revise_refused") or {}).get("receipt") == os.path.getmtime(path):
-            print("episode %s: edits not recorded, the same receipt was refused before: %s" % (d, e["revise_refused"].get("why", "")[-160:])); continue
+        sent = lambda: os.path.exists(path) and os.replace(path, path + ".sent")
         try:
             t = read(e["task"])
         except (Exception, SystemExit) as ex:
@@ -422,16 +471,18 @@ def revise_minor_edits(state=None, root=None, episodes=None, read=None, run=None
         if outcome != "Approved with minor edits":
             print("episode %s: card %s reads %r now, not approved with edits; nothing recorded" % (d, e["task"], outcome)); continue
         if EDITS_APPLIED in (t.get(TF["notes"]) or ""):
-            os.replace(path, path + ".sent"); print("episode %s: card %s already has its edits recorded" % (d, e["task"])); continue
+            sent(); print("episode %s: card %s already has its edits recorded" % (d, e["task"])); continue
         revised = with_edits_block(t.get(TF["agentOutput"]) or "", lines, now.strftime("%-d %b %Y"))
+        # There is no receipt file on the no-change path, so filing one is a no-op there, never a crash.
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
             fh.write(revised); tmp = fh.name
         try: code, out = run("revise", e["task"], "--output-file", tmp)
         finally: os.remove(tmp)
         if code:
             print("ERROR: episode %s: card %s edits NOT recorded: %s" % (d, e["task"], out[-300:]))
-            mark(d, revise_refused={"receipt": os.path.getmtime(path), "why": out[-300:]}); continue
-        os.replace(path, path + ".sent"); mark(d, revise_refused=None); done.append(int(d))
+            mark(d, revise_refused={"receipt": os.path.getmtime(path) if os.path.exists(path) else NO_CHANGE_RECEIPT,
+                                    "why": out[-300:]}); continue
+        sent(); mark(d, revise_refused=None); done.append(int(d))
         print("episode %s: card %s has your edits recorded; it closes once the episode is out everywhere" % (d, e["task"]))
     return done
 
@@ -536,8 +587,45 @@ def _selftest_gate_wait():
         else: _s.modules.pop("qa", None)
 
 
+def _selftest_nothing_asked():
+    """Finding 20261013-phase-3-849, back-tested on every with-edits note Kevin has actually left. 2055 and 2107 ask
+    for nothing to be changed on their own episode; the other three ask for work on it and must keep the card open."""
+    fires = {
+        2055: "The timing of when the jingle goes in is not fitting in the gap that I leave when I record. You're doing "
+              "it over the first sentence of the actual main body of the vlog. I'm okay to approve these ones, so no "
+              "amendments for today, but this feedback needs to be taken into consideration moving forwards. We need to "
+              "get that timing right, as it just looks unprofessional otherwise.",
+        2107: "Still need to work a little bit on the stabilisation of the editing, but this is just about passable, so "
+              "we'll let this one through. We just need to check this again in future.",
+    }
+    holds = {
+        1841: "Happy to proceed, but the episodes 2195 and 2051 had multiple duplications published on YouTube and all "
+              "the social media channels. I had to go through and manually delete them all, but we need to look at why "
+              "this happened, as it cannot happen again.",
+        2090: "This is all good, but I'm fairly sure there'll be a summary video. It might have been an episode where "
+              "the weather was so cold the camera cut out before I could do the summary video. I may have done the "
+              "summary video on the next day. Can you check the raw footage for the day this was recorded and the day "
+              "after to see whether you can find the summary video? It's very seldom I'd forget to do that, so if you "
+              "can just check that for me, that would be great.",
+        2194: "I think this is good now. We just need to ensure that the YouTube link is put into the copy and there are "
+              "no placeholders that are not correctly populated with the correct information. If that's done, you can "
+              "upload it to this and confirm when it's done.",
+    }
+    for day, note in fires.items():
+        assert nothing_asked_of_this_episode(note), "%d asks for nothing on its own episode" % day
+    for day, note in holds.items():
+        assert not nothing_asked_of_this_episode(note), "%d asks for work on its own episode" % day
+    # One ask anywhere in the note refuses it, whatever else the note says.
+    assert not nothing_asked_of_this_episode(fires[2107] + " Please re-render it.")
+    # Both halves are required: a let-through with no forward-looking half is an ordinary approval note.
+    assert not nothing_asked_of_this_episode("Let this one through.")
+    assert not nothing_asked_of_this_episode("We need to check this again in future.")
+    assert not nothing_asked_of_this_episode("") and not nothing_asked_of_this_episode(None)
+
+
 def selftest():
     _selftest_gate_wait()
+    _selftest_nothing_asked()
     full = {"id": "recF", "fields": {"Record Status": STATUS_READY, "Video Edited URL": "https://drive/full", "Thumbnail URL": "https://drive/thumb",
                                      "Reframed Video URL": "https://drive/lfmd", "Summary Video URL": "https://drive/sum",
                                      "YouTube Copy": "yt words", "Blog Copy": "blog words", "Notes": "copy written; review: Threads copy 512 chars"}}

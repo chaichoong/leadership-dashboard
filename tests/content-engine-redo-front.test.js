@@ -552,6 +552,35 @@ res = {"done": approval.revise_minor_edits(root=root, episodes=${pub}, read=lamb
     expect(r.out).toContain('stays open until a receipt of what was done is written');
   });
 
+  // Finding 20261013-phase-3-849: episode 2107's card sat open from 11 Oct 2026 because Kevin's note asked for nothing
+  // to be changed on 2107, so the receipt the gate waits for could never honestly be written. His own words, verbatim.
+  const LET_THROUGH = { ...APPROVED, feedback: "Still need to work a little bit on the stabilisation of the editing, but this is just about passable, so we'll let this one through. We just need to check this again in future." };
+
+  it('a note that asks for nothing on this episode records itself and closes, with no receipt', () => {
+    const r = py(REVISE(null), { 2103: LET_THROUGH });
+    expect(r.res.done).toEqual([2103]);
+    expect(r.calls[0].slice(0, 3)).toEqual(['revise', 'recFAKEcard00002', '--output-file']);
+    expect(r.res.written[0]).toContain('no change was asked of this episode');
+    expect(r.out).toContain('asks for no change to this episode');
+    expect(r.files).toEqual([]);                      // there was no receipt file to file away
+  });
+
+  it('CONTROL: the same note with one ask in it keeps waiting for a receipt', () => {
+    const asked = { ...LET_THROUGH, feedback: LET_THROUGH.feedback + ' Please re-render it first.' };
+    const r = py(REVISE(null), { 2103: asked });
+    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('stays open until a receipt of what was done is written');
+  });
+
+  it('a refused no-change record is said once and not retried every hour', () => {
+    const r = py('RUN[0] = (1, "ERROR: refusing to revise")\n' + REVISE(null) + `
+first = res
+res = {"first": first, "second": approval.revise_minor_edits(root=root, episodes={"2103": {}}, read=lambda t: fields, run=run_)}`, { 2103: LET_THROUGH });
+    expect(r.calls.length).toBe(1);
+    expect(r.state['2103'].revise_refused.receipt).toBe('no-change note');
+    expect(r.out).toContain('a no-change record was refused before');
+  });
+
   it('a receipt that misses one of his points is refused', () => {
     const r = py(REVISE(RECEIPT.split('\n')[0] + '\n'), { 2103: APPROVED });
     expect(r.calls).toEqual([]);
