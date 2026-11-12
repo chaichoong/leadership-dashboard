@@ -16,6 +16,13 @@ THREE RULES, HELD BY CONSTRUCTION (second review, 11 Nov 2026)
 (iii) Kevin is never handed a wall of second-hand listings: more than
       quantity + 3 distinct marketplace item links is refused.
 
+ONE MORE, FROM THE ALARM TEST (Kevin, 12 Nov 2026)
+(iv)  SPEND is the sum of the PICK lines, to the penny. Every PICK line
+      carries the full amount for that line (count times unit price, delivery
+      and VAT in). A set of six smoke alarms and one heat alarm passed this
+      check with unit prices on its PICK lines and a total nothing had added
+      up, so a card with a wrong total would have reached Kevin as checked.
+
 AGENT OUTPUT FORMAT: the SHAPE text below. Other card text (CHECKED:, the
 bold Approve line, TRACK RECORD, KEVIN ONLY, the closing line) may sit around
 the keys, in any order.
@@ -68,7 +75,8 @@ ITEM_PAGES = (("facebook.com", "/marketplace/item/"), ("facebook.com", "/share/"
 SHAPE = (
     "SOURCING: <item> | <quantity> | <property>\n"
     "BASELINE: <last buy on the preferred list: item, supplier, £price, date> | none on the list\n"
-    "PICK: <name> | <new|second-hand> | £<full price with delivery and VAT> | <https link>\n"
+    "PICK: <name, with the count when the line covers more than one> | <new|second-hand> | "
+    "£<full amount for this line, delivery and VAT in> | <https link>\n"
     "RESERVE 1: <name> | <new|second-hand> | £<full price> | <https link>   (or: RESERVE 1: none found)\n"
     "RESERVE 2: <same>   (or: RESERVE 2: none found)\n"
     "NEW FOR COMPARISON: <item> | £<full price> | <https link>   (or: NEW FOR COMPARISON: not found: <why>)\n"
@@ -78,9 +86,9 @@ SHAPE = (
     "SAVING: <£ against the baseline, or against the new price> | no baseline\n"
     "PAY BY: <shop checkout | seller: bank transfer | seller: cash on collection>\n"
     "SEARCHED: <sites searched, in words, and any site NOT CHECKED with why>\n"
-    "SPEND: £<total> (one-off)\n"
+    "SPEND: £<the PICK lines added up> (one-off)\n"
     "Every key plain and in capitals at the start of its line. More than one unit: PICK 1:, PICK 2: ... "
-    "up to the quantity."
+    "up to the quantity. SPEND must equal the PICK lines added together, to the penny."
 )
 
 
@@ -142,6 +150,7 @@ def parse_sourcing(output):
     """The parsed card, or SourcingFormatError naming the first line that is wrong.
 
     Returns {qty, item, property, picks, reserves, any_second_hand, any_new, spend}.
+    `spend` always equals the sum of the pick prices (rule iv).
     A reserve written `none found` is None in `reserves`.
     """
     text = output or ""
@@ -221,6 +230,14 @@ def parse_sourcing(output):
     sm = SPEND_LINE_RE.match("SPEND: " + fields["SPEND"]) if "SPEND" in fields else None
     if not sm:
         raise SourcingFormatError("there is no plain SPEND line with an amount; write SPEND: £<total> (one-off)")
+    spend = float(sm.group("amount").replace(",", ""))
+    # Rule iv, in whole pence so 0.1 + 0.2 never reads as a mismatch.
+    picks_pence = sum(round(p["price"] * 100) for p in parsed_picks)
+    if round(spend * 100) != picks_pence:
+        raise SourcingFormatError(
+            f"SPEND reads £{spend:,.2f} but the PICK lines add up to £{picks_pence / 100:,.2f}; every PICK line "
+            "carries the full amount for that line (count times unit price, delivery and VAT in) and SPEND is "
+            "their sum")
 
     links = item_links(text)
     if len(links) > qty + 3:
@@ -230,7 +247,7 @@ def parse_sourcing(output):
 
     return {"qty": qty, "item": item, "property": prop, "picks": parsed_picks, "reserves": reserves,
             "any_second_hand": any_second_hand, "any_new": any_new,
-            "spend": float(sm.group("amount").replace(",", ""))}
+            "spend": spend}
 
 
 def sourcing_problem(output):
