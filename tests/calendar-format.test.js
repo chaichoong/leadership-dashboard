@@ -135,3 +135,51 @@ describe('calendar-write.py', () => {
     expect(out).toContain('selftest passed');
   });
 });
+
+// The 8 Sep 2026 track-record rule makes submit REQUIRE a TRACK RECORD block at the top of the Agent Output, and the
+// carry-out then refused the very shape submit had demanded: task reccNLmwFAOZWYtQT (Y7 football at Northstowe,
+// approved as-is on 11 Nov 2026) got 'first line must be exactly CALENDAR:' from calendar-write.py and never reached
+// the diary. Finding 20261111-agent-dispatch-1270. The output below is that card's own shape.
+describe('a TRACK RECORD block above the marker (finding 20261111-agent-dispatch-1270)', () => {
+  const REAL_CARD = [
+    'TRACK RECORD: none found (searched tasks + Gmail for nothing)',
+    '',
+    'CALENDAR:',
+    'TITLE: James: Y7 football tournament, away at Northstowe',
+    'START: 2026-11-11 13:00',
+    'END: 2026-11-11 17:15',
+    'LOCATION: Northstowe (away fixture)',
+    '---',
+    "Year 7 football tournament, away at Northstowe, 1pm to about 5.15pm.",
+  ].join('\n');
+
+  it('parses the approved card instead of refusing it after his yes', () => {
+    const r = parse(REAL_CARD);
+    expect(r.ok).toBe(true);
+    expect(r.event.title).toBe('James: Y7 football tournament, away at Northstowe');
+    expect(r.event.start).toBe('2026-11-11T13:00:00');
+    expect(r.event.location).toBe('Northstowe (away fixture)');
+  });
+
+  it('the submit gate and the carry-out still agree on it, which is why the parser is shared', () => {
+    expect(submitProblem(REAL_CARD, 'Admin').problem).toBe('');
+  });
+
+  it('takes a dated TRACK RECORD block, and a `---` inside it never becomes the separator', () => {
+    const r = parse(['TRACK RECORD:', '- 9 Nov 2026 message from the school', '---', '',
+      'CALENDAR:', 'TITLE: x', 'START: 2026-11-11 13:00', 'END: 2026-11-11 14:00', '---', 'summary'].join('\n'));
+    expect(r.ok).toBe(true);
+    expect(r.event.title).toBe('x');
+  });
+
+  it('CONTROL: other text above the marker is still refused, never quietly dropped', () => {
+    const r = parse('A note I wrote above it.\n\nCALENDAR:\nTITLE: x\nSTART: 2026-11-11 13:00\nEND: 2026-11-11 14:00\n---\nsummary');
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('first line must be exactly');
+  });
+
+  it('CONTROL: a TRACK RECORD block with no CALENDAR: marker after it is still refused', () => {
+    const r = parse('TRACK RECORD: none found\n\nTITLE: x\n---\nsummary');
+    expect(r.ok).toBe(false);
+  });
+});

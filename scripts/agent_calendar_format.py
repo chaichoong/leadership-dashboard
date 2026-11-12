@@ -53,7 +53,8 @@ import os
 import re
 from datetime import datetime
 
-from agent_email_format import strip_carry_out_line, strip_tier1_banner
+from agent_email_format import (TRACK_RECORD_LINE_RE, strip_carry_out_line,
+                                strip_tier1_banner)
 
 
 class CalendarFormatError(ValueError):
@@ -101,13 +102,33 @@ def _parse_time(value, header):
             f"YYYY-MM-DD HH:MM, got {value!r}")
 
 
+def strip_leading_track_record(lines):
+    """Drop a TRACK RECORD block that sits ABOVE the `CALENDAR:` marker (finding 20261111-agent-dispatch-1270).
+
+    The 8 Sep 2026 track-record rule makes submit REQUIRE that block on a card, and it is written at the top of the
+    Agent Output. This parser is shared by submit and the carry-out precisely so one can never accept what the other
+    refuses, and here it did: task reccNLmwFAOZWYtQT (Y7 football, Northstowe, approved as-is on 11 Nov 2026) opens
+    'TRACK RECORD: none found ...' and calendar-write.py create exited 1 with 'first line must be exactly CALENDAR:'.
+    Nothing reached the diary, and the refusal landed AFTER Kevin's approval — the failure this file exists to end.
+
+    It strips NOTHING else. The block must be the very first thing in the output and a `CALENDAR:` line must follow
+    it, so text above the marker still refuses rather than being quietly dropped: a card could otherwise carry
+    anything there, and the summary Kevin approves is the whole output.
+    """
+    first = next((i for i, ln in enumerate(lines) if ln.strip()), None)
+    if first is None or not TRACK_RECORD_LINE_RE.match(lines[first]):
+        return lines
+    marker = next((i for i, ln in enumerate(lines) if ln.strip().upper() == CAL_MARKER), None)
+    return lines[marker:] if marker is not None and marker > first else lines
+
+
 def parse_calendar(output):
     """The parsed event dict, or CalendarFormatError. Never guesses a field."""
     text = strip_tier1_banner(output or "").strip()
     if not text:
         raise CalendarFormatError("empty output")
 
-    lines = text.splitlines()
+    lines = strip_leading_track_record(text.splitlines())
     # Find the marker and the --- separator.
     body_at = None
     for i, ln in enumerate(lines):
