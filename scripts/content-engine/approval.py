@@ -254,8 +254,20 @@ def output_gate(day, ledger, state, recs=None):
     if not ok:
         waiting = qa.is_wait(failures)
         entry = state.setdefault(str(day), {})
+        was = entry.get("qa_blocked") or {}
         entry.pop("qa_blocked", None); entry.pop("qa_waiting", None)
-        entry["qa_waiting" if waiting else "qa_blocked"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "failures": ["%s: %s" % f for f in failures]}
+        texts = ["%s: %s" % f for f in failures]
+        rec = {"at": dt.datetime.now().isoformat(timespec="seconds"), "failures": texts}
+        if not waiting:
+            # KEEP THE CLOCK ON THE SAME FAILURE (finding 20261110-phase-3-1259). Each read rewrote `at`, so a day
+            # blocked for weeks read exactly like one blocked last night, and pending() only sorts a blocked day to
+            # the back — never out. Day 2144 sat at 'no long clip rendered for this day' from 29 Oct to 10 Nov 2026
+            # with no card, no receipt and nothing naming it: 12 days of a verdict re-running the same render can
+            # never change. `since` survives while the failure text is the same, so the age is real.
+            same = (was.get("failures") or []) == texts
+            rec["since"] = (was.get("since") or was.get("at") or rec["at"]) if same else rec["at"]
+            rec["reads"] = (int(was.get("reads") or 1) + 1) if same else 1
+        entry["qa_waiting" if waiting else "qa_blocked"] = rec
         save_state(state)
         # A wait is not an alarm: the hourly publisher runs this step again and the card goes up within the hour
         # (15 Sep 2026: 2057 and 2058 rendered fine and waited a whole day for the next night's run).
@@ -523,6 +535,30 @@ def sync():
     after_verdicts()
 
 
+QA_STUCK_NIGHTS = 3    # three reads of the same failure is enough: nothing a night does will change the fourth
+
+
+def qa_stuck_nights(entry, now=None):
+    """Nights this day has been blocked on the SAME failure, or None when the entry carries no clock.
+
+    An entry written before `since` existed has only `at`, which every read used to rewrite, so it reads as 0 rather
+    than inventing an age from a stamp that was never a start.
+    """
+    since = (entry or {}).get("since")
+    if not since:
+        return None
+    try:
+        start = dt.datetime.fromisoformat(str(since))
+    except (TypeError, ValueError):
+        return None
+    return max(0, ((now or dt.datetime.now()) - start).days)
+
+
+def _age_note(entry):
+    n = qa_stuck_nights(entry)
+    return "" if n is None else (", blocked %d night(s) on this" % n if n else ", blocked tonight")
+
+
 def report():
     state = load_state()
     waiting = [d for d, e in state.items() if e.get("task") and not e.get("verdict")]
@@ -536,7 +572,19 @@ def report():
         len(waiting), "" if len(waiting) == 1 else "s", (" (episodes " + ", ".join(sorted(waiting)) + ")") if waiting else "", len(approved)))
     if blocked:
         print("content output gate: %d episode%s BLOCKED, no card until the files pass: %s" % (
-            len(blocked), "" if len(blocked) == 1 else "s", "; ".join("%s (%s)" % (d, "; ".join(b["failures"])[:160]) for d, b in sorted(blocked.items()))))
+            len(blocked), "" if len(blocked) == 1 else "s",
+            "; ".join("%s (%s)%s" % (d, "; ".join(b["failures"])[:160], _age_note(b)) for d, b in sorted(blocked.items()))))
+        # A TIMELESS SENTENCE IS A STALL NOBODY CAN SEE (finding 20261110-phase-3-1259, the same lesson as
+        # 20261020-phase-3-1005). The line above read the same on every one of the 12 mornings day 2144 was blocked
+        # on 'no long clip rendered for this day', and a verdict re-reading the same render can never change, so no
+        # night will clear it. Nights on the SAME failure is what separates a stall from last night's block.
+        stuck = {d: b for d, b in blocked.items() if (qa_stuck_nights(b) or 0) >= QA_STUCK_NIGHTS}
+        if stuck:
+            print("content output gate STUCK: %d episode%s blocked on the SAME failure for %d night(s) or more, so "
+                  "another night changes nothing and this needs a person: %s" % (
+                      len(stuck), "" if len(stuck) == 1 else "s", QA_STUCK_NIGHTS,
+                      "; ".join("%s (%s, %d nights)" % (d, "; ".join(b["failures"])[:120], qa_stuck_nights(b))
+                                for d, b in sorted(stuck.items()))))
     else:
         print("content output gate: nothing blocked")
 
