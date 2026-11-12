@@ -66,6 +66,57 @@ print(json.dumps(watch.redo_order(ledger, root=${JSON.stringify(dir)})))`);
     expect(JSON.parse(out)).toEqual([2106, 2112, 2100]);
   });
 
+  // Finding 20261019-phase-3-987, fourth recurrence (4 Nov 2026). Day 2106 has a second long recording the engine
+  // will not pick between, stamped on the clip exactly as the live ledger holds it. That clip sits at `failed`, and
+  // both failure stamps are read off clips at `new`, so 2106 held the head of the queue from 10 Oct and 2113 waited
+  // behind it while the night log said it was "about 1 night(s) away" every night.
+  const NEEDS_RULING = '"d.insv": {"day": 2106, "episode": 2106, "status": "failed", "requeued": "not requeued: it needs a person"},';
+
+  it('a day waiting on a ruling from Kevin does not hold the head of the queue', () => {
+    const dir = receipts({ 2100: '2026-10-17T17:23:00Z', 2106: '2026-10-10T14:16:00Z', 2112: '2026-10-13T09:19:00Z' });
+    const out = py(`import watch, json
+${LEDGER}
+ledger.update(json.loads('{${NEEDS_RULING.replace(/'/g, "")}}'.replace(",}", "}")))
+print(json.dumps(watch.redo_order(ledger, root=${JSON.stringify(dir)})))`);
+    // 2106 has waited longest and still goes last: a night cannot clear a clip only Kevin can rule on.
+    expect(JSON.parse(out)).toEqual([2112, 2100, 2106]);
+  });
+
+  it('it goes behind an ordinary failure too, because that one can still clear itself', () => {
+    const dir = receipts({ 2100: '2026-10-17T17:23:00Z', 2106: '2026-10-10T14:16:00Z', 2112: '2026-10-13T09:19:00Z' });
+    const out = py(`import watch, json
+${LEDGER}
+ledger.update(json.loads('{${NEEDS_RULING.replace(/'/g, "")}}'.replace(",}", "}")))
+ledger["c.insv"]["render_failed"] = "2026-10-18T02:00:00"
+print(json.dumps(watch.redo_order(ledger, root=${JSON.stringify(dir)})))`);
+    expect(JSON.parse(out)).toEqual([2100, 2112, 2106]);
+  });
+
+  it('CONTROL: a clip the engine WILL retry leaves the order alone', () => {
+    const dir = receipts({ 2100: '2026-10-17T17:23:00Z', 2106: '2026-10-10T14:16:00Z', 2112: '2026-10-13T09:19:00Z' });
+    const out = py(`import watch, json
+${LEDGER}
+ledger["d.insv"] = {"day": 2106, "episode": 2106, "status": "failed", "requeued": "requeued for tonight"}
+print(json.dumps([watch.redo_order(ledger, root=${JSON.stringify(dir)}), watch.needs_a_ruling(2106, ledger)]))`);
+    expect(JSON.parse(out)).toEqual([[2106, 2112, 2100], false]);
+  });
+
+  it('plan() takes the renderable day, so the queue behind the ruling drains', () => {
+    const dir = receipts({ 2106: '2026-10-10T14:16:00Z', 2113: '2026-11-02T09:00:00Z' });
+    const out = py(`import watch, json
+ledger = {
+  "b.insv": {"day": 2106, "episode": 2106, "status": "new", "reset": "10 Oct: sent back"},
+  "d.insv": {"day": 2106, "episode": 2106, "status": "failed", "requeued": "not requeued: it needs a person"},
+  "e.insv": {"day": 2113, "episode": 2113, "status": "new", "reset": "2 Nov: sent back"},
+}
+watch.RESUBMIT_DIR = ${JSON.stringify(dir)}
+days, notes = watch.plan(ledger, 2, gaps=set(), free=10**13, start=2054)
+print(json.dumps({"days": days, "note": [n for n in notes if "renders first" in n]}))`);
+    const r = JSON.parse(out);
+    expect(r.days[0]).toBe(2113);                 // before the fix this was 2106, every night, for 25 nights
+    expect(r.note[0]).toContain('day 2113');
+  });
+
   it('puts a redo day with no parked receipt behind the ones that are waiting', () => {
     const dir = receipts({ 2106: '2026-10-10T14:16:00Z' });
     const out = py(`import watch, json

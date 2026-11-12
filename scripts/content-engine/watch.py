@@ -183,6 +183,19 @@ def planned_redo_order(path=None, now=None, max_age_h=24):
         return None
 
 
+# Sorts after any ISO stamp, so a day no night can clear waits behind every day a night might (finding
+# 20261019-phase-3-987). It is a sort key only; nothing is ever written to the ledger with it.
+NEEDS_RULING_STAMP = "9999-needs-a-ruling"
+
+
+def needs_a_ruling(day, ledger):
+    """Has a clip of this day been refused in a way only a person can settle? render.py stamps `requeued` on every
+    clip it will not put back, and the one wording that means "nobody can automate past this" is its own refusal to
+    choose (resubmit_due turns the same mark into "this needs a ruling from Kevin, not another night")."""
+    return any(v.get("day") == day and (v.get("requeued") or "") and "needs a person" in str(v["requeued"])
+               for v in ledger.values())
+
+
 def redo_order(ledger, exclude=(), start=None, root=None, blocked=None):
     """The sent-back days the night may redo, in the order the night takes them.
 
@@ -211,6 +224,15 @@ def redo_order(ledger, exclude=(), start=None, root=None, blocked=None):
     exactly that, and 2122 (117 h), 2112 (94 h) and 2113 (69 h) could not drain behind it until the clip finder's
     code changed. The block stamp sends it behind the days that can still render; it keeps its place in the queue
     and comes forward the moment the wall is lifted (render.clear_block clears `redo_blocked`).
+
+    A day WAITING ON A RULING FROM KEVIN steps aside LAST of all (finding 20261019-phase-3-987, fourth recurrence,
+    4 Nov 2026). Day 2106 has two long recordings for one day and the engine will not pick which is the episode, so
+    it marked that clip `requeued: "not requeued: it needs a person"` and left it `failed`. Both failure stamps are
+    read off clips at `new`, and a clip parked at `failed` carries neither, so 2106 held the head of a
+    longest-waiting-first queue from 10 Oct with nothing able to move it: day 2113 waited two nights while the night
+    log said it was "about 1 night(s) away" every night. This is the one refusal where another night provably changes
+    nothing, so it sorts behind every day that can still render AND behind every ordinary failure, which can clear
+    itself. The day keeps its place in the queue and comes back to the front the moment the clip is ruled on.
     """
     blocked = blocked_days() if blocked is None else blocked
     def failed_at(d):
@@ -220,6 +242,8 @@ def redo_order(ledger, exclude=(), start=None, root=None, blocked=None):
                   if v.get("day") == d and v.get("status") == "new"
                   for f in ("pull_failed", "render_failed")]
         stamps.append(blocked.get(d) or "")      # a day the engine walled for the fixer lane cannot clear itself
+        if needs_a_ruling(d, ledger):
+            stamps.append(NEEDS_RULING_STAMP)    # a night cannot clear this one at all, so it waits behind the rest
         return max(stamps) if stamps else ""
     days = {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - set(exclude)
     return sorted((d for d in days if not start or d >= start),
