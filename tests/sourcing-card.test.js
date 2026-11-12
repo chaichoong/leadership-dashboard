@@ -187,10 +187,140 @@ describe('the sourcing card shape', () => {
 
   it('PICK may repeat up to the quantity, plain or numbered; one more is refused', () => {
     const twoQty = swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts | 2 | 4 Abington Place');
-    const plainTwice = twoQty.replace(/^(PICK: .*)$/m, '$1\nPICK: Posts again | new | £150 | https://www.diy.com/p/1');
+    const plainTwice = swap(twoQty.replace(/^(PICK: .*)$/m, '$1\nPICK: Posts again | new | £150 | https://www.diy.com/p/1'),
+      'SPEND:', 'SPEND: £298.90 (one-off)');
     expect(problem(plainTwice)).toBe('');
     expect(problem(plainTwice.replace(/^(PICK: .*)$/m, '$1\nPICK 3: More | new | £150 | https://www.diy.com/p/2')))
       .toMatch(/3 PICK lines for a quantity of 2/);
+  });
+
+  // THE ALARM TEST (Kevin, 12 Nov 2026). A rehearsal card for six mains smoke alarms and one heat
+  // alarm passed this check with UNIT prices on its PICK lines and a total nothing had added up. The
+  // fixture is that card's own lines. SPEND is now the sum of the PICK lines, to the penny.
+  const ALARMS = [
+    'SOURCING: Mains smoke alarm and heat alarm, wireless interlinked | 7 | property not named (test request)',
+    'BASELINE: none on the list',
+    'PICK 1: FireAngel Pro Connected FP1640W2-R mains smoke alarm, per unit | new | £63.99 | https://www.amazon.co.uk/dp/B07WQY765Q',
+    'PICK 2: FireAngel Pro Connected FP1740W2-R mains heat alarm, incl £4.20 delivery | new | £87.55 | https://www.safelincs.co.uk/product/fireangel-pro-connected-fp1740w2r-mains-powered-heat-alarm',
+    'RESERVE 1: Aico Ei3016RF mains smoke alarm | new | £112.27 | https://www.safelincs.co.uk/mains-radio-interlinked-optical-smoke-alarm-lithium-backup-ei3016rf',
+    'RESERVE 2: Aico Ei3014RF mains heat alarm | new | £124.42 | https://www.safelincs.co.uk/mains-radio-interlinked-heat-alarm-lithium-backup-ei3014rf',
+    'CASHBACK: none offered',
+    'PROVEN: both 230V mains with a sealed 10-year back-up and the radio link built in',
+    'NOT PROVEN: the property and the real number of alarms',
+    'SAVING: no baseline',
+    'PAY BY: shop checkout',
+    'SEARCHED: Amazon, Safelincs, Gumtree, Facebook Marketplace, Vinted',
+    'SPEND: £471.49 (one-off)',
+    '',
+    CLOSING,
+  ].join('\n');
+  const ALARMS_FIXED = swap(ALARMS, 'PICK 1:',
+    'PICK 1: FireAngel Pro Connected FP1640W2-R mains smoke alarm, x6 at £63.99 each | new | £383.94 | https://www.amazon.co.uk/dp/B07WQY765Q');
+
+  it('the alarm card as first written is refused: unit prices on the lines, a total that is not their sum', () => {
+    const msg = problem(ALARMS);
+    expect(msg).toMatch(/SPEND reads £471\.49 but the PICK lines add up to £151\.54/);
+    expect(msg).toMatch(/full amount for that line/);
+  });
+
+  it('the same card with the full amount on each PICK line passes, and spend is the sum', () => {
+    expect(problem(ALARMS_FIXED)).toBe('');
+    const p = parse(ALARMS_FIXED);
+    expect(p.spend).toBe(471.49);
+    expect(Math.round(p.picks.reduce((s, x) => s + x.price * 100, 0))).toBe(47149);
+  });
+
+  it.each([
+    ['a penny over', 'SPEND: £471.50 (one-off)', /SPEND reads £471\.50 but the PICK lines add up to £471\.49/],
+    ['a penny under', 'SPEND: £471.48 (one-off)', /SPEND reads £471\.48 but the PICK lines add up to £471\.49/],
+    ['one line left out of the total', 'SPEND: £383.94 (one-off)', /add up to £471\.49/],
+    ['the reserves counted in', 'SPEND: £708.18 (one-off)', /add up to £471\.49/],
+  ])('a total that is %s is refused', (_label, line, msg) => {
+    expect(problem(swap(ALARMS_FIXED, 'SPEND:', line))).toMatch(msg);
+  });
+
+  it('the fridge card with a wrong total is refused, and names both figures', () => {
+    expect(problem(swap(FRIDGES, 'SPEND:', 'SPEND: £300 (one-off)')))
+      .toMatch(/SPEND reads £300\.00 but the PICK lines add up to £260\.00/);
+  });
+
+  it('the sum is done in pence: £0.10 and £0.20 make £0.30, and a comma in thousands reads right', () => {
+    const pennies = swap(swap(swap(FENCE, 'SOURCING:', 'SOURCING: Washers | 2 | 4 Abington Place'),
+      'PICK:', 'PICK 1: Washer | new | £0.10 | https://www.toolstation.com/p/1\nPICK 2: Washer | new | £0.20 | https://www.toolstation.com/p/2'),
+    'SPEND:', 'SPEND: £0.30 (one-off)');
+    expect(problem(pennies)).toBe('');
+    const big = swap(swap(FENCE, 'PICK:', 'PICK: Boiler | new | £1,250.50 | https://www.wickes.co.uk/p/1'),
+      'SPEND:', 'SPEND: £1,250.50 (one-off)');
+    expect(problem(big)).toBe('');
+    expect(problem(swap(big, 'SPEND:', 'SPEND: £1,250 (one-off)'))).toMatch(/SPEND reads £1,250\.00 but the PICK lines add up to £1,250\.50/);
+  });
+
+  // Review, 12 Nov 2026: two ways a wrong total could still pass. A PICK line the key pattern does not
+  // read is left out of the sum, and the dispatcher reads the FIRST spend-like line, in any case.
+  it.each([
+    ['PICK2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['Pick 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK 2 : Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['- PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['**PICK 2:** Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['  PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK 2 (reserve promoted): Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['1. PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK #2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICKS 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK 2 – Posts again | second-hand | £150 | https://www.diy.com/p/1'],
+    ['PICK 2： Posts again | New | 150 | https://www.diy.com/p/1'],
+    ['Also worth a look: Posts again | **new** | £150 | https://www.diy.com/p/1'],
+    ['RESERVE one: Posts again | new | £150 | https://www.diy.com/p/1'],
+  ])('a line written like an item that does not start with the plain key is refused: %s', (line) => {
+    const twoQty = swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts | 2 | 4 Abington Place');
+    const card = twoQty.replace(/^(PICK: .*)$/m, `$1\n${line}`);
+    expect(problem(card)).toMatch(/written like an item but does not start with the plain key/);
+    // CONTROL: the same second line written plain is counted, so the old total is now refused.
+    const plain = twoQty.replace(/^(PICK: .*)$/m, '$1\nPICK 2: Posts again | new | £150 | https://www.diy.com/p/1');
+    expect(problem(plain)).toMatch(/SPEND reads £148\.90 but the PICK lines add up to £298\.90/);
+  });
+
+  it('prose is not an item line: sentences about picking, pick-up, new and second-hand all pass', () => {
+    const card = FENCE.replace('SAVING: no baseline', ['SAVING: no baseline',
+      'Pick: the Screwfix posts are cheapest.', 'Picked: the cheaper of the two.', 'Pick-up: Roy collects on Friday.',
+      'Ruled out: three second-hand lots, none new enough | all over 40 km away.',
+      '- 2 Nov: card sent, new posts priced at £148.90'].join('\n'));
+    expect(problem(card)).toBe('');
+  });
+
+  // Review pass 3: `preferred-list.py list` prints a row with the same bars (key | item | £price |
+  // Bought As | ...), and the agent's rules call that row the BASELINE. A line under any plain key
+  // is accounted for, so the pasted row passes, and the total is still checked.
+  it('a preferred-list row pasted as the BASELINE passes, and the total is still checked', () => {
+    const row = 'BASELINE: fence-posts | Fence posts | £139.00 | New | Screwfix | https://www.screwfix.com/p/1 | last bought 2026-10-02 | Active';
+    const card = swap(FENCE, 'BASELINE:', row);
+    expect(problem(card)).toBe('');
+    expect(problem(swap(card, 'BASELINE:', row.replace('| New |', '| Second-hand |')))).toBe('');
+    expect(problem(swap(card, 'SPEND:', 'SPEND: £139.00 (one-off)')))
+      .toMatch(/SPEND reads £139\.00 but the PICK lines add up to £148\.90/);
+    // CONTROL: the same row with no key in front of it is still refused.
+    expect(problem(FENCE.replace('SAVING: no baseline', `SAVING: no baseline\n${row.replace('BASELINE: ', '')}`)))
+      .toMatch(/written like an item but does not start with the plain key/);
+  });
+
+  it.each([
+    [' SPEND: £5 per unit'],
+    ['Spend: £5 a month'],
+    ['spend: £5'],
+  ])('a spend-like line above the SPEND line, which the dispatcher would read first, is refused: %s', (line) => {
+    const card = FENCE.replace('SAVING: no baseline', `SAVING: no baseline\n${line}`);
+    expect(problem(card)).toMatch(/a line above the SPEND line also reads as a spend \(£5\)/);
+    // The dispatcher's own reader agrees it would have taken £5, not £148.90.
+    const read = py(DISPATCH, 'print(json.dumps(m.spend_declared(P["o"])))', { o: card });
+    expect(read[0]).toBe(5);
+  });
+
+  it('a spend-like line BELOW the SPEND line changes nothing the dispatcher reads, and passes', () => {
+    const card = FENCE.replace(CLOSING, `Spend: nothing more is due.\n${CLOSING}`);
+    expect(problem(card)).toBe('');
+    const read = py(DISPATCH, 'print(json.dumps(m.spend_declared(P["o"])))', { o: FENCE });
+    expect(read).toEqual([148.9, false]);
   });
 
   it('any other key written twice is refused', () => {
