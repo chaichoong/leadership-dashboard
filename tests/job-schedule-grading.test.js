@@ -358,3 +358,38 @@ print(json.dumps(sorted(n for n in cr.APPROVED_SLOTS if n not in schedule)))
     expect(missing).toEqual([]);
   });
 });
+
+// 4. A job that fires INSIDE the nightly render needs a give-up long enough to outlast it.
+//
+// Finding 20261110-phase-2-1260. photo-filer fires at 03:15 and was in no schedule file at all, so it kept the
+// default 120-minute give-up and the digest could not report it as a missing run. content-engine held the queue
+// 433 to 435 minutes on 9, 10 and 12 Nov 2026, so 120 can never clear it: 8 skips in 10 days, for a job that needs
+// 2.9 seconds of machine time. audiobook-backfill had the same shape and the same answer (360) since 19 Sep 2026.
+//
+// This is the invariant rather than a check that photo-filer is present, so the NEXT job dropped into the render
+// window is caught too.
+describe('a queued job inside the nightly render window', () => {
+  const RENDER_HOURS = [2, 3, 4, 5];           // content-engine starts at 02:00 and has held the queue past 07:00
+  const MIN_GIVE_UP = 360;                     // audiobook-backfill's number, set against the worst observed hold
+
+  const inWindow = () => {
+    const schedule = JSON.parse(readFileSync(SCHEDULE, 'utf8'));
+    return Object.entries(schedule).filter(([name, job]) => {
+      if (name.startsWith('_') || typeof job !== 'object' || job === null) return false;
+      if (job.enabled === false || job.queued === false || job.lockExempt) return false;
+      const hour = String(job.cron || '').split(/\s+/)[1];
+      return /^\d+$/.test(hour) && RENDER_HOURS.includes(Number(hour));
+    });
+  };
+
+  it('finds the jobs that fire into it, so this invariant has a population', () => {
+    expect(inWindow().map(([n]) => n)).toContain('photo-filer');
+  });
+
+  it('every one of them gives up later than the render has ever held the queue', () => {
+    const short = inWindow()
+      .filter(([, job]) => (job.queueTimeoutMinutes || 120) < MIN_GIVE_UP)
+      .map(([name, job]) => `${name}: ${job.queueTimeoutMinutes || 120} min`);
+    expect(short).toEqual([]);
+  });
+});

@@ -121,3 +121,69 @@ print(json.dumps(out))
     expect(a).toContain('for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)');
   });
 });
+
+// A blocked day's clock must survive the next read (finding 20261110-phase-3-1259). Day 2144 was blocked on
+// 'episode rendered: no long clip rendered for this day' from 2026-10-29 to 2026-11-10 with no card, no receipt and
+// no list naming it: every read rewrote `at`, so 12 days read exactly like last night, and pending() only sorts a
+// blocked day to the back. Days 2137 and 2138 went the same way on 9 Nov. Re-running a render cannot change that
+// verdict, so a night is not the answer.
+describe('a day blocked on the same failure says how long for', () => {
+  function gate(before, failures) {
+    const code = `
+import sys, json, io, contextlib, datetime as dt
+sys.path.insert(0, ${JSON.stringify(DIR)})
+import approval, qa, platform_copy
+qa.gate = lambda day, ledger: (False, [tuple(f) for f in ${JSON.stringify(failures)}], [])
+qa.is_wait = lambda fs: False
+platform_copy.session_leak = lambda recs: []
+STATE = json.loads(${JSON.stringify(JSON.stringify(before))})
+approval.save_state = lambda s: None          # output_gate mutates the state it is handed; the real save would write ~/.config
+out = io.StringIO()
+with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+    approval.output_gate(2144, {}, STATE, None)
+print(json.dumps({"state": STATE, "out": out.getvalue()}))
+`;
+    return JSON.parse(execFileSync('python3', ['-c', code], { encoding: 'utf8', timeout: 60000 }).trim());
+  }
+  const FAIL = [['episode rendered', 'no long clip rendered for this day']];
+  const OLD = { '2144': { qa_blocked: { at: '2026-11-09T04:13:43', since: '2026-10-29T04:13:43', reads: 11,
+    failures: ['episode rendered: no long clip rendered for this day'] } } };
+
+  it('keeps the start of the block and counts the reads while the failure text is the same', () => {
+    const r = gate(OLD, FAIL);
+    const b = r.state['2144'].qa_blocked;
+    expect(b.since).toBe('2026-10-29T04:13:43');     // not today, which is what every read used to write
+    expect(b.reads).toBe(12);
+    expect(b.at > '2026-11-09').toBe(true);          // the latest read is still recorded
+  });
+
+  it('a DIFFERENT failure starts the clock again: that is a new block, not the old one', () => {
+    const r = gate(OLD, [['copy missing', 'Short Form Video has its clip but no copy yet']]);
+    const b = r.state['2144'].qa_blocked;
+    expect(b.reads).toBe(1);
+    expect(b.since).toBe(b.at);
+  });
+
+  it('the report names it as STUCK and needing a person, with its age', () => {
+    const code = `
+import sys, json, io, contextlib, datetime as dt
+sys.path.insert(0, ${JSON.stringify(DIR)})
+import approval
+approval.load_state = lambda: json.loads(${JSON.stringify(JSON.stringify({
+      2144: { qa_blocked: { at: '2026-11-10T04:13:43', since: '2026-10-29T04:13:43', reads: 11, failures: ['episode rendered: no long clip rendered for this day'] } },
+      2150: { qa_blocked: { at: '2026-11-12T04:13:43', since: '2026-11-12T04:13:43', reads: 1, failures: ['copy missing: no copy yet'] } },
+    }))})
+out = io.StringIO()
+with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+    approval.report()
+print(json.dumps({"out": out.getvalue()}))
+`;
+    const r = JSON.parse(execFileSync('python3', ['-c', code], { encoding: 'utf8', timeout: 60000 }).trim());
+    expect(r.out).toContain('content output gate STUCK: 1 episode blocked on the SAME failure');
+    expect(r.out).toContain('needs a person');
+    expect(r.out).toContain('2144');
+    expect(r.out).toContain('2150 (copy missing: no copy yet), blocked tonight');   // one night is not a stall
+    expect(r.out).not.toMatch(/STUCK[^\n]*2150/);
+    expect(r.out).toMatch(/2144 \(episode rendered[^)]*\), blocked \d+ night\(s\) on this/);
+  });
+});

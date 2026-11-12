@@ -334,12 +334,46 @@ def _dispatch():
     return mod
 
 
-def sync():
-    """Kevin's verdict on an open read: approved -> each recommendation becomes a dated lesson."""
+def close_read_card(key, e, run=None):
+    """Close the read's card now the lessons are written (finding 20261109-task-manager-1252).
+
+    Two months running, sync() recorded the verdict, wrote the lessons and left the Tasks row at Today. September's
+    read needed a close card Kevin approved on 8 Oct; October's sat 7 days on the board until the 9 Nov board pass
+    closed it by hand. The work is finished the moment the lessons are written, so the agent closes its own card,
+    through agent-dispatch's `complete` so its gates still apply, with the lessons as evidence.
+
+    A refusal is recorded and said, and not retried blindly: `complete` refuses a verdict that is not an approval and
+    an approval with edits that has no EDITS APPLIED mark, and neither clears by running again.
+    """
+    import render
+    run = run or render.dispatch_run
+    n = e.get("lessons_written") or 0
+    code, out = run("complete", e["task"], "--evidence",
+                    "Performance read to %s: %d lesson(s) written to the Content Engine's own lessons file and "
+                    "mirrored to its register row" % (key, n))
+    if code:
+        why = " ".join(str(out or "").split())[:300]
+        e["card_close_refused"] = why
+        print("ERROR: read %s: card %s not closed: %s" % (key, e["task"], why))
+        return False
+    e.pop("card_close_refused", None)
+    e["card_closed"] = dt.datetime.now().isoformat(timespec="seconds")
+    print("read %s: card %s closed, %d lesson(s) its evidence" % (key, e["task"], n))
+    return True
+
+
+def sync(run=None):
+    """Kevin's verdict on an open read: approved -> each recommendation becomes a dated lesson, then the card closes."""
     state = load_state()
+    # A read whose lessons are written but whose card never closed is picked up again, or a failed close would
+    # never be retried: `open_reads` only holds reads with no verdict yet.
+    owed = {k: e for k, e in state["reads"].items()
+            if e.get("task") and e.get("verdict") == "approved" and not e.get("card_closed")}
     open_reads = {k: e for k, e in state["reads"].items() if e.get("task") and not e.get("verdict")}
-    if not open_reads: print("performance sync: no open reads"); return
+    if not open_reads and not owed: print("performance sync: no open reads"); return
     TF = approval.TF
+    for key, e in owed.items():
+        if key not in open_reads: close_read_card(key, e, run)
     for key, e in open_reads.items():
         t = watch._airtable("GET", approval.TASKS_API + "/" + e["task"] + "?returnFieldsByFieldId=true")["fields"]
         outcome = t.get(TF["outcome"])
@@ -356,9 +390,14 @@ def sync():
                 n += 1
             e.update({"verdict": "approved", "lessons_written": n})
             print("read %s: approved, %d lessons written" % (key, n))
+            e.update({"outcome": outcome, "synced": dt.datetime.now().isoformat(timespec="seconds")})
+            close_read_card(key, e, run)
+            continue
         else:
+            # A rejection keeps Kevin's reason and the card stays open on purpose: `complete` refuses any outcome
+            # that is not an approval, and a read he turned down is work still owed, not work finished.
             e.update({"verdict": "rejected", "feedback": t.get(TF["feedback"]) or ""})
-            print("read %s: %s, kept Kevin's reason" % (key, outcome))
+            print("read %s: %s, kept Kevin's reason; its card stays open" % (key, outcome))
         e.update({"outcome": outcome, "synced": dt.datetime.now().isoformat(timespec="seconds")})
     save_state(state)
 

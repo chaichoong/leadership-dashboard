@@ -331,6 +331,20 @@
   ],
   "retryWhenDeferred": true
  },
+ "photo-filer": {
+  "queueTimeoutMinutes": 360,
+  "queueTimeoutNote": "360 minutes, not the default 120 (finding 20261110-phase-2-1260). It fires at 03:15, squarely inside content-engine's nightly render, which held the queue 435 minutes on 10 and 12 Nov 2026 and 433 on 9 Nov. At 120 it gave up without running on 3, 4, 5, 6, 7, 9, 10 and 12 Nov while needing 2.9 seconds of machine time itself. Same shape and same number as audiobook-backfill above, and the same proper fix: take the ffmpeg render out of the global lock so content-engine holds it only for its Airtable and Drive writes.",
+  "cron": "15 3 * * *",
+  "maxLateMinutes": 420,
+  "maxLateNote": "above the queue timeout on purpose: a run that waits its turn behind the render is late, not missing, and a false 'missing run' in the digest is what teaches Kevin to ignore it. Past 420 it never started at all.",
+  "maxRuntimeMinutes": 60,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "note": "files the day's phone photos. It was in NO schedule file until 12 Nov 2026, so the digest could not report it as a missing run: 7 skips in 8 days went unseen, which is exactly what this file's own _comment warns about."
+ },
  "mac-guard": {
   "cron": "0 * * * *",
   "maxLateMinutes": 120,

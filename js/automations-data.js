@@ -114,6 +114,8 @@ var AUTOMATIONS = {
           what: 'Runs the Site Tester agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
         { key: 'uc-check', agent: true, name: 'UC Verification', when: '8:00am daily', status: 'off',
           what: 'Runs the UC Verification agent, which has its own register row above. RETIRED 1 Sep 2026: Kevin stopped the whole UC check process \u2014 missed payments are handled as arrears instead.' },
+        { key: 'photo-filer', name: 'Photo Filer', when: '3:15am daily', status: 'on',
+          what: 'Files the day\'s phone photos into their folders. No AI. It waits its turn behind the nightly video render, which can hold the queue for seven hours, so a run that starts late is normal; a run that never starts shows up in the morning digest.' },
         { key: 'audiobook-backfill', agent: true, name: 'Audiobook Processor', when: 'midnight daily', status: 'on',
           what: 'Runs the Audiobook Processor agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
         { key: 'feed-brain', agent: true, name: 'Brain Feeder', when: '10:45pm daily', status: 'off',
