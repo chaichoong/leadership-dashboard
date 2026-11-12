@@ -22,11 +22,14 @@ ONE MORE, FROM THE ALARM TEST (Kevin, 12 Nov 2026)
       and VAT in). A set of six smoke alarms and one heat alarm passed this
       check with unit prices on its PICK lines and a total nothing had added
       up, so a card with a wrong total would have reached Kevin as checked.
-      Two things keep that sum honest (review, 12 Nov 2026). A line that
-      reads like a PICK key but is not the plain key (`PICK2:`, `Pick 2:`,
-      `- PICK 2:`) is refused, because it would be left out of the sum. And
-      the SPEND line the dispatcher reads (its pattern takes the first match,
-      in any case, after spaces) must be this card's SPEND line.
+      Two things keep that sum honest (review, 12 Nov 2026). Any line
+      WRITTEN like an item (`... | new | ...` or `... | second-hand | ...`)
+      must start with the plain PICK or RESERVE key, whatever it is called
+      (`PICK2:`, `Pick 2:`, `- PICK 2:`, `1. PICK 2 (promoted):`), because a
+      line the key pattern does not read is left out of the sum. The rule is
+      on the shape of the line, not on a list of misspellings. And the SPEND
+      line the dispatcher reads (its pattern takes the first match, in any
+      case, after spaces) must be this card's SPEND line.
 
 AGENT OUTPUT FORMAT: the SHAPE text below. Other card text (CHECKED:, the
 bold Approve line, TRACK RECORD, KEVIN ONLY, the closing line) may sit around
@@ -65,9 +68,10 @@ KEY_RE = re.compile(
 # The one leniency: a SOURCING key dressed in bullets or bold, so such a card is refused, not skipped.
 DRESSED_SOURCING_RE = re.compile(r"^ *[-*•_ ]+SOURCING[*_ ]*:|^SOURCING[*_ ]+:", re.M)
 
-# A line that reads like a PICK key. Only the plain key is counted, so any other spelling is refused.
-NEAR_PICK_RE = re.compile(r"^[ \t]*[-*•_>\"' \t]*pick[ \t]*\d*[ \t*_]*:", re.I | re.M)
-PLAIN_PICK_RE = re.compile(r"PICK(?: \d+)?:")
+# A line written like an item: its second field is the kind, between two pipes. Such a line must
+# start with the plain PICK or RESERVE key, or its price is in no total and nothing has checked it.
+ITEM_SHAPED_RE = re.compile(r"\|[ \t*_]*(?:new|second-hand)[ \t*_]*\|", re.I)
+ITEM_KEY_RE = re.compile(r"(?:PICK(?: \d+)?|RESERVE \d+):")
 
 PRICE_RE = re.compile(r"^£([0-9][0-9,]*(?:\.[0-9]{1,2})?)$")
 LINK_RE = re.compile(r"^https?://\S+$")
@@ -186,12 +190,12 @@ def parse_sourcing(output):
         if not fields.get(key):
             raise SourcingFormatError(f"the {key} line is missing or empty; write {key}: and what it says on the card shape")
 
-    for m in NEAR_PICK_RE.finditer(text):
-        if not PLAIN_PICK_RE.fullmatch(m.group(0)):
+    for line in text.splitlines():
+        if ITEM_SHAPED_RE.search(line) and not ITEM_KEY_RE.match(line):
             raise SourcingFormatError(
-                f"a line starts {m.group(0).strip()!r}, which reads like a PICK key but is not the plain key, so "
-                "its price would be left out of the total; write PICK: or PICK 1: in capitals at the very start "
-                "of the line, or reword the sentence")
+                f"a line is written like an item but does not start with the plain key, so its price is in no "
+                f"total: {line.strip()[:60]!r}; start it PICK: or PICK 1: (or RESERVE 1:) in capitals at the very "
+                "start of the line, or write it as a sentence without the | bars")
     if not picks:
         raise SourcingFormatError("there is no PICK line; write PICK: name | new or second-hand | £full price | link")
     if len(picks) > qty:

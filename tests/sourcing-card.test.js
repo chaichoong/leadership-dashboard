@@ -264,18 +264,28 @@ describe('the sourcing card shape', () => {
     ['- PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
     ['**PICK 2:** Posts again | new | £150 | https://www.diy.com/p/1'],
     ['  PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
-  ])('a line that reads like a PICK key but is not the plain key is refused: %s', (line) => {
+    ['PICK 2 (reserve promoted): Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['1. PICK 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK #2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICKS 2: Posts again | new | £150 | https://www.diy.com/p/1'],
+    ['PICK 2 – Posts again | second-hand | £150 | https://www.diy.com/p/1'],
+    ['PICK 2： Posts again | New | 150 | https://www.diy.com/p/1'],
+    ['Also worth a look: Posts again | **new** | £150 | https://www.diy.com/p/1'],
+    ['RESERVE one: Posts again | new | £150 | https://www.diy.com/p/1'],
+  ])('a line written like an item that does not start with the plain key is refused: %s', (line) => {
     const twoQty = swap(FENCE, 'SOURCING:', 'SOURCING: Fence posts | 2 | 4 Abington Place');
     const card = twoQty.replace(/^(PICK: .*)$/m, `$1\n${line}`);
-    expect(problem(card)).toMatch(/reads like a PICK key but is not the plain key/);
+    expect(problem(card)).toMatch(/written like an item but does not start with the plain key/);
     // CONTROL: the same second line written plain is counted, so the old total is now refused.
     const plain = twoQty.replace(/^(PICK: .*)$/m, '$1\nPICK 2: Posts again | new | £150 | https://www.diy.com/p/1');
     expect(problem(plain)).toMatch(/SPEND reads £148\.90 but the PICK lines add up to £298\.90/);
   });
 
-  it('prose about picking is not a key: "Picked:", "Picks:" and "pick of the two" pass', () => {
-    const card = FENCE.replace('SAVING: no baseline',
-      'SAVING: no baseline\nPicked: the cheaper of the two.\nPicks: one only.\nThe pick of the two is Screwfix: it is nearer.');
+  it('prose is not an item line: sentences about picking, pick-up, new and second-hand all pass', () => {
+    const card = FENCE.replace('SAVING: no baseline', ['SAVING: no baseline',
+      'Pick: the Screwfix posts are cheapest.', 'Picked: the cheaper of the two.', 'Pick-up: Roy collects on Friday.',
+      'Ruled out: three second-hand lots, none new enough | all over 40 km away.',
+      '- 2 Nov: card sent, new posts priced at £148.90'].join('\n'));
     expect(problem(card)).toBe('');
   });
 
