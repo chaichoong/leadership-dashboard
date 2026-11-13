@@ -315,3 +315,36 @@ describe('pieces on the way', () => {
         expect(pick.items.map(i => i.id)).not.toContain('newBeanie');
     });
 });
+
+// Pegs (Kevin, 13 Nov 2026): four pegs, two pieces each. Pieces part-way through their wears are used
+// up before clean clothes come out, and once 8 hang there the card stops hanging more up.
+describe('pegs first', () => {
+    const DAY = '2026-11-13', DD = new Date(2026, 10, 13, 9, 0);
+    it('picks the outfit that wears a piece already on a peg over one worn longer ago', () => {
+        const items = Object.fromEntries([
+            item('tee1', 'Tee'), item('tee2', 'Tee'), item('chinos', 'Trousers'),
+            item('jeans', 'Trousers', { wears: 1, lastWorn: '2026-11-07' }),
+        ].map(i => [i.id, i]));
+        const outfits = [outfit('Old', 'Out casual', ['tee1', 'chinos'], null), outfit('Peg', 'Out casual', ['tee2', 'jeans'], '2026-11-07')];
+        expect(P.onPeg(items.jeans, DAY)).toBe(true);
+        expect(P.chooseBase(outfits, items, 'Out casual', DD).id).toBe('Peg');
+    });
+    it('uses a twin on the peg before its clean twin', () => {
+        const items = Object.fromEntries([
+            item('a', 'Trousers', { twinGroup: 'g' }), item('b', 'Trousers', { twinGroup: 'g', wears: 2, lastWorn: '2026-11-10' }),
+        ].map(i => [i.id, i]));
+        expect(P.standIn(items, 'a', DAY).id).toBe('b');
+    });
+    it('once 8 pieces hang on the pegs, picks the outfit that hangs no new piece up', () => {
+        const hung = Array.from({ length: 8 }, (_, n) => item('p' + n, 'Knit', { wears: 1, lastWorn: '2026-11-10' }));
+        const items = Object.fromEntries([...hung, item('tee1', 'Tee'), item('tee2', 'Tee'), item('jumper', 'Knit'), item('cap', 'Hat')].map(i => [i.id, i]));
+        const outfits = [outfit('Adds', 'Out casual', ['tee1', 'jumper'], null), outfit('NoAdd', 'Out casual', ['tee2', 'cap'], '2026-11-01')];
+        expect(P.pegged(items, DAY).length).toBe(8);
+        expect(P.chooseBase(outfits, items, 'Out casual', DD).id).toBe('NoAdd');
+    });
+    it('a piece at its limit, in the wash, or pyjamas is not on a peg', () => {
+        expect(P.onPeg(item('t', 'Tee', { wears: 1 }), DAY)).toBe(false);
+        expect(P.onPeg(item('k', 'Knit', { wears: 1, inWashSince: '2026-11-12' }), DAY)).toBe(false);
+        expect(P.onPeg(item('p', 'Pyjamas', { wears: 1 }), DAY)).toBe(false);
+    });
+});
