@@ -37,6 +37,8 @@
     // Sport kit and the dressing gown carry their own Wash every (1 and 7) on the piece.
     const WASH_DEFAULT = { Tee: 1, Shirt: 2, Lounge: 3, Knit: 3, Trousers: 5, Shorts: 5, Pyjamas: 3 };   // anything else is never counted
     const CLEAN_AFTER_DAYS = 2;
+    // Pegs (Kevin, 13 Nov 2026): four pegs, two pieces each before it looks cluttered.
+    const PEG_LIMIT = 8;
 
     // WMO weather codes (Open-Meteo) in plain words.
     const WMO = {
@@ -111,7 +113,17 @@
     }
     function standIn(itemsById, id, today, wornToday) {
         const all = twins(itemsById, itemsById[id]);
-        return (wornToday && all.find(o => o.lastWorn === today)) || all.find(o => !inWash(o, today)) || null;
+        return (wornToday && all.find(o => o.lastWorn === today)) || all.find(o => onPeg(o, today))
+            || all.find(o => !inWash(o, today)) || null;
+    }
+    // On a peg: worn since its last wash, wears left before its limit, not pyjamas (they run on their own).
+    function onPeg(item, today) {
+        if (!owned(item) || isNightwear(item) || inWash(item, today)) return false;
+        const limit = washLimit(item), n = wearsNow(item, today);
+        return limit > 0 && n > 0 && n < limit;
+    }
+    function pegged(itemsById, today) {
+        return Object.values(itemsById).filter(it => onPeg(it, today));
     }
     function isOuter(item) { return !!item && (item.type === 'Jacket' || item.type === 'Coat'); }
     function isNightwear(item) { return !!item && item.type === 'Pyjamas'; }
@@ -158,8 +170,19 @@
         if (wornToday) return wornToday.o;
         const clean = eligible.filter(({ o }) => o.itemIds.every(id => standIn(itemsById, id, today)));
         if (!clean.length) return null;
-        clean.forEach(e => { e.f = freshness(e.o, itemsById); });
+        // Pegs first (Kevin, 13 Nov 2026): the outfit that wears the most pieces already on the pegs comes
+        // first, so they finish their wears before clean clothes come out. Once the pegs hold PEG_LIMIT
+        // pieces, the outfit that would hang fewest new pieces up comes next. Then the rotation below.
+        const full = pegged(itemsById, today).length >= PEG_LIMIT;
+        clean.forEach(e => {
+            e.f = freshness(e.o, itemsById);
+            const pieces = e.o.itemIds.map(id => standIn(itemsById, id, today));
+            e.peg = pieces.filter(it => onPeg(it, today)).length;
+            e.adds = full ? pieces.filter(it => !onPeg(it, today) && washLimit(it) > 1).length : 0;
+        });
         clean.sort((a, b) => {
+            if (a.peg !== b.peg) return b.peg - a.peg;
+            if (a.adds !== b.adds) return a.adds - b.adds;
             const oa = a.o.lastWorn || '', ob = b.o.lastWorn || '';
             if (oa !== ob) return oa < ob ? -1 : 1;
             const la = a.f, lb = b.f;
@@ -266,7 +289,7 @@
     }
 
     const api = { OPTIONS, describeCode, seasonOf, isoDay, chooseBase, applyWeather, reasonFor, pickOutfits, bestOption,
-        washLimit, cleanOn, inWash, wearsNow, wearFields, unwearFields, isNightwear, pickPyjamas, addDays, standIn,
-        RULES: { RAIN_PCT, JACKET_BELOW, COAT_BELOW, BEANIE_AT, SCARF_AT, WASH_DEFAULT, CLEAN_AFTER_DAYS } };
+        washLimit, cleanOn, inWash, wearsNow, onPeg, pegged, wearFields, unwearFields, isNightwear, pickPyjamas, addDays, standIn,
+        RULES: { RAIN_PCT, JACKET_BELOW, COAT_BELOW, BEANIE_AT, SCARF_AT, WASH_DEFAULT, CLEAN_AFTER_DAYS, PEG_LIMIT } };
     root.WardrobePick = api;
 })(typeof window !== 'undefined' ? window : globalThis);
