@@ -42,7 +42,7 @@ import sys
 CONFIG_DIR = os.path.expanduser("~/.config/od")
 
 # Where agents and jobs actually write. Deliberately not the whole home directory: this runs hourly
-# and a full walk of a 16 GB Mac is not free. ~/.claude/projects holds session transcripts, which no
+# and a full walk of this Mac's home directory is not free. ~/.claude/projects holds session transcripts, which no
 # guard can clean up (they are append-only history) — the finding routes those to a PAT rotation.
 SEARCH_ROOTS = ("~/knowledge-os", "~/.config/od/..", "~/Projects/leadership-dashboard/monitoring")
 

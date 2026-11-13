@@ -174,8 +174,17 @@ if [ -n "$BAD" ]; then
   echo "$JOB run FAILED (rc=0 but the log tail carries failure markers) — see $LOG" >&2
   exit 1
 fi
+# What the slot actually read and decided, so "OK" means something. The inbox sort used to say
+# only "inbound-triage run OK", so a run that decided sixty messages and one that decided none
+# wrote the identical line (finding 20261111-daily-ops-1278). scripts/slot-tally.py holds the rule
+# and says "tally unavailable" rather than a zero when it cannot read. It must never fail a green
+# slot, so its own failure is swallowed to an empty clause.
+slot_tally() {
+  python3 "$(dirname "$0")/slot-tally.py" "$JOB" 2>/dev/null || true
+}
+
 if [ -n "$LEAKED" ]; then
-  echo "$JOB run OK (with privacy quarantine — a file-writing behaviour needs fixing, see stderr)"
+  echo "$JOB run OK$(slot_tally) (with privacy quarantine — a file-writing behaviour needs fixing, see stderr)"
   exit 0
 fi
-echo "$JOB run OK"
+echo "$JOB run OK$(slot_tally)"

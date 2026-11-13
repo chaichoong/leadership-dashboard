@@ -1691,8 +1691,17 @@ rc.check_no_chase(ok)
 bad = world([tenancy(PAYER, 28, 300.00, tenant="recT_quiet")], [], noChase=["recT_quiet", PAYER])
 try: rc.check_no_chase(bad); out = "passed"
 except RuntimeError as e: out = str(e)
-print(json.dumps({"bad": out}))`);
-    expect(r.bad).toBe('control failed: 1 id on the do-not-chase list (noChaseTenants) matched no tenant; it takes tenant ids, not tenancy ids');
+# The tenancy list is checked the same way round: a tenant id there matches no tenancy.
+swapped = world([tenancy(PAYER, 28, 300.00, tenant="recT_quiet")], [])
+swapped["noChaseTenancies"] = {"recT_quiet"}
+try: rc.check_no_chase(swapped); other = "passed"
+except RuntimeError as e: other = str(e)
+print(json.dumps({"bad": out, "other": other}))`);
+    // A tenancy id on the TENANT list still stops the run. Since 13 Nov 2026 tenancy ids have a
+    // list of their own (noChaseTenancies), so the message names the list rather than saying
+    // tenancy ids are never valid.
+    expect(r.bad).toBe('control failed: 1 id on the do-not-chase list (noChaseTenants) matched no tenant; that list takes tenant ids');
+    expect(r.other).toBe('control failed: 1 id on the do-not-chase list (noChaseTenancies) matched no tenancy; that list takes tenancy ids');
   });
 });
 

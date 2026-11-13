@@ -262,6 +262,19 @@ because of it: 871 was claimed on 22 Oct and reopened for exactly this reason, a
 on 30 Oct. One PR is the rule for ordinary fixes; it was never a reason to leave a protected one
 unwritten.
 
+**Record the phase before you leave it.** The moment the PRs are opened and the findings closed,
+write `~/knowledge-os/logs/daily-ops-progress.json` with `phase-4` added to `done`:
+
+```
+python3 -c 'import json,os;p=os.path.expanduser("~/knowledge-os/logs/daily-ops-progress.json");d=json.load(open(p));d["done"]=sorted(set(d["done"])|{"phase-4"});json.dump(d,open(p,"w"))'
+```
+
+Why (finding 20261107-daily-ops-1232): the file read `done: [phase-1, phase-2, phase-3]` on
+7 Nov 2026 while the previous run had demonstrably finished phases 4 and 5, so phases 4 and 5 never
+recorded themselves. `rantoday` blocks only on an END mark, so a run killed during phase 5 is
+resumable the same day, reads that list, and re-runs the fix queue against findings already claimed
+and PR'd: a second PR for the same work, which is the twin-PR failure CLAUDE.md warns about.
+
 ## Phase 5 — Report
 
 **First, run the approval-loop check.** This is the trust surface: it is the only thing in the run that reports what SHOULD have moved and did not.
@@ -328,5 +341,13 @@ because on 16, 17 and 18 Oct the late Bash calls in an unattended run were refus
 so a mark stamped at the end of the step is a mark that does not get stamped. Everything after this line can be
 refused without costing the day its proof.
 
-Then delete `~/knowledge-os/logs/daily-ops-progress.json` so tomorrow starts fresh. If that is refused, say so on the
-report rather than retrying: tomorrow's run ignores a progress file from an earlier date anyway.
+Then record phase 5 in the progress file and delete it, in that order, so a run interrupted between
+the two still shows the report as written:
+
+```
+python3 -c 'import json,os;p=os.path.expanduser("~/knowledge-os/logs/daily-ops-progress.json");d=json.load(open(p));d["done"]=sorted(set(d["done"])|{"phase-5"});json.dump(d,open(p,"w"))'
+rm -f ~/knowledge-os/logs/daily-ops-progress.json
+```
+
+If the delete is refused, say so on the report rather than retrying: tomorrow's run ignores a
+progress file from an earlier date anyway.

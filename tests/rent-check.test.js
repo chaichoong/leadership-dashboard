@@ -139,7 +139,7 @@ def paid_up(tid, today, amount, cycles=3, account="recA_main"):
     return out
 def waiting(day, amount, account="recA_main"):
     return rec("txU" + day, {TX["date"]: day, TX["amount"]: amount, TX["account"]: [account]})
-def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None, lateBefore=(), noChase=()):
+def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None, lateBefore=(), noChase=(), noChaseTenancies=()):
     # The bank feed defaults to noon (London) on the day checked. A matched payment on a tenancy
     # outside the test keeps Main Bank a known rent account.
     feed = feed or (day.isoformat() + "T11:03:29.000Z")
@@ -148,7 +148,8 @@ def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None
                         rec("recT_agent", {TN["payType"]: "Agent-Managed"})],
             "tx": [paid("recOTHER", (day - timedelta(days=4)).isoformat(), 500)] + list(tx), "unmatched": list(unmatched),
             "accounts": accounts if accounts is not None else [rec("recA_main", {AC["alias"]: "Main Bank", AC["updated"]: feed})],
-            "preSlate": set(pre), "lateBefore": set(lateBefore), "noChase": set(noChase)}
+            "preSlate": set(pre), "lateBefore": set(lateBefore), "noChase": set(noChase),
+            "noChaseTenancies": set(noChaseTenancies)}
 def run(tenancies, tx, day=DAY, hour=12, **kw):
     now = datetime(day.year, day.month, day.day, hour, 30, tzinfo=timezone.utc)
     res = rc.assess(world(tenancies, tx, day=day, **kw), day, now)
@@ -730,16 +731,18 @@ def fake(table, params=None):
     return [{"id": "recN", "fields": {}}] * 200
 rc.fetch_all = fake
 rc.read_pre_slate = lambda path=None: {"recP"}
-rc.read_no_chase = lambda path=None: {"recN"}
+rc.read_no_chase = lambda path=None, key="noChaseTenants": {"recN"} if key == "noChaseTenants" else set()
 rc.read_late_before = lambda day, path=None: {"recL"}
 data = rc.load(date(2026, 10, 2))
-print(json.dumps({"calls": calls, "pre": sorted(data["preSlate"]), "late": sorted(data["lateBefore"]), "noChase": sorted(data["noChase"])}))`);
+print(json.dumps({"calls": calls, "pre": sorted(data["preSlate"]), "late": sorted(data["lateBefore"]), "noChase": sorted(data["noChase"]),
+                  "noChaseTenancies": sorted(data["noChaseTenancies"])}))`);
     expect(r.noChase).toEqual(['recN']);
+    expect(r.noChaseTenancies).toEqual([]);
     // And load() itself refuses a list naming an id it did not read as a tenant.
     const bad = py(`
 rc.fetch_all = lambda table, params=None: [{"id": "recN", "fields": {}}] * 200
 rc.read_pre_slate = lambda path=None: set()
-rc.read_no_chase = lambda path=None: {"recZ"}
+rc.read_no_chase = lambda path=None, key="noChaseTenants": {"recZ"} if key == "noChaseTenants" else set()
 rc.read_late_before = lambda day, path=None: set()
 try: rc.load(date(2026, 10, 2)); out = "passed"
 except RuntimeError as e: out = str(e)[:48]
@@ -1398,5 +1401,49 @@ print(json.dumps({"code": code, "status": rows[0][0], "lastLine": line("Late-ren
     // Lane B still runs and has its own line, after lane A's.
     expect(r.laneB).toBe('New-tenant tasks: none needed today.');
     expect(r.firstLine).toBe('20 of 21 tenants payin');
+  });
+});
+
+// One person, several tenant records (9 Nov 2026, finding 20261109-agent-dispatch-1253). A tenant on
+// Kevin's do-not-chase list held FIVE tenant records, one per tenancy. The list named one of them,
+// so the other four tenancies matched nobody and 11 Aigburth Avenue was chased on 9 Nov.
+// Back-tested by dropping the tenancy clause from the match in assess(): "a tenancy on the
+// do-not-chase list is spared" fails, which is the live bug reproduced.
+describe('the do-not-chase list and duplicate tenant records', () => {
+  it('a tenancy on the do-not-chase list is spared even when its tenant record is not on the list', () => {
+    const r = py(`
+# recT_dup is the same person as recT_work, under a second tenant record the tenant list never names.
+ts = [tenancy("recDup", 1, 500, tenant="recT_dup"), tenancy("recOther", 1, 500)]
+tx = []
+byTenant, _ = run(ts, tx, noChase=["recT_work"])
+byTenancy, _ = run(ts, tx, noChaseTenancies=["recDup"])
+spared = lambda res: sorted(r["id"] for r in res["tenancies"] if r.get("noChase"))
+plan = lambda res: [p["tenancy"] for p in rc.task_plan(res, ts, {}, DAY)]
+print(json.dumps({"byTenant": spared(byTenant), "byTenancy": spared(byTenancy),
+                  "chasedByTenant": plan(byTenant), "chasedByTenancy": plan(byTenancy)}))`);
+    // The tenant-id list names the person's OTHER record, so it spares nothing: the live bug.
+    expect(r.byTenant).toEqual([]);
+    expect(r.chasedByTenant).toContain('recDup');
+    // The tenancy-id list cannot be defeated by a duplicate tenant record.
+    expect(r.byTenancy).toEqual(['recDup']);
+    expect(r.chasedByTenancy).not.toContain('recDup');
+    // And it spares only the tenancy named.
+    expect(r.chasedByTenancy).toContain('recOther');
+  });
+
+  it('refuses a tenancy id on the tenant list, and a tenant id on the tenancy list', () => {
+    const r = py(`
+def check(noChase, noChaseTenancies):
+    data = {"tenants": [rec("recT_uc", {})], "tenancies": [rec("recTcy", {})],
+            "noChase": set(noChase), "noChaseTenancies": set(noChaseTenancies)}
+    try:
+        rc.check_no_chase(data); return "passed"
+    except RuntimeError as e: return str(e)
+print(json.dumps({"ok": check(["recT_uc"], ["recTcy"]),
+                  "swapped": check(["recTcy"], [])[:96],
+                  "strayTenancy": check([], ["recT_uc"])[:98]}))`);
+    expect(r.ok).toBe('passed');
+    expect(r.swapped).toContain('(noChaseTenants) matched no tenant');
+    expect(r.strayTenancy).toContain('(noChaseTenancies) matched no tenancy');
   });
 });
