@@ -259,6 +259,14 @@ the `list-unsubscribe` header (its presence = machine mail).
    it is about. An INVOICE that comes with its certificate is BOTH: it keeps
    its lane-12 task for the money, and its description must say
    `CERTIFICATE ATTACHED` so the task cannot close until the document is filed.
+   "Mentions" means the message says a certificate EXISTS or is on its way
+   (issued, done, sent separately, to follow): that is a filing to chase. A
+   certificate or inspection named only as the reason or the deadline for
+   something else ("buy the alarms before the fire certificate inspection on
+   the 20th") is nothing to file: no Step 4c task, and the date goes in the
+   other task's Description. (Checked 13 Nov 2026: of six filing tasks in 30
+   days, five had the document and one was an engineer saying his records
+   would follow. None was a passing mention.)
 4. **File lanes — taxonomy homes without a task:** newsletters →
    `file --label-num 6`; tenancy documents → `file --label-num 11`; inbound
    Operations Director interest → `file --label-num 17`. Creditor mail gets
