@@ -165,13 +165,23 @@ print(json.dumps({"state": STATE, "out": out.getvalue()}))
   });
 
   it('the report names it as STUCK and needing a person, with its age', () => {
+    // The ages are built from today, never written in. Pinned to 12 Nov 2026 (the day this case was
+    // written) 2150 read as blocked tonight for one day and as blocked 1 night from 13 Nov on, so
+    // the case passed once and failed every morning after, with main red and every PR's gate with it.
+    // Local time on both sides: approval.py measures the age with datetime.now(), which is local,
+    // so a UTC fixture would read a day older than it is wherever the offset is behind UTC.
+    const iso = (daysBack) => {
+      const d = new Date(Date.now() - daysBack * 86400000);
+      const p2 = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+    };
     const code = `
 import sys, json, io, contextlib, datetime as dt
 sys.path.insert(0, ${JSON.stringify(DIR)})
 import approval
 approval.load_state = lambda: json.loads(${JSON.stringify(JSON.stringify({
-      2144: { qa_blocked: { at: '2026-11-10T04:13:43', since: '2026-10-29T04:13:43', reads: 11, failures: ['episode rendered: no long clip rendered for this day'] } },
-      2150: { qa_blocked: { at: '2026-11-12T04:13:43', since: '2026-11-12T04:13:43', reads: 1, failures: ['copy missing: no copy yet'] } },
+      2144: { qa_blocked: { at: iso(1), since: iso(15), reads: 11, failures: ['episode rendered: no long clip rendered for this day'] } },
+      2150: { qa_blocked: { at: iso(0), since: iso(0), reads: 1, failures: ['copy missing: no copy yet'] } },
     }))})
 out = io.StringIO()
 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):

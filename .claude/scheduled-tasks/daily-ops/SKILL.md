@@ -269,9 +269,11 @@ write `~/knowledge-os/logs/daily-ops-progress.json` with `phase-4` added to `don
 python3 -c 'import json,os;p=os.path.expanduser("~/knowledge-os/logs/daily-ops-progress.json");d=json.load(open(p));d["done"]=sorted(set(d["done"])|{"phase-4"});json.dump(d,open(p,"w"))'
 ```
 
-Why (finding 20261107-daily-ops-1232): phases 4 and 5 never recorded themselves, so a run killed
-during phase 5 is resumable the same day, reads done as phases 1 to 3, and re-runs the fix queue
-against findings already claimed and PR'd — a second PR for the same work.
+Why (finding 20261107-daily-ops-1232): the file read `done: [phase-1, phase-2, phase-3]` on
+7 Nov 2026 while the previous run had demonstrably finished phases 4 and 5, so phases 4 and 5 never
+recorded themselves. `rantoday` blocks only on an END mark, so a run killed during phase 5 is
+resumable the same day, reads that list, and re-runs the fix queue against findings already claimed
+and PR'd: a second PR for the same work, which is the twin-PR failure CLAUDE.md warns about.
 
 ## Phase 5 — Report
 
