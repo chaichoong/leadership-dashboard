@@ -237,6 +237,16 @@ Raised 15 Oct 2026 (Kevin): about 14 findings filed a day against about 4 fixed;
 - Phase 5 reports "the fix queue did not run" on the BROKEN line and still writes the report
   whenever phase 4 left no PR and no closed findings.
 
+**Read `python3 scripts/findings.py worklist`, not `list`.** Work its BLOCKING section top to
+bottom before anything else: those findings hold robots' tasks behind TOOL walls (13 Nov 2026:
+65 tasks on 55 findings, 2 of them ever claimed). A blocking finding is only left when it does
+not reproduce (reject it), is NOT CODE (say so in the report, with the tasks it blocks), or the
+time budget ends. If the first line reads `BLOCKING: NOT CHECKED`, work the rest in order and
+put that line in the report. Copy the BLOCKED BUT NOT IN THE QUEUE section into the report.
+
+Keep claiming while the 90-minute budget and the 08:20 ceiling allow and open findings remain.
+"Neither cap bound" is not a reason to stop: it means take the next one.
+
 Cap at **25** findings. Open **one** pull request for the fixes that touch no protected
 path and, when any finding needs a protected path, **a second** holding only those
 (queue-fixer STEP 4), so the first still merges itself and the second raises ONE MERGE
