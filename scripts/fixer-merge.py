@@ -472,6 +472,24 @@ def teardown_workspace(branch, merge_output=""):
     return out
 
 
+def _local_checkout_verdict(said, merged):
+    """merge-pr.py's own verdict on a git error that sits beside a confirmed merge.
+
+    Loaded from the merger rather than reimplemented, so the gate and the merger cannot
+    drift on what counts as benign. If it cannot be loaded, nothing is called benign.
+    """
+    import importlib.util
+    path = os.path.join(REPO, "scripts", "merge-pr.py")
+    try:
+        spec = importlib.util.spec_from_file_location("merge_pr", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.local_checkout_verdict(said, merged)
+    except Exception as exc:                        # noqa: BLE001 - any failure reads as "not benign"
+        return {"benign": False,
+                "unchecked": "could not read merge-pr.py's verdict (%s)" % str(exc)[:120]}
+
+
 def cmd_merge(args):
     d = decide(args.pr)
     # A protected PR is never merged here (the refusal below comes before the merge call). Its
@@ -546,8 +564,16 @@ def cmd_merge(args):
     except json.JSONDecodeError:
         pass
     merged = state.get("state") == "MERGED"
-    out = {**d, "merged": merged, "gate": gate,
-           "mergeOutput": (m.stdout or m.stderr or "").strip()[-200:]}
+    said = (m.stdout or m.stderr or "").strip()
+    out = {**d, "merged": merged, "gate": gate, "mergeOutput": said[-200:]}
+    # The same reading merge-pr.py makes, and from the same place, so the two can never
+    # disagree about whether a git error beside merged:true is the local checkout this Mac
+    # cannot do or a real half-merge (findings 20261025-queue-fixer-1081 and
+    # 20261005-daily-ops-749). Imported rather than re-matched: a second copy of the regex is
+    # a second thing to drift.
+    out["localCheckout"] = _local_checkout_verdict(said, merged) or {"benign": False}
+    if out["localCheckout"].get("benign"):
+        out["mergeOutputBenign"] = True
     if merged:
         # Only now are the findings genuinely fixed. Closing them before the
         # merge is what put forty findings on record as done against four PRs
