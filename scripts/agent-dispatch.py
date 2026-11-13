@@ -2196,7 +2196,7 @@ def certificate_warn_above(name, output):
 REDIRECT_RE = re.compile(r"^\s*REDIRECT TO INFO@", re.I)
 REDIRECT_LANE_RE = re.compile(r"\btenan(?:t|cy)\b|\blandlord\b|letting agent|\bagile lets\b", re.I)
 TASK_PREFIX_STRIP_RE = re.compile(
-    r"^\s*(?:(?:INBOUND|POST|CORRESPONDENCE|MAINTENANCE|COMPLIANCE)(?:\s*\([^)]*\))?\s*:\s*)+", re.I)
+    r"^\s*(?:(?:INBOUND|POST|CORRESPONDENCE|MAINTENANCE|COMPLIANCE|SOURCING)(?:\s*\([^)]*\))?\s*:\s*)+", re.I)
 PLAN_INSTALMENT_RE = re.compile(r"^\s*CLOSE PROPOSAL:\s*plan instalment\b", re.I)
 INSTALMENT_WORDS_RE = re.compile(
     r"direct debit|collected|instal+ment|payment (?:received|taken|collected)", re.I)
@@ -2291,7 +2291,7 @@ def dupe_fold_verdict(name_a, name_b):
 
 
 def dupe_fold_lane(fields):
-    """'maintenance' | 'calendar' | 'reply' for a task record: the gate's fold_lane over
+    """'maintenance' | 'sourcing' | 'calendar' | 'reply' for a task record: the gate's fold_lane over
     the name, the Team Member links and the Maintenance Ticket tick."""
     return _gate().fold_lane(str(fields.get(AF["name"]) or ""),
                              links(fields.get(AF["teamMember"])),
@@ -2427,8 +2427,8 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
         if this_lane != keeper_lane:
             return card("close: duplicate",
                         f"this is a {this_lane} task and keeper {keeper_id} is a "
-                        f"{keeper_lane} task: a repair ticket and a reply task are two "
-                        "obligations, never one, so folding may not cross that lane")
+                        f"{keeper_lane} task: tasks in different lanes (repair, buying, diary, "
+                        "reply) are two obligations, never one, so folding may not cross that lane")
         another_date = _gate().fold_on_another_date(name, kname_full)
         if another_date:
             return card("close: duplicate", f"keeper {keeper_id}: {another_date}")

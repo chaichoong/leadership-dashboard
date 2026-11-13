@@ -1191,6 +1191,11 @@ def roy_lane(f):
     home rules out. Imported from agent-dispatch.py, never copied."""
     d = _load_dispatch()
     name, desc, notes = f.get("Task Name") or "", f.get("Description") or "", f.get("Notes") or ""
+    # A BUYING TASK is never Roy's lane by the name of the item (as task_lane, 12 Nov 2026):
+    # "SOURCING: a replacement boiler" is a buy for Inbox Response, not a repair, so handing it
+    # to Roy never counts as placing it.
+    if d.sourcing_task(name):
+        return ""
     hit = d.roy_match(name, desc, notes) or d.property_match(name, desc, notes)
     if hit:
         return hit
