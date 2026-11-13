@@ -243,7 +243,9 @@ the `list-unsubscribe` header (its presence = machine mail).
    asked to supply and fit (rule 2); a quote or an invoice someone sends us (rule 1 or rule 2
    as before); a certificate, licence or inspection (rule 3: a message that asks us to buy
    AND carries a certificate is BOTH, as an invoice with its certificate is); an order,
-   dispatch or delivery notice for something already bought, and shop marketing (rule 5).
+   dispatch or delivery notice for something already bought, and shop marketing (rule 5);
+   something only one body supplies, so there is nothing to compare (a council bin, a parking
+   permit, a key from the managing agent: an ordinary rule 1 task, named `INBOUND:`).
    When Roy or Kevin asks US to buy the part or the replacement, it IS a buying task, even
    though the message also describes the fault. When the message says when the item is needed ("before the tenant
    moves in on Friday"), say so in the Description. Tier 1 and creditor mail keep their rules.

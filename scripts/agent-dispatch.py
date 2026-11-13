@@ -2291,7 +2291,7 @@ def dupe_fold_verdict(name_a, name_b):
 
 
 def dupe_fold_lane(fields):
-    """'maintenance' | 'calendar' | 'reply' for a task record: the gate's fold_lane over
+    """'maintenance' | 'sourcing' | 'calendar' | 'reply' for a task record: the gate's fold_lane over
     the name, the Team Member links and the Maintenance Ticket tick."""
     return _gate().fold_lane(str(fields.get(AF["name"]) or ""),
                              links(fields.get(AF["teamMember"])),
@@ -2427,8 +2427,8 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
         if this_lane != keeper_lane:
             return card("close: duplicate",
                         f"this is a {this_lane} task and keeper {keeper_id} is a "
-                        f"{keeper_lane} task: a repair ticket and a reply task are two "
-                        "obligations, never one, so folding may not cross that lane")
+                        f"{keeper_lane} task: tasks in different lanes (repair, buying, diary, "
+                        "reply) are two obligations, never one, so folding may not cross that lane")
         another_date = _gate().fold_on_another_date(name, kname_full)
         if another_date:
             return card("close: duplicate", f"keeper {keeper_id}: {another_date}")
