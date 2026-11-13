@@ -142,8 +142,17 @@ done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
 # ---------------------------------------------------------------------------
 SESSIONS=$(( $(pgrep -f "claude-code/.*claude.app" 2>/dev/null | wc -l | tr -d ' ') / 2 ))
 if [ "$SESSIONS" -gt 3 ]; then
+  # Read the size off the host rather than printing a figure. This line said "16 GB Mac" for a
+  # month after the estate moved to the 24 GB Mac mini on 15 Oct 2026, overstating the pressure
+  # and understating the headroom by 8 GB (finding 20261110-phase-2-1262).
+  MEMBYTES=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+  if [ "$MEMBYTES" -gt 0 ]; then
+    HOSTGB="$(( MEMBYTES / 1073741824 )) GB"
+  else
+    HOSTGB="this"
+  fi
   say "  ADVISORY    $SESSIONS Claude Code sessions open. Not touching them, but"
-  say "              this is the main cause of memory pressure on a 16 GB Mac."
+  say "              this is the main cause of memory pressure on a $HOSTGB Mac."
 fi
 
 # ---------------------------------------------------------------------------
