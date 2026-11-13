@@ -16,6 +16,7 @@ Usage
     findings.py claim <id> --by queue-fixer
     findings.py reopen <id> [--force] | findings.py reopen --stale
     findings.py list --stale
+    findings.py worklist [--limit N] [--json]   # the fixer's order: what blocks tasks first
     findings.py close <id> --outcome fixed --evidence <sha> --note "..."
     findings.py close <id> --outcome pending --pr <n> --note "..."
     findings.py close <id> --outcome rejected|deferred --note "..." [--until YYYY-MM-DD]
@@ -942,35 +943,237 @@ def cmd_list(a):
         print_overflow(sys.stdout)
         return 0
     for r in rows:
-        print("[%s] %-8s %-20s %s" % (r["id"], r.get("severity", "?"),
-                                      r["routine"], r["title"]))
-        if r.get("where"):
-            print("         where: %s" % r["where"])
-        if r.get("seen", 1) > 1:
-            print("         SEEN %d TIMES (last %s) — recurring, not new"
-                  % (r["seen"], r.get("last_seen") or "?"))
-        if r.get("duplicate_root"):
-            print("         REPEAT of %s — work that one, not this" % r["duplicate_root"])
-        if r.get("duplicates"):
-            print("         repeats merged in: %s" % ", ".join(r["duplicates"]))
-        if r.get("touches_code") is False:
-            print("         NOT CODE — a code fix cannot close this; it belongs on the task board")
-        still_open = [i for i in (r.get("same_file_as") or [])
-                      if (state.get(i) or {}).get("status") in OPEN_STATES]
-        if still_open:
-            print("         also open on this file: %s" % ", ".join(still_open))
-        if r.get("proposed_fix"):
-            print("         fix:   %s" % r["proposed_fix"])
-        # A later sighting's fix text is the one a fixer must read, so it is
-        # printed, never only stored. Newest last, each with its date. A merged
-        # repeat says where it came from and what it saw.
-        for rc in (r.get("recurrences") or []):
-            if rc.get("from") and rc.get("note"):
-                print("         from %s: %s" % (rc["from"], " ".join(rc["note"].split())[:300]))
-            if rc.get("fix"):
-                print("         fix (added %s%s): %s" % (rc.get("ts") or "?",
-                                                         (", from " + rc["from"]) if rc.get("from") else "",
-                                                         rc["fix"]))
+        print_row(r, state)
+    print_overflow(sys.stdout)
+    return 0
+
+
+def print_row(r, state):
+    """One finding in `list`'s format. `worklist` prints with it too, so the two never drift."""
+    print("[%s] %-8s %-20s %s" % (r["id"], r.get("severity", "?"),
+                                  r["routine"], r["title"]))
+    if r.get("where"):
+        print("         where: %s" % r["where"])
+    if r.get("seen", 1) > 1:
+        print("         SEEN %d TIMES (last %s) — recurring, not new"
+              % (r["seen"], r.get("last_seen") or "?"))
+    if r.get("duplicate_root"):
+        print("         REPEAT of %s — work that one, not this" % r["duplicate_root"])
+    if r.get("duplicates"):
+        print("         repeats merged in: %s" % ", ".join(r["duplicates"]))
+    if r.get("touches_code") is False:
+        print("         NOT CODE — a code fix cannot close this; it belongs on the task board")
+    still_open = [i for i in (r.get("same_file_as") or [])
+                  if (state.get(i) or {}).get("status") in OPEN_STATES]
+    if still_open:
+        print("         also open on this file: %s" % ", ".join(still_open))
+    if r.get("proposed_fix"):
+        print("         fix:   %s" % r["proposed_fix"])
+    # A later sighting's fix text is the one a fixer must read, so it is
+    # printed, never only stored. Newest last, each with its date. A merged
+    # repeat says where it came from and what it saw.
+    for rc in (r.get("recurrences") or []):
+        if rc.get("from") and rc.get("note"):
+            print("         from %s: %s" % (rc["from"], " ".join(rc["note"].split())[:300]))
+        if rc.get("fix"):
+            print("         fix (added %s%s): %s" % (rc.get("ts") or "?",
+                                                     (", from " + rc["from"]) if rc.get("from") else "",
+                                                     rc["fix"]))
+
+
+# ─── WORK WHAT BLOCKS WORK FIRST (13 Nov 2026) ───────────────────────
+#
+# The fixer took findings "worst severity first" off `list --status open`: 360+
+# lines that say nothing about which findings hold a robot's task behind a TOOL
+# wall. Measured 13 Nov 2026: 65 agent tasks sat on TOOL walls naming 55
+# distinct findings, and the fixer had claimed 2 of the 55. One finding blocked
+# 7 tasks. So blocked work piled up while the fixer fixed other things.
+#
+# The half-hourly blocked-task sweep (`blockers_scan` in agent-dispatch.py)
+# already writes every wall with the finding it waits on. `worklist` reads that
+# file (never imports the 13,000-line dispatcher) and puts the findings that
+# block tasks at the top, most tasks first. Read-only: no op is appended.
+#
+# Blind is said, never shown as calm: a missing, stale or unreadable file, or a
+# sweep that could not read the board, prints `BLOCKING: NOT CHECKED (<why>)`
+# first, because an empty blocking section reads as "nothing is blocked".
+BLOCKERS_FILE = os.environ.get(
+    "FINDINGS_BLOCKERS_FILE",
+    os.path.join(HOME, "knowledge-os/logs/handback-poll/scratch/blockers.json"))
+# The same limit ai_team_health.py uses (BLOCKERS_MAX_MIN): the sweep runs every
+# 30 minutes, so two hours without a write means it has stopped.
+BLOCKERS_MAX_MIN = 120
+WORKLIST_LIMIT = 25
+
+
+def read_blockers(path, now=None):
+    """(the sweep's report, '') or (None, why it cannot be trusted)."""
+    now = now or time.time()
+    try:
+        with open(path) as fh:
+            r = json.load(fh)
+        age = (now - os.path.getmtime(path)) / 60
+    except FileNotFoundError:
+        return None, "the blocked-task sweep has written no report at %s" % path
+    except (OSError, ValueError) as exc:
+        return None, "the blocked-task sweep's report could not be read (%s)" % str(exc)[:100]
+    if not isinstance(r, dict):
+        return None, "the blocked-task sweep's report is not a JSON object"
+    if age > BLOCKERS_MAX_MIN:
+        return None, "the blocked-task sweep has not written for %d minutes (limit %d)" % (
+            int(age), BLOCKERS_MAX_MIN)
+    if not r.get("openTasksRead"):
+        return None, "the blocked-task sweep could not read the task board"
+    if not isinstance(r.get("open"), list):
+        return None, "the blocked-task sweep's report has no list of open walls"
+    return r, ""
+
+
+def fixer_open(r, now=None):
+    """Work the fixer may take: unclaimed, or claimed by a run that is never coming back."""
+    return r.get("status") == "open" or is_stale_claim(r, now=now)
+
+
+def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
+    """The fixer's order: findings that block tasks, then the rest, then walls on findings
+    the fixer cannot take. `blockers` is None when the sweep's report was not read."""
+    blocking, not_in_queue = {}, {}
+    if blockers is not None:
+        for n, w in enumerate(blockers.get("open") or []):
+            if not isinstance(w, dict) or w.get("kind") != "TOOL":
+                continue
+            fid = (w.get("finding") or "").strip()
+            task = w.get("task") or ""
+            days = w.get("days") if isinstance(w.get("days"), (int, float)) else None
+            words = (w.get("toolState") or "", w.get("tool") or "")
+            r = state.get(fid) if fid else None
+            # A wall on a merged repeat counts toward the finding that survives it.
+            root = r.get("duplicate_root") if r else None
+            target = state.get(root) if root else r
+            if target is not None and fixer_open(target, now):
+                row = blocking.setdefault(target["id"], {"tasks": set(), "days": [], "walls": set(),
+                                                         "words": [], "undated": False})
+            else:
+                if not fid:
+                    status = "no finding named on the wall"
+                elif r is None:
+                    status = "unknown id (not in the queue)"
+                else:
+                    status = target.get("status") or "?"
+                    if target.get("status") == "claimed":
+                        status = "claimed (being worked)"
+                    if target.get("pr"):
+                        status += " (PR #%s)" % target["pr"]
+                key = (target or {}).get("id") or fid or "(none)"
+                row = not_in_queue.setdefault(key, {"tasks": set(), "days": [], "walls": set(),
+                                                    "words": [], "undated": False, "status": status})
+            row["tasks"].add(task or ("(untasked wall %d)" % n))
+            row["walls"].add(fid)
+            if days is None:
+                row["undated"] = True
+            else:
+                row["days"].append(days)
+            # One line per kind of state: the same state on two walls differs only in its day count.
+            if any(words) and words[0] not in [x[0] for x in row["words"]]:
+                row["words"].append(words)
+
+    def oldest(row):
+        return max(row["days"]) if row["days"] else None
+
+    def sev(r):
+        return SEVERITIES.index(r.get("severity")) if r.get("severity") in SEVERITIES else 9
+
+    ranked = sorted(blocking.items(), key=lambda kv: (
+        -len(kv[1]["tasks"]), -(oldest(kv[1]) if oldest(kv[1]) is not None else -1),
+        sev(state[kv[0]]), kv[0]))
+    block_rows = []
+    for fid, row in ranked:
+        r = state[fid]
+        block_rows.append({
+            "finding": r, "tasksBlocked": len(row["tasks"]), "tasks": sorted(row["tasks"]),
+            "oldestWallDays": oldest(row), "undatedWall": row["undated"],
+            "wallFindings": sorted(w for w in row["walls"] if w != fid),
+            "staleClaim": r.get("status") == "claimed",
+            "sweepSays": [{"toolState": s, "words": t} for s, t in row["words"]],
+        })
+    rest = [r for r in state.values() if fixer_open(r, now) and r["id"] not in blocking]
+    rest.sort(key=lambda r: (sev(r), r.get("ts") or ""))
+    room = max(0, limit - len(block_rows))
+    blocked_out = sorted(not_in_queue.items(), key=lambda kv: (-len(kv[1]["tasks"]), kv[0]))
+    return {
+        "blocking": block_rows,
+        "rest": rest[:room], "restTotal": len(rest), "restOmitted": max(0, len(rest) - room),
+        "notInQueue": [{"finding": k, "status": v["status"], "tasksBlocked": len(v["tasks"]),
+                        "tasks": sorted(v["tasks"]), "oldestWallDays": oldest(v),
+                        "wallFindings": sorted(w for w in v["walls"] if w and w != k),
+                        "sweepSays": [{"toolState": s, "words": t} for s, t in v["words"]]}
+                       for k, v in blocked_out],
+    }
+
+
+def _age_words(days, undated=False):
+    if days is None:
+        return "no date on any wall"
+    return "oldest wall %.1f days%s" % (days, " (one wall undated)" if undated else "")
+
+
+def cmd_worklist(a):
+    path = a.blockers or BLOCKERS_FILE
+    blockers, why = read_blockers(path)
+    state = current_state()
+    w = build_worklist(state, blockers, a.limit)
+    if a.json:
+        out = {
+            "blockersFile": path,
+            "blockingChecked": blockers is not None,
+            "notChecked": why or None,
+            "blockersReadAt": (blockers or {}).get("readAt"),
+            "limit": a.limit,
+            "blocking": [dict(b, finding=b["finding"]["id"], record=b["finding"],
+                              severity=b["finding"].get("severity"),
+                              touchesCode=b["finding"].get("touches_code"))
+                         for b in w["blocking"]],
+            "rest": w["rest"], "restTotal": w["restTotal"], "restOmitted": w["restOmitted"],
+            "notInQueue": w["notInQueue"],
+        }
+        print(json.dumps(out, indent=2))
+        return 0
+    if blockers is None:
+        print("BLOCKING: NOT CHECKED (%s)" % why)
+        print("Nothing below is ranked by what it blocks. Work it in severity order and say in the "
+              "report that the blocking list could not be read.")
+    else:
+        tasks = sum(b["tasksBlocked"] for b in w["blocking"])
+        print("BLOCKING: %d finding(s) hold %d task(s) behind a TOOL wall (sweep read the board at %s). "
+              "Work these first, top to bottom." % (len(w["blocking"]), tasks, blockers.get("readAt") or "?"))
+        for b in w["blocking"]:
+            r = b["finding"]
+            print("")
+            print("BLOCKS %d TASK(S), %s" % (b["tasksBlocked"], _age_words(b["oldestWallDays"], b["undatedWall"])))
+            print_row(r, state)
+            if b["staleClaim"]:
+                print("         STALE CLAIM by %s: run `findings.py reopen --stale` before claiming it"
+                      % (r.get("claimed_by") or "?"))
+            if b["wallFindings"]:
+                print("         walls name merged repeat(s): %s" % ", ".join(b["wallFindings"]))
+            for s in b["sweepSays"]:
+                print("         sweep says: %s%s" % (s["words"] or s["toolState"],
+                                                    (" [%s]" % s["toolState"]) if s["words"] and s["toolState"] else ""))
+                if s["toolState"] == "no-fixer":
+                    print("         PROTECTED: fix it in the protected PR, never skip it")
+    print("")
+    print("THE REST: %d other open finding(s), severity then age%s." % (
+        w["restTotal"], (", %d left out by --limit %d" % (w["restOmitted"], a.limit)) if w["restOmitted"] else ""))
+    for r in w["rest"]:
+        print_row(r, state)
+    if w["notInQueue"]:
+        print("")
+        print("BLOCKED BUT NOT IN THE QUEUE: %d finding(s) named on TOOL walls the fixer cannot take."
+              % len(w["notInQueue"]))
+        for n in w["notInQueue"]:
+            print("  %s  %s  blocks %d task(s), %s%s" % (
+                n["finding"], n["status"], n["tasksBlocked"], _age_words(n["oldestWallDays"]),
+                (" (walls name %s)" % ", ".join(n["wallFindings"])) if n["wallFindings"] else ""))
     print_overflow(sys.stdout)
     return 0
 
@@ -1615,6 +1818,14 @@ def main(argv=None):
                     help="only claims older than --stale-hours")
     sp.add_argument("--stale-hours", "--lease-hours", type=float, dest="stale_hours", default=STALE_CLAIM_HOURS)
     sp.set_defaults(fn=cmd_list)
+
+    sp = sub.add_parser("worklist", help="the fixer's order: findings that block tasks first, then the rest")
+    sp.add_argument("--limit", type=int, default=WORKLIST_LIMIT,
+                    help="lines in the whole worklist (default %d); blocking findings are never cut" % WORKLIST_LIMIT)
+    sp.add_argument("--json", action="store_true")
+    sp.add_argument("--blockers", default="",
+                    help="the blocked-task sweep's report (default $FINDINGS_BLOCKERS_FILE or the live one)")
+    sp.set_defaults(fn=cmd_worklist)
 
     sp = sub.add_parser("claim")
     sp.add_argument("id")
