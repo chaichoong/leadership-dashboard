@@ -272,8 +272,9 @@ ${prelude}
 
   it('plan(): approved merges; rejected, an edit asked for, a replaced body, no real approval and a red retry each say why', () => {
     const r = drive(`
-att = {"812": {"result": "red", "approvedAt": "2026-10-07T09:00:00.000Z", "at": "x", "back": True}}
-unsent = {"812": {"result": "red", "approvedAt": "2026-10-07T09:00:00.000Z", "at": "x", "back": False}}
+ma.clock = lambda: 1791367200.0   # 2026-10-07T10:00:00Z, an hour after the red below
+att = {"812": {"result": "red", "approvedAt": "2026-10-07T09:00:00.000Z", "at": "2026-10-07T09:00:00Z", "back": False, "head": "${HEAD}", "reds": 1}}
+unsent = {"812": {"result": "error", "approvedAt": "2026-10-07T09:00:00.000Z", "at": "x", "back": False}}
 print(json.dumps([ma.plan(C(), {}), ma.plan(C(), att)[0], ma.plan(C(approvedAt="2026-10-07T11:00:00.000Z", fields={"fld30Yw8SWYVp049g": ["${BUILDER}"], "fldr4Mvf2RzKvhZhi": "2026-10-07T11:00:00.000Z"}), att)[0],
   ma.plan(C(status="Completed", outcome="Rejected"), {})[0], ma.plan(C(status="Completed", outcome="Rejected", notes=ma.REJECTED_MARK), {})[0],
   ma.plan(C(outcome="Approved with minor edits", feedback="hold till Friday"), {})[0], ma.plan(C(outcome="Changes requested"), {})[0],
@@ -282,7 +283,7 @@ print(json.dumps([ma.plan(C(), {}), ma.plan(C(), att)[0], ma.plan(C(approvedAt="
   ma.plan(C(agentOutput="DECIDE: close PR #812?\\n\\n" + ${JSON.stringify(OUTPUT)}), {}),
   ma.plan(C(), unsent)[0], ma.plan(C(head="", agentOutput=${JSON.stringify(OUTPUT)}.replace("Tested head: ${HEAD}", "Tested head: not recorded")), {})[0]]))`, tmpd());
     expect(r[0]).toEqual(['merge', 'approved']);
-    expect(r[1]).toBe('skip');            // red on this approval: not re-run every half hour
+    expect(r[1]).toBe('skip');            // red an hour ago: not re-run every half hour (the clock, below)
     expect(r[2]).toBe('merge');           // approved again: tried once more
     expect(r[3]).toBe('note-rejected');
     expect(r[4]).toBe('skip');            // told once
@@ -293,7 +294,7 @@ print(json.dumps([ma.plan(C(), {}), ma.plan(C(), att)[0], ma.plan(C(approvedAt="
     expect(r[8][1]).toMatch(/not .*(Builder|approval gate)/);
     expect(r[9]).toMatch(/Approved At is earlier than the task itself/);
     expect(r[10]).toEqual(['skip', 'not a MERGE card any more: its work does not open with the MERGE CARD line for PR #812']);
-    expect(r[11]).toBe('send-back');     // tried, but never got back to his queue: sent back now
+    expect(r[11]).toBe('send-back');     // an ERROR that never got back to his queue: sent back now
     expect(r[12]).toBe('send-back');     // no tested head: never merged, sent back saying so
   });
 
@@ -346,31 +347,6 @@ res = ma.merge_one(C(), {})
 print(json.dumps({"res": res, "patches": PATCHES, "notes": NOTES}))`, tmpd());
     expect(r.patches.some(([, f]) => 'fldzswp8fx6PqpLQ5' in f)).toBe(false);
     expect(r.notes[0]).toMatch(/The new code was re-tested and is not green/);
-  });
-
-  it('two red gates on the same code: the second says it needs a working session and files a finding; a re-approval runs no gate', () => {
-    const dir = tmpd();
-    const r = drive(`
-def merge_pr(pr, head, dry_run=False):
-    MERGES.append([pr, head])
-    return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "RED"}), "")
-ma.run_merge_pr = merge_pr
-att = {}
-first = ma.merge_one(C(), att)
-second = ma.merge_one(C(approvedAt="2026-10-07T11:00:00.000Z"), att)
-third_plan = ma.plan(C(approvedAt="2026-10-07T12:00:00.000Z"), att)
-newhead_plan = ma.plan(C(approvedAt="2026-10-07T12:00:00.000Z", head="${NEWHEAD}",
-                         agentOutput=${JSON.stringify(OUTPUT)}.replace("${HEAD}", "${NEWHEAD}")), att)
-print(json.dumps({"first": first, "second": second, "third": third_plan, "newhead": newhead_plan, "merges": len(MERGES),
-                  "calls": CALLS, "last": PATCHES[-1][1]}))`, dir);
-    expect(r.first.needsSession).toBeUndefined();
-    expect(r.second.needsSession).toBe(true);
-    expect(r.second.why).toMatch(/failed 2 times on this code, so the robot will not run it again: PR #812 needs a fix in a working session/);
-    expect(r.calls.filter((c) => c.startsWith('findings.py add'))).toHaveLength(1);
-    expect(r.last.fld3PrM8AJcnWHemG).toMatch(/^TASK: PR #812 failed its gate twice on this code/);
-    expect(r.third[0]).toBe('needs-session');
-    expect(r.merges).toBe(2);                     // no third gate
-    expect(r.newhead[0]).toBe('merge');           // the fix pushed and the card refreshed: the count starts again
   });
 
   it('the poll queues the run through job-queue.py (lease 60), never two at once, and never runs it detached on its own', () => {
@@ -455,13 +431,11 @@ print(json.dumps({"recycled": recycled, "oldCode": old_code, "started": len(STAR
     expect(r.gone).toBeNull();
   });
 
-  it('a note that fails to write never strands the card: it goes back first, and a send-back that failed is retried', () => {
+  it('a note that fails to write never strands an ERROR card: it goes back first, and a send-back that failed is retried', () => {
     const r = drive(`
 def bad_annotate(task, note): raise RuntimeError("Airtable 503")
 ma.annotate = bad_annotate
-def merge_pr(pr, head, dry_run=False):
-    return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "RED"}), "")
-ma.run_merge_pr = merge_pr
+GH["view"] = json.dumps({"state": "CLOSED", "mergeCommit": None, "headRefOid": "${HEAD}"})
 res = ma.merge_one(C(), {})
 att = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
 def bad_patch(task, fields): raise RuntimeError("Airtable 503")
@@ -478,7 +452,7 @@ print(json.dumps({"res": res, "back": PATCHES[0][1].get("fldx4qCw17UfrKpaN") if 
     expect(r.plan2[0]).toBe('send-back');
   });
 
-  it('red: the gate\'s last lines go on the card, the card goes back to his queue, and nothing is completed or landed', () => {
+  it('red: the gate\'s last lines go on the card, his approval STANDS (no send-back), and nothing is completed or landed', () => {
     const r = drive(`
 def merge_pr(pr, head, dry_run=False):
     MERGES.append([pr, head])
@@ -487,7 +461,7 @@ ma.run_merge_pr = merge_pr
 res = ma.merge_one(C(), {})
 print(json.dumps({"res": res, "calls": CALLS, "notes": NOTES, "patches": PATCHES}))`, tmpd());
     expect(r.res.result).toBe('red');
-    expect(r.res.backToKevin).toBe(true);
+    expect(r.res.backToKevin).toBeUndefined();
     expect(r.calls.some((c) => c.startsWith('agent-dispatch.py complete'))).toBe(false);
     expect(r.calls.some((c) => c.startsWith('findings.py'))).toBe(false);
     expect(r.notes).toHaveLength(1);
@@ -495,8 +469,8 @@ print(json.dumps({"res": res, "calls": CALLS, "notes": NOTES, "patches": PATCHES
     expect(r.notes[0]).toContain('why: the gate is RED: 2 tests failed');
     expect(r.notes[0]).toContain('progress 29');
     expect(r.notes[0]).not.toContain('progress 9\n');            // the last 20 lines, not the whole run
-    expect(r.patches).toEqual([['recCardAaaaaaaaaa', { fldx4qCw17UfrKpaN: 'Approval', fldrHBSr6qoUfaKuZ: null,
-      fld3PrM8AJcnWHemG: 'TASK: The merge of PR #812 did not go through: merge-pr.py did not merge PR #812 (exit 1). Its last lines:\nIF YOU APPROVE: the robot tries merge-pr.py on PR #812 once more, and the deploy. Reject leaves the PR open.' }]]);
+    expect(r.patches).toEqual([]);                                   // nothing moves the card or clears his verdict
+    expect(r.notes[0]).toMatch(/Kevin's approval stands: the robot tries again by itself after \S+ \(red 1 of 4 on this code\)/);
   });
 
   it('a merge that landed just before merge-pr.py was stopped is a merge, never "left open"', () => {
