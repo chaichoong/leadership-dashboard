@@ -43,8 +43,10 @@ scripts/rent_signed_check.py matches every tenancy agreement Adobe says was sign
 tenancy, and raises ONE TENANCY RECORD task for the Cash Flow Voids agent for one with none.
 
 NOT CHASED (Kevin's standing instruction)
-A tenant on the private "noChaseTenants" list (PRE_SLATE_PATH, ids only) is judged and shown like
-anyone else, and no task of either lane is ever raised for their tenancy.
+A tenant on the private "noChaseTenants" list, or a tenancy on "noChaseTenancies" (both in
+PRE_SLATE_PATH, ids only), is judged and shown like anyone else, and no task of either lane is ever
+raised for that tenancy. Both lists exist because one person can hold a separate tenant record per
+tenancy, so a tenant-id list alone is defeated by a record it does not name.
 
 THE RULE (the app's, js/arrears.js isCurrentlyInArrears, so the robot and the page agree)
 A rent cycle is covered when a matched payment linked to the tenancy is dated no more than
@@ -328,28 +330,37 @@ def read_pre_slate(path=None):
     return set(ids)
 
 
-def read_no_chase(path=None):
+def read_no_chase(path=None, key="noChaseTenants"):
     """The tenants no task is ever raised for (Kevin's standing instruction), from the same private
     file. The key is optional: a file without it is an empty list. The wrong shape stops the run,
-    because reading it as empty would chase someone Kevin said to leave alone."""
+    because reading it as empty would chase someone Kevin said to leave alone.
+
+    `key` picks the list: "noChaseTenants" (tenant ids) or "noChaseTenancies" (tenancy ids). One
+    person can hold a separate tenant record per tenancy, so a tenant-id list is defeated by a
+    duplicate record the list does not name (9 Nov 2026, finding 20261109-agent-dispatch-1253: five
+    records for one tenant, one of them on the list, and the other four chased). A tenancy id cannot
+    be defeated that way, so both lists are read and either one spares a tenancy."""
     try:
         with open(path or PRE_SLATE_PATH) as fh:
-            ids = json.load(fh).get("noChaseTenants", [])
+            ids = json.load(fh).get(key, [])
         if not isinstance(ids, list) or not all(isinstance(i, str) and i.startswith("rec") for i in ids):
-            raise ValueError("'noChaseTenants' must be a list of record ids")
+            raise ValueError(f"'{key}' must be a list of record ids")
     except (OSError, ValueError, AttributeError, TypeError) as exc:
         raise RuntimeError(f"control failed: the list of tenants not to chase could not be read ({exc})")
     return set(ids)
 
 
 def check_no_chase(data):
-    """Every id on the do-not-chase list must be a tenant this run read. A tenancy id pasted in, or
-    a tenant since deleted, matches nobody and would let that tenant be chased in silence."""
-    known = {r["id"] for r in data.get("tenants") or [] if isinstance(r, dict)}
-    stray = sorted(set(data.get("noChase") or ()) - known)
-    if stray:
-        raise RuntimeError(f"control failed: {len(stray)} id{'' if len(stray) == 1 else 's'} on the do-not-chase "
-                           "list (noChaseTenants) matched no tenant; it takes tenant ids, not tenancy ids")
+    """Every id on either do-not-chase list must be a record this run read: a tenant id on
+    noChaseTenants, a tenancy id on noChaseTenancies. An id in the wrong list, or a record since
+    deleted, matches nobody and would let that tenant be chased in silence."""
+    for key, source, kind in (("noChase", "tenants", "tenant"), ("noChaseTenancies", "tenancies", "tenancy")):
+        known = {r["id"] for r in data.get(source) or [] if isinstance(r, dict)}
+        stray = sorted(set(data.get(key) or ()) - known)
+        if stray:
+            name = "noChaseTenants" if kind == "tenant" else "noChaseTenancies"
+            raise RuntimeError(f"control failed: {len(stray)} id{'' if len(stray) == 1 else 's'} on the do-not-chase "
+                               f"list ({name}) matched no {kind}; that list takes {kind} ids")
 
 
 def read_late_before(day, path=None):
@@ -381,6 +392,7 @@ def load(day):
         "accounts": fetch_all(T_ACCOUNTS, {"fields[]": list(AC.values())}),
         "preSlate": read_pre_slate(),
         "noChase": read_no_chase(),
+        "noChaseTenancies": read_no_chase(key="noChaseTenancies"),
         "lateBefore": read_late_before(day),
     }
     check_controls(data)
@@ -604,6 +616,7 @@ def assess(data, day, now):
     feed = feed_state(data, pay, now)
     pre_slate, late_before = set(data.get("preSlate") or ()), set(data.get("lateBefore") or ())
     no_chase = set(data.get("noChase") or ())
+    no_chase_tenancies = set(data.get("noChaseTenancies") or ())
     rows = []
     for rec in data["tenancies"]:
         f = rec.get("fields") or {}
@@ -611,7 +624,7 @@ def assess(data, day, now):
         if not is_live(f, day) or (start and start > day):
             continue
         row = judge(rec, tenants, pay.get(rec["id"], []), day, feed, pre_slate, late_before)
-        if no_chase & set(f.get(TY["tenants"]) or []):
+        if rec["id"] in no_chase_tenancies or no_chase & set(f.get(TY["tenants"]) or []):
             row["noChase"] = True
             if not row["paying"]:
                 row["note"] += "; not chased: standing instruction"
