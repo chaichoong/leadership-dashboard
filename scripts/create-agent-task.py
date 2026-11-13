@@ -276,7 +276,7 @@ def auto_reply_signal(headers, subject, body):
 # Task-name prefixes the skills add before the subject; the subject test
 # must see past them.
 TASK_NAME_PREFIX_RE = re.compile(
-    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post|calendar)\s*:\s*", re.I)
+    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post|calendar|sourcing)\s*:\s*", re.I)
 
 THREAD_URL_RE = re.compile(r"#(?:all|inbox)/([0-9a-f]{8,})")
 
@@ -287,6 +287,17 @@ CALENDAR_TASK_PREFIX = "CALENDAR:"
 def calendar_task(name):
     """True for a diary task: its name opens with the CALENDAR: lane prefix."""
     return str(name or "").lstrip().upper().startswith(CALENDAR_TASK_PREFIX)
+
+
+# The buying lane's task name (inbound-email-triage rule 1d, Kevin 13 Nov 2026). The same prefix
+# as agent_sourcing_format.SOURCING_TASK_PREFIX, which the dispatcher reads; this script imports
+# no sibling, so the two are held equal by tests/sourcing-task-lane.test.js.
+SOURCING_TASK_PREFIX = "SOURCING:"
+
+
+def sourcing_task(name):
+    """True for a buying task: its name opens with the SOURCING: lane prefix."""
+    return str(name or "").lstrip().upper().startswith(SOURCING_TASK_PREFIX)
 
 
 # The date a diary task's name ends with ("CALENDAR: Dentist, Example Dental - Tue 27 Oct").
@@ -1810,8 +1821,8 @@ def dupe_signals(name):
 
 
 def fold_lane(name, team=None, maintenance_ticket=False):
-    """"maintenance" | "calendar" | "reply" for a task RECORD, for the fold callers that
-    hold one (the creation gate, the Task Manager board, the dispatch close).
+    """"maintenance" | "sourcing" | "calendar" | "reply" for a task RECORD, for the fold
+    callers that hold one (the creation gate, the Task Manager board, the dispatch close).
 
     The name lane alone is not enough: on the live board of 15 Sep 2026 all
     24 ticked Maintenance Tickets were unprefixed ("Clear and tidy garden",
@@ -1822,6 +1833,14 @@ def fold_lane(name, team=None, maintenance_ticket=False):
     """
     if maintenance_ticket or ROY_TEAM_MEMBER in (team or []):
         return "maintenance"
+    # A BUYING TASK IS ITS OWN LANE (13 Nov 2026). The dispatcher keeps a task with Inbox
+    # Response, the agent with the buying rules, by its SOURCING: name. Folded into an open
+    # "INBOUND: ... smoke alarms ..." reply task, a request to buy would keep THAT name and go
+    # to Property Administration or to Roy; and a reply folded into a buying task would never
+    # get its answer. Fold-only and Python-only, like fold_on_a_number_only: the page's
+    # Duplicates lane still shows the pair to Kevin, because grouping shows and folding destroys.
+    if sourcing_task(name):
+        return "sourcing"
     return dupe_signals(name)[0]
 
 

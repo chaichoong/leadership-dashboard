@@ -226,6 +226,27 @@ the `list-unsubscribe` header (its presence = machine mail).
    compliance lanes); and a train, flight, hotel or event-ticket booking, because Gmail puts those
    in his diary itself (checked 18 Oct 2026: the 23 Oct Eurostar entry was Gmail's own). When
    unsure whether a date belongs in his diary, raise it: he answers the card with one tap.
+1d. **A request to buy or source an item is a buying task (Kevin, 11 Nov 2026; named at birth
+   13 Nov 2026).** When a message asks us to buy, order, source or price an item or materials
+   for one of his properties or for Kevin (Roy asking for fridge freezers, smoke alarms, a
+   boiler, a bed, paint), it is rule 1 (label 12, an ordinary Step 4 task) with ONE difference:
+   the Task Name starts `SOURCING:` and names the item and the property ("SOURCING: 4 fridge
+   freezers for the Haverhill HMOs", "SOURCING: smoke alarms for 13 Chedburgh Place"). The
+   dispatch engine routes BY THE TASK NAME. A buying task belongs to Inbox Response, which holds
+   the buying rules, and only that prefix keeps it there: named `INBOUND:`, `COMPLIANCE:` or
+   `MAINTENANCE:`, a request for alarms moves to Property Administration and one for a boiler
+   goes to Roy as a repair, and neither has buying rules. The item never decides the lane: the
+   ask does. So a smoke alarm to BUY is `SOURCING:`, while a smoke alarm certificate is rule 3
+   and a broken smoke alarm is rule 2. NOT a buying task: a tenant, or anyone else, reporting
+   a fault or asking for something to be fixed or replaced (rule 2: Roy decides whether it is
+   repaired or replaced, and asks us when something is to be bought); a job a contractor is
+   asked to supply and fit (rule 2); a quote or an invoice someone sends us (rule 1 or rule 2
+   as before); a certificate, licence or inspection (rule 3: a message that asks us to buy
+   AND carries a certificate is BOTH, as an invoice with its certificate is); an order,
+   dispatch or delivery notice for something already bought, and shop marketing (rule 5).
+   When Roy or Kevin asks US to buy the part or the replacement, it IS a buying task, even
+   though the message also describes the fault. When the message says when the item is needed ("before the tenant
+   moves in on Friday"), say so in the Description. Tier 1 and creditor mail keep their rules.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
    scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
    Kevin's standing approval covers the pass, so no per-task ask.
@@ -374,6 +395,16 @@ moves, cancels or repeats that event, raise a diary task for it through Step
 apart once its card waits on Kevin, so his card never changes under him);
 anything else it asks of Kevin gets its own task by the normal rules.
 
+The same holds for a BUYING task (rule 1d): the dedupe match only counts if
+the existing task's name starts "SOURCING:". A reply, compliance or
+maintenance task on the same thread does NOT suppress it, and never append a
+request to buy to one of those: it would keep that task's name and go to an
+agent with no buying rules. Create it through the Step 4 gate, which keeps a
+buying task apart from every other kind. And the reverse: a new message on a
+thread whose open task is `SOURCING:` is appended only when it adds to or
+changes the buy; anything else it asks (a repair, a certificate, a reply)
+gets its own task by the normal rules.
+
 For each thread heading for a task (and each stranded message in Step 5),
 query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
 `OR(FIND("#all/{threadId}", {Inbound Note URL Link}), FIND("#inbox/{threadId}", {Inbound Note URL Link}))`
@@ -402,7 +433,9 @@ unhandled for Step 6, and report the failure.
     approved outcome reads to the dispatch engine as an approved hand-back
     and would be carried out AGAIN. Create a fresh task instead (Step 4
     shape), Task Name prefixed `INBOUND (follow-up):`, same thread URL, and
-    a Description line naming the earlier task. One OPEN task per thread
+    a Description line naming the earlier task. A follow-up that asks us to
+    buy something (rule 1d) is named `SOURCING:` like any other buying
+    request: the name follows what the NEW message asks. One OPEN task per thread
     still holds — the next dedupe finds this one.
 - **Existing task COMPLETED and the new message needs nothing** (a thanks, a
   confirmation) → log `note --do duplicate` (it files the message out of the
@@ -499,6 +532,8 @@ Status outside Today / Upcoming / Approval is corrected to Today with a Notes
 line (an unknown value is refused, never minted as a new option):
 
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: <concise action from the email>".
+  A request to buy or source an item (rule 1d) is named "SOURCING: <item> for
+  <property>" instead, with every other field as below.
   Under 100 chars. No em dashes anywhere in name or description.
 - `fldx4qCw17UfrKpaN` Status: `Today`
 - `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD) — UNLESS the email body

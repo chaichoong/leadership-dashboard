@@ -2196,7 +2196,7 @@ def certificate_warn_above(name, output):
 REDIRECT_RE = re.compile(r"^\s*REDIRECT TO INFO@", re.I)
 REDIRECT_LANE_RE = re.compile(r"\btenan(?:t|cy)\b|\blandlord\b|letting agent|\bagile lets\b", re.I)
 TASK_PREFIX_STRIP_RE = re.compile(
-    r"^\s*(?:(?:INBOUND|POST|CORRESPONDENCE|MAINTENANCE|COMPLIANCE)(?:\s*\([^)]*\))?\s*:\s*)+", re.I)
+    r"^\s*(?:(?:INBOUND|POST|CORRESPONDENCE|MAINTENANCE|COMPLIANCE|SOURCING)(?:\s*\([^)]*\))?\s*:\s*)+", re.I)
 PLAN_INSTALMENT_RE = re.compile(r"^\s*CLOSE PROPOSAL:\s*plan instalment\b", re.I)
 INSTALMENT_WORDS_RE = re.compile(
     r"direct debit|collected|instal+ment|payment (?:received|taken|collected)", re.I)
