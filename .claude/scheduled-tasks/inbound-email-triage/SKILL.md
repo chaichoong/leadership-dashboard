@@ -361,6 +361,10 @@ the board — an open task for a done reply is noise (Kevin's ruling, 25 Aug
    (Kevin, 2 Oct 2026): his reply settles the conversation, not the filing.
    The certificate still has to reach the compliance book, and only
    `agent-dispatch.py complete` may close that task.
+   NEVER close a task whose name starts `SOURCING:` either (13 Nov 2026): his
+   reply settles the conversation, not the buy. Only `agent-dispatch.py
+   complete` may close a buying task, and it wants the bought item on the
+   preferred list or a stated reason that nothing was bought.
 3. Closing means exactly: Status `Completed`, Completion Date
    `fldFOi1SwEKuJRmdN` = now (ISO), and append to the Description:
    "Closed by inbound-email-triage <date>: Kevin replied himself (sent message
