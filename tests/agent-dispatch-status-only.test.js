@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -449,6 +449,70 @@ print(json.dumps({'before': before, 'after': queue(), 'code': code, 'gate': out.
     expect(res.before.idle).toEqual(['recRestedAaaaaaaa']);
     expect(res.after.idle).toEqual([]);
     expect(res.after.work).toEqual(['recRestedAaaaaaaa']);
+  });
+
+  // A GATE TEST NEVER WRITES THE REAL LEDGER (14 Nov 2026). record_fold appends to the dispatcher's
+  // ledger through its own ledger_append, at STATE_DIR. A test that drives a real fold without
+  // overriding STATE_DIR by hand used to write ~/knowledge-os/logs/agent-dispatch, the ledger that
+  // decides which of Kevin's tasks rest. AGENT_DISPATCH_DIR, read at import, now moves it. HOME is a
+  // temp folder here, so "the real path" is one this test can look at without touching his.
+  it('a real fold under AGENT_DISPATCH_DIR writes the ledger there, and nothing under the default path', () => {
+    const fold = (env) => {
+      const script = `
+import importlib.util, json, io, contextlib
+from datetime import date
+def boom(*a, **k): raise RuntimeError("network call in a test")
+import urllib.request; urllib.request.urlopen = boom
+gspec = importlib.util.spec_from_file_location('gate', ${JSON.stringify(GATE)})
+g = importlib.util.module_from_spec(gspec); gspec.loader.exec_module(g)
+TID, ANALYST = 'recRestedAaaaaaaa', 'recqmKBmq8ZGkxVH9'
+NAME = 'Chase: Example Phones refund reply ref EXP-55102'
+live = {g.F['name']: NAME, g.F['status']: {'name': 'Today'}, g.F['due']: date.today().isoformat(),
+        g.F['team']: [ANALYST], g.F['desc']: 'CREDITOR MATTER', g.F['notes']: ''}
+def req(method, path, body=None):
+    if method == 'GET' and TID in path:
+        return {'id': TID, 'fields': dict(live)}
+    if method in ('PATCH', 'POST'):
+        return {'id': TID}
+    raise RuntimeError('unexpected ' + method + ' ' + path)
+g._request = req
+g.fetch_open_tasks = lambda: [{'id': TID, 'fields': dict(live)}]
+g.settle_owner = lambda fields, owner, day: (fields, None, [])
+g.load_scan_cache = lambda: {}
+g.write_track_record = lambda *a, **k: None
+g.auto_reply_refusal = lambda *a, **k: ''
+g.never_a_card_refusal = lambda *a, **k: ''
+out = io.StringIO()
+with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+    g.cmd_create({g.F['name']: NAME + ' (follow-up)', g.F['desc']: 'They replied.', g.F['status']: 'Today',
+                  g.F['team']: [ANALYST]}, force=False)
+print(json.dumps({'gate': out.getvalue().strip().splitlines()[0], 'dir': g._dispatch().STATE_DIR}))`;
+      return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8', env }).trim().split('\n').pop());
+    };
+    const home = mkdtempSync(tmpdir() + '/od-fold-home-');
+    const dir = mkdtempSync(tmpdir() + '/od-fold-ledger-');
+    const real = `${home}/knowledge-os/logs/agent-dispatch/carryout-intent.jsonl`;
+    const r = fold({ ...process.env, HOME: home, AGENT_DISPATCH_DIR: dir });
+    expect(r.gate).toContain('"action": "updated"');
+    expect(r.dir).toBe(dir);
+    expect(readFileSync(`${dir}/carryout-intent.jsonl`, 'utf8').trim().split('\n').map((l) => JSON.parse(l).event)).toEqual(['folded']);
+    expect(existsSync(real)).toBe(false);
+    // The control: with no override the same fold lands on the default path, so the check above
+    // is looking at the right place.
+    const env = { ...process.env, HOME: home };
+    delete env.AGENT_DISPATCH_DIR;
+    const c = fold(env);
+    expect(c.gate).toContain('"action": "updated"');
+    expect(existsSync(real)).toBe(true);
+  });
+
+  it('every vitest file runs with AGENT_DISPATCH_DIR and MERGE_APPROVED_DIR on temp folders (tests/setup-state-dirs.js)', () => {
+    const r = py(`print(json.dumps({'dir': m.STATE_DIR, 'ledger': m.INTENT_LEDGER, 'merge': m.MERGE_ATTEMPTS_FILE}))`);
+    const home = process.env.HOME;
+    expect(r.dir).toBe(process.env.AGENT_DISPATCH_DIR);
+    expect(r.dir.startsWith(`${home}/knowledge-os`)).toBe(false);
+    expect(r.ledger.startsWith(r.dir)).toBe(true);
+    expect(r.merge.startsWith(`${home}/knowledge-os`)).toBe(false);
   });
 
   it('the offline build_queue lists a rested task under idleHandbacks and keeps the others in the worklist', () => {

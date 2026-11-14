@@ -228,7 +228,7 @@ DRY[:] = ["green"]
 _, out = cmd_run()
 print(json.dumps({"done": out["done"][0], "merges": MERGES, "back": [f for _, f in PATCHES if "fldx4qCw17UfrKpaN" in f]}))`);
     expect(r.merges).toEqual([[812, NEWHEAD, true]]);
-    expect(r.done.result).toBe('error');
+    expect(r.done.result).toBe('refreshed');
     expect(r.back[0]).toMatchObject({ fldx4qCw17UfrKpaN: 'Approval', fldrHBSr6qoUfaKuZ: null });
   });
 });
@@ -317,6 +317,184 @@ a = {"812": {"result": "moved", "head": "${HEAD}", "newHead": "${NEWHEAD}", "mov
 refreshed = C(head="${NEWHEAD}", agentOutput=${JSON.stringify(OUTPUT)}.replace("${HEAD}", "${NEWHEAD}"), prState="OPEN", prHead="${NEWHEAD}")
 print(json.dumps(ma.plan(refreshed, a)))`);
     expect(r).toEqual(['merge', 'approved']);
+  });
+});
+
+// A CARD WITH NO TESTED HEAD IS TESTED BY THE ROBOT, NEVER SENT BACK FOR EVER (14 Nov 2026). It used
+// to go back to Kevin "records no tested head"; he approved; it still had no head; back again.
+const NOHEAD = `C(head="", agentOutput=${JSON.stringify(OUTPUT)}.replace("Tested head: ${HEAD}", "Tested head: not recorded"))`;
+
+describe('a card with no tested head is dry-run tested by the robot, like a moved head (14 Nov 2026)', () => {
+  it('THE LOOP: red dry runs rest 6 hours apart, never go back to Kevin, and stop after 4 with ONE finding', () => {
+    const r = drive(`
+CARDS[:] = [${NOHEAD}]
+steps = []
+def step(hours):
+    NOW[0] = ${T0} + hours * ${HOUR}
+    todo = detach_todo()
+    code, out = cmd_run()
+    steps.append({"todo": todo, "code": code, "done": out["done"][0], "dry": [m for m in MERGES if m[2]]})
+for h in (0, 0.5, 6.1, 12.2, 18.3, 24.4):
+    step(h)
+print(json.dumps({"steps": steps, "sentBack": sent_back(), "verdict": verdict_writes(), "adds": ADDS, "att": att()["812"],
+                  "notes": NOTES, "merges": [m for m in MERGES if not m[2]]}))`);
+    const [s1, rest, s2, s3, s4, rest2] = r.steps;
+    expect(s1.done).toMatchObject({ action: 'retest', result: 'moved', retryAt: '2026-11-06T15:00:00Z' });
+    expect(s1.dry).toEqual([[812, HEAD, true]]);                          // the PR's CURRENT head, dry run only
+    expect(s1.code).toBe(0);                                              // a rest is a normal outcome
+    expect(rest.todo).toEqual([]);
+    expect(rest.done.action).toBe('skip');
+    expect([s2.dry.length, s3.dry.length, s4.dry.length]).toEqual([2, 3, 4]);
+    expect(s4.done.stopped).toBe(true);
+    expect(rest2.done.action).toBe('skip');
+    expect(rest2.dry.length).toBe(4);
+    expect(r.adds).toHaveLength(1);
+    const a = r.adds[0];
+    expect(a[a.indexOf('--title') + 1]).toMatch(/^PR #812's MERGE card had no tested head and its code failed 4 re-tests/);
+    expect(r.att).toMatchObject({ result: 'moved', noHead: true, movedTries: 4, newHead: HEAD });
+    expect(r.notes[0]).toMatch(/^MERGE NOT DONE: This card records no tested head .* is not green/);
+    expect(r.sentBack).toEqual([]);
+    expect(r.verdict).toEqual([]);
+    expect(r.merges).toEqual([]);
+  });
+
+  it('a GREEN dry run whose card refresh succeeded goes back to Kevin once, naming the head his Approve merges', () => {
+    const r = drive(`
+CARDS[:] = [${NOHEAD}]
+DRY[:] = ["green"]
+_, out = cmd_run()
+p_after = ma.plan(dict(${NOHEAD}, head="${HEAD}", agentOutput=${JSON.stringify(OUTPUT)}, prState="OPEN", prHead="${HEAD}"), att())
+print(json.dumps({"done": out["done"][0], "refresh": REFRESH["calls"], "back": sent_back(), "plain": [f.get("fld3PrM8AJcnWHemG") for f in sent_back()],
+                  "att": att()["812"], "after": p_after, "merges": [m for m in MERGES if not m[2]]}))`);
+    expect(r.refresh).toBe(1);
+    expect(r.done).toMatchObject({ action: 'retest', result: 'refreshed', backToKevin: true });
+    expect(r.back).toHaveLength(1);
+    expect(r.plain[0]).toMatch(/IF YOU APPROVE: the robot runs merge-pr\.py on PR #812 at head a1b2c3d4a1b2/);
+    expect(r.att).toMatchObject({ result: 'refreshed', back: true, head: HEAD });
+    expect(r.after[0]).toBe('skip');                                     // still the old approval: never merged on it
+    expect(r.merges).toEqual([]);
+  });
+});
+
+// EVERY OTHER FAILURE IS RETRIED BY THE ROBOT, NEVER SENT BACK (14 Nov 2026). Four failures used to
+// send the card back "the robot tries once more": his Approve re-ran exactly what had just failed.
+const ERRS = {
+  'run-broke': `ma.run_merge_pr = lambda pr, head, dry_run=False: (_ for _ in ()).throw(RuntimeError("worktree.sh exploded"))`,
+  'pr-unreadable': `def bad_state(pr): raise RuntimeError("gh cannot read PR #812: HTTP 502")\nma.pr_state = bad_state`,
+  'pr-state': `GH["view"] = json.dumps({"state": "", "mergeCommit": None, "headRefOid": "${HEAD}"})`,
+  'pr-state (MERGED, no commit)': `GH["view"] = json.dumps({"state": "MERGED", "mergeCommit": None, "headRefOid": "${HEAD}"})`,
+  'github-disagrees': `ma.run_merge_pr = lambda pr, head, dry_run=False: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": True, "why": "merged"}), "")`,
+};
+
+describe('a failure that is not a red gate is retried by the robot on the red clock, never sent back (14 Nov 2026)', () => {
+  for (const [label, setup] of Object.entries(ERRS)) {
+    it(`${label}: rests 6 hours, retries with no new approval, notes once, stops after 4 with ONE finding quoting the error`, () => {
+      const r = drive(`
+${setup}
+steps = []
+def step(hours):
+    NOW[0] = ${T0} + hours * ${HOUR}
+    todo = detach_todo()
+    code, out = cmd_run()
+    steps.append({"todo": todo, "code": code, "done": out["done"][0]})
+for h in (0, 0.5, 6.1, 12.2, 18.3, 24.4):
+    step(h)
+rest = att()["812"]
+# He approves again: it runs at once and the count starts again.
+CARDS[:] = [C(approvedAt="2026-11-07T12:00:00.000Z", fields={"fld30Yw8SWYVp049g": ["${BUILDER}"], "fldr4Mvf2RzKvhZhi": "2026-11-07T12:00:00.000Z"})]
+step(24.6)
+print(json.dumps({"steps": steps, "sentBack": sent_back(), "verdict": verdict_writes(), "adds": ADDS, "rest": rest,
+                  "att": att()["812"], "notes": NOTES, "merges": [m for m in MERGES if not m[2]]}))`);
+      const kind = label.split(' ')[0];
+      const [s1, rest1, s2, s3, s4, rest2, again] = r.steps;
+      expect(s1.done).toMatchObject({ action: 'merge', result: 'error', kind, retryAt: '2026-11-06T15:00:00Z' });
+      expect(s1.done.backToKevin).toBeUndefined();
+      expect(s1.code).toBe(0);
+      expect(rest1.todo).toEqual([]);
+      expect(rest1.done.action).toBe('skip');
+      expect(rest1.done.why).toMatch(new RegExp(`the merge run failed \\(${kind}, try 1 of 4 on a1b2c3d4a1b2\\); his approval stands`));
+      expect(s2.todo).toEqual([812]);                                       // the clock alone queues the retry
+      expect([s2.done.result, s3.done.result]).toEqual(['error', 'error']);
+      expect(s4.done.stopped).toBe(true);
+      expect(rest2.todo).toEqual([]);
+      expect(rest2.done.why).toMatch(/^resting: the merge run failed 4 times/);
+      expect(r.adds).toHaveLength(1);
+      const a = r.adds[0];
+      expect(a[a.indexOf('--title') + 1]).toBe(`PR #812's MERGE card: the merge run failed 4 times (${kind}); the robot stopped`);
+      expect(a[a.indexOf('--detail') + 1]).toMatch(/Last error:\n/);
+      expect(a.slice(a.indexOf('--holds-merge-pr'), a.indexOf('--holds-merge-pr') + 2)).toEqual(['--holds-merge-pr', '812']);
+      expect(r.rest).toMatchObject({ result: 'error', errKind: kind, errTries: 4, head: HEAD });
+      expect(r.notes).toHaveLength(3);                                      // first try, the stop, and the new approval's first try
+      expect(r.notes[0]).toMatch(/Kevin's approval stands, so the card is not sent back .* \(try 1 of 4 for this failure\)/);
+      expect(r.notes[1]).toMatch(/failed 4 times this way, so the robot has stopped retrying \(20261106-merge-approved-1\)/);
+      expect(again.done).toMatchObject({ result: 'error', kind });
+      expect(r.att.errTries).toBe(1);
+      expect(r.sentBack).toEqual([]);
+      expect(r.verdict).toEqual([]);
+      expect(r.notes.concat(r.sentBack.map((x) => JSON.stringify(x))).join(' ')).not.toMatch(/once more/);
+    });
+  }
+
+  it('a different kind of failure starts its own count; a stop finding that would not file is filed by the next run', () => {
+    const r = drive(`
+def bad_state(pr): raise RuntimeError("gh cannot read PR #812: HTTP 502")
+real_state = ma.pr_state
+ma.pr_state = bad_state
+for h in (0, 6.1):
+    NOW[0] = ${T0} + h * ${HOUR}
+    cmd_run()
+two = att()["812"]
+ma.pr_state = real_state
+GH["view"] = json.dumps({"state": "", "mergeCommit": None, "headRefOid": "${HEAD}"})
+NOW[0] = ${T0} + 12.2 * ${HOUR}
+cmd_run()
+other = att()["812"]
+FIND_RC[0] = 1
+for h in (18.3, 24.4, 30.5):
+    NOW[0] = ${T0} + h * ${HOUR}
+    cmd_run()
+p1 = ma.plan(C(), att())[0]
+FIND_RC[0] = 0
+code, out = cmd_run()
+print(json.dumps({"two": two, "other": other, "p1": p1, "filed": out["done"][0], "code": code, "adds": len(ADDS)}))`);
+    expect(r.two).toMatchObject({ errKind: 'pr-unreadable', errTries: 2 });
+    expect(r.other).toMatchObject({ errKind: 'pr-state', errTries: 1 });
+    expect(r.p1).toBe('file-finding');
+    expect(r.filed).toMatchObject({ action: 'file-finding', result: 'finding-filed' });
+    expect(r.code).toBe(0);
+    expect(r.adds).toBe(2);
+  });
+
+  it('exit code: a resting retry is 0; a refreshed card whose send-back did not write is 1', () => {
+    const r = drive(`
+${ERRS['pr-unreadable']}
+c1, _ = cmd_run()
+import tempfile
+ma.STATE_DIR = tempfile.mkdtemp()
+ma.pr_state = lambda pr: ("OPEN", "", "${NEWHEAD}")
+DRY[:] = ["green"]
+def bad_patch(task, fields): raise RuntimeError("Airtable 503")
+ma.merge_card.patch_card = bad_patch
+c2, out2 = cmd_run()
+print(json.dumps({"c1": c1, "c2": c2, "r2": out2["done"][0]}))`);
+    expect(r.c1).toBe(0);
+    expect(r.r2).toMatchObject({ result: 'refreshed', backToKevin: false });
+    expect(r.c2).toBe(1);
+  });
+
+  it('the dispatcher\'s wall row says the robot is retrying, or has stopped, never "the robot is merging it"', () => {
+    const r = run(`
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("d", ${JSON.stringify(S('agent-dispatch.py'))})
+d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
+card = {"pr": 812, "head": "${HEAD}"}
+e = {"result": "error", "errKind": "pr-unreadable", "errTries": 2, "head": "${HEAD}", "lastErrAt": "2026-11-06T09:00:00Z"}
+print(json.dumps([d.approved_merge_state(812, card, e), d.approved_merge_state(812, card, dict(e, errTries=4, finding="f1")),
+                  d.approved_merge_state(812, {"pr": 812, "head": ""}, {"result": "moved", "noHead": True, "newHead": "${HEAD}", "movedTries": 1, "lastMovedAt": "2026-11-06T09:00:00Z"})]))`);
+    expect(r[0][0]).toBe('merge-approved');
+    expect(r[0][1]).toMatch(/the merge run failed \(pr-unreadable, 2 of 4\), the robot tries again after 15:00 on 06 Nov/);
+    expect(r[1][0]).toBe('merge-stopped');
+    expect(r[2][1]).toMatch(/the card recorded no tested head and the PR's code is not green \(1 of 4\)/);
   });
 });
 
