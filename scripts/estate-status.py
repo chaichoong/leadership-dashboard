@@ -819,10 +819,11 @@ def blockers_summary(r):
         detail += " %s approved by you and being merged by the robot." % _plural(len(merging), "fix")
     if stopped:
         prs = sorted({(w.get("mergeCard") or {}).get("pr") for w in stopped} - {None})
-        detail += (" %s you approved stopped after failed test runs and need%s a fix (%s); the robot filed a "
-                   "stop finding for the daily robot fix."
-                   % (_plural(len(stopped), "merge"), "s" if len(stopped) == 1 else "",
-                      ", ".join("PR #%s" % p for p in prs) or "PR not named"))
+        # Walls are tasks, not merges: three tasks can wait on two stopped cards.
+        detail += (" %s waiting on %s you approved that stopped after failed test runs and need%s a fix (%s); "
+                   "the robot filed a stop finding for the daily robot fix."
+                   % (_plural(len(stopped), "task"), _plural(len(prs), "merge") if prs else "a merge",
+                      "s" if len(prs) <= 1 else "", ", ".join("PR #%s" % p for p in prs) or "PR not named"))
     if on_task:
         detail += " %s waiting on the task its fix was moved to." % _plural(len(on_task), "task")
     if dated:
