@@ -214,4 +214,39 @@ describe('findings worklist: what blocks work comes first', () => {
     expect((out.match(/^\[([\w-]+)\]/gm) || [])).toEqual(['[b]', '[a]']);
     expect(out).not.toMatch(/BLOCKING/);
   });
+
+  // A stop finding from merge-approved.py holds a MERGE card (14 Nov 2026). No wall names it, yet
+  // the PR it holds carries fixes for findings that walls DO name, so it is blocking work.
+  it('ranks a stop finding by the tasks walled on its PR\'s pending findings, says it holds the merge card, and uses the field, not the title', () => {
+    seed([add('f-one', 'medium'), add('f-p1'), add('f-p2'), add('f-p3'), add('f-other-pr'),
+          add('f-stop', 'high', 10, { routine: 'merge-approved', holds_merge_pr: 812,
+                                      title: 'invented stop finding' }),
+          add('f-oldstop', 'high', 20, { routine: 'merge-approved',
+                                         title: 'PR #799 failed its gate 4 times on its MERGE card; the robot stopped retrying' }),
+          add('f-idle', 'high', 30, { routine: 'merge-approved', holds_merge_pr: 700 }),
+          ...['f-p1', 'f-p2', 'f-p3'].map(id => ({ op: 'close', id, ts: stamp(5), outcome: 'pending', pr: '812', note: 'n' })),
+          { op: 'close', id: 'f-other-pr', ts: stamp(5), outcome: 'pending', pr: '799', note: 'n' }]);
+    blockers([wall('rA', 'f-p1', 2), wall('rB', 'f-p2', 6), wall('rB', 'f-p3', 6), wall('rC', 'f-p3', 1),
+              wall('rD', 'f-one', 1), wall('rE', 'f-other-pr', 3)]);
+    const out = worklist().out;
+    const s = sections(out);
+    expect(s.blocking).toEqual(['f-stop', 'f-one']);                     // 3 distinct tasks beats 1
+    expect(s.rest).toEqual(expect.arrayContaining(['f-oldstop', 'f-idle']));   // no field, or nothing walled on its PR
+    expect(out).toMatch(/HOLDS THE MERGE CARD for PR #812: its findings f-p1, f-p2, f-p3 cannot land until it merges/);
+    const j = json();
+    const stop = j.blocking.find(b => b.finding === 'f-stop');
+    expect(stop).toMatchObject({ tasksBlocked: 3, tasks: ['rA', 'rB', 'rC'], oldestWallDays: 6, holdsMergePr: 812,
+                                 heldFindings: ['f-p1', 'f-p2', 'f-p3'] });
+    expect(j.notInQueue.map(n => n.finding).sort()).toEqual(['f-other-pr', 'f-p1', 'f-p2', 'f-p3']);   // still listed
+  });
+
+  it('`add --holds-merge-pr` stores the field; without it nothing changes', () => {
+    seed([]);
+    const a = run(['add', '--routine', 'merge-approved', '--severity', 'high', '--title', 'invented stop',
+                   '--holds-merge-pr', '812']);
+    const b = run(['add', '--routine', 'merge-approved', '--severity', 'high', '--title', 'invented other']);
+    expect([a.code, b.code]).toEqual([0, 0]);
+    const recs = readFileSync(store, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    expect(recs.map(r => r.holds_merge_pr)).toEqual([812, undefined]);
+  });
 });

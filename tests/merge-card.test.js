@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync, mkdtempSync } from 'fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -435,7 +435,7 @@ print(json.dumps({"recycled": recycled, "oldCode": old_code, "started": len(STAR
     const r = drive(`
 def bad_annotate(task, note): raise RuntimeError("Airtable 503")
 ma.annotate = bad_annotate
-GH["view"] = json.dumps({"state": "CLOSED", "mergeCommit": None, "headRefOid": "${HEAD}"})
+GH["view"] = ""   # the PR cannot be read (14 Nov 2026: a CLOSED PR is no longer an error; the robot closes its card)
 res = ma.merge_one(C(), {})
 att = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
 def bad_patch(task, fields): raise RuntimeError("Airtable 503")
@@ -623,6 +623,7 @@ def patch(i, f): WRITES.append(i); TASKS[i]["fields"].update(f)
 d.patch_task = patch
 d.ledger_append = lambda t, e: None
 d.load_login_sites = lambda: {}
+d.MERGE_ATTEMPTS_FILE = "/nonexistent/od-test-merge-attempts.json"
 def q(formula, max_records=None, minimal=False):
     if formula.startswith("NOT("): return [{"id": "ctl", "fields": {}}]
     if formula.startswith("AND({Status}='Completed'") or formula.startswith("LEFT("): return []
@@ -636,6 +637,39 @@ print(json.dumps({"before": [w["task"] for w in before["woken"]], "state": [w.ge
     expect(r.before).toEqual([]);
     expect(r.state).toEqual(['pending']);
     expect(r.after).toEqual([`the fix landed (finding ${add})`]);
+  });
+});
+
+describe('the wall row reads merge-approved.py\'s record (14 Nov 2026)', () => {
+  it('blockers_scan says an approved card is resting on a red, read from the attempts file it is given', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'od-wall-row-'));
+    const env = { FINDINGS_FILE: join(dir, 'q.jsonl'), FINDINGS_OVERFLOW_FILE: join(dir, 'o.jsonl') };
+    const add = execFileSync('python3', [S('findings.py'), 'add', '--routine', 'agent-dispatch', '--severity', 'high',
+      '--title', 'Agent blocked: retype', '--where', 'scripts/agent-dispatch.py'], { encoding: 'utf8', env: { ...process.env, ...env } }).trim();
+    execFileSync('python3', [S('findings.py'), 'close', add, '--outcome', 'pending', '--pr', '812', '--note', 'in the PR'], { env: { ...process.env, ...env } });
+    const att = join(dir, 'attempts.json');
+    writeFileSync(att, JSON.stringify({ 812: { result: 'red', head: HEAD, reds: 1, lastRedAt: '2026-11-06T09:00:00Z' } }));
+    const r = run(load('d', 'agent-dispatch.py') + `
+AF = d.AF
+TASKS = {"t1": {"id": "t1", "fields": {AF["notes"]: "[x — agent] BLOCKER OPEN (TOOL retype): why Fix: f [since 2026-10-01T09:00:00.000Z] [finding ${add}]",
+                                         AF["status"]: "Today", AF["name"]: "Example task", AF["approvalOutcome"]: "", AF["agentOutput"]: ""}}}
+CARD = {"id": "recCardAaaaaaaaaa", "createdTime": "2026-11-06T08:00:00.000Z", "fields": {
+    d.merge_card.F["name"]: "MERGE: PR #812 — fix", d.merge_card.F["status"]: "Today",
+    d.merge_card.F["approvalOutcome"]: "Approved as-is", d.merge_card.F["agentOutput"]: ${JSON.stringify(OUTPUT)}}}
+d.get_task = lambda i: json.loads(json.dumps(TASKS[i]))
+d.patch_task = lambda i, f: None
+d.ledger_append = lambda t, e: None
+d.load_login_sites = lambda: {}
+d.MERGE_ATTEMPTS_FILE = ${JSON.stringify(att)}
+def q(formula, max_records=None, minimal=False):
+    if formula.startswith("NOT("): return [{"id": "ctl", "fields": {}}]
+    if formula.startswith("LEFT("): return [json.loads(json.dumps(CARD))]
+    if formula.startswith("AND({Status}='Completed'"): return []
+    return [json.loads(json.dumps(t)) for t in TASKS.values()]
+d.query_tasks = q
+out = d.blockers_scan(sweep=False)
+print(json.dumps([[w.get("toolState"), w.get("tool")] for w in out["open"]]))`, env);
+    expect(r).toEqual([['merge-approved', 'you approved the merge card for PR #812; its tests failed (1 of 4), the robot tries again after 15:00 on 06 Nov']]);
   });
 });
 
