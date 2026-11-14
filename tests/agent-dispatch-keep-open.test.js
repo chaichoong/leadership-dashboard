@@ -194,7 +194,8 @@ m.merge_card = types.SimpleNamespace(pr_number=lambda name: None)
 m.sign_output_needs_watch = lambda out: False
 args = types.SimpleNamespace(task="recTtGhchq2fEF7lB", keep_open=True, note="the approved chase",
                              no_certificate="", cost_not_written="", evidence="", not_signed="",
-                             diary_not_written="")
+                             diary_not_written="",
+                             until=(m.datetime.now(m.LONDON).date() + m.timedelta(days=2)).isoformat())
 err = ""
 import contextlib, io
 try:

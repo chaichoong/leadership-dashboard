@@ -603,7 +603,8 @@ for outcome in d.APPROVED:
     d.patch_task = lambda i, f, W=W: W.append(f)
     d.ledger_append = lambda t, e, L=L: L.append((e, datetime.now(timezone.utc)))
     with contextlib.redirect_stdout(io.StringIO()):
-        d.cmd_complete(A(task="recWAITxxxxxxxx01", keep_open=True, note="chased the electrician", no_certificate="", evidence=""))
+        d.cmd_complete(A(task="recWAITxxxxxxxx01", keep_open=True, note="chased the electrician", no_certificate="", evidence="",
+                            until=(d.datetime.now(d.LONDON).date() + d.timedelta(days=2)).isoformat()))
     notes = W[-1][d.AF["notes"]]
     fields = {"Status": "Today", "Approval Outcome": outcome, "Approved At": iso(approved_at), "Notes": notes}
     seen.append([lh.reply_wait(fields, datetime.now(timezone.utc), L), [e for e, _ in L]])

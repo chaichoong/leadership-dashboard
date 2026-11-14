@@ -247,7 +247,8 @@ describe('a blocked task cannot close', () => {
 rec("t1", outcome="Approved as-is", approved_at="2026-09-25T09:00:00.000Z")
 run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "purchase", "why": "Kevin buys the policy.", "finding": None, "steps": "1. Buy the policy online."})
 a = run(m.cmd_complete, {"task": "t1", "keep_open": False, "note": None})
-k = run(m.cmd_complete, {"task": "t1", "keep_open": True, "note": "saved the quote"})
+k = run(m.cmd_complete, {"task": "t1", "keep_open": True, "note": "saved the quote",
+                         "until": (m.datetime.now(m.LONDON).date() + m.timedelta(days=2)).isoformat()})
 thin = run(m.cmd_unblock, {"task": "t1", "evidence": "done"})
 u = run(m.cmd_unblock, {"task": "t1", "evidence": "Policy RS-1234 schedule email from RightSure, 25 Sep 14:02, in Gmail."})
 b = run(m.cmd_complete, {"task": "t1", "keep_open": False, "note": None,
