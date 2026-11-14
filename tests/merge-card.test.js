@@ -294,8 +294,8 @@ print(json.dumps([ma.plan(C(), {}), ma.plan(C(), att)[0], ma.plan(C(approvedAt="
     expect(r[8][1]).toMatch(/not .*(Builder|approval gate)/);
     expect(r[9]).toMatch(/Approved At is earlier than the task itself/);
     expect(r[10]).toEqual(['skip', 'not a MERGE card any more: its work does not open with the MERGE CARD line for PR #812']);
-    expect(r[11]).toBe('send-back');     // an ERROR that never got back to his queue: sent back now
-    expect(r[12]).toBe('send-back');     // no tested head: never merged, sent back saying so
+    expect(r[11]).toBe('send-back');     // a pre-14-Nov ERROR record (no errKind) that never got back: its old send-back stands
+    expect(r[12]).toBe('retest');        // no tested head: never merged; the robot dry-run tests the current head (14 Nov 2026)
   });
 
   it('green: merge-pr.py once at the approved head, findings landed, deploy watched, the card completed with the merge commit', () => {
@@ -328,7 +328,7 @@ ma.subprocess.run = guard
 res = ma.merge_one(C(), {})
 print(json.dumps({"res": res, "called": CALLED, "patches": PATCHES, "notes": NOTES}))`, tmpd());
     expect(r.called).toEqual([[812, NEWHEAD, true]]);            // the gate alone, at the new head
-    expect(r.res.result).toBe('error');
+    expect(r.res).toMatchObject({ result: 'refreshed', backToKevin: true });
     expect(r.notes[0]).toMatch(/^MERGE NOT DONE: PR #812 changed after this card was raised .*Re-tested green on the new code; the card now shows it\./);
     const body = r.patches.find(([, f]) => 'fldzswp8fx6PqpLQ5' in f);
     expect(body[1].fldzswp8fx6PqpLQ5).toContain(`Tested head: ${NEWHEAD}`);
@@ -431,25 +431,20 @@ print(json.dumps({"recycled": recycled, "oldCode": old_code, "started": len(STAR
     expect(r.gone).toBeNull();
   });
 
-  it('a note that fails to write never strands an ERROR card: it goes back first, and a send-back that failed is retried', () => {
+  it('a green refreshed card whose send-back failed to write is re-sent by the next run, never merged on the old approval', () => {
     const r = drive(`
-def bad_annotate(task, note): raise RuntimeError("Airtable 503")
-ma.annotate = bad_annotate
-GH["view"] = ""   # the PR cannot be read (14 Nov 2026: a CLOSED PR is no longer an error; the robot closes its card)
-res = ma.merge_one(C(), {})
-att = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
+GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
+ma.run_merge_pr = lambda pr, head, dry_run=False: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "head": head, "why": "green"}), "")
+ma.refresh_card = lambda card, head, res: None
 def bad_patch(task, fields): raise RuntimeError("Airtable 503")
 ma.merge_card.patch_card = bad_patch
-res2 = ma.merge_one(C(), {})
-att2 = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
-print(json.dumps({"res": res, "back": PATCHES[0][1].get("fldx4qCw17UfrKpaN") if PATCHES else None, "att": att["812"],
-                  "res2": res2, "plan2": ma.plan(C(), att2)}))`, tmpd());
-    expect(r.res.annotateError).toMatch(/Airtable 503/);
-    expect(r.res.backToKevin).toBe(true);
-    expect(r.back).toBe('Approval');
-    expect(r.att.back).toBe(true);
-    expect(r.res2.backToKevin).toBe(false);
-    expect(r.plan2[0]).toBe('send-back');
+res = ma.merge_one(C(), {})
+att = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
+refreshed = C(head="${NEWHEAD}", agentOutput=${JSON.stringify(OUTPUT)}.replace("${HEAD}", "${NEWHEAD}"), prState="OPEN", prHead="${NEWHEAD}")
+print(json.dumps({"res": res, "att": att["812"], "plan": ma.plan(refreshed, att)}))`, tmpd());
+    expect(r.res).toMatchObject({ result: 'refreshed', backToKevin: false });
+    expect(r.att).toMatchObject({ result: 'refreshed', head: NEWHEAD, back: false });
+    expect(r.plan[0]).toBe('send-back');          // re-sent, never 'merge' on his approval of the OLD head
   });
 
   it('red: the gate\'s last lines go on the card, his approval STANDS (no send-back), and nothing is completed or landed', () => {
@@ -517,15 +512,16 @@ print(json.dumps({"res": res, "calls": CALLS}))`, tmpd());
     expect(r.calls).toContain('agent-dispatch.py complete recCardAaaaaaaaaa');
   });
 
-  it('a PR number that does not exist is written on the card, the card goes back, and merge-pr.py never runs', () => {
+  it('a PR number that does not exist is written on the card, the card is NOT sent back (the robot retries), and merge-pr.py never runs', () => {
     const r = drive(`
 GH["view"] = ""
 res = ma.merge_one(C(), {})
 print(json.dumps({"res": res, "merges": MERGES, "notes": NOTES, "patches": len(PATCHES)}))`, tmpd());
-    expect(r.res.result).toBe('error');
+    expect(r.res).toMatchObject({ result: 'error', kind: 'pr-unreadable' });
+    expect(r.res.retryAt).toBeTruthy();
     expect(r.notes[0]).toMatch(/PR #812 could not be read, so nothing was merged: gh cannot read PR #812: no pull requests found/);
     expect(r.merges).toEqual([]);
-    expect(r.patches).toBe(1);
+    expect(r.patches).toBe(0);
   });
 
   it('a PR already merged by hand is completed without a second merge', () => {

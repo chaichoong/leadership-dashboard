@@ -18,7 +18,7 @@ import { clearGitLocalEnv } from './git-local-env.js';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // The real config and every file it loads, copied as they are.
 const CARRIED = ['vitest.config.js', 'tests/real-repo-config-tripwire.js', 'tests/git-local-env.js',
-  'tests/setup-git-env.js', 'tests/setup-yield.js', 'tests/clock-skew-reporter.js'];
+  'tests/setup-git-env.js', 'tests/setup-state-dirs.js', 'tests/setup-yield.js', 'tests/clock-skew-reporter.js'];
 
 const PROBE = `
 import { it } from 'vitest';

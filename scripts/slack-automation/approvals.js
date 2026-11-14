@@ -754,17 +754,47 @@ export function signInsWaiting(tasks) {
     return Object.values(bySite).sort((a, b) => b.n - a.n || a.site.localeCompare(b.site));
 }
 // Level A (Kevin's ruling, 7 Sep 2026): what the agents carried out WITHOUT a
-// card since yesterday's message — closed duplicates, already-handled closes,
-// diary entries, Roy handovers. agent-dispatch.py stamps HANDLED_MARK into
-// Notes on every one; this counts the stamps modified in the last 24 hours.
-// Named in the digest so a suppression is never silent: the number he can
-// check is the whole safety of letting agents act.
+// card since yesterday's message. agent-dispatch.py stamps HANDLED_MARK into
+// Notes on every one as "HANDLED WITHOUT YOU (<category>):"; this counts the
+// stamps modified in the last 24 hours and sorts each task by the category on
+// its NEWEST stamp. Since 14 Nov 2026 (PR #925) that includes status updates
+// with nothing to approve, so the sentence names each kind it counted rather
+// than a fixed list (diary entries left Level A on 18 Oct 2026 and are now a
+// card). Named in the digest so a suppression is never silent: the number he
+// can check is the whole safety of letting agents act.
 export const HANDLED_MARK = 'HANDLED WITHOUT YOU';
 export const HANDLED_FORMULA = `AND(FIND('${HANDLED_MARK}', {Notes}), IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(NOW(), -24, 'hours')))`;
 const DASHBOARD_CHECKS_URL = 'https://app.operationsdirector.co.uk/os/agents/index.html#tab=checks';
+const HANDLED_STAMP_RE = new RegExp(`${HANDLED_MARK} \\(([^)]+)\\)`, 'g');
+// The category agent-dispatch.py writes (decision_level's act() names and STATUS_CATEGORY) to the
+// words Kevin reads. Order is the order of the sentence. Anything not listed is "other".
+const HANDLED_KINDS = [
+    ['closed', (c) => c.startsWith('close'), (n) => `${n} closed`],
+    ['status', (c) => c === 'status update', (n) => `${n} status update${n === 1 ? '' : 's'} with nothing to approve`],
+    ['roy', (c) => c === 'pass to roy', (n) => `${n} passed to Roy`],
+    ['royAnswer', (c) => c.startsWith('roy '), (n) => `${n} answered for Roy`],
+    ['sent', (c) => c === 'redirect reply' || c === 'quote request', (n) => `${n} sent under a standing rule`],
+];
+export function handledKinds(tasks) {
+    const out = { total: 0, other: 0 };
+    for (const [k] of HANDLED_KINDS) out[k] = 0;
+    for (const t of tasks || []) {
+        const stamps = [...String((t && t.notes) || '').matchAll(HANDLED_STAMP_RE)];
+        const cat = stamps.length ? stamps[stamps.length - 1][1].trim().toLowerCase() : '';
+        const hit = HANDLED_KINDS.find(([, test]) => cat && test(cat));
+        out[hit ? hit[0] : 'other'] += 1;
+        out.total += 1;
+    }
+    return out;
+}
 export function handledLine(handled) {
-    if (!handled) return '';
-    return `\n*${handled} thing${handled === 1 ? '' : 's'} handled without you* since yesterday's message (closed duplicates, already-handled closes, diary entries, Roy handovers). Check or reverse them here: ${DASHBOARD_CHECKS_URL}\n`;
+    // A number (the count alone) or handledKinds()'s breakdown.
+    const kinds = typeof handled === 'object' && handled ? handled : { total: Number(handled) || 0 };
+    if (!kinds.total) return '';
+    const parts = HANDLED_KINDS.filter(([k]) => kinds[k]).map(([k, , words]) => words(kinds[k]));
+    if (kinds.other) parts.push(`${kinds.other} other`);
+    const what = parts.length ? `: ${parts.join(', ')}.` : '.';
+    return `\n*${kinds.total} thing${kinds.total === 1 ? '' : 's'} handled without you* since yesterday's message${what} Check or reverse them here: ${DASHBOARD_CHECKS_URL}\n`;
 }
 // The Content Engine's publishing report (Kevin, 15 Sep 2026: "I need some kind of reporting protocol so I can see
 // what's been published each day and what's scheduled"). scripts/content-engine/content_report.py writes ONE row in the
@@ -885,8 +915,8 @@ async function postKevinDigest(env, log) {
     // line saying so, rather than pretending nothing was handled.
     let handled = 0;
     try {
-        handled = (await queryTasks(env, HANDLED_FORMULA, DIGEST_MAX)).length;
-        log.push(`digest: ${handled} handled without Kevin in the last 24h`);
+        handled = handledKinds((await queryTasks(env, HANDLED_FORMULA, DIGEST_MAX)).map(taskView));
+        log.push(`digest: ${handled.total} handled without Kevin in the last 24h (${JSON.stringify(handled)})`);
     } catch (e) {
         log.push(`digest: handled-without-you count FAILED (${e && e.message ? e.message : e}) — reported as unknown, not zero`);
         handled = 0;

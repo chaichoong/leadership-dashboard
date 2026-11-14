@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { londonParts, buildDigestText, handledLine, HANDLED_FORMULA, contentLine, buildContentOnlyText, CONTENT_REPORT_KEY } from '../scripts/slack-automation/approvals.js';
+import { londonParts, buildDigestText, handledLine, handledKinds, HANDLED_FORMULA, contentLine, buildContentOnlyText, CONTENT_REPORT_KEY } from '../scripts/slack-automation/approvals.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'scripts/slack-automation/approvals.js'), 'utf8');
@@ -184,7 +184,35 @@ describe('the digest counts what was handled without Kevin', () => {
     it('reads the dispatcher\'s marker over the last 24 hours', () => {
         expect(HANDLED_FORMULA).toContain("FIND('HANDLED WITHOUT YOU', {Notes})");
         expect(HANDLED_FORMULA).toMatch(/LAST_MODIFIED_TIME\(\), DATEADD\(NOW\(\), -24, 'hours'\)/);
-        expect(SRC).toMatch(/handled = \(await queryTasks\(env, HANDLED_FORMULA, DIGEST_MAX\)\)\.length/);
+        expect(SRC).toMatch(/handled = handledKinds\(\(await queryTasks\(env, HANDLED_FORMULA, DIGEST_MAX\)\)\.map\(taskView\)\)/);
+    });
+    // Since PR #925 a status update with nothing to approve is handled without him too. The sentence
+    // used to name a fixed list (closes, diary entries, Roy handovers) whatever was counted, so on a
+    // morning of status updates it named three things that had not happened and not the one that had.
+    it('names each kind it counted, status updates included, from the category on each task\'s newest stamp', () => {
+        const stamp = (cat) => `[14 Nov 2026 09:00 — agent-dispatch] HANDLED WITHOUT YOU (${cat}): x.`;
+        const tasks = [
+            { notes: stamp('close: duplicate') },
+            { notes: stamp('close: already handled') },
+            { notes: stamp('status update') },
+            { notes: stamp('close: duplicate') + '\n' + stamp('status update') },   // the newest stamp decides
+            { notes: stamp('status update') },
+            { notes: stamp('pass to Roy') },
+            { notes: stamp('roy answer') },
+            { notes: stamp('quote request') },
+            { notes: stamp('something new') },
+        ];
+        const kinds = handledKinds(tasks);
+        expect(kinds).toMatchObject({ total: 9, closed: 2, status: 3, roy: 1, royAnswer: 1, sent: 1, other: 1 });
+        const text = buildDigestText(2, ['a', 'b'], 'https://x', false, [], kinds);
+        expect(text).toContain("*9 things handled without you* since yesterday's message: 2 closed, 3 status updates "
+            + 'with nothing to approve, 1 passed to Roy, 1 answered for Roy, 1 sent under a standing rule, 1 other. '
+            + 'Check or reverse them here:');
+        expect(text).not.toMatch(/diary/);
+        expect(handledLine(handledKinds([{ notes: stamp('status update') }]))).toMatch(
+            /\*1 thing handled without you\* since yesterday's message: 1 status update with nothing to approve\./);
+        expect(handledLine(handledKinds([]))).toBe('');
+        expect(text).not.toMatch(/—/);
     });
     it('names the count and where to reverse them', () => {
         const text = buildDigestText(2, ['a', 'b'], 'https://x', false, [], 3);

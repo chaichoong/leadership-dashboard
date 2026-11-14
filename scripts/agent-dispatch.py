@@ -1465,7 +1465,12 @@ def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
+# AGENT_DISPATCH_DIR, read once at import (14 Nov 2026), moves every state file below, the carry-out
+# ledger first, the way MERGE_APPROVED_DIR moves merge-approved.py's. Nothing in production sets it:
+# it exists so a test that reaches a real write (the create gate's record_fold, a verify, a submit)
+# can never write Kevin's real ledger. tests/setup-state-dirs.js points it at a temp folder for every
+# test file.
+STATE_DIR = os.environ.get("AGENT_DISPATCH_DIR") or os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 INTENT_LEDGER = os.path.join(STATE_DIR, "carryout-intent.jsonl")
 
 
@@ -10447,9 +10452,21 @@ def approved_merge_state(pr, card, entry):
                                      f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix before "
                                      "it can merge")
         if tries > 0:
-            return "merge-approved", (f"you approved the merge card for PR #{pr}, but the PR changed since and its new "
-                                      f"code is not green ({tries} of {cap}); the robot re-tests it after "
-                                      f"{after('lastMovedAt')}")
+            what = ("the card recorded no tested head and the PR's code" if e.get("noHead") else
+                    "the PR changed since and its new code")
+            return "merge-approved", (f"you approved the merge card for PR #{pr}, but {what} is not green "
+                                      f"({tries} of {cap}); the robot re-tests it after {after('lastMovedAt')}")
+    # Any other failure (merge-approved.py ERROR_RESULT with an errKind, 14 Nov 2026): retried by the
+    # robot on the same clock, stopped after RED_MAX of one kind.
+    if e.get("result") == "error" and e.get("errKind") and str(e.get("head") or "") == head:
+        tries, kind = count("errTries"), e.get("errKind")
+        if tries >= cap:
+            return "merge-stopped", (f"the merge card for PR #{pr} stopped: the merge run failed {tries} times ({kind}) "
+                                     f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix before "
+                                     "it can merge")
+        if tries > 0:
+            return "merge-approved", (f"you approved the merge card for PR #{pr}; the merge run failed ({kind}, "
+                                      f"{tries} of {cap}), the robot tries again after {after('lastErrAt')}")
     return None
 
 
