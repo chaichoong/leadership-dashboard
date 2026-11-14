@@ -1603,7 +1603,7 @@ def open_intents():
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict) or rec.get("event") in ("parked", "unblocked"):
+                if not isinstance(rec, dict) or rec.get("event") in ("parked", "unblocked", "status"):
                     # A wall recorded or cleared (14 and 25 Sep 2026) says nothing about
                     # whether the action ran; skipping it keeps an earlier intent open, so
                     # the woken carry-out still checks what already happened (review).
@@ -1987,7 +1987,7 @@ CHECK_TRIGGERS = ("money", "data-request", "legal", "deadline", "obligation",
                   "unknown-sender", "kevin-asked", "none")
 REPORT_TYPES = ("Analysis", "Research", "Admin", "Drafting", "Audit", "Build")
 CHECK_EXEMPT_RE = re.compile(
-    r"^\s*(CLOSE PROPOSAL:|PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:)", re.I)
+    r"^\s*(CLOSE PROPOSAL:|PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|STATUS ONLY:)", re.I)
 
 
 def checked_parse(output):
@@ -2007,7 +2007,9 @@ def checked_problem(output, task_type, inbound):
     if not inbound or task_type not in REPORT_TYPES:
         return ""
     out = (output or "").strip()
-    if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out):
+    # A STATUS ONLY update under the tier-1 banner is exempt too (14 Nov 2026): it declares
+    # nothing to decide, and status_only_problem refuses a CHECKED line naming a trigger.
+    if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out) or status_only_line(out):
         return ""
     c = checked_parse(out)
     if c is None:
@@ -2301,6 +2303,291 @@ def dupe_fold_lane(fields):
 CLOSED_KEEPER_STATUSES = ("Completed", "Cancelled")
 
 
+# ─── A STATUS-ONLY UPDATE FILES ITSELF, A NO-OP CARD IS REFUSED (Kevin, 14 Nov 2026) ───
+#
+# Kevin's own count (ruling evidence): in the 30 days to 14 Nov 2026, 64 verdicts on cards whose plain line said
+# "IF YOU APPROVE: Nothing happens", "nothing runs" or "This only tells you…", most of them creditor
+# chase updates ("Chase: …", no reply has come yet). recr8iLqHOb2mpMh0 read "Nothing happens. This
+# only tells you no reply has come yet and the next check is on 2 November." The informational
+# filing above never takes a tier-1 or creditor task (the banner promises he reads it), so every
+# such update became a card he had to approve to make go away. His ruling ("Handled list, no
+# card"): a status-only update is listed under Handled without you with nothing to approve; the
+# robot is refused a card whose Approve runs nothing; anything to send, pay or decide on a creditor
+# stays a card. Close proposals are not part of the ruling.
+#
+# THE DECLARATION. The output's first line (under the tier-1 banner) is `STATUS ONLY: <one plain
+# sentence: what was checked and what has not changed>`, a `NEXT CHECK: YYYY-MM-DD` line says when
+# the agent looks again, and the closing line is the declared Nothing form. The code then VERIFIES
+# it carries nothing to carry out (status_only_problem), on a tier-1 or creditor task too, which is
+# the point of the ruling. Filing writes ONE dated Notes line under HANDLED_MARK (the page's Handled
+# without you lane reads it) and nothing else: Status, Due Date, Agent Output, Plain Summary, the
+# owners and Kevin's verdict stay exactly as they were. The task rests until NEXT CHECK
+# (status_rest), at most STATUS_REST_MAX_DAYS ahead so it never outlives the board's stuck clock.
+STATUS_CATEGORY = "status update"
+STATUS_ONLY_RE = re.compile(r"\A\s*STATUS ONLY:\s*(?P<line>[^\n]+)$", re.I | re.M)
+STATUS_NEXT_RE = re.compile(r"^\s*NEXT CHECK:\s*(?P<date>\d{4}-\d{2}-\d{2})\s*$", re.I | re.M)
+STATUS_REST_MAX_DAYS = 7
+# Every line shape something else carries out. One of these and it is not a status update: it is
+# an email, a letter, a signature, a payment, a diary entry, a decision, a close or a handover.
+STATUS_CARRY_LINE_RE = re.compile(
+    r"^\s*(?:(?P<what>TO|CC|BCC|FROM|SUBJECT|DOCUMENT|POST|SIGNERS|CALENDAR|TITLE|START|REPLACES|CANCELS"
+    r"|SPEND|KEVIN ONLY|DECIDE|CLOSE PROPOSAL|PASS TO ROY|ROY ANSWER|ROY DONE|SOURCING|SIGN-IN NEEDED"
+    r"|RECORD NEW COST|RECORD CHANGE|YOUR STEP|SIGN AS KEVIN|AGREEMENT ID|SIGNER)\s*:"
+    r"|(?P<bare>MARK FOR PAYMENT|REDIRECT TO INFO@|SIGN AS KEVIN)\b)", re.I | re.M)
+STATUS_SEPARATOR_RE = re.compile(r"^\s*-{3,}\s*$", re.M)
+# A reply that arrived since the last look is not "nothing has changed": the newest email line of
+# the TRACK RECORD (history --text writes "- 12 Nov 2026 10:38 — email: Name <addr>: subject").
+STATUS_EMAIL_LINE_RE = re.compile(
+    r"^\s*[-*]\s*(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*[—–-]+\s*email:\s*"
+    r"(?P<who>[^\n]*?)(?P<addr>[\w.+-]+@[\w-]+(?:\.[\w-]+)+)", re.M)
+STATUS_SUBMIT_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?\s*— agent-dispatch\] "
+                                    r"(?:SUBMITTED|" + re.escape(HANDLED_MARK) + r")\b", re.M)
+STATUS_FILED_RE = re.compile(
+    r"^\[(?P<day>\d{1,2} \w{3} \d{4}) \d{2}:\d{2} — agent-dispatch\] " + re.escape(HANDLED_MARK)
+    + r" \(" + re.escape(STATUS_CATEGORY) + r"\):[^\n]*rests until (?P<until>\d{4}-\d{2}-\d{2})\.", re.M)
+# Lines kept out of the record block under the filed line: a marker another reader acts on.
+STATUS_NOTE_MAX = 2000
+STATUS_ONLY_HELP = (
+    "       A STATUS ONLY update files itself with no card (Kevin, 14 Nov 2026), but only when it\n"
+    "       carries nothing to carry out and its own words ask nothing of him. Its shape:\n"
+    "         STATUS ONLY: <one plain sentence: what you checked and what has not changed>\n"
+    "         NEXT CHECK: <YYYY-MM-DD, within 7 days>\n"
+    "         <what you checked, a few short lines>\n"
+    "         TRACK RECORD: ... (as for any creditor or inbound item)\n"
+    "         **Carrying this out will involve:** Nothing. Information only.\n"
+    "       If something arrived, is due, is demanded or needs his decision, it is a card: write it\n"
+    "       as one and say in --plain-approve what Approve sets going.")
+
+_TRIAGE_MOD = None
+
+
+def _triage():
+    """scripts/inbound-triage.py, imported once for ask_signal: the estate's one reader of "does
+    this ask anything of the reader". Imported, never copied, so the two never drift."""
+    global _TRIAGE_MOD
+    if _TRIAGE_MOD is None:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inbound-triage.py")
+        spec = importlib.util.spec_from_file_location("od_inbound_triage", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _TRIAGE_MOD = mod
+    return _TRIAGE_MOD
+
+
+def status_only_line(output):
+    """The STATUS ONLY sentence of an output (under the tier-1 banner), or ''."""
+    body = str(output or "").strip()
+    if body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
+    m = STATUS_ONLY_RE.match(body)
+    return " ".join(m.group("line").split()) if m else ""
+
+
+def status_own_words(body):
+    """What the update itself says: everything bar the TRACK RECORD block (the dated history,
+    which quotes old subjects), the NEXT CHECK, CHECKED and closing lines. The STATUS ONLY label
+    goes, its sentence stays."""
+    text = str(body or "")
+    tails = list(CARRY_OUT_RE.finditer(text))
+    if tails:
+        text = text[:tails[-1].start()]
+    kept, in_record = [], False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s.upper().startswith(TRACK_RECORD_MARK):
+            in_record = True
+            continue
+        if in_record:
+            if not s or s[:1] in "-*•":
+                if not s:
+                    in_record = False
+                continue
+            in_record = False
+        if STATUS_NEXT_RE.match(ln) or CHECKED_RE.match(ln):
+            continue
+        kept.append(re.sub(r"^\s*STATUS ONLY:\s*", "", ln, flags=re.I))
+    return "\n".join(kept).strip()
+
+
+def _status_day(day):
+    try:
+        return datetime.strptime(day, "%d %b %Y").date()
+    except ValueError:
+        return None
+
+
+def status_reply_arrived(body, task_rec):
+    """'<day> from <addr>' when the TRACK RECORD shows an email from outside on or after the last
+    time this task was looked at (its creation, Kevin's verdict, its last card or status update),
+    else ''. Day resolution, so a same-day email counts: the strict direction."""
+    tf = task_rec.get("fields", {}) or {}
+    marks = [str(task_rec.get("createdTime") or "")[:10], str(tf.get(AF["approvedAt"]) or "")[:10]]
+    for m in STATUS_SUBMIT_STAMP_RE.finditer(str(tf.get(AF["notes"]) or "")):
+        d = _status_day(m.group("day"))
+        if d:
+            marks.append(d.isoformat())
+    since = max([m for m in marks if m] or [""])
+    own = {a.lower() for a in OWN_ADDRESSES} | {ROY_EMAIL.lower()}
+    for m in STATUS_EMAIL_LINE_RE.finditer(str(body or "")):
+        d = _status_day(m.group("day"))
+        if not d or m.group("addr").lower() in own:
+            continue
+        if not since or d.isoformat() >= since:
+            return f"{d.strftime('%d %b %Y')} from {m.group('addr')}"
+    return ""
+
+
+def status_only_problem(body, task_type, task_rec, today=None):
+    """(why it is not a status-only update, '') or ('', the rest-until date ISO). Every check reads
+    the output's lines or the task's stored fields, never the agent's word that nothing changed."""
+    m = STATUS_ONLY_RE.match(str(body or ""))
+    if not m:
+        return "it does not open with STATUS ONLY:", ""
+    line = " ".join(m.group("line").split())
+    if task_type == "Correspondence":
+        return "a status update is not Correspondence: submit it as Research, Analysis or Admin", ""
+    plain = plain_summary_problem(line, line)
+    if plain:
+        return "the STATUS ONLY sentence " + plain.split(" ", 1)[1], ""
+    carry = STATUS_CARRY_LINE_RE.search(body)
+    if carry:
+        return (f"it carries a {(carry.group('what') or carry.group('bare')).upper()} line, which is something to carry out, "
+                "so it is a card"), ""
+    if STATUS_SEPARATOR_RE.search(body):
+        return "it carries a --- line, the shape of an email or a letter, so it is a card", ""
+    tail = carry_out_tail(body)
+    if not tail or not no_action_declared(tail):
+        return ("its closing line must be the declared form, "
+                f"{CARRY_OUT_MARKER} Nothing. Information only."), ""
+    c = checked_parse(body)
+    if c is not None and c.get("trigger") not in ("none", None):
+        return f"its CHECKED line names trigger={c.get('trigger')}, which makes it Kevin's, so it is a card", ""
+    tf = task_rec.get("fields", {}) or {}
+    if sel(tf.get(AF["approvalOutcome"])) == "Changes requested":
+        return "Kevin asked for changes on this task, and his request is owed a new card", ""
+    nd = STATUS_NEXT_RE.search(body)
+    if not nd:
+        return "it has no NEXT CHECK: YYYY-MM-DD line saying when you look again", ""
+    try:
+        nxt = datetime.strptime(nd.group("date"), "%Y-%m-%d").date()
+    except ValueError:
+        return f"NEXT CHECK {nd.group('date')} is not a real date", ""
+    today = today or datetime.now(LONDON).date()
+    if not today < nxt <= today + timedelta(days=STATUS_REST_MAX_DAYS):
+        return (f"NEXT CHECK {nxt.isoformat()} must be after today and at most "
+                f"{STATUS_REST_MAX_DAYS} days ahead"), ""
+    ask = _triage().ask_signal("", status_own_words(body))
+    if ask:
+        return f"its own words carry an ask ({ask}), so this is a card, not a status update", ""
+    reply = status_reply_arrived(body, task_rec)
+    if reply:
+        return (f"its TRACK RECORD shows a reply since the last look ({reply}), so something has "
+                "changed: this is a card"), ""
+    return "", nxt.isoformat()
+
+
+def status_record_block(body):
+    """The update's own lines for the Notes, indented so no line can pass for a stamped note, and
+    without any marker another reader acts on."""
+    marks = (HANDLED_MARK, BLOCKER_OPEN_MARK, BLOCKER_CLEARED_MARK, CARRIED_OUT_MARK, "Parked until",
+             NO_CARD_PASS_MARK, DUE_MOVED_MARK)
+    lines = [ln.rstrip() for ln in str(body or "").splitlines()
+             if ln.strip() and not any(mk in ln for mk in marks)]
+    text = "\n".join("    " + ln.strip() for ln in lines)
+    return text[:STATUS_NOTE_MAX] + ("\n    [… cut]" if len(text) > STATUS_NOTE_MAX else "")
+
+
+def status_rest_until(notes):
+    """The rest-until date of the newest status update filed on this task, or ''."""
+    found = STATUS_FILED_RE.findall(str(notes or ""))
+    return found[-1][1] if found else ""
+
+
+def status_filed_on(notes):
+    """The day (date) of the newest status update filed on this task, or None."""
+    found = STATUS_FILED_RE.findall(str(notes or ""))
+    return _status_day(found[-1][0]) if found else None
+
+
+def status_rest(t, last, now=None):
+    """Why a task with a status update filed is resting, or ''. It rests from the `status` event
+    the filing writes until its NEXT CHECK, and wakes early when Kevin's verdict moves or he asks
+    for changes. Clocks and the stamped line only, never words."""
+    if not last or last[0] != "status" or not last[1]:
+        return ""
+    if t.get("outcome") == "Changes requested":
+        return ""
+    if str(t.get("approvedAt") or "") > last[1]:
+        return ""
+    until = status_rest_until(t.get("notes"))
+    if not until:
+        return ""
+    today = (now or datetime.now(timezone.utc)).astimezone(LONDON).date().isoformat()
+    if today >= until:
+        return ""
+    return (f"status update filed at {last[1][:16]} with nothing to approve; rests until {until}, "
+            "or until Kevin's verdict changes")
+
+
+# THE NO-OP CARD (backstop, 14 Nov 2026). An approve line that says Approve runs nothing is refused
+# at submit and escalate, with the two honest routes. It reads words, so it is kept narrow and was
+# back-tested read-only on the stored cards of the 60 days to 14 Nov 2026 (1,147 approve lines):
+# it opens with "Nothing happens / runs / changes", "Nothing is sent / paid / booked …", "Nothing
+# to do" or "No action", or says "this only tells you", AND no clause in it says Approve does
+# something (closes, sends, pays, books, records, writes, creates, merges, a route or option
+# chosen …) without a negation in front. "This task closes. Nothing is sent." passes: Approve
+# closes it. A refusal costs the agent one resubmit; a wrong accept costs Kevin a card.
+NOOP_LEAD_RE = re.compile(
+    r"^\W*(?:if\s+you\s+approve,?\s*)?(?:"
+    r"nothing(?:\s+(?:else|new|more|further))?\s+(?:happens|runs|changes|moves|is\s+done|will\s+happen)"
+    r"|nothing\s+(?:is|gets)\s+(?:sent|paid|posted|booked|bought|changed|done|signed)"
+    r"|nothing\s+(?:left\s+)?(?:to\s+(?:do|approve|decide)|for\s+you\s+to\s+(?:do|decide|approve))"
+    r"|no\s+action(?:\s+is)?(?:\s+(?:taken|needed|required))?"
+    r")\b", re.I)
+NOOP_TELLS_RE = re.compile(
+    r"\b(?:this|it|the\s+card|approving|approve)\s+(?:only|just|simply|merely)\s+"
+    r"(?:tells|informs|lets|shows|confirms\s+to)\s+you\b", re.I)
+NOOP_CLAUSE_SPLIT_RE = re.compile(r"[.;:!?,]+|\s[-–—]+\s|\bbut\b|\bthen\b", re.I)
+NOOP_NEGATION_RE = re.compile(
+    r"\b(?:no|not|nothing|never|none|nobody|without|cannot|won't|isn't|doesn't|already)\b", re.I)
+NOOP_ITSELF_RE = re.compile(r"\b(?:files|closes|filed|closed)\s+itself\b", re.I)
+NOOP_ACTION_RE = re.compile(
+    r"\b(?:clos(?:e|es|ed|ing)|sen(?:d|ds|t)|goes\s+(?:to|out|from)|(?<!by\s)post(?:s|ed)?|pa(?:y|ys|id)|"
+    r"book(?:s|ed)?|(?<!your\s)(?<!the\s)(?<!just\s)(?<!only\s)record(?:s|ed)?|(?:re)?writ(?:e|es|ten)|creat(?:e|es|ed)|"
+    r"rais(?:e|es|ed)|merg(?:e|es|ed)|delet(?:e|es|ed)|cancel(?:s|led)?|remov(?:e|es|ed)|"
+    r"archiv(?:e|es|ed)|mark(?:s|ed)|set(?:s)?\s+(?:to|for|a|the)|rests?\s+until|parks?\s+(?:it|this|the)|"
+    r"moves?\s+to|approv(?:e|es|ing)\s+the\s+plan|go(?:es)?\s+ahead|starts?|builds|built\s+(?:now|today)|"
+    r"fix(?:es|ed)|updat(?:e|es|ed)|chang(?:e|es)\s+(?:to|from)|switch(?:es|ed)?|appl(?:y|ies|ied)|"
+    r"filed\s+as|clear(?:s|ed)?\s+(?:out|up|away)|order(?:s|ed)?|bu(?:y|ys)|renew(?:s|ed)?|"
+    r"fil(?:e|es|ed)\s+(?:the|it|this|in|a)|(?:route|option)\s+[A-D]|hand(?:s|ed)?\s+(?:over|to|it)|"
+    r"pass(?:es|ed)?\s+to|emails?|texts?|replies|reply\s+goes)\b", re.I)
+NOOP_HELP = (
+    "       Kevin's ruling (14 Nov 2026): a card whose Approve runs nothing is refused. Two honest routes:\n"
+    "         (a) if nothing has changed and nothing is owed, submit it as a STATUS ONLY update: it is\n"
+    "             listed under Handled without you and makes no card;\n"
+    "         (b) if Approve does set something going, say what in --plain-approve (the task closes,\n"
+    "             the email goes, the record changes, the agent prepares the chase).\n" + STATUS_ONLY_HELP)
+
+
+def approve_line_noop(line):
+    """The words that say Approve runs nothing (a short quote), or '' when the line names something
+    Approve sets going or makes no such claim."""
+    text = " ".join(str(line or "").split())
+    if not text:
+        return ""
+    hit = NOOP_LEAD_RE.match(text) or NOOP_TELLS_RE.search(text)
+    if not hit:
+        return ""
+    for c in (c.strip() for c in NOOP_CLAUSE_SPLIT_RE.split(text)):
+        if not c or NOOP_ITSELF_RE.search(c):
+            continue
+        a = NOOP_ACTION_RE.search(c)
+        if a and not NOOP_NEGATION_RE.search(c[:a.start()]):
+            return ""
+    return hit.group(0).strip()
+
+
 def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                    plans_fetch=None):
     """Which level this submission sits at, with the evidence VERIFIED.
@@ -2375,6 +2662,16 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     body = out
     if body.startswith(TIER1_BANNER):
         body = body[len(TIER1_BANNER):].strip()
+    # A STATUS-ONLY UPDATE (Kevin, 14 Nov 2026) is decided before the tier check on purpose: the
+    # ruling is about creditor and tier-1 chase updates above all. It is Level A only when the code
+    # finds nothing in it to carry out and nothing in its own words that asks anything of him;
+    # anything else is refused back to the agent as a card (submit says so, it never makes one).
+    if STATUS_ONLY_RE.match(body):
+        problem, until = status_only_problem(body, task_type, task_rec)
+        if problem:
+            return card(STATUS_CATEGORY, problem)
+        return act(STATUS_CATEGORY, "status", f"{status_only_line(body)} Nothing to approve",
+                   restUntil=until, tierChecked=True)
     dup = CLOSE_DUPLICATE_RE.match(body)
     handled = CLOSE_HANDLED_RE.match(body)
     instalment = PLAN_INSTALMENT_RE.match(body)
@@ -2748,6 +3045,57 @@ def handle_without_kevin(args, output, task_rec, level, attached):
                       "category": level["category"], "carry": carry,
                       "evidence": level["evidence"], "inform": inform,
                       "attached": len(attached), "status": status}))
+    return 0
+
+
+# The output shapes that can leave submit without a card: a report that files itself, and the
+# Level A shapes decision_level may carry out. Only for the no-op card's first look: an output that
+# might take one of these is judged again, once its route is known, just before a card is written.
+NOOP_MAY_ACT_RE = re.compile(r"^\s*(?:CLOSE PROPOSAL:|PASS TO ROY:|REDIRECT TO INFO@|ROY ANSWER:|ROY DONE:)", re.I)
+
+
+def noop_may_file(output, task_type, is_inbound, is_tier1):
+    """True when this output might file itself or act at Level A, so its approve line is not yet
+    known to be a card's."""
+    body = str(output or "").strip()
+    if body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
+    if informational_only(output, task_type, tier1=is_tier1) or NOOP_MAY_ACT_RE.match(body):
+        return True
+    if task_type == "Correspondence" and body.upper().startswith("TO:"):
+        return True                     # a fixed-rule send (quote request) is decided later
+    return bool(is_inbound and task_type in REPORT_TYPES and checked_trigger(output) == "none"
+                and not is_tier1)
+
+
+def file_status_update(args, output, level, notes_seen):
+    """File a verified STATUS ONLY update: ONE dated Notes line under HANDLED_MARK plus the update's
+    own lines, and nothing else. Status, Due Date, Agent Output, Plain Summary, the owners and
+    Kevin's verdict are not touched, so a card waiting stays as it is and an approved task kept
+    open stays approved. The `status` ledger event rests the task until its NEXT CHECK."""
+    fresh = get_task(args.task).get("fields", {}) or {}
+    existing = str(fresh.get(AF["notes"]) or "")
+    if not existing.strip() and str(notes_seen or "").strip():
+        sys.exit(f"ERROR: the re-read of {args.task} came back with blank Notes after an earlier read "
+                 "showed some. Stopped before writing, so nothing is lost. Retry the submit.")
+    status_now = sel(fresh.get(AF["status"])) or "open"
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    body = str(output or "").strip()
+    if body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
+    head = (f"[{stamp} — agent-dispatch] {HANDLED_MARK} ({STATUS_CATEGORY}): {status_only_line(body)} "
+            f"Nothing to approve: the task stays {status_now}, its card and Kevin's verdict are "
+            f"untouched, and it rests until {level['restUntil']}. Level A, Kevin's ruling 14 Nov 2026.")
+    patch_task(args.task, {AF["notes"]: append_notes(existing, head + "\n" + status_record_block(body),
+                                                     task_id=args.task)})
+    check = get_task(args.task).get("fields", {}) or {}
+    if head not in str(check.get(AF["notes"]) or ""):
+        sys.exit(f"ERROR: the status update on {args.task} left NO line in Notes after the write. Nothing "
+                 "shows on Handled without you. Retry the submit.")
+    ledger_append(args.task, "status")
+    print(json.dumps({"submitted": args.task, "handled": True, "card": False, "level": AUTONOMY_ACT,
+                      "category": STATUS_CATEGORY, "carry": "status", "status": status_now,
+                      "restsUntil": level["restUntil"]}))
     return 0
 
 
@@ -3884,6 +4232,16 @@ def build_queue(args=None):
         if why:
             t["idleReason"] = why
             idle_hb.append(t)
+    # A STATUS UPDATE FILED WITH NOTHING TO APPROVE (14 Nov 2026) rests the task until the NEXT CHECK
+    # it declared: the filing leaves the task as it was (Today, say), and without this rest every
+    # slot would hand it back for the same look. Listed with its reason, never hidden.
+    for t in list(approved_hb) + list(changes_hb) + list(new_work) + list(deferred_hb):
+        if t in idle_hb:
+            continue
+        why = status_rest(t, ledger.get(t["id"]))
+        if why:
+            t["idleReason"] = why
+            idle_hb.append(t)
     if idle_hb:
         idle_ids = {t["id"] for t in idle_hb}
         approved_hb = [t for t in approved_hb if t["id"] not in idle_ids]
@@ -4529,6 +4887,15 @@ def cmd_escalate(args):
                  "       then does (Kevin, 27 Oct 2026). A step of his after his answer is recorded by the carry-out\n"
                  f"       with block --kind KEVIN --subject <{'|'.join(KEVIN_ONLY_REASONS)}>, which brings it back\n"
                  "       to him as a Your step card he proves.")
+    noop = approve_line_noop(getattr(args, "plain_approve", None))
+    if noop:
+        # A decision card whose Approve runs nothing (14 Nov 2026): his yes takes the recommended
+        # option, so the line says what that sets going.
+        sys.exit(f"REFUSED: {args.task} is not ready for Kevin: its --plain-approve says Approve runs nothing "
+                 f"({noop!r}).\n"
+                 "       On a decision card his yes takes your RECOMMENDED option: say what that sets going\n"
+                 "       (the agent sends the chase, the task waits until a date, the plan is cancelled).\n"
+                 "       If nothing needs deciding, it is not a decision card: file a STATUS ONLY update.")
     record = decision_track_record(args.task, tf, emails=getattr(args, "email", None),
                                    refs=getattr(args, "ref", None), properties=getattr(args, "property", None),
                                    gmail=not getattr(args, "no_gmail", False))
@@ -5519,6 +5886,31 @@ def cmd_submit(args):
     if is_tier1 and TIER1_BANNER not in output:
         output = TIER1_BANNER + "\n\n" + output
 
+    # A STATUS-ONLY UPDATE (Kevin, 14 Nov 2026) is decided here, before anything is uploaded or
+    # stamped: it either files itself (one Notes line, nothing else touched) or is refused back to
+    # the agent. It never becomes a card, so a "nothing happens" card cannot come back this way.
+    if status_only_line(output):
+        status_shape = decision_level(output, args.type, trec, agent_banner=agent_banner)
+        why = ("" if status_shape["level"] == AUTONOMY_ACT and status_shape["category"] == STATUS_CATEGORY
+               else status_shape["why"])
+        if not why and getattr(args, "attach", None):
+            why = "it attaches a file, and a file goes with something to carry out"
+        if not why and (kevin_step or cur_wall):
+            why = ("a wall stands on this task or a step of Kevin's is declared, and that comes back to "
+                   "him as a card, never as a status update")
+        # A certificate or a cost the task still owes is not checked here: those gates guard a CLOSE,
+        # and a status update closes nothing.
+        if why:
+            sys.exit(f"ERROR: refusing to file {args.task} as a status update: {why}.\n" + STATUS_ONLY_HELP)
+        return file_status_update(args, output, status_shape, tf.get(AF["notes"]))
+
+    # A CARD WHOSE APPROVE RUNS NOTHING (Kevin, 14 Nov 2026), refused here before any upload when no
+    # route other than a card is open to this output; checked again just before the card is written.
+    noop = approve_line_noop(plain_approve) if plain_approve is not None else ""
+    if noop and not noop_may_file(output, args.type, is_inbound, is_tier1):
+        sys.exit(f"ERROR: refusing to submit {args.task}: its --plain-approve says Approve runs nothing "
+                 f"({noop!r}).\n" + NOOP_HELP)
+
     # SIGN AS KEVIN (Kevin, 16 Oct 2026): his Approve is the authority for ONE document, so the card
     # goes to him and nobody else, carries the document he reads, and never touches his private
     # legal matter. The agreement id is stamped in Notes so `complete` can ask for the robot's proof
@@ -5720,6 +6112,14 @@ def cmd_submit(args):
     # every site in one go, and the card then carries the one-tap link.
     signin_wait = bool(SIGNIN_NEEDED_RE.search(output))
 
+    # THE NO-OP CARD, second and last look (14 Nov 2026): an output that might have filed or acted
+    # passed the first look, and here it is about to be a card after all (a certificate or a cost
+    # owed, a wall, a Level A check that failed). A card whose Approve runs nothing is refused.
+    # Files attached with this submit are already on the task; the resubmit supersedes them.
+    if noop:
+        sys.exit(f"ERROR: refusing to submit {args.task}: it would be a card, and its --plain-approve says "
+                 f"Approve runs nothing ({noop!r}).\n" + NOOP_HELP)
+
     fields = {
         AF["agentOutput"]: output[:95000],
         AF["taskType"]: args.type,
@@ -5819,6 +6219,11 @@ def cmd_annotate(args):
     # nine times that way while its house had no insurance (25 Sep 2026). A
     # wall is now a `block` with a kind, which routes the fix and wakes the
     # task when it lands. The free-text form is refused so it cannot come back.
+    if HANDLED_MARK in (args.note or ""):
+        # Only submit writes this marker (a Level A carry-out or a filed status update), and the
+        # status line is the clock a task rests on: a typed one would rest it with nothing filed.
+        sys.exit(f"ERROR: refusing a note on {args.task} that writes the {HANDLED_MARK} marker. A status "
+                 "update is filed by `submit` with a STATUS ONLY output, never typed.")
     if BLOCKER_OPEN_MARK in (args.note or "") or BLOCKER_CLEARED_MARK in (args.note or ""):
         # Only block, unblock (with evidence) and the sweep write these lines; a
         # hand-written CLEARED line would let a task close with nothing proved.
@@ -10387,6 +10792,12 @@ def action_landed(a, t, today=None):
     if kind == "decided":
         return st in ("Approval", "Completed", "Cancelled") or bool(
             kevin_park(t, today or datetime.now(LONDON).date()))
+    # A status update filed with nothing to approve (14 Nov 2026) leaves the task where it was, so its
+    # landing is the stamped line itself, written today or yesterday (a run that crosses midnight).
+    if kind in ("new", "redo", "submit"):
+        filed = status_filed_on(t.get("notes"))
+        if filed and filed >= (today or datetime.now(LONDON).date()) - timedelta(days=1):
+            return True
     # new, redo, submit, escalate: a card in his queue, the task filed or closed, or handed to a person
     return st in ("Approval", "Completed", "Cancelled") or any(i in people for i in held)
 

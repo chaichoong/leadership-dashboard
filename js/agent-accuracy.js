@@ -258,6 +258,10 @@
         // record of work logged for it, goes to info@ only, so nobody outside sees it.
         'roy answer':              { level: 'A', since: '2026-09-24' },
         'roy work logged':         { level: 'A', since: '2026-09-24' },
+        // A STATUS ONLY update (Kevin, 14 Nov 2026, "Handled list, no card"): nothing to carry out
+        // and nothing in its own words that asks anything of him, verified in code, on a tier-1 or
+        // creditor task too. Listed under Handled without you; the task stays as it was.
+        'status update':           { level: 'A', since: '2026-11-14' },
         'close: judgement':        { level: 'B' },
         'email: reply':            { level: 'B' },
         'email: quote request':    { level: 'B' },
@@ -293,6 +297,8 @@
         while (i < lines.length && (!lines[i].trim() || (i < 3 && /TIER\s*1/i.test(lines[i])))) i++;
         var out = lines.slice(i).join('\n').trim();
         var up = out.toUpperCase();
+        // A status update is Level A on a tier-1 task too (14 Nov 2026), so it is read before the banner wins.
+        if (/^STATUS ONLY:/i.test(out)) return 'status update';
         if (tier1) return 'tier-1 matter';
         // Money before shape: a PASS TO ROY over the rule is a card whatever its shape.
         if (/^\s*SPEND:\s*£?\s*[\d,]+(?:\.\d+)?\s*(?:\/|per\s|a\s|each\s|every\s)?(?:month|week|year|quarter|annum|recurring|monthly|weekly|annually|yearly)\b/im.test(out)) return 'spend over the rule';

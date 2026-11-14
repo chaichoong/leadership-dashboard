@@ -146,7 +146,9 @@ out = []
 for name, a in pairs:
     assert a[0] == '--plain-task' and a[2] == '--plain-approve', name
     # The approve line says what Approve sets going, never a step of Kevin's (27 Oct 2026).
-    out.append({'name': name, 'problem': m.plain_summary_problem(a[1], a[3]) or m.approve_line_step_problem(a[3])})
+    # ...and never says Approve runs nothing (14 Nov 2026): a fixed line the no-op backstop refused would stop the nightly run.
+    out.append({'name': name, 'problem': m.plain_summary_problem(a[1], a[3]) or m.approve_line_step_problem(a[3])
+                or m.approve_line_noop(a[3])})
 out.append({'name': 'performance passes plain lines', 'problem': '' if 'approval.plain_args(' in src else 'missing'})
 # The OD lane's cards carry no KEVIN ONLY line, so their closing lines may leave him no step either.
 tps = [{'n': 1, 'title': 'Topic one', 'angle': 'why', 'number': 'none needed'}]
@@ -163,7 +165,7 @@ for mode in ('test', 'live'):
     out.append({'name': 'episode closing ' + mode, 'problem': m.kevin_step_in_line(m.carry_out_tail(approval.closing_line(mode)))})
 spec2 = importlib.util.spec_from_file_location('rnt', ${JSON.stringify(resolve(ROOT, 'scripts/rent_new_tenant.py'))})
 rnt = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rnt)
-out.append({'name': 'DWP form card', 'problem': m.approve_line_step_problem(rnt.FORM_PLAIN_APPROVE)})
+out.append({'name': 'DWP form card', 'problem': m.approve_line_step_problem(rnt.FORM_PLAIN_APPROVE) or m.approve_line_noop(rnt.FORM_PLAIN_APPROVE)})
 print('---JSON---'); print(json.dumps(out))
 `;
     const raw = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
