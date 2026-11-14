@@ -24,12 +24,28 @@ Read the exit code and obey it:
 
 Never continue past a non-zero exit. Running anyway is the exact behaviour this routine replaces.
 
-## STEP 2 — Read the queue
+## STEP 2 — Read the worklist
 
 ```
 cd /Users/kevinbrittain/Projects/leadership-dashboard
-python3 scripts/findings.py list --status open
+python3 scripts/findings.py worklist
 ```
+
+It prints three sections:
+
+- **BLOCKING**: open findings that hold a robot's task behind a TOOL wall, most tasks blocked
+  first, then the oldest wall. Each one says how many tasks it blocks and what the blocked-task
+  sweep says about it ("protected file: X" means it goes in the protected PR, never skipped).
+- **THE REST**: every other open finding, worst severity first, then oldest.
+- **BLOCKED BUT NOT IN THE QUEUE**: walls on findings you cannot take (fixed, pending on a PR,
+  deferred, claimed, unknown id). Not your work. Copy the list into your report so it is seen.
+
+Why (13 Nov 2026): 65 tasks waited on 55 findings and the fixer had claimed 2 of them, because
+`list` ranks by severity and says nothing about what a finding blocks. One finding held 7 tasks.
+
+If the first line reads `BLOCKING: NOT CHECKED (<why>)`, the sweep's report could not be read.
+Work THE REST in the order given and put the NOT CHECKED line, word for word, in your report.
+Never write "nothing is blocked" when the list was not read.
 
 No open findings is a normal, good outcome. Release the lock (STEP 6) and report "nothing to fix". Do not invent work.
 
@@ -69,7 +85,19 @@ Raised 15 Oct 2026 (Kevin): about 14 findings filed a day against about 4 fixed;
 
 ## STEP 4 — Work the findings
 
-Take them in the order `findings.py list` gives you, worst severity first. Cap at **10 findings per run**. If more are open, do the ten and say in the PR body exactly how many you left, with their IDs. Never truncate silently.
+Work the BLOCKING section top to bottom before anything else. Then work THE REST in the order
+`worklist` gives. Do not skip a blocking finding for an easier one.
+
+A blocking finding is only left for one of three reasons:
+- it does not reproduce: close it `--outcome rejected` with what you checked;
+- it is NOT CODE: no code change can close it, so say so in the report, with its id and the
+  tasks it blocks;
+- the time budget ended (STEP 3b): name the cap and list the blocking findings you did not reach.
+
+Keep going while time remains and open findings remain. Stopping because "neither cap bound" is
+not a reason: if neither the 90-minute budget, the 08:20 ceiling nor the cap of 25 stopped you,
+take the next finding. When you stop, say in the PR body exactly how many you left, with their
+IDs, blocking ones first. Never truncate silently.
 
 For each finding:
 1. `python3 scripts/findings.py claim <id> --by queue-fixer`
@@ -82,7 +110,7 @@ For each finding:
    (checked as an ancestor of origin/main) or, for a non-code fix, a plain statement of the proof.
    `python3 scripts/findings.py close <id> --outcome pending --pr <n> --note "<what you did>"`
 
-Anything you will not fix, close as `deferred` with the reason. Every finding ends the run in a terminal state, so tomorrow's queue starts clean.
+Anything you claimed and will not fix, close as `deferred` with the reason. Every finding you claim ends the run in a terminal state, so tomorrow's queue starts clean. Never defer a BLOCKING finding: it is rejected, reported as NOT CODE, or left open when time runs out.
 
 **A protected file is never a reason to defer (Kevin, 7 Oct 2026).** 19 tasks sat on TOOL walls for up
 to twelve days because their fixes needed `scripts/agent-dispatch.py`, a runner or
@@ -197,9 +225,14 @@ Do NOT DM Kevin (Slack contract, 21 Aug 2026). Return to daily-ops: how many fin
   straight to main — the PR is the audit trail even when the fixer merges it itself.
 - Never `git stash`. Another session's work is usually in the main checkout.
 - Never fix something absent from the findings queue. If you spot a new problem, add it as a finding for tomorrow rather than widening today's run.
+- **Blocking first.** Read `findings.py worklist`, never `list`, to choose work. The BLOCKING
+  section is worked top to bottom before THE REST (STEP 4).
 - **Cap of 25 per run** (raised from 10 on 29 Aug 2026, with auto-merge). It is a real cap,
   reported not hidden. It was never a safety limit — it was set when the drain was Kevin's
   review time, and the fixer now drains its own work.
+- **Do not stop early.** While the 90-minute budget and the 08:20 ceiling allow, and fewer than
+  25 are done, and open findings remain, take the next one. "Neither cap bound" is not a reason
+  to stop.
 - **Report the arithmetic, not just the count.** Findings filed today, findings closed today,
   and the resulting open total. A queue fed at 20 and drained at 25 clears; one fed at 20 and
   drained at 10 does not, and only the arithmetic says which is happening. On 29 Aug 2026 it
