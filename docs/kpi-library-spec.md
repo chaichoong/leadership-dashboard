@@ -227,6 +227,27 @@ judged by `scripts/ai_team_health.py` into the same `ai-team-verdict` row.
     part-read pass never lowers a day that already has a full count, and an "at least" above
     the day's full count replaces it, marked "at least", for that day's bar and the next week's
     "last week" (review of PR #795: 5 at 10:00 then "at least 40" at 23:50 had kept 5).
+    **Each code fault once (Kevin, 14 Nov 2026).** On 13 Nov the number was 130 and one fault
+    (finding 907) held 7 blocked tasks, counted 7 times. Line 29 now groups blocked tasks whose
+    TOOL wall names a finding: one finding is one thing to fix, and its row in the line names it
+    and how many tasks it holds, with their names. A merged repeat (`duplicate_root` in the
+    findings queue, the same rule as `findings.py worklist`) counts toward its survivor; if the
+    queue cannot be read the walls are grouped by their own ids and the line says so. A TOOL wall
+    naming no finding, and every KEVIN, SIGN-IN and SITE wall, still counts per task. A task with
+    two walls is still one thing; a task waiting on two DIFFERENT findings makes each finding one
+    thing (each needs its own fix) and adds nothing on top. A fault's thing carries its tasks'
+    ids, so a task another line also counts is counted once with its fault. The live dry run on
+    14 Nov 2026 read 130 the old way and 120 the new way (74 blocked tasks, 62 on code walls
+    naming 53 ids, 52 faults once a repeat was merged). Not flattering the trend: the old
+    per-task number is still worked out and kept in each day's snapshot (`_hp`, written only
+    with `_h`, so a day that has it was counted per fault). Past days cannot be recounted the new
+    way: they kept only the number, never which tasks waited on which fault. So while the bars
+    hold a week counted the old way, the panel shows one line under the number ("Counted per
+    fault since 14 Nov 2026. By the old count: N", the date read from the first day with `_hp`),
+    "last week" says "(old count)", a dashed line marks the first bar counted per fault, and the
+    answer (44) compares last week against THIS week counted the old way. Guarded by
+    `tests/ai-team-fault-count.test.js` (back-tested with `GROUP_FAULTS = False`) and
+    `tests/sync-invariants/ai-team-health.spec.js`.
 41. **Work is flowing (light)** — T10 over lines 26 to 30: the worst colour (a grey line counts
     at its last known colour; one with none keeps the light off green). Titled for its colour:
     "Work is flowing", "Work is held up", or the question when it cannot be read. Red and amber

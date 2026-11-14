@@ -37,6 +37,10 @@ the lights, unchanged.
   two rates (lines 11 and 13) never add to it. A task, a job, an email or a check that two
   lines both count is counted once (each line hands on the ids it counted). A line that cannot
   be read, or was read only in part, makes the number "at least N" and is named.
+  Since 14 Nov 2026 (Kevin: one fault held 7 tasks and was counted 7 times) a code fault counts
+  ONCE however many blocked tasks wait on it (fault_groups()). The old per-task count is still
+  worked out and kept in each day's snapshot (`_hp`); the panel says when the counting changed and
+  what the number is the old way, and a week counted per task is compared per task.
 - Weekly bars (weekly_series()): one bar per London week, Monday to Sunday, the week's last
   daily number (today's for this week), up to 8 weeks. The daily number is kept in each day's
   snapshot from 15 Oct 2026. No earlier day can be rebuilt from its line numbers: "Everything's
@@ -87,6 +91,12 @@ TRIAGE_DEFAULT_RUN_MIN = 150        # job-schedule.json's maxRuntimeMinutes for 
 TRIAGE_FINISH_GRACE_MIN = 15        # past its run limit plus this, a run with no end line did not finish
 BLOCKERS_FILE = os.path.join(LOGS, "handback-poll", "scratch", "blockers.json")
 BLOCKERS_MAX_MIN = 120              # the sweep runs every 30 minutes with the hand-back poll
+# The findings queue, read only to merge a wall on a repeat finding into the one that survives it
+# (scripts/findings.py duplicate_root). The same env override findings.py itself honours.
+# Count each code fault once in "Things needing a fix", however many blocked tasks wait on it
+# (Kevin, 14 Nov 2026). A switch so a test can back-test the old per-task count against the code.
+GROUP_FAULTS = True
+FINDINGS_FILE = os.environ.get("FINDINGS_FILE", os.path.join(LOGS, "findings-queue.jsonl"))
 DISPATCH_QUEUE = os.path.join(LOGS, "handback-poll", "scratch", "queue.json")
 DISPATCH_QUEUE_MAX_MIN = 120        # written every 30 minutes (loop-health.py's own limit)
 DISPATCH_DIR = os.path.join(LOGS, "agent-dispatch")
@@ -386,9 +396,33 @@ def judge_bottlenecks(f, now):
     blocked = f.get("blocked")
     if blocked is None:
         blocked = past
-    extra.append(["Blocked tasks, each counted as a thing to fix", len(blocked)])
-    return line("bottlenecks", colour, answer, n, past, extra, src, count=len(blocked), keys=task_keys(blocked),
-                short=("%s blocked too long" % plural(n, "task")) if n else None)
+    # Since 14 Nov 2026 a code fault is ONE thing to fix however many tasks wait on it (Kevin:
+    # one fault had held 7 tasks and was counted 7 times). `things` comes from facts_bottlenecks;
+    # without it (an older caller) every blocked task is one thing, as before.
+    things = f.get("things")
+    if things is None:
+        things = [["task:" + i["id"]] if i.get("id") else [] for i in blocked]
+    faults = f.get("faults") or []
+    extra.append(["Blocked tasks", len(blocked)])
+    if faults:
+        extra.append(["Code faults holding them, each counted once", "%s holding %s" % (
+            plural(len(faults), "fault"), plural(f.get("heldByFaults", 0), "task"))])
+        for x in faults:
+            if x["count"] > 1:
+                extra.append(["Fault %s" % x["finding"], "holds %s: %s" % (
+                    plural(x["count"], "task"), ", ".join(t["name"] for t in x["tasks"]))])
+        if f.get("byWallId"):
+            extra.append(["Note", "repeats of one fault were not merged: %s, so each wall's own id was used"
+                          % (f.get("rootsError") or "the findings queue was not read")])
+    extra.append(["Things to fix here (each code fault once, every other blocked task once)", len(things)])
+    out = line("bottlenecks", colour, answer, n, past, extra, src, count=len(things), keys=task_keys(blocked),
+               short=("%s blocked too long" % plural(n, "task")) if n else None)
+    out["_things"] = things
+    # The count the old way, one per blocked task, kept so the number's change of method is shown
+    # honestly beside it (headline(per_task=True)).
+    out["_perTask"] = (len(blocked), task_keys(blocked))
+    out["faults"] = [{"finding": x["finding"], "count": x["count"], "tasks": x["tasks"][:ITEMS_MAX]} for x in faults]
+    return out
 
 
 def judge_carried(f):
@@ -725,6 +759,9 @@ def merge_history(*histories):
 COLOUR_KEY = "_c"       # inside a day's snapshot: {line key: [colour, "HH:MM"]}, never a line key
 HEAD_KEY = "_h"         # the day's "Things needing a fix": [number, at least?] (from 15 Oct 2026)
 LIGHTS_KEY = "_l"       # the day's three lights: {light key: colour} (from 15 Oct 2026)
+# The day's number counted the OLD way, one per blocked task: [number, at least?]. Present only on
+# a day whose `_h` was counted per code fault (from 14 Nov 2026), so it also marks the method.
+PER_TASK_KEY = "_hp"
 
 
 def last_known(lines, history, now):
@@ -764,6 +801,37 @@ def day_headline(snap):
     if isinstance(h, list) and len(h) == 2 and isinstance(h[0], int) and not isinstance(h[0], bool):
         return h[0], bool(h[1])
     return None
+
+
+def day_per_task(snap):
+    """(number the old way, at least?) for a day counted per code fault, else None (a day from
+    before 14 Nov 2026, whose `_h` was only ever counted per task)."""
+    h = (snap or {}).get(PER_TASK_KEY)
+    if isinstance(h, list) and len(h) == 2 and isinstance(h[0], int) and not isinstance(h[0], bool):
+        return h[0], bool(h[1])
+    return None
+
+
+def method_note(hist, now, head):
+    """The one plain line the panel shows under the number about the change of counting, e.g.
+    "Counted per fault since 14 Nov 2026. By the old count: 128". `since` is the first day the
+    history holds a per-fault number (never a date typed into the code, so it is the day the new
+    count really started). Shown while the kept history still holds a day counted the old way
+    (so its bars mix the two methods); once every kept day is per fault (about 9 weeks on) the
+    note has nothing left to explain and goes. None when either number is unknown."""
+    hist = hist or {}
+    days = sorted(d for d, s in hist.items() if day_per_task(s) is not None)
+    older = [d for d, s in hist.items() if day_headline(s) is not None and day_per_task(s) is None
+             and d < london_day(now)]
+    if isinstance(head.get("perTask"), int):
+        days.append(london_day(now))
+    if not days or not older or not isinstance(head.get("number"), int) or not isinstance(head.get("perTask"), int):
+        return None
+    since = min(days)
+    d = datetime.strptime(since, "%Y-%m-%d")
+    old = "%s%d" % ("at least " if head.get("atLeast") else "", head["perTask"])
+    return {"since": since, "perTask": head["perTask"],
+            "text": "Counted per fault since %d %s. By the old count: %s" % (d.day, d.strftime("%b %Y"), old)}
 
 
 def day_lights(snap):
@@ -813,6 +881,12 @@ def apply_history(lines, history, now, head=None, lights=None):
         # kept 5, a day that read better than the truth). It stays marked "at least".
         if had is None or had[1] or not head["atLeast"] or head["number"] > had[0]:
             snap[HEAD_KEY] = [head["number"], bool(head["atLeast"])]
+            # Written with the number it belongs to, never alone: a day that has it was counted
+            # per fault, and this is its number the old way (from 14 Nov 2026).
+            if isinstance(head.get("perTask"), int):
+                snap[PER_TASK_KEY] = [head["perTask"], bool(head["atLeast"])]
+            else:
+                snap.pop(PER_TASK_KEY, None)
     if lights:
         kept = dict(snap.get(LIGHTS_KEY) or {})
         kept.update({x["key"]: x["colour"] for x in lights if x["colour"] in RANK})
@@ -826,7 +900,7 @@ def apply_history(lines, history, now, head=None, lights=None):
         if d > today or d < keep_head:
             continue
         if d < keep:
-            s = {k: v for k, v in s.items() if k in (HEAD_KEY, LIGHTS_KEY)}
+            s = {k: v for k, v in s.items() if k in (HEAD_KEY, PER_TASK_KEY, LIGHTS_KEY)}
         if s:
             kept[d] = s
     hist = kept
@@ -951,18 +1025,29 @@ RANK = {"green": 0, "amber": 1, "red": 2}
 LIGHT_PHRASES = 2           # a light names at most two things, then "+N more" (about 8 words)
 
 
-def headline(lines):
+def headline(lines, per_task=False):
     """"Things needing a fix": every problem the eleven counting lines name, each counted once.
     A task, job, email or check two lines both list is taken off once for each extra line it
     is on (each line hands on the ids of what it counted). A line that cannot be read, or was
     read only in part, makes the number "at least" and is named in `unread`; with no counting
-    line read at all, the number is None, never a zero."""
+    line read at all, the number is None, never a zero.
+    Since 14 Nov 2026 a line may hand on `_things` (one key list per thing): "No bottlenecks"
+    counts each code fault once and its thing carries the keys of the tasks it holds, so a task
+    another line counts merges with its fault. `per_task=True` gives the old count (one per
+    blocked task), kept beside the new one so the change of method is shown, never hidden."""
     total, parts, unread, seen = 0, [], [], {}
     floor, read = False, 0
+    things = []                 # (line key, [keys]): one entry per named thing a line counted
     for l in lines:
         if l["key"] not in HEADLINE_LINES:
             continue
         c = l.get("count")
+        keys = l.get("_keys") or ()
+        mine = None
+        if per_task and l.get("_perTask"):
+            c, keys = l["_perTask"]
+        elif l.get("_things") is not None:
+            mine = [list(t) for t in l["_things"]]
         if not isinstance(c, int) or isinstance(c, bool):
             floor = True
             unread.append({"key": l["key"], "question": l["question"],
@@ -972,11 +1057,31 @@ def headline(lines):
         if l.get("countFloor"):
             floor = True
             unread.append({"key": l["key"], "question": l["question"], "why": "read only in part"})
+        if mine is None:
+            mine = [[k] for k in keys]
         total += c
         parts.append({"key": l["key"], "question": l["question"], "count": c})
-        for k in l.get("_keys") or ():
+        things += [(l["key"], t) for t in mine if t]
+        for k in {k for t in mine for k in t}:
             seen[k] = seen.get(k, 0) + 1
-    shared = sum(v - 1 for v in seen.values() if v > 1)
+    # Things that share a key are one thing (a task two lines both count; a task another line
+    # counts that also waits on a code fault). With one key per thing this is exactly the old
+    # sum minus each key's extra lines; a fault's thing carries its tasks' keys as well.
+    parent = list(range(len(things)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    owner = {}
+    for i, (_lk, t) in enumerate(things):
+        for k in t:
+            if k in owner:
+                parent[find(i)] = find(owner[k])
+            else:
+                owner[k] = i
+    shared = len(things) - len({find(i) for i in range(len(things))})
     by_kind = {}
     for k, v in seen.items():
         if v > 1:
@@ -1031,13 +1136,15 @@ def weekly_series(hist, now, head):
     number between two that have one is kept, with no bar. Returns (weeks, the first day any
     number was kept)."""
     today = now.astimezone(LONDON).date()
-    days = {}
+    days, old = {}, {}
     for d, s in (hist or {}).items():
         h = day_headline(s)
         if h is not None:
             days[datetime.strptime(d, "%Y-%m-%d").date()] = (d, h)
+            old[datetime.strptime(d, "%Y-%m-%d").date()] = day_per_task(s)
     if head and isinstance(head.get("number"), int):
         days[today] = (today.isoformat(), (head["number"], bool(head["atLeast"])))
+        old[today] = (head["perTask"], bool(head["atLeast"])) if isinstance(head.get("perTask"), int) else None
     if not days:
         return [], None
     first = min(days)
@@ -1048,8 +1155,14 @@ def weekly_series(hist, now, head):
         mine = [d for d in days if w <= d <= min(w + timedelta(days=6), today)]
         d = max(mine) if mine else None
         n, al = days[d][1] if d else (None, False)
+        # `perFault`: this bar's number counts each code fault once (14 Nov 2026 on); `perTask` is
+        # the same week counted the old way, one per blocked task (a bar from before the change
+        # was only ever counted that way, so it is its own number).
+        pf = bool(d and old.get(d))
+        pt = old[d][0] if pf else n
         weeks.append({"start": w.isoformat(), "end": (w + timedelta(days=6)).isoformat(),
-                      "day": days[d][0] if d else None, "number": n, "atLeast": al, "current": w == this})
+                      "day": days[d][0] if d else None, "number": n, "atLeast": al, "current": w == this,
+                      "perFault": pf, "perTask": pt})
         w += timedelta(days=7)
     return weeks, first.isoformat()
 
@@ -1143,15 +1256,29 @@ def build_payload(lines, history, now, history_check=None):
     groups = group_verdicts(lines)
     lights = build_lights(lines, groups)
     head = headline(lines)
+    # The same number counted the old way (one per blocked task), kept beside the new one so the
+    # change of method never reads as an overnight improvement (Kevin, 14 Nov 2026).
+    old = headline(lines, per_task=True)
+    head["perTask"] = old["number"]
     hist = apply_history(lines, history, now, head, lights)
     weeks, since = weekly_series(hist, now, head)
+    head["method"] = method_note(hist, now, head)
     last_week = weeks[-2] if len(weeks) >= 2 else None
     if last_week and last_week["number"] is None:
         last_week = None
     prev = day_lights(hist.get(last_week["day"])) if last_week else None
-    verdict = team_verdict(head, last_week, lights, prev, lines)
+    # Last week counted per task: compare like with like, so the answer is judged on the old count
+    # this week too (it can only read worse, never better, than the new count would).
+    compare = head
+    if last_week and not last_week.get("perFault") and isinstance(head.get("perTask"), int):
+        compare = dict(head, number=head["perTask"])
+    verdict = team_verdict(compare, last_week, lights, prev, lines)
+    if compare is not head:
+        verdict["reason"] += " (both weeks counted the old way, one per blocked task, to compare like with like)"
+        verdict["comparedPerTask"] = True
     for l in lines:
-        l.pop("_keys", None)             # identities for the count only: never written to Airtable
+        for k in ("_keys", "_things", "_perTask"):
+            l.pop(k, None)               # identities for the count only: never written to Airtable
     return {"version": 2, "computedAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
             "verdict": verdict, "headline": head, "lastWeek": last_week, "weeks": weeks, "weeksSince": since,
             "lights": lights,
@@ -1204,10 +1331,54 @@ WALL_WORDS = {"TOOL": "waiting on a code fix", "KEVIN": "waiting on a step only 
               "SIGN-IN": "waiting on your sign-in", "SITE": "waiting on a site to be added"}
 
 
-def facts_bottlenecks(blockers, clock_days, now, fresh=()):
+def read_finding_roots(path=None):
+    """({finding id: the id it is counted under}, None), or (None, why not). A merged repeat is
+    counted under the finding that survives it, exactly as scripts/findings.py's worklist does.
+    Fail-soft: a queue that cannot be read groups walls by the id each one names, and says so."""
+    path = path or FINDINGS_FILE
+    try:
+        if not os.path.isfile(path):
+            return None, "the findings queue has no file"
+        fm = _load("findings_for_verdict", "findings.py")
+        fm.FINDINGS = path                  # current_state() reads the module's own path
+        state = fm.current_state()
+    except Exception as exc:  # noqa: BLE001 — the line still counts, by the id on each wall
+        return None, "the findings queue could not be read (%s)" % str(exc)[:100]
+    if not state:
+        return None, "the findings queue read as empty"
+    roots = {}
+    for fid, r in state.items():
+        root = r.get("duplicate_root")
+        roots[fid] = root if root and root in state else fid
+    return roots, None
+
+
+def fault_groups(blockers, roots=None):
+    """Code faults that hold blocked tasks, each ONE thing to fix however many tasks wait on it
+    (Kevin, 14 Nov 2026). Only a TOOL wall that names a finding is grouped; a merged repeat goes
+    under its survivor when `roots` (read_finding_roots) is known. A task walled on two DIFFERENT
+    findings makes each of them one thing (each needs its own fix); the task itself adds nothing on
+    top. Returns {finding: [task ids in wall order]}, biggest first."""
+    groups = {}
+    for w in blockers.get("open") or []:
+        if (w.get("kind") or "") != "TOOL":
+            continue
+        fid, tid = (w.get("finding") or "").strip(), w.get("task")
+        if not fid or not tid:
+            continue
+        fid = (roots or {}).get(fid, fid)
+        if tid not in groups.setdefault(fid, []):
+            groups[fid].append(tid)
+    return dict(sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])))
+
+
+def facts_bottlenecks(blockers, clock_days, now, fresh=(), roots=None, roots_error=None):
     """`blocked`: every blocked task once (a task with two walls is one thing to fix), the
     sweep's walls plus `fresh`, open tasks whose own Notes carry a wall opened since the sweep
-    (the same walls "Everything's moving" takes out, so the two lines never miss one)."""
+    (the same walls "Everything's moving" takes out, so the two lines never miss one).
+    `faults` (14 Nov 2026): the code faults among them, each counted once (fault_groups()); a
+    blocked task held by a fault is counted under the fault, never on its own as well. `things`
+    is what the line hands the one number: one key list per thing to fix."""
     if blockers.get("error"):
         return {"error": blockers["error"]}
     read_at = _aware(blockers.get("readAt"))
@@ -1235,7 +1406,22 @@ def facts_bottlenecks(blockers, clock_days, now, fresh=()):
         if it.get("id") and it["id"] not in seen:
             seen.add(it["id"])
             blocked.append(it)
-    return {"past": past, "byKind": by_kind, "total": sum(kinds.values()), "blocked": blocked}
+    # One thing per code fault, then one per blocked task no fault holds. A task's key sits on the
+    # first fault that holds it only, so two faults never merge into one through a shared task;
+    # the key lets another line counting that same task count it once with its fault.
+    groups = fault_groups(blockers, roots) if GROUP_FAULTS else {}
+    names = {it.get("id"): it.get("name") for it in blocked if it.get("id")}
+    held, things, faults = set(), [], []
+    for fid, tids in groups.items():
+        mine = [t for t in tids if t not in held]
+        held.update(tids)
+        things.append(["finding:" + fid] + ["task:" + t for t in mine])
+        faults.append({"finding": fid, "count": len(tids),
+                       "tasks": [item(names.get(t) or t, t) for t in tids]})
+    things += [["task:" + it["id"]] if it.get("id") else [] for it in blocked if it.get("id") not in held]
+    return {"past": past, "byKind": by_kind, "total": sum(kinds.values()), "blocked": blocked,
+            "faults": faults, "things": things, "heldByFaults": len(held),
+            "byWallId": bool(groups) and roots is None, "rootsError": roots_error if groups else None}
 
 
 def facts_moving(lh_res, walled, task_names):
@@ -2190,7 +2376,8 @@ def gather(now, es, rows, lh_res, lh_err, measures, readers=None):
     swept = {w.get("task") for w in (blockers.get("open") or []) if w.get("task")}
     open_ids = {r["id"] for r in tasks if _open(r.get("fields") or {}, lh.CLOSED)}
     fresh = [item(names.get(i, i), i, "blocked since the last sweep") for i in sorted(walled - swept) if i in open_ids]
-    f["bottlenecks"] = facts_bottlenecks(blockers, tm.CLOCK_DAYS, now, fresh)
+    roots, roots_err = (rd["findings"]() if "findings" in rd else read_finding_roots())
+    f["bottlenecks"] = facts_bottlenecks(blockers, tm.CLOCK_DAYS, now, fresh, roots, roots_err)
     f["carried"] = facts_carried(queue, now)
     # A held list the poll could not give is not fatal here: the HELD UNDER note on each task is
     # read as well, so a held sibling is still left out.
@@ -2320,7 +2507,10 @@ def headline_text(head, last_week=None):
                                   "needs" if n == 1 and not head.get("atLeast") else "need")
     lw = (last_week or {}).get("number")
     if isinstance(lw, int):
-        said += " (%s%d last week)" % ("at least " if last_week.get("atLeast") else "", lw)
+        # A week counted per task beside one counted per fault says so (14 Nov 2026).
+        said += " (%s%d last week%s)" % ("at least " if last_week.get("atLeast") else "", lw,
+                                         ", old count" if head.get("perTask") is not None
+                                         and not last_week.get("perFault") else "")
     return said
 
 
@@ -2353,6 +2543,13 @@ def cmd_dry_run(out=None):
     v, h = p["verdict"], p["headline"]
     print("VERDICT: %s [%s] %s" % (v["text"], v["colour"], v["why"]))
     print("NUMBER: %s" % headline_text(h, p.get("lastWeek")))
+    print("  the old way (one per blocked task): %s" % h.get("perTask"))
+    if h.get("method"):
+        print("  panel note: %s" % h["method"]["text"])
+    bl = next((l for l in p["lines"] if l["key"] == "bottlenecks"), {})
+    for x in bl.get("faults") or ():
+        if x["count"] > 1:
+            print("  fault %s holds %d tasks" % (x["finding"], x["count"]))
     print("  parts: %s" % ", ".join("%s %d" % (x["key"], x["count"]) for x in h["parts"]))
     print("  counted on two lines, taken off once each: %d %s" % (h["shared"], json.dumps(h.get("sharedByKind") or {})))
     for u in h["unread"]:
