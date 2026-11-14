@@ -757,6 +757,9 @@ def blockers_summary(r):
     tools = [w for w in walls if w["kind"] == "TOOL"]
     merge_wait = [w for w in tools if tool_state(w) == "merge-card"]
     merging = [w for w in tools if tool_state(w) == "merge-approved"]
+    # Approved, but the robot stopped after RED_MAX failed runs (14 Nov 2026): a fix is needed, so
+    # never "being merged by the robot".
+    stopped = [w for w in tools if tool_state(w) == "merge-stopped"]
     build = [w for w in tools if tool_state(w) in NO_FIXER_STATES]
     unclaimed = [w for w in tools if tool_state(w) == "unclaimed"]
     open_pr = [w for w in tools if tool_state(w) == "pending"]
@@ -766,7 +769,8 @@ def blockers_summary(r):
     # A finding moved to a task, or parked to a date (#784), is neither a fixer's job nor stuck.
     on_task = [w for w in tools if tool_state(w) == "tasked"]
     dated = [w for w in tools if tool_state(w) == "deferred-dated"]
-    fixing = [w for w in tools if w not in merge_wait + merging + build + unclaimed + open_pr + unknown + on_task + dated]
+    fixing = [w for w in tools if w not in merge_wait + merging + stopped + build + unclaimed + open_pr + unknown
+              + on_task + dated]
     parts = []
     if signin:
         parts.append("sign the robot in to " + ", ".join(signin))
@@ -813,6 +817,12 @@ def blockers_summary(r):
         detail += " %s waiting on an open fix PR to merge." % _plural(len(open_pr), "task")
     if merging:
         detail += " %s approved by you and being merged by the robot." % _plural(len(merging), "fix")
+    if stopped:
+        prs = sorted({(w.get("mergeCard") or {}).get("pr") for w in stopped} - {None})
+        detail += (" %s you approved stopped after failed test runs and need%s a fix (%s); the robot filed a "
+                   "stop finding for the daily robot fix."
+                   % (_plural(len(stopped), "merge"), "s" if len(stopped) == 1 else "",
+                      ", ".join("PR #%s" % p for p in prs) or "PR not named"))
     if on_task:
         detail += " %s waiting on the task its fix was moved to." % _plural(len(on_task), "task")
     if dated:
@@ -857,7 +867,8 @@ def blockers_summary(r):
                             "stale": len(stale), "closedWhileBlocked": closed[:10],
                             "woken": len(r.get("woken") or []),
                             "noFixer": len(build), "unclaimed": len(unclaimed), "openPr": len(open_pr),
-                            "mergeCard": len(merge_wait), "merging": len(merging), "dailyFix": len(fixing)}
+                            "mergeCard": len(merge_wait), "merging": len(merging), "mergeStopped": len(stopped),
+                            "dailyFix": len(fixing)}
 
 
 def blockers_row(now, path=BLOCKERS_FILE):

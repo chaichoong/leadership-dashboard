@@ -9803,9 +9803,11 @@ def read_merge_attempts(path=None):
     return v if isinstance(v, dict) else {}
 
 
-def approved_merge_words(pr, card, entry):
-    """The row's words for an APPROVED merge card that is resting, or None for the plain wording.
-    Pure. ENTRY is merge-approved.py's attempts.json entry for the PR; anything malformed is None."""
+def approved_merge_state(pr, card, entry):
+    """(code, words) for an APPROVED merge card that is resting, or None for the plain wording.
+    Pure. ENTRY is merge-approved.py's attempts.json entry for the PR; anything malformed is None.
+    A card the robot STOPPED on (RED_MAX reds, or RED_MAX failed re-tests of a moved head) is
+    "merge-stopped": it needs a fix, so the Estate row must not count it as being merged."""
     e = entry if isinstance(entry, dict) else {}
 
     def count(key):
@@ -9825,21 +9827,24 @@ def approved_merge_words(pr, card, entry):
     if e.get("result") == "red" and (not head or str(e.get("head") or "") == head):
         reds = count("reds")
         if reds >= cap:
-            return (f"the merge card for PR #{pr} stopped after {reds} failed test runs "
-                    f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix before it can merge")
+            return "merge-stopped", (f"the merge card for PR #{pr} stopped after {reds} failed test runs "
+                                     f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix "
+                                     "before it can merge")
         if reds > 0:
-            return (f"you approved the merge card for PR #{pr}; its tests failed ({reds} of {cap}), "
-                    f"the robot tries again after {after('lastRedAt')}")
+            return "merge-approved", (f"you approved the merge card for PR #{pr}; its tests failed ({reds} of {cap}), "
+                                      f"the robot tries again after {after('lastRedAt')}")
     new = str(e.get("newHead") or "")
     if e.get("result") == "moved" and not (new and head and new.startswith(head)):
         tries = count("movedTries")
         if tries >= cap:
-            return (f"the merge card for PR #{pr} stopped: the PR changed after you approved it and its new code "
-                    f"failed {tries} re-tests ({e.get('finding') or 'its finding is not filed yet'}); it needs a fix "
-                    "before it can merge")
+            return "merge-stopped", (f"the merge card for PR #{pr} stopped: the PR changed after you approved it and "
+                                     f"its new code failed {tries} re-tests "
+                                     f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix before "
+                                     "it can merge")
         if tries > 0:
-            return (f"you approved the merge card for PR #{pr}, but the PR changed since and its new code is not green "
-                    f"({tries} of {cap}); the robot re-tests it after {after('lastMovedAt')}")
+            return "merge-approved", (f"you approved the merge card for PR #{pr}, but the PR changed since and its new "
+                                      f"code is not green ({tries} of {cap}); the robot re-tests it after "
+                                      f"{after('lastMovedAt')}")
     return None
 
 
@@ -9847,7 +9852,8 @@ def tool_wall_state(b, status, detail, cards, days, findings_error="", cards_err
     """(code, words) for a TOOL wall: who can clear it, in Kevin's words (7 Oct 2026). The row
     used to say "waiting on the daily robot fix" for 19 walls no fixer could reach. ATTEMPTS is
     merge-approved.py's record (read_merge_attempts), so an approved card resting on a red, or
-    stopped after four, says so (14 Nov 2026); None or {} keeps the plain wording."""
+    stopped after four, says so (14 Nov 2026; a stopped card's code is "merge-stopped"); None or {}
+    keeps the plain wording."""
     card = card_for_wall(b, detail, cards)
     if card:
         pr = card["pr"]
@@ -9864,9 +9870,10 @@ def tool_wall_state(b, status, detail, cards, days, findings_error="", cards_err
             return "merge-closed", (f"the merge card for PR #{pr} is closed but finding {b.get('finding') or '?'} "
                                     f"is still {status or 'not in the queue'}, so nothing will clear this wall")
         if card.get("outcome") in merge_card.APPROVED:
-            # The code stays "merge-approved" (estate-status.py counts it); only the words say which.
-            return "merge-approved", (approved_merge_words(pr, card, (attempts or {}).get(str(pr)))
-                                      or f"you approved the merge card for PR #{pr}; the robot is merging it")
+            # "merge-approved" while the robot merges or retries; "merge-stopped" once it has stopped
+            # (estate-status.py counts each on its own, 14 Nov 2026).
+            return (approved_merge_state(pr, card, (attempts or {}).get(str(pr)))
+                    or ("merge-approved", f"you approved the merge card for PR #{pr}; the robot is merging it"))
         return "merge-card", f"waiting on a merge card (PR #{pr})"
     if not b.get("finding"):
         return "no-finding", "no finding was filed, so nothing will clear this wall"
