@@ -1756,6 +1756,10 @@
         }
         const max = Math.max(1, ...known.map(w => aiNum(w.number)));
         const said = [];
+        // 14 Nov 2026: from this week a code fault counts once, not once per task it holds. The
+        // first bar counted that way after one counted per task gets a dashed line on its left,
+        // so a drop at the change never reads as work done.
+        let lastMethod = null, switchLabel = '';
         const cols = weeks.map(w => {
             const n = aiNum(w.number);
             const label = w.current ? 'This week' : aiHealthDay(w.start);
@@ -1763,14 +1767,20 @@
                 said.push(`${label}: no number`);
                 return `<div class="aih-bar-col"><span class="aih-bar-val aih-muted">-</span><div class="aih-bar-track"></div><span class="aih-bar-lab">${escHtml(label)}</span></div>`;
             }
-            said.push(`${label}: ${w.atLeast ? 'at least ' : ''}${n}`);
+            const switched = lastMethod === false && w.perFault === true;
+            if (switched) switchLabel = label;
+            lastMethod = w.perFault === true;
+            said.push(`${label}: ${w.atLeast ? 'at least ' : ''}${n}${switched ? ' (counted per fault from here)' : ''}`);
             const h = n > 0 ? Math.max(4, Math.round(100 * n / max)) : 0;
-            return `<div class="aih-bar-col${w.current ? ' aih-bar-now' : ''}"><span class="aih-bar-val">${n}${w.atLeast ? '+' : ''}</span>`
+            return `<div class="aih-bar-col${w.current ? ' aih-bar-now' : ''}${switched ? ' aih-bar-switch' : ''}"><span class="aih-bar-val">${n}${w.atLeast ? '+' : ''}</span>`
                 + `<div class="aih-bar-track"><div class="aih-bar" style="height:${h}%"></div></div><span class="aih-bar-lab">${escHtml(label)}</span></div>`;
         });
         const aria = `Things needing a fix each week, oldest first. ${said.join(', ')}. Shorter is better.`;
+        const switchNote = switchLabel
+            ? ` The dashed line marks ${switchLabel === 'This week' ? 'this week' : `the week of ${switchLabel}`}: from there each code fault counts once, so bars before it counted the old way.`
+            : '';
         return `<div class="aih-bars${stale ? ' aih-bars-stale' : ''}" role="img" aria-label="${escHtml(aria)}">${cols.join('')}</div>`
-            + '<p class="aih-bars-note aih-muted aih-small">One bar a week, oldest on the left. Shorter is better.</p>';
+            + `<p class="aih-bars-note aih-muted aih-small">One bar a week, oldest on the left. Shorter is better.${escHtml(switchNote)}</p>`;
     }
 
     // The three lights as buttons; each opens its fourteen-line group exactly as it was drawn
@@ -1820,7 +1830,11 @@
             : escHtml(v.reason || v.why || '');
         const h = p.headline || {};
         const lw = p.lastWeek || null;
-        const lwText = lw && aiNum(lw.number) !== AI_UNKNOWN ? aiHealthFixText(lw.number, lw.atLeast) : 'no number yet';
+        // The counting changed on 14 Nov 2026 (each code fault once): the Mac sends one plain line
+        // saying so with the number the old way, and last week's number says when it is the old count.
+        const method = h.method && typeof h.method === 'object' && h.method.text ? String(h.method.text) : '';
+        const lwOld = method && lw && lw.perFault === false;
+        const lwText = lw && aiNum(lw.number) !== AI_UNKNOWN ? aiHealthFixText(lw.number, lw.atLeast) + (lwOld ? ' (old count)' : '') : 'no number yet';
         const unread = (Array.isArray(h.unread) ? h.unread : []).filter(u => u && typeof u === 'object');
         return `<div class="aih-head"><h3 class="aih-title">AI team</h3>
                    <div class="aih-verdict aih-verdict-${vc}"><span class="aih-dot aih-${vc}" role="img" aria-label="${AI_HEALTH_WORDS[vc]}"></span>
@@ -1832,6 +1846,7 @@
                    <span class="aih-fix-num">${escHtml(older ? 'not known yet' : aiHealthFixText(h.number, h.atLeast))}</span>
                    <span class="aih-fix-last">last week: <strong>${escHtml(lwText)}</strong></span>
                </div>`
+            + (method && !older ? `<p class="aih-method aih-small">${escHtml(method)}.</p>` : '')
             + (unread.length && !stale ? `<p class="aih-unread aih-small">Could not read all of: ${unread.map(u => escHtml(u.question || '')).join(', ')}.</p>` : '')
             + (older ? '' : aiHealthBars(p, stale))
             + aiHealthLightsHtml(p, row, stale)
@@ -1859,6 +1874,8 @@
             .aih-fix-last{font-size:var(--fs-md);color:var(--text-secondary)}
             .aih-fix-stale .aih-fix-num{color:var(--text-muted)}
             .aih-unread{margin:var(--space-1) 0 0;color:var(--text-secondary);word-break:break-word}
+            .aih-method{margin:var(--space-1) 0 0;color:var(--text-secondary);word-break:break-word}
+            .aih-bar-switch .aih-bar-track{border-left:2px dashed var(--text-muted)}
             .aih-bars{display:flex;align-items:stretch;gap:var(--space-2);height:112px;margin-top:var(--space-3);max-width:560px}
             .aih-bar-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px}
             .aih-bar-track{flex:1 1 auto;width:100%;display:flex;align-items:flex-end;border-bottom:1px solid var(--border-default)}

@@ -576,6 +576,7 @@ class AL:
     def cmd_status(self, now=None): return {"paused": False}
 readers = {"lh": lh, "tm": TM, "tri": None, "aar": load("aar", "agent-accuracy-report.py"), "al": AL(),
            "blockers": lambda: {"readAt": iso(NOW), "openTasksRead": 1, "open": []},
+           "findings": lambda: ({}, None),
            "queue": lambda: {"generatedAt": iso(NOW), "worklist": []},
            "reports": lambda: ([], []),
            "triage": lambda: {"left": 0, "truncated": False, "scannedAt": ago(hours=1), "scoredDay": "2026-10-15",
@@ -1059,8 +1060,9 @@ p = A.build_payload(ls, hist, mon)
 print(json.dumps({"weeks": weeks, "since": since, "lastWeek": p["lastWeek"], "verdict": p["verdict"]["text"],
                   "today": p["history"]["2026-10-12"][A.HEAD_KEY], "sunday": A.london_day(mon - timedelta(hours=1))}))`);
     expect(out.weeks).toEqual([
-      { start: '2026-10-05', end: '2026-10-11', day: '2026-10-11', number: 25, atLeast: false, current: false },   // Sunday's, not Thursday's
-      { start: '2026-10-12', end: '2026-10-18', day: '2026-10-12', number: 20, atLeast: false, current: true }]);
+      // Sunday's, not Thursday's. A head with no per-task figure is a count from before 14 Nov 2026.
+      { start: '2026-10-05', end: '2026-10-11', day: '2026-10-11', number: 25, atLeast: false, current: false, perFault: false, perTask: 25 },
+      { start: '2026-10-12', end: '2026-10-18', day: '2026-10-12', number: 20, atLeast: false, current: true, perFault: false, perTask: 20 }]);
     expect(out.since).toBe('2026-10-08');
     expect(out.lastWeek).toMatchObject({ number: 25, day: '2026-10-11' });
     expect(out.today).toEqual([2, false]);                        // kept under the London day, Monday
