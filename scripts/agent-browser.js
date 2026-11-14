@@ -85,6 +85,8 @@
  *       {"do":"upload", "selector":"#pick", "file":"~/knowledge-os/attachments/ast.pdf"},
  *       {"do":"press",  "selector":"#email", "key":"Enter"},
  *       {"do":"click",  "selector":"#next"},
+ *       {"do":"click",   "selector":"#disable", "dialog":"accept"},   (answers a native confirm() box; default is dismiss)
+ *       {"do":"download","selector":"a.schedule", "as":"schedule.pdf"},   (saves to ~/knowledge-os/downloads)
  *       {"do":"submit", "selector":"#submit"}      <- prepare stops before this
  *     ]
  *   }
@@ -600,6 +602,14 @@ const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 // The Content Engine's own finished videos go up to Spotify for Creators through the wizard (9 Sep 2026). Only files it
 // writes under attachments/content-engine may be video or audio, and only up to 2 GB; everything else keeps the
 // document-only guard above, because that guard is the exfiltration control.
+// Where a `download` step saves what it captured (13 Oct 2026, findings 20261013-agent-dispatch-859
+// and 20261113-agent-dispatch-1302). A letter behind a DOWNLOAD PDF button and an Acturis schedule
+// behind a script-driven link were both unreadable: the only download code in this file was Adobe's
+// own, so a plan could click the link and save nothing. Saved OUT of the page, never back into
+// UPLOAD_DIR: what a site hands the robot is not something the robot may then send.
+const DOWNLOAD_DIR = realpathOrResolve(process.env.AGENT_DOWNLOAD_DIR ||
+  path.join(os.homedir(), 'knowledge-os', 'downloads'));
+
 const ENGINE_UPLOAD_DIR = path.join(UPLOAD_DIR, 'content-engine');
 const ENGINE_EXTENSIONS = new Set(['.mp4', '.mp3', '.m4a']);
 const ENGINE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
@@ -1381,6 +1391,40 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         break;
       case 'click':
       case 'submit':
+        // A NATIVE confirm() BOX IS A WALL WITH NO DOOR (15 Oct 2026, finding
+        // 20261015-agent-dispatch-884). Fintable asks "Disable this account?" through
+        // window.confirm. Playwright's default is to DISMISS every dialog, so the click
+        // looked like it worked three times running and the account stayed Enabled, with
+        // nothing on the page to read. `"dialog": "accept"` answers the next one; the
+        // handler is one-shot and removed again, so no later step can be answered by
+        // accident, and the default stays dismiss.
+        if (s.dialog) {
+          const answer = String(s.dialog).toLowerCase();
+          if (answer !== 'accept' && answer !== 'dismiss') {
+            die(`click: "dialog" is "accept" or "dismiss", not ${JSON.stringify(s.dialog)}`);
+          }
+          let seen = null;
+          const once = (d) => {
+            seen = { type: d.type(), message: d.message() };
+            page.off('dialog', once);
+            (answer === 'accept' ? d.accept(s.dialogText === undefined ? undefined : String(s.dialogText)) : d.dismiss())
+              .catch(() => {});
+          };
+          page.on('dialog', once);
+          try {
+            await page.click(s.selector, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
+            // The click returns before the box is necessarily up on a slow page.
+            const until = Date.now() + Math.min(Number(s.dialogWaitMs) || 5000, 30000);
+            while (!seen && Date.now() < until) await page.waitForTimeout(100);
+          } finally {
+            page.off('dialog', once);
+          }
+          if (!seen) die(`click: ${s.selector} raised no dialog to ${answer}. The page may have changed, ` +
+                         'or the box is a page element rather than a native confirm — click that instead.');
+          done.push({ do: s.do, executed: true, selector: s.selector, url: null, dialog: { ...seen, answered: answer } });
+          if (s.do === 'submit') submitted = true;
+          continue;
+        }
         await page.click(s.selector, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
         if (s.do === 'submit') submitted = true;
         break;
@@ -1434,6 +1478,39 @@ async function runSteps(page, steps, allowSubmit, confirm) {
               `nor a new ${inputSel}. The selector probably missed.`);
         }
         break;
+      }
+      case 'download': {
+        // Click the thing, catch the file. Acturis and NewDay both drive their links from
+        // script with no href, so there is nothing to fetch and nothing to read in the page:
+        // the file only exists as a download event. `as` is a plain file name, never a path,
+        // so a plan cannot write outside DOWNLOAD_DIR.
+        const want = String(s.as || '').trim();
+        if (!want) die('download: "as" names the file to save, e.g. "schedule.pdf"');
+        if (want !== path.basename(want) || want === '.' || want === '..') {
+          die(`download: "as" is a file name, not a path (${JSON.stringify(want)})`);
+        }
+        const ext = path.extname(want).toLowerCase();
+        if (!UPLOAD_EXTENSIONS.has(ext)) {
+          die(`download: "as" ends in ${[...UPLOAD_EXTENSIONS].join(', ')}, not ${JSON.stringify(ext || want)}`);
+        }
+        const safe = `${safeFileName(path.basename(want, ext))}${ext}`;
+        fs.mkdirSync(DOWNLOAD_DIR, { recursive: true, mode: 0o700 });
+        const out = path.join(DOWNLOAD_DIR, safe);
+        const wait = Math.min(Number(s.timeoutMs) || 60000, 180000);
+        const dl = await Promise.all([
+          page.waitForEvent('download', { timeout: wait }),
+          page.click(s.selector, { timeout: 20000 }),
+        ]).then(([d]) => d).catch(() => null);
+        if (!dl) {
+          die(`download: clicking ${s.selector} saved no file in ${Math.round(wait / 1000)}s. ` +
+              'The link may open a viewer instead — click through to its own download control.');
+        }
+        await dl.saveAs(out);
+        // A download event with an empty file is a failure that reads as a success.
+        const size = fs.existsSync(out) ? fs.statSync(out).size : 0;
+        if (!size) die(`download: ${s.selector} saved an empty file at ${out}`);
+        done.push({ do: 'download', executed: true, selector: s.selector, url: null, saved: out, bytes: size });
+        continue;
       }
       case 'press':
         // Some fields only COMMIT on Enter — Adobe's recipient box turns typed
@@ -3608,7 +3685,7 @@ if (require.main === module) {
 
 module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
-                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
+                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,

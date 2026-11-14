@@ -211,3 +211,41 @@ describe('the save Adobe makes is recognised', () => {
     expect(mod.SAVE_RE.test('https://evil.example.com/dc-api.adobe.io/x/assets')).toBe(false);
   });
 });
+
+// --anchor, not only ASSIGN_ANCHOR (3 Nov 2026, finding 20261103-agent-dispatch-1179).
+//
+// The Close Brothers authority letter has no drawn signature line, so Auto-place offers
+// nothing and the field is anchored to the printed name instead. The only way to name that
+// person was the ASSIGN_ANCHOR environment variable, and a headless dispatch run may not put
+// a VAR=x prefix in front of a command: the run was refused twice and nothing was prepared.
+// Driven through the real CLI, because the bug was in argument handling, not in run().
+describe('--anchor names the signature anchor without an env prefix', () => {
+  const { execFileSync } = require_('child_process');
+  const { mkdtempSync, mkdirSync, writeFileSync } = require_('fs');
+  const script = join(ROOT, 'scripts/adobe-assign.js');
+  // Its own attachments folder: a test never writes to, or reads from, the real one.
+  const uploads = join(mkdtempSync(join(require_('os').tmpdir(), 'adobe-anchor-')), 'attachments');
+  mkdirSync(uploads, { recursive: true });
+  const doc = join(uploads, 'authority.pdf');
+  writeFileSync(doc, '%PDF-1.4 pretend');   // --dry never opens it
+  const dry = (args, env) => JSON.parse(execFileSync('node', [script, '--dry', ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, AGENT_UPLOAD_DIR: uploads, ASSIGN_ANCHOR: '', ...(env || {}) },
+  }));
+
+  it('reports the flag back on a dry run', () => {
+    expect(dry(['--document', doc, '--signers', 'a@b.com', '--anchor', 'Ciara Brittain']).anchor)
+      .toBe('Ciara Brittain');
+  });
+
+  it('beats ASSIGN_ANCHOR when both are given', () => {
+    expect(dry(['--document', doc, '--signers', 'a@b.com', '--anchor', 'Ciara Brittain'],
+               { ASSIGN_ANCHOR: 'Roy Lavin' }).anchor).toBe('Ciara Brittain');
+  });
+
+  it('still honours ASSIGN_ANCHOR, and falls back to Roy Lavin', () => {
+    expect(dry(['--document', doc, '--signers', 'a@b.com'], { ASSIGN_ANCHOR: 'Someone Else' }).anchor)
+      .toBe('Someone Else');
+    expect(dry(['--document', doc, '--signers', 'a@b.com']).anchor).toBe('Roy Lavin');
+  });
+});
