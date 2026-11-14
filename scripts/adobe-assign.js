@@ -435,7 +435,7 @@ async function boxHandle(page, id) {
   return page.$(`${SEL.anyField}[data-fieldid="${id}"]`);
 }
 
-async function run({ document: doc, signers, fields, page: pageNo, shot }) {
+async function run({ document: doc, signers, fields, page: pageNo, shot, anchor }) {
   const { chromium } = require('playwright');
   const ctx = await chromium.launchPersistentContext(PROFILE, {
     headless: true, viewport: { width: 1280, height: 900 },
@@ -529,7 +529,11 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // line sits directly above the signer's printed name ("Roy Lavin" on the
       // proof of residency), which is text on the page and does not move, so
       // it is a far steadier anchor than a remembered coordinate.
-      const anchorText = process.env.ASSIGN_ANCHOR || 'Roy Lavin';
+      // --anchor, not only the env var (3 Nov 2026, finding 20261103-agent-dispatch-1179).
+      // A headless dispatch run may not put a VAR=x prefix in front of a command, so
+      // `ASSIGN_ANCHOR=... node scripts/adobe-assign.js` was refused twice by the permission
+      // layer and the authority letter was never prepared. A flag needs no prefix.
+      const anchorText = (anchor && String(anchor).trim()) || process.env.ASSIGN_ANCHOR || 'Roy Lavin';
       log(`no Auto-place offered; placing one signature field above "${anchorText}"`);
       // FIND THE NAME AS TEXT, AT ANY SPLIT. An exact match on "Roy Lavin"
       // timed out on a real proof: Adobe's viewer lays the PDF's words out as
@@ -855,11 +859,13 @@ async function main() {
   const fields = arg(rest, 'fields', 'blocks');
   const pageNo = Number(arg(rest, 'page', 0)) || 0;
   const shot = arg(rest, 'shot');
+  const anchor = arg(rest, 'anchor');
   if (rest.includes('--dry')) {
-    console.log(JSON.stringify({ document: doc, signers, fields, page: pageNo || 'last', dry: true }, null, 2));
+    console.log(JSON.stringify({ document: doc, signers, fields, page: pageNo || 'last',
+      anchor: (anchor && String(anchor).trim()) || process.env.ASSIGN_ANCHOR || 'Roy Lavin', dry: true }, null, 2));
     return;
   }
-  const res = await run({ document: doc, signers, fields, page: pageNo, shot });
+  const res = await run({ document: doc, signers, fields, page: pageNo, shot, anchor });
   console.log(JSON.stringify(res, null, 2));
 }
 

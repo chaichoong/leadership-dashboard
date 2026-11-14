@@ -34,7 +34,8 @@ const CAT = 'recCAT00000000001';
 const SUB = 'recSUB00000000001';
 const PROP = 'recPROP0000000001';
 const NEWID = 'recNEWC0000000001';
-const KNOWN = { tblpqkvWJJo8Uu25q: [BIZ], tbleWb8ioptnEwPR8: [CAT], tblOTdRcPf8AgRz25: [SUB], tbl6f0OkAmTC2jbuG: [PROP] };
+const PROP2 = 'recPROP0000000002';
+const KNOWN = { tblpqkvWJJo8Uu25q: [BIZ], tbleWb8ioptnEwPR8: [CAT], tblOTdRcPf8AgRz25: [SUB], tbl6f0OkAmTC2jbuG: [PROP, PROP2] };
 
 // `cost` is the main row's fields by name (name, expected) plus `fields` keyed by field id; `rows` are more Costs rows.
 function door(argv, { task = {}, cost = {}, rows = [], lands = true, costExists = true, createLands = true, ledger = [] } = {}) {
@@ -563,5 +564,77 @@ describe('cost-record.py: ids come from js/config.js', () => {
     for (const [name, id] of Object.entries(want)) {
       expect(src, name).toMatch(new RegExp(`^${name} = "${id}"`, 'm'));
     }
+  });
+});
+
+// The houses on an EXISTING cost (31 Oct 2026, finding 20261031-agent-dispatch-1151).
+//
+// `new --property` set the link when a cost was created and nothing could change it afterwards, so
+// the houses on the Close Brothers cost could not be written through the gated door at all, and a
+// hand-rolled Airtable write is forbidden in a carry-out run. Back-tested by taking Property out of
+// CHANGE_RE: every test below refuses with "has no line 'RECORD CHANGE: ... Property = ...'".
+describe('cost-record.py property: the houses a cost belongs to', () => {
+  const PLINE = (v) => `If you approve, the cost record changes:\nRECORD CHANGE: ${COST} Property = ${v}`;
+  const run = (ids, extra = {}) => door(
+    ['property', COST, ...ids.flatMap((i) => ['--property', i]), '--task', TASK,
+      '--why', 'The Close Brothers finance covers both houses'], extra);
+
+  it('writes the link Kevin approved, and reads it back', () => {
+    const r = run([PROP, PROP2], { task: { ...APPROVED, output: PLINE(`${PROP}, ${PROP2}`) } });
+    expect(r.code).toBe(0);
+    expect(r.writes).toHaveLength(1);
+    expect(r.writes[0].payload.fields[F.property]).toEqual([PROP, PROP2]);
+    expect(r.state.fields[F.property]).toEqual([PROP, PROP2]);
+    expect(r.comments[0].text).toMatch(/Property changed from 0 to 2 linked record/);
+    expect(r.ledger.join('')).toMatch(/"kind": ?"write"/);
+  });
+
+  it('matches the card however it separated the ids, because the houses have no order', () => {
+    const r = run([PROP, PROP2], { task: { ...APPROVED, output: PLINE(`${PROP2} ${PROP}`) } });
+    expect(r.code).toBe(0);
+    expect(r.writes[0].payload.fields[F.property]).toEqual([PROP, PROP2]);
+  });
+
+  it('refuses a set the card does not name, and writes nothing', () => {
+    const r = run([PROP], { task: { ...APPROVED, output: PLINE(`${PROP}, ${PROP2}`) } });
+    expect(r.code).toBe(2);
+    expect(r.json.refused).toMatch(/has no line 'RECORD CHANGE/);
+    expect(r.writes).toEqual([]);
+  });
+
+  it('refuses an id that is not shaped like a record id at all', () => {
+    const r = run(['recNOTAPROPERTY1'], { task: { ...APPROVED, output: PLINE('recNOTAPROPERTY1') } });
+    expect(r.code).toBe(2);
+    expect(r.json.refused).toMatch(/has no line 'RECORD CHANGE/);
+    expect(r.writes).toEqual([]);
+  });
+
+  it('refuses a card line that is not record ids, rather than writing a shorter list', () => {
+    const r = run([PROP], { task: { ...APPROVED, output: PLINE('17 Newington and 32 Elmdon') } });
+    expect(r.code).toBe(2);
+    expect(r.writes).toEqual([]);
+  });
+
+  it('refuses an id that is not a record in the Properties table', () => {
+    const r = run(['recPROP0000000003'], { task: { ...APPROVED, output: PLINE('recPROP0000000003') } });
+    expect(r.code).toBe(2);
+    expect(r.json.refused).toMatch(/is not a record in its table/);
+    expect(r.writes).toEqual([]);
+  });
+
+  it('writes nothing when the link already reads those records', () => {
+    const r = run([PROP], { task: { ...APPROVED, output: PLINE(PROP) }, cost: { fields: { [F.property]: [PROP] } } });
+    expect(r.code).toBe(0);
+    expect(r.json.unchanged).toBe(true);
+    expect(r.writes).toEqual([]);
+  });
+
+  it('a dry run writes nothing', () => {
+    const r = door(['property', COST, '--property', PROP, '--task', TASK, '--why',
+      'The Close Brothers finance covers this house', '--dry-run'],
+    { task: { ...APPROVED, output: PLINE(PROP) } });
+    expect(r.code).toBe(0);
+    expect(r.json.dryRun).toBe(true);
+    expect(r.writes).toEqual([]);
   });
 });

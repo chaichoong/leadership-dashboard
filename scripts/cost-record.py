@@ -62,6 +62,8 @@ USAGE
   cost-record.py new --name "..." --expected 31.27 --frequency Monthly --due-day 28 --first-payment 2026-10-28
       (--end-date 2027-06-28 | --no-end-date) [--like COST] [--business REC] [--category REC]
       [--sub-category REC] [--property REC ...] --task T --why "..."
+  property COST --property REC [--property REC ...] --task T --why "..."
+      the houses an EXISTING cost belongs to, on a "RECORD CHANGE: recCOST Property = recA, recB" line
       --like copies Business, Category, Sub-Category and Property from the cost this one replaces;
       an explicit flag wins over it.
   add --dry-run to a write to see the gate's answer and change nothing.
@@ -121,7 +123,7 @@ ENDED_GRACE_DAYS = 5
 # One line each: [ \t] never crosses a line break, so a value can never be read off the next line (review, 14 Oct
 # 2026: "End Date =" then "none" on its own line would otherwise clear a date).
 CHANGE_RE = re.compile(r"^RECORD CHANGE:[ \t]*(?P<cost>rec[A-Za-z0-9]{14})[ \t]+"
-                       r"(?P<label>Expected Cost|End Date|Payment Status)[ \t]*=[ \t]*(?P<value>[^\n]+?)[ \t]*$", re.M)
+                       r"(?P<label>Expected Cost|End Date|Payment Status|Property)[ \t]*=[ \t]*(?P<value>[^\n]+?)[ \t]*$", re.M)
 NEW_RE = re.compile(r"^RECORD NEW COST:[ \t]*(?P<body>[^\n]+?)[ \t]*$", re.M)
 # Up to £9,999,999.99, with or without thousands commas; a leading zero group ("0,500") is not an amount.
 AMOUNT_RE = re.compile(r"^(?:£|GBP)?\s*((?:[1-9]\d{0,2},\d{3}|[1-9],\d{3},\d{3}|\d{1,7})(?:\.\d{1,2})?)$", re.I)
@@ -178,6 +180,15 @@ def approved_lines(task):
 
 
 def same_value(label, card_value, value):
+    if label == "Property":
+        # A SET of record ids, however the card separated them, because "the houses on this cost"
+        # has no order. Anything that is not a record id on the line makes it no match, so a typo
+        # refuses rather than quietly writing a shorter list (31 Oct 2026, finding
+        # 20261031-agent-dispatch-1151).
+        parts = [q for q in re.split(r"[,\s]+", squash(card_value)) if q]
+        if not parts or any(not tr.REC_RE.fullmatch(q) for q in parts):
+            return False
+        return sorted(set(parts)) == sorted(set(value))
     if label == "Expected Cost":
         return amount(card_value) == value
     if label == "End Date":
@@ -194,7 +205,8 @@ def change_problem(task, cost_id, label, value):
     for m in CHANGE_RE.finditer(text):
         if m.group("cost") == cost_id and m.group("label") == label and same_value(label, m.group("value"), value):
             return ""
-    return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {cost_id} {label} = {value}': "
+    shown = ", ".join(value) if isinstance(value, list) else value
+    return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {cost_id} {label} = {shown}': "
             "put the change on a card for him to approve (one tap)")
 
 
@@ -506,6 +518,40 @@ def cmd_inactive(a):
                            f"({tr.task_label(task)}). Why: {why_text(a)}", out)
 
 
+def cmd_property(a):
+    """Set the houses a cost belongs to, on an approved RECORD CHANGE line.
+
+    WHY (31 Oct 2026, finding 20261031-agent-dispatch-1151): `new --property` could set the link
+    when a cost was created and nothing could change it afterwards, so the houses on the Close
+    Brothers cost could not be written through the gated door at all, and a hand-rolled PATCH is
+    forbidden. The card line is `RECORD CHANGE: recCOST Property = recA, recB`."""
+    ids = list(dict.fromkeys(a.property or []))
+    if not ids:
+        raise Refused("--property names at least one property record (repeat the flag for several)")
+    cost, task = load_cost(a.cost), tr.load_task(a.task)
+    why = change_problem(task, a.cost, "Property", ids)
+    if why:
+        raise Refused(why)
+    proven_links(T_PROPERTIES, ids, "property")
+    f = cost.get("fields") or {}
+    before = list(f.get(COST_PROPERTY) or [])
+    out = {"cost": a.cost, "name": f.get(COST_NAME), "field": "Property",
+           "from": before or "blank", "to": ids, "task": task["id"]}
+    if sorted(before) == sorted(ids):
+        return dict(out, unchanged=True, note="the Property link already reads those records; nothing written")
+    if a.dry_run:
+        return dict(out, dryRun=True)
+    rc.api("PATCH", f"{T_COSTS}/{a.cost}", {"fields": {COST_PROPERTY: ids}})
+    after = list((load_cost(a.cost).get("fields") or {}).get(COST_PROPERTY) or [])
+    if sorted(after) != sorted(ids):
+        ledger(dict(out, kind="unlanded"))
+        raise RuntimeError(f"Property on {a.cost} reads {after!r} after writing {ids!r}: the write did not land")
+    ledger(dict(out, kind="write", why=a.why))
+    return comment(a.cost, f"{stamp()}: Property changed from {len(before)} to {len(ids)} linked record(s) "
+                           f"({', '.join(ids)}) by an agent, on the RECORD CHANGE line of the card Kevin "
+                           f"approved, task {task['id']} ({tr.task_label(task)}). Why: {why_text(a)}", out)
+
+
 def proven_links(table, ids, label):
     """The ids, each proven to be a record of `table`, or Refused."""
     for rid in ids:
@@ -640,6 +686,8 @@ def main(argv=None):
     write("expected", "cost", "value")
     write("end", "cost", "value")
     write("inactive", "cost")
+    pr = write("property", "cost")
+    pr.add_argument("--property", action="append", required=True)
     w = write("new")
     w.add_argument("--name", required=True)
     w.add_argument("--expected", required=True)
@@ -659,7 +707,8 @@ def main(argv=None):
         return 2
     try:
         out = {"show": cmd_show, "ended": cmd_ended, "owed": cmd_owed, "payments": cmd_payments,
-               "expected": cmd_expected, "end": cmd_end, "inactive": cmd_inactive, "new": cmd_new}[a.cmd](a)
+               "expected": cmd_expected, "end": cmd_end, "inactive": cmd_inactive, "new": cmd_new,
+               "property": cmd_property}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2
