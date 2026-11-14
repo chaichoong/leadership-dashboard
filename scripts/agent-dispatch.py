@@ -1494,6 +1494,11 @@ def ledger_append(task_id, event):
 
 
 IDLE_HOURS = 24
+# Written by the create gate's fold path (create-agent-task.py record_fold, 14 Nov 2026): a new item
+# was folded into the task. It ends a status-update rest at once (status_rest). It is NOT a step in
+# the task's own life, so ledger_last_events and open_intents skip it and every other rest reads
+# exactly as before; ledger_fold_times reads it on its own.
+FOLD_EVENT = "folded"
 PARKED_NOTE_RE = re.compile(r"^\s*(?:PARKED|BLOCKED)\b", re.I)
 
 
@@ -1507,12 +1512,29 @@ def ledger_last_events():
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict):
+                if not isinstance(rec, dict) or rec.get("event") == FOLD_EVENT:
                     continue
                 state[rec.get("task")] = (rec.get("event"), rec.get("ts") or "")
     except FileNotFoundError:
         pass
     return state
+
+
+def ledger_fold_times():
+    """task id -> the newest time the create gate folded a new item into it (FOLD_EVENT)."""
+    folds = {}
+    try:
+        with open(INTENT_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("event") == FOLD_EVENT and rec.get("ts"):
+                    folds[rec.get("task")] = max(folds.get(rec.get("task"), ""), rec["ts"])
+    except FileNotFoundError:
+        pass
+    return folds
 
 
 def idle_handback(t, last, now=None):
@@ -1603,7 +1625,7 @@ def open_intents():
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict) or rec.get("event") in ("parked", "unblocked", "status"):
+                if not isinstance(rec, dict) or rec.get("event") in ("parked", "unblocked", "status", FOLD_EVENT):
                     # A wall recorded or cleared (14 and 25 Sep 2026) says nothing about
                     # whether the action ran; skipping it keeps an earlier intent open, so
                     # the woken carry-out still checks what already happened (review).
@@ -2305,9 +2327,10 @@ CLOSED_KEEPER_STATUSES = ("Completed", "Cancelled")
 
 # ─── A STATUS-ONLY UPDATE FILES ITSELF, A NO-OP CARD IS REFUSED (Kevin, 14 Nov 2026) ───
 #
-# Kevin's own count (ruling evidence): in the 30 days to 14 Nov 2026, 64 verdicts on cards whose plain line said
-# "IF YOU APPROVE: Nothing happens", "nothing runs" or "This only tells you…", most of them creditor
-# chase updates ("Chase: …", no reply has come yet). recr8iLqHOb2mpMh0 read "Nothing happens. This
+# The estate review of 13 Nov 2026 measured 64 verdicts in 30 days (counted by round, the older rounds
+# inferred from the stored plain line) on cards whose plain line said "IF YOU APPROVE: Nothing happens",
+# "nothing runs" or "This only tells you…"; the back-test on 14 Nov, counting each task's latest round
+# only, found 31 cards with a verdict over 60 days. Most were creditor chase updates ("Chase: …", no reply has come yet). recr8iLqHOb2mpMh0 read "Nothing happens. This
 # only tells you no reply has come yet and the next check is on 2 November." The informational
 # filing above never takes a tier-1 or creditor task (the banner promises he reads it), so every
 # such update became a card he had to approve to make go away. His ruling ("Handled list, no
@@ -2335,16 +2358,19 @@ STATUS_CARRY_LINE_RE = re.compile(
     r"|RECORD NEW COST|RECORD CHANGE|YOUR STEP|SIGN AS KEVIN|AGREEMENT ID|SIGNER)\s*:"
     r"|(?P<bare>MARK FOR PAYMENT|REDIRECT TO INFO@|SIGN AS KEVIN)\b)", re.I | re.M)
 STATUS_SEPARATOR_RE = re.compile(r"^\s*-{3,}\s*$", re.M)
-# A reply that arrived since the last look is not "nothing has changed": the newest email line of
-# the TRACK RECORD (history --text writes "- 12 Nov 2026 10:38 — email: Name <addr>: subject").
-STATUS_EMAIL_LINE_RE = re.compile(
-    r"^\s*[-*]\s*(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*[—–-]+\s*email:\s*"
-    r"(?P<who>[^\n]*?)(?P<addr>[\w.+-]+@[\w-]+(?:\.[\w-]+)+)", re.M)
-STATUS_SUBMIT_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?\s*— agent-dispatch\] "
+STATUS_ADDR_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# How far back the reply search reads. The last look is never older than a rest (7 days) plus a
+# card's life on the queue, so 45 days covers it with room; the date filter does the real work.
+STATUS_HISTORY_DAYS = 45
+STATUS_SUBMIT_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*— agent-dispatch\] "
                                     r"(?:SUBMITTED|" + re.escape(HANDLED_MARK) + r")\b", re.M)
 STATUS_FILED_RE = re.compile(
     r"^\[(?P<day>\d{1,2} \w{3} \d{4}) \d{2}:\d{2} — agent-dispatch\] " + re.escape(HANDLED_MARK)
-    + r" \(" + re.escape(STATUS_CATEGORY) + r"\):[^\n]*rests until (?P<until>\d{4}-\d{2}-\d{2})\.", re.M)
+    + r" \(" + re.escape(STATUS_CATEGORY) + r"\):[^\n]*rests until (?P<until>\d{4}-\d{2}-\d{2})\."
+    + r"(?:[^\n]*? Holder: (?P<holder>rec[A-Za-z0-9]{14})\.)?", re.M)
+# The dated block the create gate's fold appends to the Description (create-agent-task.py
+# build_update): "UPDATE 2026-11-14: new item folded in by the duplicate gate".
+STATUS_FOLD_BLOCK_RE = re.compile(r"^UPDATE (\d{4}-\d{2}-\d{2}): new item folded in by the duplicate gate", re.M)
 # Lines kept out of the record block under the filed line: a marker another reader acts on.
 STATUS_NOTE_MAX = 2000
 STATUS_ONLY_HELP = (
@@ -2417,24 +2443,76 @@ def _status_day(day):
         return None
 
 
-def status_reply_arrived(body, task_rec):
-    """'<day> from <addr>' when the TRACK RECORD shows an email from outside on or after the last
-    time this task was looked at (its creation, Kevin's verdict, its last card or status update),
-    else ''. Day resolution, so a same-day email counts: the strict direction."""
+def status_last_look(task_rec):
+    """When this task was last looked at, as an aware datetime: the latest of its creation, Kevin's
+    verdict, and every card or status update agent-dispatch stamped on it. Every source is a stamp
+    code wrote, never an agent's word."""
     tf = task_rec.get("fields", {}) or {}
-    marks = [str(task_rec.get("createdTime") or "")[:10], str(tf.get(AF["approvedAt"]) or "")[:10]]
+    marks = []
+    for iso in (task_rec.get("createdTime"), tf.get(AF["approvedAt"])):
+        try:
+            marks.append(datetime.fromisoformat(str(iso).replace("Z", "+00:00")))
+        except (TypeError, ValueError):
+            pass
     for m in STATUS_SUBMIT_STAMP_RE.finditer(str(tf.get(AF["notes"]) or "")):
-        d = _status_day(m.group("day"))
-        if d:
-            marks.append(d.isoformat())
-    since = max([m for m in marks if m] or [""])
+        try:
+            marks.append(datetime.strptime(f"{m.group('day')} {m.group('time') or '00:00'}",
+                                           "%d %b %Y %H:%M").replace(tzinfo=LONDON))
+        except ValueError:
+            pass
+    return max(marks) if marks else None
+
+
+def status_history_terms(body, task_rec):
+    """(emails, refs) to search for a reply: every outside address the task or the output names
+    (the inbound sender, the TRACK RECORD lines the gate wrote into Notes, the agent's block) and
+    the references in the task's name and description. More terms is the strict direction: a hit on
+    any of them since the last look makes it a card."""
+    tf = task_rec.get("fields", {}) or {}
     own = {a.lower() for a in OWN_ADDRESSES} | {ROY_EMAIL.lower()}
-    for m in STATUS_EMAIL_LINE_RE.finditer(str(body or "")):
-        d = _status_day(m.group("day"))
-        if not d or m.group("addr").lower() in own:
+    text = " ".join(str(x or "") for x in (tf.get(AF["inboundSender"]), tf.get(AF["name"]),
+                                          tf.get(AF["description"]), tf.get(AF["notes"]), body))
+    emails = sorted({a.lower().rstrip(".") for a in STATUS_ADDR_RE.findall(text)} - own)
+    refs = reference_tokens(f"{tf.get(AF['name']) or ''} {str(tf.get(AF['description']) or '')[:2000]}")
+    return emails, refs
+
+
+def status_reply_problem(body, task_rec):
+    """Why "nothing has changed" cannot stand, or ''. The history is READ HERE, by the same
+    `history` the TRACK RECORD is built from (the task board and Gmail), so an agent that leaves its
+    block out or pastes an old one changes nothing. A read that fails, could not search Gmail, or
+    has nothing to search for refuses the filing: an unread history is never "no reply"."""
+    emails, refs = status_history_terms(body, task_rec)
+    if not (emails or refs):
+        return ("there is no address or reference on the task or in the output to search for a reply, "
+                "so \"nothing has changed\" cannot be checked: this is a card")
+    try:
+        result = history(emails=emails, refs=refs, days=STATUS_HISTORY_DAYS,
+                         exclude_task=task_rec.get("id"), gmail=True)
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never filed
+        return f"the history could not be read to check for a reply ({str(exc)[:120]}), so this is a card"
+    if not result.get("terms"):
+        return ("none of the task's addresses or references is searchable, so \"nothing has changed\" "
+                "cannot be checked: this is a card")
+    unread = [n for n in (result.get("notes") or []) if "not searched" in str(n).lower()]
+    if unread or "Gmail" not in (result.get("searched") or []):
+        return (f"Gmail could not be searched for a reply ({(unread or ['not searched'])[0][:120]}), "
+                "so this is a card")
+    since = status_last_look(task_rec)
+    own = {a.lower() for a in OWN_ADDRESSES} | {ROY_EMAIL.lower()}
+    for e in result.get("entries") or []:
+        if e.get("source") != "email":
             continue
-        if not since or d.isoformat() >= since:
-            return f"{d.strftime('%d %b %Y')} from {m.group('addr')}"
+        addr = STATUS_ADDR_RE.search(str(e.get("text") or "").split(": ", 1)[0] or "")
+        if not addr or addr.group(0).lower() in own:
+            continue
+        try:
+            when = datetime.strptime(str(e.get("date") or "")[:16], "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
+        except ValueError:
+            return f"an email from {addr.group(0)} carries no readable date, so this is a card"
+        if since is None or when >= since:
+            return (f"an email from {addr.group(0)} arrived {when.strftime('%d %b %Y %H:%M')}, after this task "
+                    "was last looked at, so something has changed: this is a card")
     return ""
 
 
@@ -2480,10 +2558,9 @@ def status_only_problem(body, task_type, task_rec, today=None):
     ask = _triage().ask_signal("", status_own_words(body))
     if ask:
         return f"its own words carry an ask ({ask}), so this is a card, not a status update", ""
-    reply = status_reply_arrived(body, task_rec)
+    reply = status_reply_problem(body, task_rec)
     if reply:
-        return (f"its TRACK RECORD shows a reply since the last look ({reply}), so something has "
-                "changed: this is a card"), ""
+        return reply, ""
     return "", nxt.isoformat()
 
 
@@ -2510,24 +2587,40 @@ def status_filed_on(notes):
     return _status_day(found[-1][0]) if found else None
 
 
-def status_rest(t, last, now=None):
+def status_rest(t, last, now=None, folded_at=""):
     """Why a task with a status update filed is resting, or ''. It rests from the `status` event
-    the filing writes until its NEXT CHECK, and wakes early when Kevin's verdict moves or he asks
-    for changes. Clocks and the stamped line only, never words."""
+    the filing writes until its NEXT CHECK. Clocks and stamped facts only, never words. It wakes at
+    once when:
+      - any later step of the task's own lands in the ledger (a wall, a clear, a carry-out intent,
+        a done): the newest event is then no longer `status`;
+      - the create gate folds a new item into it after the filing (`folded_at`, the FOLD_EVENT the
+        gate writes), or, the backstop for a gate that could not write the ledger, the dated UPDATE
+        block a fold appends to the Description is dated after the filing day;
+      - it is routed to another holder (the holder stamped on the filed line is no longer on it);
+      - Kevin's verdict moves (a newer Approved At) or he asks for changes."""
     if not last or last[0] != "status" or not last[1]:
         return ""
     if t.get("outcome") == "Changes requested":
         return ""
     if str(t.get("approvedAt") or "") > last[1]:
         return ""
-    until = status_rest_until(t.get("notes"))
-    if not until:
+    if folded_at and folded_at > last[1]:
+        return ""
+    filed = STATUS_FILED_RE.findall(str(t.get("notes") or ""))
+    if not filed:
+        return ""
+    day, until, holder = filed[-1]
+    filed_day = _status_day(day)
+    folds = STATUS_FOLD_BLOCK_RE.findall(str(t.get("description") or ""))
+    if folds and filed_day and max(folds) > filed_day.isoformat():
+        return ""
+    if holder and t.get("teamMemberIds") and holder not in t.get("teamMemberIds"):
         return ""
     today = (now or datetime.now(timezone.utc)).astimezone(LONDON).date().isoformat()
     if today >= until:
         return ""
     return (f"status update filed at {last[1][:16]} with nothing to approve; rests until {until}, "
-            "or until Kevin's verdict changes")
+            "or until a new item is folded in, it changes hands or Kevin's verdict changes")
 
 
 # THE NO-OP CARD (backstop, 14 Nov 2026). An approve line that says Approve runs nothing is refused
@@ -3079,13 +3172,15 @@ def file_status_update(args, output, level, notes_seen):
         sys.exit(f"ERROR: the re-read of {args.task} came back with blank Notes after an earlier read "
                  "showed some. Stopped before writing, so nothing is lost. Retry the submit.")
     status_now = sel(fresh.get(AF["status"])) or "open"
+    holder = next(iter(links(fresh.get(AF["teamMember"]))), "")
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     body = str(output or "").strip()
     if body.startswith(TIER1_BANNER):
         body = body[len(TIER1_BANNER):].strip()
     head = (f"[{stamp} — agent-dispatch] {HANDLED_MARK} ({STATUS_CATEGORY}): {status_only_line(body)} "
             f"Nothing to approve: the task stays {status_now}, its card and Kevin's verdict are "
-            f"untouched, and it rests until {level['restUntil']}. Level A, Kevin's ruling 14 Nov 2026.")
+            f"untouched, and it rests until {level['restUntil']}. Level A, Kevin's ruling 14 Nov 2026."
+            + (f" Holder: {holder}." if holder else ""))
     patch_task(args.task, {AF["notes"]: append_notes(existing, head + "\n" + status_record_block(body),
                                                      task_id=args.task)})
     check = get_task(args.task).get("fields", {}) or {}
@@ -4232,13 +4327,14 @@ def build_queue(args=None):
         if why:
             t["idleReason"] = why
             idle_hb.append(t)
+    folds = ledger_fold_times()
     # A STATUS UPDATE FILED WITH NOTHING TO APPROVE (14 Nov 2026) rests the task until the NEXT CHECK
     # it declared: the filing leaves the task as it was (Today, say), and without this rest every
     # slot would hand it back for the same look. Listed with its reason, never hidden.
     for t in list(approved_hb) + list(changes_hb) + list(new_work) + list(deferred_hb):
         if t in idle_hb:
             continue
-        why = status_rest(t, ledger.get(t["id"]))
+        why = status_rest(t, ledger.get(t["id"]), folded_at=folds.get(t["id"], ""))
         if why:
             t["idleReason"] = why
             idle_hb.append(t)
