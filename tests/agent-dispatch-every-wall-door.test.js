@@ -47,6 +47,7 @@ m.finding_details = lambda: {}
 m.load_login_sites = lambda: {}
 m.BROWSER_LEDGER = "/nonexistent/od-test-browser-ledger.jsonl"
 m.HANDOVER_DIR = "/nonexistent/od-test-handover"
+m.MERGE_ATTEMPTS_FILE = "/nonexistent/od-test-merge-attempts.json"
 class A:
     def __init__(self, **kw): self.__dict__.update(kw)
 def run(fn, args):
@@ -783,6 +784,88 @@ print(json.dumps([
     expect(r[12]).toEqual(['no-fixer', 'no fixer can reach it (protected file: scripts/agent-dispatch.py)']);
     expect(r[13][0]).toBe('merge-closed');          // merged, yet this finding did not land
     expect(r[8][1]).toBe('you approved the merge card for PR #812; the robot is merging it');
+  });
+
+  it('an approved merge card says when it is resting on a red, stopped after four, or waiting on a moved PR (14 Nov 2026)', () => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'od-wall-att-'));
+    const good = resolve(dir, 'attempts.json');
+    const bad = resolve(dir, 'broken.json');
+    const H = 'a1b2c3d4'.repeat(5), N = 'f0e1d2c3'.repeat(5);
+    writeFileSync(good, JSON.stringify({ 812: { result: 'red', head: H, reds: 2, lastRedAt: '2026-11-06T09:00:00Z' } }));
+    writeFileSync(bad, '{not json');
+    const r = py(`
+b = {"kind": "TOOL", "subject": "x", "why": "w", "finding": "20261001-agent-dispatch-901", "since": ""}
+detail = {"title": "Agent blocked: retype", "where": "scripts/agent-settings.json"}
+card = {"pr": 812, "id": "recCard", "status": "Today", "outcome": "Approved as-is", "head": "${H}", "findings": ["20261001-agent-dispatch-901"]}
+st = lambda att: m.tool_wall_state(b, "pending", detail, [card], 5, attempts=att)
+red2 = m.read_merge_attempts(${JSON.stringify(good)})
+print(json.dumps({
+  "red2": st(red2),
+  "stopped": st({"812": {"result": "red", "head": "${H}", "reds": 4, "finding": "20261106-merge-approved-7"}}),
+  "stoppedUnfiled": st({"812": {"result": "red", "head": "${H}", "reds": 4}}),
+  "otherHead": st({"812": {"result": "red", "head": "${N}", "reds": 4}}),
+  "moved": st({"812": {"result": "moved", "head": "${H}", "newHead": "${N}", "movedTries": 1, "lastMovedAt": "2026-11-06T09:00:00Z"}}),
+  "movedStop": st({"812": {"result": "moved", "head": "${H}", "newHead": "${N}", "movedTries": 4, "finding": "20261106-merge-approved-8"}}),
+  "merging": st({}), "none": st(None), "junk": st({"812": "oops"}), "badReds": st({"812": {"result": "red", "head": "${H}", "reds": "two"}}),
+  "missing": m.read_merge_attempts(${JSON.stringify(resolve(dir, 'nope.json'))}),
+  "broken": m.read_merge_attempts(${JSON.stringify(bad)}),
+  "closedReopened": m.tool_wall_state(b, "open", dict(detail, pr="812"), [dict(card, status="Completed", outcome="")], 1),
+  "default": m.read_merge_attempts(),
+}))`);
+    expect(r.red2).toEqual(['merge-approved', 'you approved the merge card for PR #812; its tests failed (2 of 4), the robot tries again after 15:00 on 06 Nov']);
+    expect(r.stopped).toEqual(['merge-stopped', 'the merge card for PR #812 stopped after 4 failed test runs (20261106-merge-approved-7); it needs a fix before it can merge']);
+    expect(r.stoppedUnfiled[0]).toBe('merge-stopped');
+    expect(r.otherHead[0]).toBe('merge-approved');
+    expect(r.moved[0]).toBe('merge-approved');                            // still being retried
+    expect(r.movedStop[0]).toBe('merge-stopped');
+    expect(r.stoppedUnfiled[1]).toMatch(/stopped after 4 failed test runs \(its finding is not filed yet\)/);
+    expect(r.otherHead[1]).toBe('you approved the merge card for PR #812; the robot is merging it');   // a red on another head says nothing about this one
+    expect(r.moved[1]).toBe('you approved the merge card for PR #812, but the PR changed since and its new code is not green (1 of 4); the robot re-tests it after 15:00 on 06 Nov');
+    expect(r.movedStop[1]).toMatch(/^the merge card for PR #812 stopped: the PR changed after you approved it and its new code failed 4 re-tests \(20261106-merge-approved-8\)/);
+    for (const k of ['merging', 'none', 'junk', 'badReds']) {
+      expect(r[k]).toEqual(['merge-approved', 'you approved the merge card for PR #812; the robot is merging it']);
+    }
+    expect(r.missing).toEqual({});
+    expect(r.broken).toEqual({});                                         // fails soft, never crashes the sweep
+    expect(r.default).toEqual({});                                        // the harness points the default away from ~/knowledge-os
+    // A card the robot closed because its PR closed unmerged: the finding is open again, so the fixer's words.
+    expect(r.closedReopened).toEqual(['fixer', 'waiting on the daily robot fix']);
+  });
+
+  it('the Estate row counts a stopped merge card on its own and never as being merged (14 Nov 2026)', () => {
+    const script = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('e', ${JSON.stringify(ESTATE)})
+e = importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
+W = lambda t, state, pr, words: {"task": t, "name": "n", "kind": "TOOL", "subject": t, "fix": "f", "days": 1, "findingStatus": "pending",
+                                 "toolState": state, "tool": words, "mergeCard": {"pr": pr}}
+s = {"openTasksRead": 1, "woken": [], "closedWhileBlocked": [], "sitesError": "", "findingsError": "", "stale": [], "open": [
+  W("a", "merge-approved", 812, "you approved the merge card for PR #812; its tests failed (2 of 4), the robot tries again after 15:00 on 06 Nov"),
+  W("b", "merge-stopped", 890, "the merge card for PR #890 stopped after 4 failed test runs (20261106-merge-approved-7); it needs a fix before it can merge"),
+  W("c", "merge-stopped", 890, "the merge card for PR #890 stopped after 4 failed test runs (20261106-merge-approved-7); it needs a fix before it can merge"),
+  W("d", "merge-stopped", 901, "the merge card for PR #901 stopped: the PR changed after you approved it"),
+]}
+st, detail, payload = e.blockers_summary(s)
+one = e.blockers_summary(dict(s, open=s["open"][1:2]))
+print(json.dumps({"st": st, "detail": detail, "one": one[1], "counts": [payload["merging"], payload["mergeStopped"], payload["dailyFix"]],
+                  "fix": [w["fix"] for w in payload["open"]], "states": [w["toolState"] for w in payload["open"]]}))`;
+    const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
+    expect(r.counts).toEqual([1, 3, 0]);                                  // never "being merged", never the daily fix
+    expect(r.detail).toMatch(/ 1 fix approved by you and being merged by the robot\./);
+    expect(r.detail).toMatch(/ 3 tasks waiting on 2 merges you approved that stopped after failed test runs and need a fix \(PR #890, PR #901\); the robot filed a stop finding for the daily robot fix\./);
+    expect(r.one).toMatch(/1 task waiting on 1 merge you approved that stopped after failed test runs and needs a fix \(PR #890\)/);
+    expect(r.one).not.toMatch(/being merged|waiting on the daily robot fix/);
+    expect(r.states).toEqual(['merge-approved', 'merge-stopped', 'merge-stopped', 'merge-stopped']);
+    expect(r.fix[1]).toMatch(/stopped after 4 failed test runs/);        // each wall's own words reach the page
+    expect(r.st).toBe('Worked');
+  });
+
+  it('the wall row and merge-approved.py read the same red clock', () => {
+    const r = py(`
+ma_spec = importlib.util.spec_from_file_location('ma', ${JSON.stringify(resolve(ROOT, 'scripts/merge-approved.py'))})
+ma = importlib.util.module_from_spec(ma_spec); ma_spec.loader.exec_module(ma)
+print(json.dumps([ma.RED_MAX, ma.RED_RETRY_HOURS, m.merge_card.RED_MAX, m.merge_card.RED_RETRY_HOURS]))`);
+    expect(r).toEqual([4, 6, 4, 6]);
   });
 
   it('the Estate row counts the three kinds separately and the payload carries step, turn and the TOOL state', () => {

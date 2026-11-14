@@ -61,6 +61,11 @@ APPROVE_LINE = "If you approve, the robot runs merge-pr.py and the deploy, nothi
 FINDINGS_HEAD = "Findings it closes:"
 FINDING_ID_RE = re.compile(r"\b(\d{8}-[A-Za-z0-9-]+-\d{3,})\b")
 APPROVED = ("Approved as-is", "Approved with minor edits")
+# The red-gate clock merge-approved.py runs on (13 Nov 2026), here so the blocked-task sweep's row
+# (agent-dispatch.py tool_wall_state) reads the same numbers it does: retries RED_RETRY_HOURS apart,
+# at most RED_MAX on one head, then one stop finding.
+RED_RETRY_HOURS = 6
+RED_MAX = 4
 REPO_URL = "https://github.com/chaichoong/leadership-dashboard"
 # The PR head the gate tested, written on the card. Kevin's approval is of THAT head: a push
 # after the card was raised must never merge on his "yes" (review, 7 Oct 2026).

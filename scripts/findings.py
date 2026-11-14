@@ -788,6 +788,10 @@ def file_finding(state, f, cap=True):
     }
     if f.get("agent"):
         rec["agent"] = f["agent"]
+    if f.get("holds_merge_pr"):
+        # A stop finding from merge-approved.py (14 Nov 2026): it holds that PR's MERGE card, so
+        # `worklist` ranks it by the tasks walled on the findings that PR carries.
+        rec["holds_merge_pr"] = f["holds_merge_pr"]
     # Rule 2: not the same defect, but the same file. Carried on the record so
     # the fixer sees the cluster in `list` instead of meeting six ids one at a
     # time and treating each as a small separate thing.
@@ -812,6 +816,8 @@ def cmd_add(a):
         print("NOTE: " + note, file=sys.stderr)
     f = {"routine": a.routine, "title": a.title, "where": a.where, "detail": a.detail,
          "fix": a.fix, "severity": a.severity, "touches_code": a.touches_code, "agent": agent}
+    if getattr(a, "holds_merge_pr", None):
+        f["holds_merge_pr"] = a.holds_merge_pr
     rc, _ = file_finding(current_state(), f)
     return rc
 
@@ -1038,6 +1044,9 @@ def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
     """The fixer's order: findings that block tasks, then the rest, then walls on findings
     the fixer cannot take. `blockers` is None when the sweep's report was not read."""
     blocking, not_in_queue = {}, {}
+    # Walls on findings pending on a PR, per PR: a stop finding holding that PR's MERGE card is
+    # what stands between those tasks and their fix landing (14 Nov 2026).
+    held_by_pr = {}
     if blockers is not None:
         for n, w in enumerate(blockers.get("open") or []):
             if not isinstance(w, dict) or w.get("kind") != "TOOL":
@@ -1050,6 +1059,15 @@ def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
             # A wall on a merged repeat counts toward the finding that survives it.
             root = r.get("duplicate_root") if r else None
             target = state.get(root) if root else r
+            if target is not None and target.get("status") == "pending" and target.get("pr"):
+                held = held_by_pr.setdefault(str(target["pr"]), {"tasks": set(), "days": [], "undated": False,
+                                                                 "findings": set()})
+                held["tasks"].add(task or ("(untasked wall %d)" % n))
+                held["findings"].add(target["id"])
+                if days is None:
+                    held["undated"] = True
+                else:
+                    held["days"].append(days)
             if target is not None and fixer_open(target, now):
                 row = blocking.setdefault(target["id"], {"tasks": set(), "days": [], "walls": set(),
                                                          "words": [], "undated": False})
@@ -1077,6 +1095,21 @@ def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
             if any(words) and words[0] not in [x[0] for x in row["words"]]:
                 row["words"].append(words)
 
+    # A stop finding is identified by its field, never its title; one filed before the field
+    # existed stays in THE REST (14 Nov 2026).
+    for r in state.values():
+        pr = str(r.get("holds_merge_pr") or "")
+        held = held_by_pr.get(pr)
+        if not pr or not held or not fixer_open(r, now) or r.get("duplicate_root"):
+            continue
+        row = blocking.setdefault(r["id"], {"tasks": set(), "days": [], "walls": set(), "words": [],
+                                            "undated": False})
+        row["tasks"] |= held["tasks"]
+        row["days"] += held["days"]
+        row["undated"] = row["undated"] or held["undated"]
+        row["holdsMergePr"] = int(pr) if pr.isdigit() else pr
+        row["heldFindings"] = sorted(held["findings"])
+
     def oldest(row):
         return max(row["days"]) if row["days"] else None
 
@@ -1095,6 +1128,8 @@ def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
             "wallFindings": sorted(w for w in row["walls"] if w != fid),
             "staleClaim": r.get("status") == "claimed",
             "sweepSays": [{"toolState": s, "words": t} for s, t in row["words"]],
+            **({"holdsMergePr": row["holdsMergePr"], "heldFindings": row["heldFindings"]}
+               if row.get("holdsMergePr") else {}),
         })
     rest = [r for r in state.values() if fixer_open(r, now) and r["id"] not in blocking]
     rest.sort(key=lambda r: (sev(r), r.get("ts") or ""))
@@ -1156,6 +1191,9 @@ def cmd_worklist(a):
                       % (r.get("claimed_by") or "?"))
             if b["wallFindings"]:
                 print("         walls name merged repeat(s): %s" % ", ".join(b["wallFindings"]))
+            if b.get("holdsMergePr"):
+                print("         HOLDS THE MERGE CARD for PR #%s: its findings %s cannot land until it merges"
+                      % (b["holdsMergePr"], ", ".join(b.get("heldFindings") or [])))
             for s in b["sweepSays"]:
                 print("         sweep says: %s%s" % (s["words"] or s["toolState"],
                                                     (" [%s]" % s["toolState"]) if s["words"] and s["toolState"] else ""))
@@ -1771,6 +1809,9 @@ def main(argv=None):
     sp.add_argument("--agent", default=os.environ.get("FINDINGS_AGENT", ""),
                     help="the AI agent filing it, when the routine is shared: the cap "
                          "counts each agent's own open findings (default $FINDINGS_AGENT)")
+    sp.add_argument("--holds-merge-pr", type=int, default=None,
+                    help="a stop finding that holds this PR's MERGE card (merge-approved.py): the "
+                         "worklist ranks it by the tasks walled on that PR's pending findings")
     sp.set_defaults(fn=cmd_add)
 
     sp = sub.add_parser("dupe", help="merge a repeat into the finding that survives it")

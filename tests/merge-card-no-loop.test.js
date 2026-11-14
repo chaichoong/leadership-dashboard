@@ -42,7 +42,9 @@ ma = importlib.util.module_from_spec(spec); spec.loader.exec_module(ma)
 ma.STATE_DIR = ${JSON.stringify(dir)}
 NOW = [${T0}]
 ma.clock = lambda: NOW[0]
-CALLS, NOTES, PATCHES, MERGES, ADDS, COMPLETES = [], [], [], [], [], []
+CALLS, NOTES, PATCHES, MERGES, ADDS, COMPLETES, REOPENS = [], [], [], [], [], [], []
+PENDING = []          # what findings.py list --status pending --json returns
+DRY = []              # the dry run's answer per run ("green"); empty means red
 GH = {"view": json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${HEAD}"})}
 FIND_RC = [0]
 COMPLETE = {"rc": 0, "err": ""}
@@ -60,6 +62,11 @@ def py(script, *args, timeout=300):
     if script == "agent-dispatch.py" and args[0] == "complete":
         COMPLETES.append(list(args))
         return subprocess.CompletedProcess([script], COMPLETE["rc"], "", COMPLETE["err"])
+    if script == "findings.py" and args[0] == "list":
+        return subprocess.CompletedProcess([script], 0, json.dumps(PENDING), "")
+    if script == "findings.py" and args[0] == "reopen":
+        REOPENS.append(list(args))
+        return subprocess.CompletedProcess([script], 0, "reopened " + args[1], "")
     if script == "findings.py" and args[0] == "add":
         ADDS.append(list(args))
         return subprocess.CompletedProcess([script], FIND_RC[0], "20261106-merge-approved-%d" % len(ADDS) if FIND_RC[0] == 0 else "", "queue locked" if FIND_RC[0] else "")
@@ -68,12 +75,20 @@ MERGE_RESULTS = []
 def merge_pr(pr, head, dry_run=False):
     MERGES.append([pr, head, dry_run])
     if dry_run:
+        if DRY and DRY.pop(0) == "green":
+            return subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "dryRun": True, "head": head, "why": "green"}), "")
         return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "head": head, "why": "the gate is RED"}), "")
     if MERGE_RESULTS and MERGE_RESULTS.pop(0) == "green":
         GH["view"] = json.dumps({"state": "MERGED", "mergeCommit": {"oid": "abc123def4567890"}, "headRefOid": head})
         return subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": True, "why": "merged: green"}), "")
     return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "the gate is RED"}), "${RED_TAIL}")
 ma.sh, ma.py, ma.run_merge_pr = sh, py, merge_pr
+REFRESH = {"fail": False, "calls": 0}
+def refresh_card(card, head, res):
+    REFRESH["calls"] += 1
+    if REFRESH["fail"]:
+        raise RuntimeError("Airtable 503")
+ma.refresh_card = refresh_card
 ma.merge_card.patch_card = lambda task, fields: PATCHES.append([task, fields])
 ma.merge_card.read_tasks = lambda *a, **k: [{"id": "ctl", "fields": {}}]
 ma.time.sleep = lambda s: None
@@ -104,6 +119,9 @@ def att():
 def verdict_writes():
     # Any write that moves the card back to his queue or touches his verdict.
     return [f for _, f in PATCHES if set(f) & {"fldx4qCw17UfrKpaN", "fldrHBSr6qoUfaKuZ", "fldr4Mvf2RzKvhZhi"}]
+def sent_back():
+    # Writes that put the card back in his Approval lane.
+    return [f for _, f in PATCHES if f.get("fldx4qCw17UfrKpaN") == "Approval"]
 def nothing_runs_lines():
     return [x for x in [json.dumps(p) for p in PATCHES] + NOTES if "nothing runs" in x.lower()]
 ${prelude}
@@ -173,6 +191,7 @@ print(json.dumps({"gates": len(MERGES), "adds": ADDS, "att": att()["812"], "rest
     expect(detail).toContain('example-page.spec.js:486');                 // the failing gate lines
     expect(detail).toMatch(/is not known here: read the gate lines/);
     expect(fix).toMatch(/If they are tests the PR does not touch, fix main/);
+    expect(r.adds[0].slice(r.adds[0].indexOf('--holds-merge-pr'), r.adds[0].indexOf('--holds-merge-pr') + 2)).toEqual(['--holds-merge-pr', '812']);
     expect(r.att).toMatchObject({ result: 'red', reds: 4, head: HEAD, finding: '20261106-merge-approved-1' });
     expect(r.rest[0]).toBe('skip');
     expect(r.rest[1]).toMatch(/^resting: the gate failed 4 times on a1b2c3d4a1b2/);
@@ -200,16 +219,177 @@ print(json.dumps({"p1": p1, "act": out["done"][0], "again": out2["done"][0]["act
     expect(r.gates).toBe(4);
   });
 
-  it('a resting card whose PR moved goes through changed(): the new code is dry-run tested and the card goes back to Kevin for it', () => {
+  it('a resting card whose PR moved goes through changed(): new code re-tested GREEN and refreshed goes back to Kevin for it', () => {
     const r = drive(`
 a = {"812": {"result": "red", "head": "${HEAD}", "reds": 4, "finding": "20261106-merge-approved-1", "approvedAt": "2026-11-06T08:30:00.000Z", "at": "2026-11-06T09:00:00Z"}}
 ma.save_attempts(a)
 GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
+DRY[:] = ["green"]
 _, out = cmd_run()
 print(json.dumps({"done": out["done"][0], "merges": MERGES, "back": [f for _, f in PATCHES if "fldx4qCw17UfrKpaN" in f]}))`);
     expect(r.merges).toEqual([[812, NEWHEAD, true]]);
     expect(r.done.result).toBe('error');
     expect(r.back[0]).toMatchObject({ fldx4qCw17UfrKpaN: 'Approval', fldrHBSr6qoUfaKuZ: null });
+  });
+});
+
+const NEWHEAD2 = '9a8b7c6d'.repeat(5);
+
+describe('a moved PR whose new code is not a green, refreshed card is never sent back (14 Nov 2026)', () => {
+  it('THE LOOP: a red dry run on the new head rests, re-tests by itself 6 hours apart, stops after 4 with ONE finding, and a further push starts again', () => {
+    const r = drive(`
+GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
+steps = []
+def step(label, hours):
+    NOW[0] = ${T0} + hours * ${HOUR}
+    todo = detach_todo()
+    code, out = cmd_run()
+    steps.append({"label": label, "todo": todo, "done": out["done"][0], "dry": len([m for m in MERGES if m[2]])})
+step("approved, PR moved", 0)      # try 1
+step("half an hour on", 0.5)       # resting
+step("six hours on", 6.1)          # try 2
+step("twelve hours on", 12.2)      # try 3
+step("eighteen hours on", 18.3)    # try 4: stop finding
+step("a day on", 24.4)             # rests: no 5th re-test
+a4 = att()["812"]
+GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD2}"})
+step("pushed again", 24.9)         # a new head: re-tested at once, count starts again
+print(json.dumps({"steps": steps, "sentBack": sent_back(), "verdict": verdict_writes(), "adds": ADDS, "a4": a4,
+                  "att": att()["812"], "notes": NOTES, "merges": [m for m in MERGES if not m[2]]}))`);
+    const [s1, rest, s2, s3, s4, rest2, s5] = r.steps;
+    expect(s1.done).toMatchObject({ action: 'merge', result: 'moved', retryAt: '2026-11-06T15:00:00Z' });
+    expect(s1.done.backToKevin).toBeUndefined();
+    expect(rest.todo).toEqual([]);
+    expect(rest.done.action).toBe('skip');
+    expect(rest.done.why).toMatch(/moved to f0e1d2c3f0e1 .* re-test 1 of 4 .* re-tests by itself after 2026-11-06T15:00:00Z/);
+    expect(s2.todo).toEqual([812]);
+    expect([s2.dry, s3.dry, s4.dry]).toEqual([2, 3, 4]);
+    expect(s4.done.stopped).toBe(true);
+    expect(rest2.todo).toEqual([]);
+    expect(rest2.done.why).toMatch(/^resting: the PR moved to f0e1d2c3f0e1 and that code failed 4 re-tests/);
+    expect(rest2.dry).toBe(4);                                            // no 5th re-test
+    expect(r.adds).toHaveLength(1);                                       // ONE stop finding
+    const a = r.adds[0];
+    expect(a[a.indexOf('--title') + 1]).toMatch(/^PR #812's new code failed 4 re-tests/);
+    expect(a[a.indexOf('--detail') + 1]).toMatch(/new code \(head f0e1d2c3f0e1\)/);
+    expect(a.slice(a.indexOf('--holds-merge-pr'), a.indexOf('--holds-merge-pr') + 2)).toEqual(['--holds-merge-pr', '812']);
+    expect(r.a4).toMatchObject({ result: 'moved', newHead: NEWHEAD, movedTries: 4, finding: '20261106-merge-approved-1' });
+    expect(s5.done).toMatchObject({ result: 'moved' });
+    expect(s5.dry).toBe(5);
+    expect(r.att).toMatchObject({ newHead: NEWHEAD2, movedTries: 1 });
+    expect(r.att.finding).toBeUndefined();
+    expect(r.sentBack).toEqual([]);                                       // never back in his lane
+    expect(r.verdict).toEqual([]);
+    expect(r.merges).toEqual([]);                                         // nothing merged on an old approval
+    expect(r.notes[0]).toMatch(/^MERGE NOT DONE: PR #812 changed .* is not green.* the card is not sent back .* \(try 1 of 4/s);
+  });
+
+  it('green but the card refresh failed rests too; an unreadable head rests on the same clock', () => {
+    const r = drive(`
+GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
+DRY[:] = ["green"]
+REFRESH["fail"] = True
+_, out = cmd_run()
+NOW[0] = ${T0} + 1800
+p_rest = ma.plan(dict(C(), prState="OPEN", prHead="${NEWHEAD}"), att())
+# An unreadable head (the merge-time read gave none): a moved try keyed on "", never sent back.
+import tempfile
+ma.STATE_DIR = tempfile.mkdtemp()
+GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": ""})
+res = ma.merge_one(C(), {})
+p2 = ma.plan(dict(C(), prReadError="gh down"), att())
+print(json.dumps({"done": out["done"][0], "refresh": REFRESH["calls"], "rest": p_rest, "unread": res, "p2": p2,
+                  "sentBack": sent_back(), "att": att()["812"]}))`);
+    expect(r.refresh).toBe(1);
+    expect(r.done).toMatchObject({ result: 'moved' });
+    expect(r.done.why).toMatch(/Re-tested green, but the card could not be refreshed: Airtable 503/);
+    expect(r.rest[0]).toBe('skip');
+    expect(r.unread).toMatchObject({ result: 'moved' });
+    expect(r.unread.why).toMatch(/The new head could not be read/);
+    expect(r.att).toMatchObject({ newHead: '', movedTries: 1 });
+    expect(r.p2[0]).toBe('skip');                                         // rests on the clock, not every half hour
+    expect(r.sentBack).toEqual([]);
+  });
+
+  it('once the card carries the new head, its own verdict decides (the moved record no longer rests it)', () => {
+    const r = drive(`
+a = {"812": {"result": "moved", "head": "${HEAD}", "newHead": "${NEWHEAD}", "movedTries": 4, "finding": "f1", "lastMovedAt": "2026-11-06T09:00:00Z", "at": "2026-11-06T09:00:00Z", "approvedAt": "2026-11-06T08:30:00.000Z"}}
+refreshed = C(head="${NEWHEAD}", agentOutput=${JSON.stringify(OUTPUT)}.replace("${HEAD}", "${NEWHEAD}"), prState="OPEN", prHead="${NEWHEAD}")
+print(json.dumps(ma.plan(refreshed, a)))`);
+    expect(r).toEqual(['merge', 'approved']);
+  });
+});
+
+describe('a card whose PR was closed without merging is closed by the robot, once, never sent back (14 Nov 2026)', () => {
+  const closedRun = (cardOver) => drive(`
+CARDS[:] = [C(${cardOver})]
+GH["view"] = json.dumps({"state": "CLOSED", "mergeCommit": None, "headRefOid": "${HEAD}"})
+PENDING[:] = [{"id": "20261101-agent-dispatch-901", "status": "pending", "pr": "812"},
+              {"id": "20261101-agent-dispatch-902", "status": "pending", "pr": "799"}]
+todo1 = detach_todo()
+code, out = cmd_run()
+todo2 = detach_todo()
+_, out2 = cmd_run()
+print(json.dumps({"todo1": todo1, "todo2": todo2, "code": code, "done": out["done"][0], "again": out2["done"][0],
+                  "patches": PATCHES, "notes": NOTES, "reopens": REOPENS, "att": att()["812"], "merges": MERGES,
+                  "completes": COMPLETES, "sentBack": sent_back()}))`);
+
+  for (const [label, over] of [['approved', ''], ['waiting for Kevin', 'status="Approval", outcome="", approvedAt=""']]) {
+    it(`${label}: the card is closed with a plain dated note, its pending findings go back to the queue, and nothing is sent back`, () => {
+      const r = closedRun(over);
+      expect(r.todo1).toEqual([812]);
+      expect(r.done).toMatchObject({ action: 'close-unmerged', result: 'closed-unmerged', reopened: ['20261101-agent-dispatch-901'] });
+      expect(r.code).toBe(0);
+      expect(r.patches).toHaveLength(1);
+      const f = r.patches[0][1];
+      expect(f.fldx4qCw17UfrKpaN).toBe('Completed');
+      expect(f.fldFOi1SwEKuJRmdN).toMatch(/^2026-11-06T09:00:00Z$/);
+      expect(Object.keys(f).sort()).toEqual(['fldFOi1SwEKuJRmdN', 'fldx4qCw17UfrKpaN']);   // no verdict, no Approved At
+      expect(r.sentBack).toEqual([]);
+      expect(r.completes).toEqual([]);                                    // no forged merge evidence
+      expect(r.merges).toEqual([]);
+      expect(r.reopens).toEqual([['reopen', '20261101-agent-dispatch-901', '--force', '--note',
+        'PR #812 was closed on GitHub without merging, so this fix never landed; back in the queue.']]);
+      expect(r.notes).toEqual(['PR CLOSED, NOT MERGED: PR #812 was closed on GitHub without merging, so nothing was merged. '
+        + 'The robot closed this card; there is nothing to approve. Its pending finding(s) went back to the fixer\'s queue: 20261101-agent-dispatch-901.']);
+      expect(r.att).toMatchObject({ result: 'closed-unmerged', head: HEAD, reopened: ['20261101-agent-dispatch-901'] });
+      expect(r.todo2).toEqual([]);                                        // once
+      expect(r.again.action).toBe('skip');
+    });
+  }
+
+  it('a PR closed between the live read and the merge is closed the same way, never failed back to Kevin', () => {
+    const r = drive(`
+GH["view"] = json.dumps({"state": "CLOSED", "mergeCommit": None, "headRefOid": "${HEAD}"})
+res = ma.merge_one(C(), {})
+def bad_patch(task, fields): raise RuntimeError("Airtable 503")
+ma.merge_card.patch_card = bad_patch
+res2 = ma.merge_one(C(), {})
+print(json.dumps({"res": res, "res2": res2, "sentBack": sent_back(), "merges": MERGES}))`);
+    expect(r.res.result).toBe('closed-unmerged');
+    expect(r.res2).toMatchObject({ result: 'error' });
+    expect(r.res2.backToKevin).toBeUndefined();                          // a failed close never tries a send-back
+    expect(r.sentBack).toEqual([]);
+    expect(r.merges).toEqual([]);
+  });
+
+  it('a card close that fails is not recorded, so the next run tries again; findings already reopened are not reopened twice', () => {
+    const r = drive(`
+GH["view"] = json.dumps({"state": "CLOSED", "mergeCommit": None, "headRefOid": "${HEAD}"})
+PENDING[:] = [{"id": "20261101-agent-dispatch-901", "status": "pending", "pr": "812"}]
+def bad_patch(task, fields): raise RuntimeError("Airtable 503")
+good = ma.merge_card.patch_card
+ma.merge_card.patch_card = bad_patch
+_, out = cmd_run()
+p = ma.plan(dict(C(), prState="CLOSED", prHead="${HEAD}"), json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS))) if os.path.exists(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)) else {})
+ma.merge_card.patch_card = good
+PENDING[:] = []
+_, out2 = cmd_run()
+print(json.dumps({"first": out["done"][0], "plan": p[0], "second": out2["done"][0], "reopens": len(REOPENS)}))`);
+    expect(r.first).toMatchObject({ result: 'error' });
+    expect(r.plan).toBe('close-unmerged');
+    expect(r.second).toMatchObject({ result: 'closed-unmerged', reopened: [] });
+    expect(r.reopens).toBe(1);
   });
 });
 
