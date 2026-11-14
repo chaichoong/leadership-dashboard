@@ -296,6 +296,10 @@ RETIRED = [
      "2026-10-14",
      "the Knowledge Base Manager (Meetings) agent and its 22:45 feed-brain job are retired; "
      "file a meeting by hand with /feed-brain"),
+    # A kept-open hand-back no longer gets a daily AI look (Kevin, 14 Nov 2026; estate review fix 2).
+    (r"kept open RESTS for 24 hours", "2026-11-14",
+     "a hand-back carried out and kept open rests until the next look its carry-out named "
+     "(complete --keep-open --until, at most 14 days), not 24 hours"),
 ]
 
 # A line that is describing the old rule, not stating it.
