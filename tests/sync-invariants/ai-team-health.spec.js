@@ -211,6 +211,44 @@ test.describe('AI team panel: one number, weekly bars, three lights', () => {
     expect(v.lights.map(l => l.dot)).toEqual(['aih-red', 'aih-red', 'aih-amber']);
   });
 
+  // Kevin, 14 Nov 2026: a code fault counts once, however many tasks wait on it. The change of
+  // method must never read as an overnight improvement: one plain line gives the number the old
+  // way, last week says it is the old count, and a dashed line marks the bar where it changed.
+  test('the change to counting each fault once is said in one line, last week is marked old, the bar where it changed is marked', async ({ page }) => {
+    const weeks = WEEKS.map(w => ({ ...w, perFault: false, perTask: w.number }));
+    weeks[3] = { ...weeks[3], number: 36, perFault: true, perTask: 46 };
+    const p = payload({ weeks, lastWeek: weeks[2],
+      headline: { number: 36, atLeast: false, parts: [], shared: 0, unread: [], perTask: 46,
+                  method: { since: '2026-10-14', perTask: 46, text: 'Counted per fault since 14 Oct 2026. By the old count: 46' } } });
+    await load(page, [verdictRow(5, {}, p)]);
+    const v = await view(page);
+    expect(v.number).toBe('36');
+    expect(v.last).toBe('last week: 58 (old count)');
+    const extra = await page.evaluate(() => {
+      const el = document.getElementById('aiHealthPanel');
+      return { method: el.querySelector('.aih-method') && el.querySelector('.aih-method').textContent,
+               switched: [...el.querySelectorAll('.aih-bar-col')].map(c => c.classList.contains('aih-bar-switch')),
+               note: el.querySelector('.aih-bars-note').textContent,
+               aria: el.querySelector('.aih-bars').getAttribute('aria-label'),
+               dash: (() => { const t = el.querySelector('.aih-bar-switch .aih-bar-track'); return t ? getComputedStyle(t).borderLeftStyle : null; })() };
+    });
+    expect(extra.method).toBe('Counted per fault since 14 Oct 2026. By the old count: 46.');
+    expect(extra.switched).toEqual([false, false, false, true]);
+    expect(extra.dash).toBe('dashed');
+    expect(extra.note).toMatch(/The dashed line marks this week: from there each code fault counts once/);
+    expect(extra.aria).toContain('This week: 36 (counted per fault from here)');
+  });
+
+  test('a report from before the change shows no method line and no marker', async ({ page }) => {
+    await load(page, [verdictRow()]);
+    const extra = await page.evaluate(() => {
+      const el = document.getElementById('aiHealthPanel');
+      return { method: !!el.querySelector('.aih-method'), marks: el.querySelectorAll('.aih-bar-switch').length,
+               last: el.querySelector('.aih-fix-last').textContent };
+    });
+    expect(extra).toEqual({ method: false, marks: 0, last: 'last week: 58' });
+  });
+
   test('a number with a check it could not read says "at least" and names the check', async ({ page }) => {
     const p = payload({ headline: { number: 46, atLeast: true, parts: [], shared: 0,
       unread: [{ key: 'data', question: 'The data is accurate', why: 'not run' }, { key: 'jobs', question: 'No job is broken', why: 'read only in part' }] } });
