@@ -109,6 +109,23 @@ describe('attachmentProblem (worker-side floor)', () => {
     expect(lib.attachmentProblem({ ...ok, dataB64: 'not base64 ***' })).toBeTruthy();
     expect(lib.attachmentProblem({ ...ok, dataB64: 'A'.repeat(7 * 1024 * 1024 + 1) })).toBeTruthy();
   });
+  // BOTH ends gate the type (finding 20261014-agent-dispatch-862). Widening only
+  // send-email.py's list would still be refused here, days after Kevin approved the send.
+  const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  it('takes the .docx send-email.py now allows, and still refuses the macro formats', () => {
+    expect(lib.attachmentProblem({ ...ok, filename: 'police-form.docx', mimeType: DOCX })).toBeNull();
+    expect(lib.attachmentProblem({ ...ok, filename: 'f.doc', mimeType: 'application/msword' })).toBeTruthy();
+    expect(lib.attachmentProblem({ ...ok, filename: 'f.docm', mimeType: 'application/vnd.ms-word.document.macroEnabled.12' })).toBeTruthy();
+  });
+  it('the two allowlists agree: every type send-email.py sends, the worker takes', () => {
+    const py = execFileSync('python3', ['-c',
+      `import importlib.util,json;s=importlib.util.spec_from_file_location('se',${JSON.stringify(SEND)});`
+      + `m=importlib.util.module_from_spec(s);s.loader.exec_module(m);print(json.dumps(sorted(m.ATTACH_MIME.values())))`,
+    ], { encoding: 'utf8' });
+    for (const mime of JSON.parse(py)) {
+      expect(lib.attachmentProblem({ ...ok, mimeType: mime })).toBeNull();
+    }
+  });
 });
 
 describe('the send endpoint actually gates on it', () => {

@@ -187,6 +187,28 @@ describe('the report gate', () => {
     const p2 = py(`print(ad.checked_problem("CHECKED: handled=no; roy=yes; machine=no; open-task=no; trigger=none", "Admin", True))`);
     expect(p2).toMatch(/PASS TO ROY/);
   });
+  // THE TIER-1 BANNER IS NOT THE AGENT'S WORDS (findings 20261016-agent-dispatch-951 and
+  // 20261107-agent-dispatch-1242). cmd_submit prepends TIER1_BANNER and only then runs this
+  // gate, so CHECK_EXEMPT_RE — anchored at the start — never saw the CLOSE PROPOSAL: beneath it.
+  // Kevin had said "close this" on two inbound tasks and there was no shape that passed: without
+  // a CHECKED line it was "must open with the five questions", with one it was "not a report".
+  // Back-tested by putting the `.strip()` back in place of strip_tier1_banner: both fail.
+  it('an exempt shape under the tier-1 banner is still exempt', () => {
+    const banner = `print(ad.TIER1_BANNER + "\\n\\n" + "CLOSE PROPOSAL: Kevin ruled on 16 Oct, close it")`;
+    const out = py(banner);
+    expect(out).toMatch(/CLOSE PROPOSAL/);
+    expect(py(`print(repr(ad.checked_problem(ad.TIER1_BANNER + "\\n\\n" + "CLOSE PROPOSAL: Kevin ruled on 16 Oct, close it", "Admin", True)))`)).toBe("''");
+    expect(py(`print(repr(ad.checked_problem(ad.TIER1_BANNER + "\\n\\n" + "PASS TO ROY: boiler", "Admin", True)))`)).toBe("''");
+  });
+  it('a report under the banner is still judged on its CHECKED line', () => {
+    expect(py(`print(ad.checked_problem(ad.TIER1_BANNER + "\\n\\nFindings...", "Analysis", True))`))
+      .toMatch(/must open with the five questions answered/);
+    expect(py(`print(repr(ad.checked_problem(ad.TIER1_BANNER + "\\n\\n" + ${JSON.stringify(ok)}, "Research", True)))`)).toBe("''");
+  });
+  it('a decision card under the banner is still a decision card', () => {
+    const r = j(`print(json.dumps([ad.is_decide_card(ad.TIER1_BANNER + "\\n\\nDECIDE: which quote"), ad.is_decide_card("DECIDE: which quote"), ad.is_decide_card("A report that mentions DECIDE: nothing")]))`);
+    expect(r).toEqual([true, true, false]);
+  });
   it('a missing key or an unknown trigger is refused', () => {
     expect(py(`print(ad.checked_problem("CHECKED: handled=no; trigger=money", "Analysis", True))`)).toMatch(/missing roy, machine, open-task/);
     expect(py(`print(ad.checked_problem("CHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=vibes", "Analysis", True))`)).toMatch(/not one of/);

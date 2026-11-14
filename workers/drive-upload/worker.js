@@ -691,7 +691,11 @@ function buildRawEmail({ to, subject, text, cc, from, attachment }) {
 // or null. The real file guards (allowlisted directory, extension, size on
 // disk) live in scripts/send-email.py, the only caller — this is the
 // worker-side floor so a direct call cannot send arbitrary content shapes.
-const ATTACH_MIME_ALLOWED = ['application/pdf', 'image/png', 'image/jpeg'];
+// .docx too (14 Oct 2026, finding 20261014-agent-dispatch-862): the police form Roy has to
+// fill in only works as the Word file. BOTH ends gate the type, so send-email.py's allowlist
+// alone would still be refused here (CLAUDE.md: fix every branch that gates the outcome).
+const ATTACH_MIME_ALLOWED = ['application/pdf', 'image/png', 'image/jpeg',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
 const ATTACH_B64_MAX = 7 * 1024 * 1024; // ~5MB file, base64-encoded
 function attachmentProblem(a) {
     if (!a || typeof a !== 'object') return 'attachment must be an object';

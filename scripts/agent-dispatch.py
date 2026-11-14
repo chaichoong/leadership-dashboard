@@ -97,6 +97,7 @@ from agent_email_format import (  # noqa: E402
     CARRY_OUT_RE,
     CARRY_OUT_TAIL_MAX,
     TIER1_BANNER,
+    strip_tier1_banner,
     EmailFormatError,
     parse_output as parse_email_output,
     RULE_OWN_ADDRESSES,
@@ -293,8 +294,12 @@ def in_dispatch_window(status, due_date, today=None, some_day=False):
 
 def is_decide_card(agent_output):
     """A decision card (cmd_escalate): Agent Output opens with DECIDE:. Kevin's
-    answer to one is for the Task Manager's board, never a carry-out."""
-    return str(agent_output or "").lstrip().upper().startswith("DECIDE:")
+    answer to one is for the Task Manager's board, never a carry-out.
+
+    The tier-1 banner comes off first, for the same reason checked_problem takes it off: it is
+    prepended to the stored output, so a tier-1 decision card read as not a decision card at all
+    (24 Oct 2026, noted on finding 20261015-agent-dispatch-907)."""
+    return strip_tier1_banner(str(agent_output or "")).lstrip().upper().startswith("DECIDE:")
 
 # How many pieces of work one run may take on.
 #
@@ -1743,6 +1748,36 @@ def coverage_parse(text):
     return props, contractors
 
 
+# A CONTRACTOR NAMES A COUNTY, NOT A POSTCODE (12 Oct 2026, findings 20261012-agent-dispatch-843
+# and 20261012-agent-dispatch-844). DD Fire Alarms say they cover "Lancashire / North West".
+# Lytham St Annes is FY8 and is in Lancashire, but the matcher only knew postcode districts, area
+# letters and town names, so the reply and quote email to a contractor who ALREADY services that
+# building sat in a run folder for a month.
+#
+# Deliberately short and deliberately accurate. A region that is not listed, or an area that
+# straddles two counties (BL, OL, WN sit across Lancashire and Greater Manchester), is simply not
+# matched, and the check then refuses — which is the safe direction: Kevin's rule is never to write
+# to a tradesperson about an address outside their area, so a miss costs a sentence in the card and
+# a wrong match costs a wasted visit. Each line is the postcode AREAS that lie wholly inside that
+# region (Royal Mail postcode areas, which are public and do not move).
+POSTCODE_REGIONS = {
+    "LANCASHIRE": {"BB", "FY", "LA", "PR"},
+    "CUMBRIA": {"CA"},
+    "MERSEYSIDE": {"L"},
+    "CHESHIRE": {"CW", "CH", "SK", "WA"},
+    "GREATER MANCHESTER": {"M"},
+    "NORTH WEST": {"BB", "BL", "CA", "CH", "CW", "FY", "L", "LA", "M", "OL", "PR", "SK", "WA", "WN"},
+    "NORTH WEST ENGLAND": {"BB", "BL", "CA", "CH", "CW", "FY", "L", "LA", "M", "OL", "PR", "SK", "WA", "WN"},
+    "NORTHWEST": {"BB", "BL", "CA", "CH", "CW", "FY", "L", "LA", "M", "OL", "PR", "SK", "WA", "WN"},
+}
+
+
+def region_covers(area, letters):
+    """True when a contractor's named county or region contains this postcode area."""
+    key = re.sub(r"\s+", " ", str(area or "").upper()).strip().rstrip(".")
+    return bool(letters) and letters in POSTCODE_REGIONS.get(key, ())
+
+
 def area_covers(areas, address):
     """True when the contractor's stated areas include this property."""
     district = postcode_district(address)
@@ -1755,6 +1790,8 @@ def area_covers(areas, address):
             return True
         if letters and a == letters:
             return True            # an area code: "CB" covers CB9
+        if region_covers(a, letters):
+            return True            # a county or region: "Lancashire" covers FY8
         if len(a) >= 4 and not re.match(r"^[A-Z]{1,2}\d", a) and a in addr_up:
             return True            # a town named in the address
     return False
@@ -2006,7 +2043,15 @@ def checked_problem(output, task_type, inbound):
     """Why a report on an inbound item may not be submitted, or ''."""
     if not inbound or task_type not in REPORT_TYPES:
         return ""
-    out = (output or "").strip()
+    # THE BANNER COMES OFF BEFORE THE EXEMPTION IS TESTED (16 Oct and 7 Nov 2026, findings
+    # 20261016-agent-dispatch-951 and 20261107-agent-dispatch-1242). cmd_submit prepends
+    # TIER1_BANNER to the output, and only THEN runs this gate, so CHECK_EXEMPT_RE — which is
+    # anchored at the start of the text — never saw the "CLOSE PROPOSAL:" underneath it. A tier-1
+    # close proposal on an inbound task was refused for a missing CHECKED line, and adding a
+    # CHECKED line was refused as "not a report": no honest shape passed, and two tasks Kevin had
+    # already ruled on could not be closed at all. The banner is Kevin's, not the agent's words,
+    # so it is never what the gate reads.
+    out = strip_tier1_banner(output or "").strip()
     if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out):
         return ""
     c = checked_parse(out)
