@@ -60,6 +60,30 @@ describe('the coverage check on quote emails', () => {
     expect(check('PROPERTY: 6 Chedburgh Place, Haverhill, CB9 0AB\nCONTRACTOR: X covers CB, IP (source: https://x)', EMAIL, 'COMPLIANCE: GSC')).toBe('');
     expect(check('PROPERTY: 6 Chedburgh Place, Haverhill, CB9 0AB\nCONTRACTOR: X covers nationwide (source: https://x)', EMAIL, 'COMPLIANCE: GSC')).toBe('');
   });
+  // A CONTRACTOR NAMES A COUNTY (12 Oct 2026, findings 20261012-agent-dispatch-843 and -844).
+  // DD Fire Alarms cover "Lancashire / North West"; Lytham St Annes is FY8 and is in Lancashire.
+  // The matcher knew districts, area letters and towns only, so a reply to the contractor who
+  // already services that building was refused and sat in a run folder for a month.
+  // Back-tested by taking the region_covers() line out of area_covers: the first case refuses.
+  it('a county or region the contractor names covers the postcode areas inside it', () => {
+    const fy8 = 'TO: info@dd.example\nFROM: info@agilelets.co.uk\nSUBJECT: Fire alarm quote\n---\n'
+      + 'Please quote for the fire alarm at 1 Clifton Drive, FY8 1AA.';
+    const prop = 'PROPERTY: 1 Clifton Drive, Lytham St Annes, FY8 1AA\n';
+    expect(check(prop + 'CONTRACTOR: DD Fire Alarms covers Lancashire / North West (source: https://dd.example)', fy8, 'COMPLIANCE: fire alarm')).toBe('');
+    expect(check(prop + 'CONTRACTOR: DD Fire Alarms covers Lancashire (source: https://dd.example)', fy8, 'COMPLIANCE: fire alarm')).toBe('');
+    expect(check(prop + 'CONTRACTOR: DD Fire Alarms covers North West (source: https://dd.example)', fy8, 'COMPLIANCE: fire alarm')).toBe('');
+  });
+  it('a region the contractor did NOT name still refuses, and so does an unlisted one', () => {
+    const fy8 = 'TO: info@dd.example\nFROM: info@agilelets.co.uk\nSUBJECT: Fire alarm quote\n---\n'
+      + 'Please quote for the fire alarm at 1 Clifton Drive, FY8 1AA.';
+    const prop = 'PROPERTY: 1 Clifton Drive, Lytham St Annes, FY8 1AA\n';
+    // Suffolk does not contain FY, and an unlisted region is never guessed at: a miss refuses,
+    // which is the safe direction when the rule is "never write about an address outside their area".
+    expect(check(prop + 'CONTRACTOR: X covers Suffolk (source: https://x)', fy8, 'COMPLIANCE: fire alarm')).toMatch(/outside their area/);
+    expect(check(prop + 'CONTRACTOR: X covers Wessex (source: https://x)', fy8, 'COMPLIANCE: fire alarm')).toMatch(/outside their area/);
+    // CB9 is in Suffolk but CB is not wholly inside any region we list, so the old checks still carry it.
+    expect(check(COV.replace('CB9, CB8, IP33', 'Lancashire'), EMAIL, 'COMPLIANCE: GSC')).toMatch(/outside their area/);
+  });
   it('a property line without a postcode is refused: the district is the check', () => {
     expect(check('PROPERTY: 6 Chedburgh Place\nCONTRACTOR: X covers CB9 (source: https://x)', EMAIL, 'COMPLIANCE: GSC')).toMatch(/no postcode/);
   });

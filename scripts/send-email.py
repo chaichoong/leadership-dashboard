@@ -565,10 +565,16 @@ def cmd_preview(args):
 ATTACH_DIR = os.path.realpath(os.path.expanduser(
     os.environ.get("SEND_EMAIL_ATTACH_DIR")
     or "~/knowledge-os/attachments"))
-ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+# .docx, and ONLY .docx (14 Oct 2026, finding 20261014-agent-dispatch-862). Kevin approved an
+# email attaching a police form that Roy has to fill in, so the fillable Word copy IS the thing
+# being sent; a PDF of it would change what he approved, and sending without it changes it too.
+# Not .doc and not .docm: the old binary format and the macro-enabled one both carry executable
+# macros, and .docx cannot (its format forbids them), so the document-only guard still holds.
+ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx"}
 ATTACH_MAX_BYTES = 5 * 1024 * 1024
 ATTACH_MIME = {".pdf": "application/pdf", ".png": "image/png",
-               ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+               ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 
 
 # The hand-off stamp names the file: "SIGNED COPY BACK: <agreement> came back
@@ -1485,6 +1491,18 @@ def cmd_selftest(args):
             bad_ext = os.path.join(ATTACH_DIR, "notes.txt")
             open(bad_ext, "w").write("x")
             guard_refuses("refuses a disallowed extension", bad_ext)
+            # .docx goes (finding 20261014-agent-dispatch-862); the macro-carrying Word
+            # formats do not, which is the whole reason .docx could be added at all.
+            for bad in ("form.doc", "form.docm"):
+                p_bad = os.path.join(ATTACH_DIR, bad)
+                open(p_bad, "w").write("x")
+                guard_refuses(f"refuses {bad}", p_bad)
+            docx = os.path.join(ATTACH_DIR, "police-form.docx")
+            open(docx, "wb").write(b"PK\x03\x04 pretend docx")
+            loaded_docx = load_attachment(docx, "selftest")
+            cases.append(("sends a .docx as a Word document",
+                          loaded_docx["mimeType"] ==
+                          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
             guard_refuses("refuses a missing file",
                           os.path.join(ATTACH_DIR, "ghost.pdf"))
             big = os.path.join(ATTACH_DIR, "big.pdf")
