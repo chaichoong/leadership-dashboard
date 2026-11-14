@@ -38,12 +38,14 @@ Subcommands:
   annotate TASKID --note STR  append a dated agent note to the task's Notes.
   intent   TASKID             record BEFORE dispatching a carry-out, so a
                               crash mid-action can never re-execute it blind.
-  complete TASKID [--keep-open [--note STR]]
+  complete TASKID [--keep-open --until YYYY-MM-DD [--note STR]]
                               after the approved action has been carried out.
                               --keep-open records the carry-out in Notes and
                               leaves Status alone, for an approval whose text
                               says the task must stay open (a standing
-                              obligation, a chase, a thing due again). The run
+                              obligation, a chase, a thing due again). --until
+                              (required with it) is the next look, at most 14
+                              days ahead: the task rests until then. The run
                               report must set "keepOpen": true on that action so
                               verify checks the Notes record, not Completed.
   verify   --report PATH      the control. Exits 1, loudly, if there was work
@@ -1494,6 +1496,17 @@ def ledger_append(task_id, event):
 
 
 IDLE_HOURS = 24
+# THE NEXT LOOK ON A KEPT-OPEN TASK (Kevin, 14 Nov 2026: replace the daily AI re-check with a
+# rules-only wait). `complete --keep-open` used to rest the task IDLE_HOURS and nothing else, so
+# every approved task kept open had an agent look at it every day: 57 tasks, 96% of looks repeats,
+# 37 of 40 sampled repeats changed nothing and none acted, and two tasks reached the Notes cap on
+# these lines alone. Now the carry-out names its next look (`--until YYYY-MM-DD`, after today and
+# at most KEPT_OPEN_MAX_DAYS ahead), the date is stamped by code into the CARRIED OUT line in the
+# same "rests until YYYY-MM-DD." form a filed status update uses, and the task rests until then
+# (kept_open_rest). A line from before this change carries no date: it rests
+# KEPT_OPEN_UNDATED_REST_DAYS from its event, so the agent's next look sets a real one.
+KEPT_OPEN_MAX_DAYS = 14
+KEPT_OPEN_UNDATED_REST_DAYS = 3
 # Written by the create gate's fold path (create-agent-task.py record_fold, 14 Nov 2026): a new item
 # was folded into the task. It ends a status-update rest at once (status_rest). It is NOT a step in
 # the task's own life, so ledger_last_events and open_intents skip it and every other rest reads
@@ -1537,19 +1550,65 @@ def ledger_fold_times():
     return folds
 
 
-def idle_handback(t, last, now=None):
+def kept_open_rest(t, ts, now=None, folded_at=""):
+    """Why an approved task carried out and kept open is resting, or ''. The caller has checked the
+    newest ledger event is the `done` that `complete --keep-open` wrote at `ts`, the task is still
+    approved and Kevin's verdict has not moved since. Clocks and stamped facts only, never words.
+    It rests until the next-look date stamped on the task's newest own CARRIED OUT line (never
+    past KEPT_OPEN_MAX_DAYS from the event, whatever the Notes say), or, on a line from before the
+    date was stamped, KEPT_OPEN_UNDATED_REST_DAYS from the event. It wakes at once when:
+      - any later step of its own lands in the ledger (a wall, a clear, a new intent): the newest
+        event is then no longer `done`, so this is never reached;
+      - the create gate folds a new item in after it (`folded_at`; in practice the gate refuses to
+        fold into a decided card, fold_into_a_decided_card, so a reply becomes its own new task);
+      - it is routed to another holder (the holder stamped on the line is no longer on it)."""
+    if folded_at and folded_at > ts:
+        return ""
+    try:
+        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    stamped = KEPT_OPEN_RE.findall(str(t.get("notes") or ""))
+    if stamped:
+        _day, until, holder = stamped[-1]
+        if holder and t.get("teamMemberIds") and holder not in t.get("teamMemberIds"):
+            return ""
+        try:
+            until_day = datetime.strptime(until, "%Y-%m-%d").date()
+        except ValueError:
+            until_day = None
+        if until_day:
+            until_day = min(until_day, when.astimezone(LONDON).date() + timedelta(days=KEPT_OPEN_MAX_DAYS))
+            if now.astimezone(LONDON).date() >= until_day:
+                return ""
+            return (f"carried out and kept open at {ts[:16]}; rests until {_day_text(until_day)}, "
+                    "or until Kevin's verdict changes, a wall opens or it changes hands")
+    end = when + timedelta(days=KEPT_OPEN_UNDATED_REST_DAYS)
+    if now >= end:
+        return ""
+    return (f"carried out and kept open at {ts[:16]} with no next-look date; rests until "
+            f"{_day_text(end.astimezone(LONDON).date())} ({KEPT_OPEN_UNDATED_REST_DAYS} days), when the agent "
+            "sets one, or until Kevin's verdict changes")
+
+
+def _day_text(d):
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+
+def idle_handback(t, last, now=None, folded_at=""):
     """Why an APPROVED hand-back is resting rather than waiting on an agent, or ''.
 
     `last` is the newest ledger (event, ts) for the task. Two events rest it:
     "done" written by `complete --keep-open` (the approved action happened and
-    the task stays open by Kevin's own words) and "parked" written by `annotate`
-    when the agent's note opens PARKED or BLOCKED (a sign-in only Kevin can do).
-    Rest lasts IDLE_HOURS from that event, and ends early the moment Kevin's
-    verdict moves: an Approved At newer than the event means he approved again,
-    so the task is worked. A plain "done" on a task still Approved with no
-    keep-open mark in its Notes is NOT rested — that is an incomplete close and
-    the run must look at it. A verdict on a Your step card is not one that moves
-    (your_step_reapproved)."""
+    the task stays open by Kevin's own words) and "parked" written by `block`
+    (a wall). A "done" rests until the next look the carry-out named
+    (kept_open_rest, 14 Nov 2026); a park rests as the wall rules below say.
+    Both end early the moment Kevin's verdict moves: an Approved At newer than
+    the event means he approved again, so the task is worked. A plain "done" on
+    a task still Approved with no keep-open mark in its Notes is NOT rested —
+    that is an incomplete close and the run must look at it. A verdict on a
+    Your step card is not one that moves (your_step_reapproved)."""
     if t.get("outcome") not in APPROVED:
         return ""
     step_wait = your_step_reapproved(t)
@@ -1565,6 +1624,8 @@ def idle_handback(t, last, now=None):
     approved_at = str(t.get("approvedAt") or "")
     if approved_at and approved_at > ts:
         return ""
+    if event == "done":
+        return kept_open_rest(t, ts, now, folded_at)
     # A PARKED TASK ON AN OPEN WALL RESTS UNTIL THE WALL CLEARS (Kevin, 7 Oct 2026). The day's
     # rest used to end on its own, so the poll handed the task back, the agent met the same wall
     # and parked it again: 235 parks and 264 dispatch actions on 39 blocked tasks in 14 days,
@@ -2364,10 +2425,41 @@ STATUS_ADDR_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 STATUS_HISTORY_DAYS = 45
 STATUS_SUBMIT_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*— agent-dispatch\] "
                                     r"(?:SUBMITTED|" + re.escape(HANDLED_MARK) + r")\b", re.M)
+# The machine-readable rest a code-stamped line ends with: "rests until YYYY-MM-DD." and, after it,
+# the holder at the time. One vocabulary for both rests a line can carry: a filed status update and
+# a keep-open carry-out (14 Nov 2026). The greedy run means the LAST "rests until" on the line wins,
+# which is the one code wrote, never one quoted in an agent's own words before it.
+REST_UNTIL_TAIL = (r"[^\n]*rests until (?P<until>\d{4}-\d{2}-\d{2})\."
+                   r"(?:[^\n]*? Holder: (?P<holder>rec[A-Za-z0-9]{14})\.)?")
 STATUS_FILED_RE = re.compile(
     r"^\[(?P<day>\d{1,2} \w{3} \d{4}) \d{2}:\d{2} — agent-dispatch\] " + re.escape(HANDLED_MARK)
-    + r" \(" + re.escape(STATUS_CATEGORY) + r"\):[^\n]*rests until (?P<until>\d{4}-\d{2}-\d{2})\."
-    + r"(?:[^\n]*? Holder: (?P<holder>rec[A-Za-z0-9]{14})\.)?", re.M)
+    + r" \(" + re.escape(STATUS_CATEGORY) + r"\):" + REST_UNTIL_TAIL, re.M)
+# The task's OWN keep-open line with its stamped next look (complete --keep-open --until). Anchored
+# at the line start, so a TRACK RECORD quoting another task's carry-out ("- 30 Sep 2026 — agent:
+# [30 Sep …] CARRIED OUT …") never reads as this task's.
+KEPT_OPEN_RE = re.compile(
+    r"^\[(?P<day>\d{1,2} \w{3} \d{4}) — agent\] " + re.escape(CARRIED_OUT_MARK) + REST_UNTIL_TAIL, re.M)
+KEPT_OPEN_UNTIL_HELP = (
+    "       Say when you will look again: the chase date, the date a reply is due, the hearing, the\n"
+    f"       renewal; after today and at most {KEPT_OPEN_MAX_DAYS} days ahead:\n"
+    "         python3 scripts/agent-dispatch.py complete TASKID --keep-open --until YYYY-MM-DD --note \"...\"\n"
+    "       The task rests until then with no agent run (Kevin, 14 Nov 2026: no daily AI re-check). It\n"
+    "       wakes sooner by itself if Kevin's verdict changes, a wall opens or clears, or it changes hands.\n"
+    "       If something has changed (a reply, dates offered, a document arrived), raise it now as its own\n"
+    "       card or task; if a chase is due, prepare it as a card. Never leave it in the note.")
+
+
+def next_look_problem(raw, label, max_days, today=None):
+    """(problem, date) for a next-look date an agent gave: after today (London) and at most
+    `max_days` ahead. Shared by a status update's NEXT CHECK and a keep-open's --until."""
+    try:
+        nxt = datetime.strptime(str(raw or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return f"{label} {raw} is not a real date", None
+    today = today or datetime.now(LONDON).date()
+    if not today < nxt <= today + timedelta(days=max_days):
+        return f"{label} {nxt.isoformat()} must be after today and at most {max_days} days ahead", None
+    return "", nxt
 # The dated block the create gate's fold appends to the Description (create-agent-task.py
 # build_update): "UPDATE 2026-11-14: new item folded in by the duplicate gate".
 STATUS_FOLD_BLOCK_RE = re.compile(r"^UPDATE (\d{4}-\d{2}-\d{2}): new item folded in by the duplicate gate", re.M)
@@ -2547,14 +2639,9 @@ def status_only_problem(body, task_type, task_rec, today=None):
     nd = STATUS_NEXT_RE.search(body)
     if not nd:
         return "it has no NEXT CHECK: YYYY-MM-DD line saying when you look again", ""
-    try:
-        nxt = datetime.strptime(nd.group("date"), "%Y-%m-%d").date()
-    except ValueError:
-        return f"NEXT CHECK {nd.group('date')} is not a real date", ""
-    today = today or datetime.now(LONDON).date()
-    if not today < nxt <= today + timedelta(days=STATUS_REST_MAX_DAYS):
-        return (f"NEXT CHECK {nxt.isoformat()} must be after today and at most "
-                f"{STATUS_REST_MAX_DAYS} days ahead"), ""
+    problem, nxt = next_look_problem(nd.group("date"), "NEXT CHECK", STATUS_REST_MAX_DAYS, today)
+    if problem:
+        return problem, ""
     ask = _triage().ask_signal("", status_own_words(body))
     if ask:
         return f"its own words carry an ask ({ask}), so this is a card, not a status update", ""
@@ -4308,11 +4395,14 @@ def build_queue(args=None):
     # triage together, and the allowance ran out at Friday lunchtime. An idle
     # hand-back is looked at once a day, is listed (never hidden) under
     # idleHandbacks with its reason, and wakes at once if Kevin's verdict
-    # changes (a new Approved At or a Changes requested).
+    # changes (a new Approved At or a Changes requested). Since 14 Nov 2026 a
+    # carry-out kept open rests until the next look it named, not a day
+    # (kept_open_rest), so it is no longer an AI look every day.
     ledger = ledger_last_events()
+    folds = ledger_fold_times()
     idle_hb = []
     for t in list(approved_hb):
-        why = idle_handback(t, ledger.get(t["id"]))
+        why = idle_handback(t, ledger.get(t["id"]), folded_at=folds.get(t["id"], ""))
         if why:
             t["idleReason"] = why
             idle_hb.append(t)
@@ -4327,7 +4417,6 @@ def build_queue(args=None):
         if why:
             t["idleReason"] = why
             idle_hb.append(t)
-    folds = ledger_fold_times()
     # A STATUS UPDATE FILED WITH NOTHING TO APPROVE (14 Nov 2026) rests the task until the NEXT CHECK
     # it declared: the filing leaves the task as it was (Today, say), and without this rest every
     # slot would hand it back for the same look. Listed with its reason, never hidden.
@@ -4412,8 +4501,9 @@ def build_queue(args=None):
         # Named, counted, and left open on the board. Never dropped: an alert
         # that vanishes is worse than one that clogs the gate.
         "systemAlerts": system_alerts,
-        # Approved hand-backs resting until tomorrow: carried out and kept open,
-        # or parked on a sign-in. Listed with the reason, never dropped.
+        # Hand-backs resting: carried out and kept open (until the next look it
+        # named), parked on a wall, or a status update filed. Listed with the
+        # reason, never dropped.
         "idleHandbacks": idle_hb,
         "ownGoSignal": own_signal,
         "trialChecked": trial_checked,
@@ -8790,17 +8880,31 @@ def cmd_complete(args):
                            or (getattr(args, "not_bought", "") or "").strip()):
         sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate, --cost-not-written and --not-bought "
                  "close a task, and --keep-open leaves it open. Use one. The reason would be dropped.")
+    until_raw = str(getattr(args, "until", "") or "").strip()
+    if until_raw and not args.keep_open:
+        sys.exit(f"ERROR: refusing to complete {args.task}: --until is the next look on a task kept open, "
+                 "and this call closes it. Use --keep-open with it, or drop it. The date would be dropped.")
     if args.keep_open:
+        # THE NEXT LOOK (Kevin, 14 Nov 2026). A keep-open names when it is looked at again, stamped
+        # by code at the end of the line, and the task rests until then (kept_open_rest).
+        if not until_raw:
+            sys.exit(f"ERROR: refusing to keep {args.task} open with no next look.\n" + KEPT_OPEN_UNTIL_HELP)
+        problem, until = next_look_problem(until_raw, "--until", KEPT_OPEN_MAX_DAYS)
+        if problem:
+            sys.exit(f"ERROR: refusing to keep {args.task} open: {problem}.\n" + KEPT_OPEN_UNTIL_HELP)
+        holder = next(iter(t.get("teamMemberIds") or []), "")
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
-        detail = (args.note or "the approved action").strip()
+        # One line: a note with line breaks could otherwise forge a stamped line of its own.
+        detail = " ".join((args.note or "the approved action").split())
         mark = (f"[{stamp} — agent] {CARRIED_OUT_MARK} {detail}. "
-                "Left OPEN deliberately: the approval said so.")
+                "Left OPEN deliberately: the approval said so. "
+                f"Next look: it rests until {until.isoformat()}." + (f" Holder: {holder}." if holder else ""))
         # Through append_notes, never by hand: this line had no cap, so a full Notes field
         # refused the write and the carried-out work was never recorded (finding 20261102-phase-3-1166).
         patch_task(args.task, {AF["notes"]: append_notes(t["notes"] or "", mark, task_id=args.task)})
         ledger_append(args.task, "done")
         print(json.dumps({"carriedOut": args.task, "keptOpen": True,
-                          "status": t["status"]}))
+                          "status": t["status"], "restsUntil": until.isoformat()}))
         return
 
     # THE ROBOT'S SIGNATURE GATE (Kevin, 16 Oct 2026). A SIGN AS KEVIN task closes on the robot's
@@ -14058,6 +14162,10 @@ def main():
                    help="record the carry-out but leave Status untouched")
     c.add_argument("--note", default="",
                    help="what was carried out (goes into Notes with --keep-open)")
+    c.add_argument("--until", default="", metavar="YYYY-MM-DD",
+                   help="REQUIRED with --keep-open: the next look (the chase date, a reply due, the "
+                        "hearing), after today and at most %d days ahead; the task rests until then"
+                        % KEPT_OPEN_MAX_DAYS)
     c.add_argument("--no-certificate", default="", metavar="REASON",
                    help="the file that arrived on this task is not a certificate "
                         "(say what it is); recorded in Notes")

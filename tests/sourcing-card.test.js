@@ -597,7 +597,8 @@ try:
     with contextlib.redirect_stdout(io.StringIO()):
         m.cmd_complete(types.SimpleNamespace(task="reck5ZY5MoXulxJz8", keep_open=P["keepOpen"], note="", no_certificate="",
                                              evidence="", not_signed="", diary_not_written="", cost_not_written="",
-                                             not_bought=P["notBought"]))
+                                             not_bought=P["notBought"],
+                                             until=(m.datetime.now(m.LONDON).date() + m.timedelta(days=2)).isoformat() if P["keepOpen"] else ""))
     print(json.dumps({"status": state.get(AF["status"]), "notes": state.get(AF["notes"]), "calls": calls}))
 except SystemExit as e:
     print(json.dumps({"exit": str(e), "calls": calls}))`, { output, rows, readError, notBought, keepOpen, notes });
