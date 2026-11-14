@@ -2727,6 +2727,7 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
                          "creating a sibling (one subject = one open task). "
                          "New item: " + str(fields.get(F["name"], "")))
             write_track_record(task_id, fields)
+            record_fold(task_id)
         # EVERY FOLD STATES ITS REASON AT THE CALL SITE (14 Oct 2026). The
         # incident's output named the task it folded into and nothing about
         # WHY, so "same reference 1406" — a house number — was invisible to
@@ -2876,6 +2877,25 @@ def merge_track_record(notes, block, stamp):
         cut = merged.find("\n")
         merged = merged[cut + 1:] if cut != -1 else merged
     return merged
+
+
+def record_fold(task_id):
+    """Tell the dispatcher a new item was folded into this task (14 Nov 2026). A task resting on a
+    filed status update (agent-dispatch.py status_rest) rests until its NEXT CHECK; a creditor's
+    reply folded in on day one must end that rest at once, not after a week. The signal is a stamped
+    ledger event written by the dispatcher's own ledger_append (imported, never copied), so the clock
+    reads a timed fact, never prose. Never raises: a fold that cannot be recorded is said on stderr,
+    and the dated UPDATE block this fold wrote into the Description is the dispatcher's backstop."""
+    d, note = load_dispatch()
+    if not d:
+        print("FOLD NOT RECORDED for the rest clock: " + note, file=sys.stderr)
+        return False
+    try:
+        d.ledger_append(task_id, d.FOLD_EVENT)
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        print("FOLD NOT RECORDED for the rest clock: %s" % str(e)[:200], file=sys.stderr)
+        return False
 
 
 def write_track_record(task_id, fields):

@@ -283,6 +283,11 @@ describe('decisionCategory — the shapes the dispatcher acts on', () => {
     expect(decisionCategory('CALENDAR:\nTITLE: Dentist', 'Admin', 'x')).toBe('calendar entry');
     expect(decisionCategory('PASS TO ROY: boiler', 'Admin', 'MAINTENANCE: boiler')).toBe('pass to Roy');
   });
+  it('a STATUS ONLY update is Level A, on a tier-1 task too (Kevin, 14 Nov 2026)', () => {
+    expect(decisionCategory('STATUS ONLY: No reply yet.\nNEXT CHECK: 2026-11-20', 'Research', 'Chase: x')).toBe('status update');
+    expect(decisionCategory('🚨 TIER 1. This touches your private legal and financial matter.\n\nSTATUS ONLY: No reply yet.', 'Research', 'Chase: x')).toBe('status update');
+    expect(AUTONOMY_LEVELS['status update'].level).toBe('A');
+  });
   it('a close with nothing to cite is judgement, and stays Level B', () => {
     expect(decisionCategory('CLOSE PROPOSAL: dead — 300 days', 'Admin', 'x')).toBe('close: judgement');
     expect(AUTONOMY_LEVELS['close: judgement'].level).toBe('B');
