@@ -4,8 +4,8 @@
 //
 // WHAT THIS EXISTS FOR
 // The agent only works if these stay true at once:
-//   1. Its Team Members record is a dispatchable role agent (ROLE_AGENTS) and
-//      the roster twins in follow-up.html know it owns tasks.
+//   1. Its Team Members record is a dispatchable role agent (ROLE_AGENTS).
+//      (The roster copies in follow-up.html went with that page on 15 Nov 2026.)
 //   2. Compliance matters route to it deterministically — certificates,
 //      licences, landlord insurance, inspections — AFTER the creditor lane
 //      and BEFORE the generic Response route; repairs never do (they stay
