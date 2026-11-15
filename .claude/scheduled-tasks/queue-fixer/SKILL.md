@@ -214,8 +214,9 @@ Write every fix so it can pass:
 - **Refused outright:** a new test file that already passes on the old code, and a test that fails
   with your fix.
 
-Read `secondReview` in the merge JSON. If the JSON has no `secondReview`, the reviewer is not wired
-in yet: carry on as before.
+Read `secondReview` in the merge JSON; it is there on every run. It is `null` when the run stopped
+before the reviewer (a red gate, a PR that would not build, tests that could not run, or a MERGE
+card that already stands); then follow the other STEP 5 rules as before.
 
 - **Passed.** The merge, or the MERGE card, went ahead as normal.
 - **Sent back** (`refusedBy` is `back-test` or `reviewer`, with a `sendBack` list of finding ids

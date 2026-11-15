@@ -73,17 +73,33 @@ spec = os.environ.get("FAKE_GH_SPEC")
 if not spec:
     sys.stderr.write("fake gh: no FAKE_GH_SPEC\\n"); sys.exit(1)
 s = json.load(open(spec))
+merged = log + ".merged"
+if a[:2] == ["pr", "merge"]:
+    open(merged, "w").write(json.dumps(a))
+    sys.exit(0)
 if a[:2] == ["pr", "view"]:
     counter = log + ".views"
     n = int(open(counter).read()) if os.path.exists(counter) else 0
     open(counter, "w").write(str(n + 1))
     heads = s["heads"]
-    print(json.dumps({"body": s.get("body", ""), "headRefOid": heads[min(n, len(heads) - 1)]}))
+    print(json.dumps({"body": s.get("body", ""), "headRefOid": heads[min(n, len(heads) - 1)],
+                      "state": "MERGED" if os.path.exists(merged) else "OPEN", "headRefName": "fix/invented-wiring"}))
     sys.exit(0)
 sys.stderr.write("fake gh: unsupported %s\\n" % a); sys.exit(1)
 `);
 chmodSync(join(BIN, 'claude'), 0o755);
 chmodSync(join(BIN, 'gh'), 0o755);
+// Every Python this file starts refuses an internet socket (sitecustomize on PYTHONPATH).
+mkdirSync(join(HARNESS, 'netblock'));
+writeFileSync(join(HARNESS, 'netblock', 'sitecustomize.py'), `import socket
+_connect = socket.socket.connect
+def _refuse(self, address):
+    if self.family in (socket.AF_INET, socket.AF_INET6):
+        raise OSError("network refused in a test: %r" % (address,))
+    return _connect(self, address)
+socket.socket.connect = _refuse
+socket.socket.connect_ex = lambda self, address: _refuse(self, address) or 0
+`);
 
 // What vitest tells its own workers must not reach the vitest the back-test starts.
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env)
@@ -94,6 +110,7 @@ const BOUNDARY = {
   FIXER_REVIEW_TOKEN_FILE: join(HARNESS, 'token'),
   ALLOWANCE_STATE: join(HARNESS, 'allowance-never-the-estate.json'),
   GIT_ALLOW_PROTOCOL: 'file',
+  PYTHONPATH: join(HARNESS, 'netblock'),
 };
 
 const cleanup = [HARNESS];
@@ -769,5 +786,211 @@ print(json.dumps({"raised": raised, "same": open(fr.STATE_FILE).read() == before
                   "passedA": fr.passed(1, "a" * 40), "passedB": fr.passed(1, "b" * 40)}))
 `);
     expect(r).toEqual({ raised: true, same: true, left: [], passedA: true, passedB: false });
+  }, SLOW);
+});
+
+// ── STEP 2: fixer-merge.py and merge-approved.py ask the reviewer ───────────
+//
+// The real cmd_merge, with the real fixer-review.py, real back-test, fake claude and fake gh. Only
+// what fixer-merge.py reaches OUTSIDE this change is stubbed: decide() (which reads gh pr diff),
+// the full test gate (run_gate: vitest plus Playwright over a whole repo), and the MERGE card's
+// Airtable writes (standing_card, raise_merge_card).
+const FIXER_MERGE = join(ROOT, 'scripts/fixer-merge.py');
+const MERGE_APPROVED = join(ROOT, 'scripts/merge-approved.py');
+
+function cmdMerge(repo, s, { mayAutoMerge = true, green = true, hook = '', prelude = '', pr = 1 } = {}) {
+  return py(s, `
+fspec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(FIXER_MERGE)})
+fm = importlib.util.module_from_spec(fspec); fspec.loader.exec_module(fm)
+fm.REPO = ${JSON.stringify(repo.main)}
+import io, contextlib, argparse, subprocess
+fm.decide = lambda pr: {"pr": pr, "files": 2, "protected": [] if ${mayAutoMerge ? 'True' : 'False'} else
+                        [{"file": "scripts/agent-dispatch.py", "rule": "scripts/agent-dispatch.py"}],
+                        "mayAutoMerge": ${mayAutoMerge ? 'True' : 'False'}}
+fm.standing_card = lambda mc, pr: (None, "")
+fm.merge_cards = lambda: None
+GATES, CARDS = [], []
+def run_gate(cwd):
+    GATES.append(cwd)
+${hook.split('\n').map(l => '    ' + l).join('\n')}
+    return ${green ? 'True' : 'False'}, {"testedTree": cwd}
+fm.run_gate = run_gate
+fm.raise_merge_card = lambda pr, d, gate: (CARDS.append([pr, gate.get("head")]), {"task": "recInventedCard01", "already": False})[1]
+${prelude}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    code = fm.cmd_merge(argparse.Namespace(pr=${pr}))
+merged = ${JSON.stringify(s.ghLog + '.merged')}
+print(json.dumps({"code": code, "out": json.loads(buf.getvalue()), "gates": len(GATES), "cards": CARDS,
+                  "mergeCall": json.load(open(merged)) if os.path.exists(merged) else None}))`);
+}
+
+describe('STEP 2: fixer-merge.py merges or raises a card only for a head the reviewer passed', () => {
+  it('a pass merges, and the merge names the reviewed head (B2); secondReview is at the top level', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    const r = cmdMerge(repo, s);
+    expect(r.out.merged, JSON.stringify(r.out)).toBe(true);
+    expect(r.mergeCall).toEqual(['pr', 'merge', '1', '--squash', '--delete-branch', '--match-head-commit', repo.head]);
+    expect(r.out.secondReview).toMatchObject({ pass: true, head: repo.head, base: repo.base, round: 1 });
+    expectClean(repo, s);
+  }, SLOW);
+
+  it('a send-back merges nothing and says why', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST], cause: 'fail' })], 'send-back') });
+    const r = cmdMerge(repo, s);
+    expect(r.out.merged).toBe(false);
+    expect(r.mergeCall).toBe(null);
+    expect(r.out.secondReview).toMatchObject({ pass: false, refusedBy: 'reviewer' });
+    expect(r.out.why).toMatch(/^the second reviewer did not pass head [0-9a-f]{12}: the reviewer sent back 1 of 1/);
+  }, SLOW);
+
+  it('a protected PR gets a MERGE card only when the reviewer passed it', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST], elsewhere: 'fail' })], 'send-back') });
+    const back = cmdMerge(repo, s, { mayAutoMerge: false });
+    expect(back.cards).toEqual([]);
+    expect(back.out.secondReview.refusedBy).toBe('reviewer');
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    const passedRun = cmdMerge(repo, s, { mayAutoMerge: false });
+    expect(passedRun.cards).toEqual([[1, repo.head]]);
+    expect(passedRun.out.secondReview).toMatchObject({ pass: true, round: 2 });
+    expect(passedRun.mergeCall).toBe(null);
+  }, SLOW);
+
+  it('a reviewer that throws, or cannot be loaded, is a could-not-run: nothing merges', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    const r = cmdMerge(repo, s, { prelude: `
+def broken():
+    raise RuntimeError("an invented load failure")
+fm.second_reviewer = broken` });
+    expect(r.out.merged).toBe(false);
+    expect(r.mergeCall).toBe(null);
+    expect(r.out.secondReview).toMatchObject({ pass: false, refusedBy: 'cannot-run',
+      why: 'the second reviewer could not run: RuntimeError: an invented load failure' });
+  }, SLOW);
+
+  it('an earlier pass for the same head does not stand in for this run\'s review', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    const r = cmdMerge(repo, s, { prelude: `
+rspec = importlib.util.spec_from_file_location("fr2", ${JSON.stringify(SCRIPT)})
+fr2 = importlib.util.module_from_spec(rspec); rspec.loader.exec_module(fr2)
+fr2.write_record({"pr": 1, "head": ${JSON.stringify(repo.head)}, "date": "2026-11-15", "pass": True, "counted": True})
+fm.run_second_review = lambda pr, base, tree: {"pr": pr, "pass": False, "refusedBy": "cannot-run", "why": "invented: this run's review failed"}` });
+    expect(r.out.merged).toBe(false);
+    expect(r.mergeCall).toBe(null);
+    expect(r.out.why).toMatch(/invented: this run's review failed/);
+  }, SLOW);
+
+  it('secondReview is in the JSON on every path: null on a red gate and on a PR that will not build, and no reviewer runs', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    const red = cmdMerge(repo, s, { green: false });
+    expect(red.out).toHaveProperty('secondReview', null);
+    expect(red.out.why).toMatch(/the gate is RED/);
+    const unbuilt = cmdMerge(repo, s, { pr: 2 });
+    expect(unbuilt.out).toHaveProperty('secondReview', null);
+    expect(unbuilt.out.why).toMatch(/could not build the merge result/);
+    expect(s.claudeCalls()).toHaveLength(0);
+  }, SLOW);
+
+  it('A4: the reviewer judges the base the gate built on, even when main moves during the gate', () => {
+    const OTHER = (n) => `import { it, expect } from 'vitest';\nimport { cap } from '../other.js';\nit('cap', () => { expect(cap).toBe(${n}); });\n`;
+    const repo = miniRepo({
+      base: { 'lib.js': LIB_OLD, 'other.js': 'export const cap = 5;\n', 'tests/other.test.js': OTHER(5) },
+      fix: { 'lib.js': LIB_FIX, 'tests/add.test.js': FAILS_ON_OLD },
+    });
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    const work = JSON.stringify(repo.work);
+    const r = cmdMerge(repo, s, { hook: `
+def g(cwd2, *a):
+    subprocess.run(["git"] + list(a), cwd=cwd2, check=True, capture_output=True)
+g(${work}, "checkout", "--quiet", "main")
+open(os.path.join(${work}, "other.js"), "w").write("export const cap = 6;\\n")
+open(os.path.join(${work}, "tests", "other.test.js"), "w").write(${JSON.stringify(OTHER(6))})
+g(${work}, "add", "-A"); g(${work}, "commit", "--quiet", "-m", "someone else's merge"); g(${work}, "push", "--quiet", "origin", "main")
+g(${JSON.stringify(repo.main)}, "fetch", "--quiet", "origin", "main")` });
+    expect(git(repo.main, 'rev-parse', 'origin/main')).not.toBe(repo.base);
+    expect(r.out.gate.base).toBe(repo.base);
+    expect(r.out.secondReview.base).toBe(repo.base);
+    expect(r.out.secondReview.backTest.files.map(f => f.file)).toEqual(['tests/add.test.js']);
+    expect(r.out.secondReview.backTest.codeFiles.map(f => f.file)).toEqual(['lib.js']);
+    expect(r.out.merged).toBe(true);
+  }, SLOW);
+
+  it('scripts/fixer-review.py is a protected path', () => {
+    const repo = codeOnly();
+    const s = scenario(repo);
+    const r = py(s, `
+fspec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(FIXER_MERGE)})
+fm = importlib.util.module_from_spec(fspec); fspec.loader.exec_module(fm)
+print(json.dumps(fm.protected_hits(["scripts/fixer-review.py", "scripts/fixer-reviewer-notes.py"])))`);
+    expect(r).toEqual([{ file: 'scripts/fixer-review.py', rule: 'scripts/fixer-review.py' }]);
+  }, SLOW);
+});
+
+// The real changed() and the real reviewer record; the merge run, the card write and the notes are
+// recorded instead of done. B1: a MERGE card is never refreshed to a head the reviewer has not passed.
+function changedRun(s, { record = null, corrupt = false } = {}) {
+  return py(s, `
+mspec = importlib.util.spec_from_file_location("ma", ${JSON.stringify(MERGE_APPROVED)})
+ma = importlib.util.module_from_spec(mspec); mspec.loader.exec_module(ma)
+ma.STATE_DIR = ${JSON.stringify(s.dir)}
+import subprocess
+DRY, REFRESHED, NOTES = [], [], []
+def run_merge_pr(pr, head, dry_run=False, card=None):
+    DRY.append([pr, head, dry_run])
+    return subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "dryRun": True, "head": head, "why": "green"}), "")
+ma.run_merge_pr = run_merge_pr
+ma.refresh_card = lambda card, head, res: REFRESHED.append(head)
+ma.card_moved_on = lambda card: None
+ma.annotate = lambda task, note: NOTES.append(note)
+NEW = "f0e1d2c3" * 5
+${record ? `fr.write_record({"pr": 1, "head": NEW, "date": "2026-11-15", "pass": ${record === 'pass' ? 'True' : 'False'}, "counted": True})` : ''}
+${corrupt ? 'os.makedirs(fr.STATE_DIR, exist_ok=True); open(fr.STATE_FILE, "w").write("{ half")' : ''}
+card = {"pr": 1, "id": "recInventedCard01", "head": "a1b2c3d4" * 5, "approvedAt": "2026-11-15T08:30:00.000Z"}
+res = ma.changed(card, {}, NEW)
+print(json.dumps({"res": res, "dry": DRY, "refreshed": REFRESHED, "notes": NOTES}))`);
+}
+
+describe('STEP 2: merge-approved.py never refreshes a MERGE card to a head the reviewer has not passed (B1)', () => {
+  it('a moved head with no pass rests with a plain reason: no dry run, no refresh', () => {
+    const s = scenario(codeOnly());
+    const r = changedRun(s);
+    expect(r.res.result).toBe('moved');
+    expect(r.res.why).toMatch(/The new code was not put on the card because the second reviewer has not passed head f0e1d2c3f0e1/);
+    expect(r.res.why).toMatch(/fixer-merge\.py merge --pr 1. reviews it and refreshes this card if it passes/);
+    expect(r.dry).toEqual([]);
+    expect(r.refreshed).toEqual([]);
+  }, SLOW);
+
+  it('a moved head the reviewer sent back rests the same way', () => {
+    const s = scenario(codeOnly());
+    const r = changedRun(s, { record: 'send-back' });
+    expect(r.res.result).toBe('moved');
+    expect(r.refreshed).toEqual([]);
+  }, SLOW);
+
+  it('an unreadable reviewer record is a reason to rest, never a pass', () => {
+    const s = scenario(codeOnly());
+    const r = changedRun(s, { corrupt: true });
+    expect(r.res.why).toMatch(/the second reviewer's record could not be read/);
+    expect(r.refreshed).toEqual([]);
+  }, SLOW);
+
+  it('control: a moved head the reviewer passed is dry-run tested and refreshed, as before', () => {
+    const s = scenario(codeOnly());
+    const r = changedRun(s, { record: 'pass' });
+    expect(r.dry).toEqual([[1, 'f0e1d2c3'.repeat(5), true]]);
+    expect(r.refreshed).toEqual(['f0e1d2c3'.repeat(5)]);
+    expect(r.res.result).toBe('refreshed');
   }, SLOW);
 });

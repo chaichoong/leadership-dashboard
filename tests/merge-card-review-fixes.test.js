@@ -32,6 +32,7 @@ import findings
 findings.current_state = lambda *a, **k: {}
 spec = importlib.util.spec_from_file_location("ma", ${JSON.stringify(S('merge-approved.py'))})
 ma = importlib.util.module_from_spec(spec); spec.loader.exec_module(ma)
+ma.second_reviewer = lambda: type("Reviewed", (), {"passed": staticmethod(lambda pr, head: True), "load_state": staticmethod(lambda: {"records": []})})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 MC = ma.merge_card
 ma.STATE_DIR = ${JSON.stringify(dir)}
 NOW = [${T0}]

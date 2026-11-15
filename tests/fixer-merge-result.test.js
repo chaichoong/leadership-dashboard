@@ -45,7 +45,7 @@ describe('the gate never runs the suites in the main checkout', () => {
 
   it('cmd_merge builds the merge result, gates it, and always tears it down', () => {
     const fn = SRC.slice(SRC.indexOf('def cmd_merge'));
-    const buildAt = fn.indexOf('build_merge_result(args.pr)');
+    const buildAt = fn.indexOf('build_merge_result(args.pr, base)');
     const gateAt = fn.indexOf('run_gate(tree)');
     const mergeAt = fn.indexOf('gh", "pr", "merge');
     expect(buildAt).toBeGreaterThan(-1);
@@ -132,6 +132,8 @@ describe('build_merge_result materialises base + PR', () => {
 import importlib.util, os, json
 spec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(GATE)})
 fm = importlib.util.module_from_spec(spec); spec.loader.exec_module(fm)
+fm.pinned_base = lambda: "b" * 40
+fm.second_reviewer = lambda: type("Reviewed", (), {"review": staticmethod(lambda pr, base, tree=None: {"pr": pr, "pass": True, "head": fm.tested_head(pr), "refusedBy": None, "why": "stubbed here", "sendBack": []}), "passed": staticmethod(lambda pr, head: True)})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 fm.REPO = ${JSON.stringify(clone)}
 path, err = fm.build_merge_result(1)
 try:
@@ -221,6 +223,8 @@ const buildFrom = (session) => {
 import importlib.util, os, json
 spec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(GATE)})
 fm = importlib.util.module_from_spec(spec); spec.loader.exec_module(fm)
+fm.pinned_base = lambda: "b" * 40
+fm.second_reviewer = lambda: type("Reviewed", (), {"review": staticmethod(lambda pr, base, tree=None: {"pr": pr, "pass": True, "head": fm.tested_head(pr), "refusedBy": None, "why": "stubbed here", "sendBack": []}), "passed": staticmethod(lambda pr, head: True)})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 fm.REPO = ${JSON.stringify(session)}
 path, err = fm.build_merge_result(1)
 out = {"err": err, "path": path}
@@ -273,10 +277,12 @@ describe('the fixer\'s gate says "tests could not run", never RED, when no test 
 import importlib.util, io, contextlib, argparse, json, subprocess
 spec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(GATE)})
 fm = importlib.util.module_from_spec(spec); spec.loader.exec_module(fm)
+fm.pinned_base = lambda: "b" * 40
+fm.second_reviewer = lambda: type("Reviewed", (), {"review": staticmethod(lambda pr, base, tree=None: {"pr": pr, "pass": True, "head": fm.tested_head(pr), "refusedBy": None, "why": "stubbed here", "sendBack": []}), "passed": staticmethod(lambda pr, head: True)})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 fm.REPO = ${JSON.stringify(repo)}
 gate_calls, sh_calls, destroyed = [], [], []
 fm.decide = lambda pr: {"pr": pr, "files": 1, "protected": [], "mayAutoMerge": True}
-fm.build_merge_result = lambda pr: (${JSON.stringify(tree)}, None)
+fm.build_merge_result = lambda pr, base="origin/main": (${JSON.stringify(tree)}, None)
 fm.destroy_merge_result = lambda p: destroyed.append(p)
 def run_gate(cwd):
     gate_calls.append(cwd)

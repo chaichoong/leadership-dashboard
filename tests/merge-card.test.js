@@ -21,6 +21,7 @@ import importlib.util, json, sys, os, io, contextlib, argparse, subprocess
 sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
 spec = importlib.util.spec_from_file_location(${JSON.stringify(name)}, ${JSON.stringify(S(file))})
 ${name} = importlib.util.module_from_spec(spec); spec.loader.exec_module(${name})
+${name === 'ma' ? 'ma.second_reviewer = lambda: type("Reviewed", (), {"passed": staticmethod(lambda pr, head: True), "load_state": staticmethod(lambda: {"records": []})})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js' : name === 'fm' ? 'fm.pinned_base = lambda: "b" * 40\nfm.second_reviewer = lambda: type("Reviewed", (), {"review": staticmethod(lambda pr, base, tree=None: {"pr": pr, "pass": True, "head": fm.tested_head(pr), "refusedBy": None, "why": "stubbed here", "sendBack": []}), "passed": staticmethod(lambda pr, head: True)})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js' : ''}
 `;
 const HEAD = 'a1b2c3d4'.repeat(5);
 const NEWHEAD = 'f0e1d2c3'.repeat(5);
@@ -116,7 +117,7 @@ describe('fixer-merge.py: a green protected PR raises ONE card and never merges'
 import merge_card, findings
 CREATED, SH, PATCHED, GATES = [], [], [], []
 fm.decide = lambda pr: {"pr": pr, "files": 2, "protected": [{"file": "scripts/agent-dispatch.py", "rule": "scripts/agent-dispatch.py"}], "mayAutoMerge": False}
-fm.build_merge_result = lambda pr: ("/tmp/od-fm-tree", None)
+fm.build_merge_result = lambda pr, base="origin/main": ("/tmp/od-fm-tree", None)
 fm.destroy_merge_result = lambda p: None
 fm.tests_cannot_run = lambda tree: None
 fm.tested_head = lambda pr: "${HEAD}"
