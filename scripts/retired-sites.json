@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "retired": [
+    {
+      "host": "swintonbusiness.acturis.com",
+      "since": "2026-11-15",
+      "why": "the site refuses the robot: the sign-in drops and the quote form cannot be driven",
+      "instead": "quote through RightSure via TopCashback; ask Swinton or a broker by email for anything on a live policy"
+    },
+    {
+      "host": "everywhen.co.uk",
+      "since": "2026-11-15",
+      "why": "the site refuses the robot: the sign-in drops and the quote form cannot be driven",
+      "instead": "quote through RightSure via TopCashback, or ask a broker by email"
+    }
+  ]
+}

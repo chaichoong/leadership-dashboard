@@ -191,10 +191,11 @@ describe('the Acturis checks read the account, not the door (agent-browser.js bu
   const b = createRequire(import.meta.url)(join(SCRIPTS, 'agent-browser.js'));
   const sites = b.loadSites();
 
-  it('Swinton is checked on My account, which a dead session leaves for the Login step', () => {
-    expect(sites['swintonbusiness.acturis.com'].checkUrl).toMatch(/CurrentStep=MyAccount/);
-    expect(sites['swintonbusiness.acturis.com'].loginUrl).toMatch(/CurrentStep=Login/);
-    expect(sites['swintonbusiness.acturis.com'].idleMinutes).toBe(60);
+  // Swinton was checked on My account here until 15 Nov 2026, when Kevin took it off the robot
+  // (scripts/retired-sites.json, tests/retired-sites.test.js): even with Kevin's file still listing it,
+  // the keep-warm never sees it.
+  it('Swinton is off the list the keep-warm reads, even with the private file still holding it', () => {
+    expect(sites).not.toHaveProperty(['swintonbusiness.acturis.com']);
     expect(sites['login.xero.com'].idleMinutes).toBe(60);
     expect(sites['login.xero.com'].label).toBe('login.xero.com');           // Kevin's own fields still win
   });

@@ -5803,6 +5803,13 @@ def cmd_submit(args):
     # Namecheap"; Namecheap is not on the robot's list, the app had nothing to
     # open, and the card promised "the robot finishes this within minutes" for
     # work no robot could do. Refused here, with what to write instead.
+    # A SIGN-IN NEEDED line on a site Kevin took off the robot (15 Nov 2026) is refused before anything
+    # else reads it: signed in or not, the robot does not work there.
+    gone_line = parse_signin_line(output)
+    gone = retired_host_in_text(f"{gone_line['site']} {gone_line['url']}", retired_sites()) if gone_line else None
+    if gone:
+        sys.exit(f"ERROR: refusing to submit {args.task}: its SIGN-IN NEEDED line is for a retired site. "
+                 f"{retired_refusal(gone[1], gone[0])} {RETIRED_WALL_ROUTE}")
     line_sites = load_login_sites() if parse_signin_line(output) else {}
     problem = signin_line_problem(output, line_sites)
     if problem:
@@ -8530,6 +8537,7 @@ def signin_site_for(line_site, line_url, sites):
 def signin_waiting(sites=None):
     """Every approval-queue task blocked on a sign-in, grouped by site."""
     sites = sites if sites is not None else load_login_sites()
+    retired = retired_sites()           # a site Kevin took off the robot is never offered for a sign-in
     # FIND is case-sensitive; the line is written by an agent, so match on UPPER.
     recs = query_tasks("AND({Status}='Approval', FIND('SIGN-IN NEEDED', UPPER({Agent Output})))")
     groups = {}
@@ -8541,6 +8549,8 @@ def signin_waiting(sites=None):
             continue
         m = parse_signin_line(f.get(AF["agentOutput"]))
         if not m:
+            continue
+        if retired_host_in_text(f"{m['site']} {m['url']}", retired):
             continue
         host = signin_site_for(m["site"], m["url"], sites) or "unknown"
         entry = sites.get(host, {})
@@ -8564,6 +8574,8 @@ def signin_waiting(sites=None):
         f = rec.get("fields", {}) or {}
         b = task_blocker(f.get(AF["notes"]))
         if not b or b["kind"] != "SIGN-IN":
+            continue
+        if retired_site_for_host(blocker_host(b["subject"]), retired):
             continue
         # The door host, as signin-done resolves it, or the tap never matches
         # (One Login's entries open WebFiling's door; review, 25 Sep 2026).
@@ -9379,6 +9391,68 @@ def blocker_host(subject):
     return host.lower() if "." in host else ""
 
 
+# Sites Kevin took off the robot (15 Nov 2026): Swinton and Everywhen refused it, every job there
+# stalled on a sign-in that dropped or a form it could not drive, and he ruled "Remove". agent-browser.js
+# keeps them off its list (retiredSite); here a wall on one is refused, because a SIGN-IN or SITE wall
+# is a card asking Kevin to sign the robot in or add the site, which is the loop he ended. A SIGN-IN
+# NEEDED line on a card is the same ask by another door: submit refuses it and signin-waiting leaves it
+# out. Matched on the HOST only, never a name (a flat in Swinton is not the Swinton site). The same file
+# the browser reads. A list that cannot be read RAISES: read as empty, a wall would put the site back.
+RETIRED_SITES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retired-sites.json")
+RETIRED_WALL_ROUTE = ("Do not raise a wall on it: take the route above, and if the job cannot be done "
+                      "that way, escalate it as a decision.")
+
+
+def retired_sites(path=None):
+    """The entries of scripts/retired-sites.json. A missing file raises (OSError), and so does one
+    that will not parse or is not in its shape (ValueError): never an empty list."""
+    path = path or RETIRED_SITES_FILE
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+
+    def text(v):
+        return isinstance(v, str) and v.strip() != ""
+    version = doc.get("version") if isinstance(doc, dict) else None
+    entries = doc.get("retired") if type(version) is int and version == 1 else None
+    if not isinstance(entries, list) or not all(
+            isinstance(r, dict) and text(r.get("host")) and re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", r["host"])
+            and all(text(r.get(k)) for k in ("since", "why", "instead"))
+            for r in entries):
+        raise ValueError(f"{path} is not in its shape (version 1; each entry a lower-case host, "
+                         "since, why and instead)")
+    return entries
+
+
+def retired_site_for_host(host, entries):
+    """The retired entry HOST is, or sits under (business.everywhen.co.uk is everywhen.co.uk's), or None."""
+    h = str(host or "").lower().rstrip(".")
+    if not h:
+        return None
+    return next((r for r in entries if h == r["host"] or h.endswith("." + r["host"])), None)
+
+
+def retired_host_in_text(text, entries):
+    """(entry, host) for the first retired HOST that TEXT carries as a host token, or None: the host
+    itself or a sub-domain of it, after the start, a space, a slash, an @ or any other character that
+    cannot be part of a host, and not followed by more of a host. A NAME is never enough (finding A1,
+    15 Nov 2026: "the reply to Swinton", "CLOSE-SWINTON REF", "the flat in Swinton, M27" are not the
+    site), and "noteverywhen.co.uk" or "everywhen.co.uk.evil.example" are other hosts."""
+    s = str(text or "")
+    for r in entries:
+        pat = (r"(?<![A-Za-z0-9.-])((?:[A-Za-z0-9-]+\.)*" + re.escape(r["host"]) + r")(?![A-Za-z0-9-])(?!\.[A-Za-z0-9])")
+        m = re.search(pat, s, re.I)
+        if m:
+            return r, m.group(1).lower()
+    return None
+
+
+def retired_refusal(host, r):
+    """The plain words agent-browser.js retiredRefusal gives: what came off, when, why, and the route."""
+    def clip(t):
+        return str(t).strip().rstrip(".")
+    return f"{host} came off the robot on {r['since']} (Kevin): {clip(r['why'])}. Instead: {clip(r['instead'])}."
+
+
 def site_reachable(host, sites):
     """The allowlist entry that lets the robot sign in to HOST, or ''. Its own
     entry or the nearest parent, and it must hold a login with a sign-in page:
@@ -10168,6 +10242,18 @@ def cmd_block(args):
     why = " ".join(str(args.why or "").split())
     if not subject or not why:
         sys.exit("ERROR: --subject and --why are both required: what is blocked, and what you saw.")
+    # A site Kevin took off the robot (15 Nov 2026) never gets a wall, and nothing is written: a
+    # SIGN-IN or SITE wall on its address, or a TOOL wall that carries its HOST. Refused before anything is
+    # read, and on top of every check below, which still runs for any other site.
+    if kind in ("SIGN-IN", "SITE", "TOOL"):
+        retired = retired_sites()
+        gone_host = blocker_host(subject) if kind != "TOOL" else ""
+        gone = retired_site_for_host(gone_host, retired) if kind != "TOOL" else None
+        if kind == "TOOL":
+            gone, gone_host = retired_host_in_text(subject + " " + why, retired) or (None, "")
+        if gone:
+            sys.exit(f"ERROR: refusing a {kind} wall: "
+                     f"{retired_refusal(gone_host or gone['host'], gone)} {RETIRED_WALL_ROUTE}")
     rec = get_task(args.task)
     t = task_view(rec)
     if merge_card.is_merge_card(t["name"]):

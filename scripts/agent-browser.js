@@ -73,6 +73,7 @@
  *       agreement with the account's saved signature (Kevin's) and proves it on Adobe's own page
  *   node scripts/agent-browser.js sign --task recXXX --check --shot OUT.png   after SIGN NOT CONFIRMED: reads Adobe
  *   node scripts/agent-browser.js sites
+ *   node scripts/agent-browser.js sites --retired   the sites Kevin took off the robot (scripts/retired-sites.json)
  *
  * PLAN FORMAT (the agent writes this; the script only executes it)
  *   {
@@ -312,16 +313,10 @@ const BUILTIN_SITES = {
   // 11:20, Kevin signed in again at 11:26, while reads 55 and 57 minutes apart on 13 Oct held.
   'login.xero.com':             { label: 'Xero', login: true,
                                   loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
-  // The two Acturis insurance portals. AXA showed "Sorry, your session has timed out" an hour after
+  // The Acturis insurance portal for AXA. AXA showed "Sorry, your session has timed out" an hour after
   // Kevin's sign-in on 7 Oct 2026; Acturis publishes no limit, so 60 is the longest it can be.
-  // Swinton's door is the Login step itself, which shows its password box whether or not the robot is
-  // signed in: every check after a sign-in read "signed out" (7 Oct 10:52 sign-in, 10:53 "out";
-  // 8 Oct 11:59 and 11:59), and the wall went straight back to Kevin. The check opens My account
-  // instead, which shows the account to a live session and sends a dead one to the Login step.
-  'swintonbusiness.acturis.com': { label: 'Swinton Business (Acturis)', login: true,
-                                  loginUrl: 'https://swintonbusiness.acturis.com/AWE/Container.aspx?CurrentStep=Login&CurrentWorkflow=StandardB2C&RefererWorkflow=StandardB2C&RefererStep=MyAccount',
-                                  checkUrl: 'https://swintonbusiness.acturis.com/AWE/Container.aspx?CurrentWorkflow=StandardB2C&CurrentStep=MyAccount',
-                                  idleMinutes: 60 },
+  // Swinton's Acturis portal sat here too until 15 Nov 2026, when Kevin took it off the robot: it is
+  // in scripts/retired-sites.json now, which nothing on this list or in sites.json can override.
   'www.landlordaxainsurance.com': { label: 'AXA landlord insurance', login: true,
                                   loginUrl: 'https://www.landlordaxainsurance.com/',
                                   checkUrl: 'https://www.landlordaxainsurance.com/AWE/Container.aspx?CurrentStep=MyAXA&CurrentWorkflow=Direct',
@@ -333,6 +328,135 @@ const BUILTIN_SITES = {
                                   checkUrl: 'https://www.landlordaxainsurance.com/AWE/Container.aspx?CurrentStep=MyAXA&CurrentWorkflow=Direct' },
 };
 
+// ── Sites Kevin took off the robot (15 Nov 2026) ─────────────────────────────
+// Swinton and Everywhen refused the robot: every job there stalled on a sign-in that dropped or a
+// form it could not drive, and Kevin ruled "Remove". Taking them out of this list and out of
+// sites.json was not enough on its own: a later `login`, a hand edit or an agent's SITE wall would
+// quietly put them back. A host on scripts/retired-sites.json (or under one) is never on the list,
+// whatever the builtins or sites.json hold, `login` will not record it, and every door that checks a
+// host refuses it with the route the work takes instead. Each is a refusal ADDED to the checks that
+// were already there. The list is read once, from beside this file, and a list that cannot be read
+// STOPS the command: read as "nothing retired", it would put both sites back in silence.
+// agent-dispatch.py reads the same file for its walls (retired_sites).
+const RETIRED_FILE = path.join(__dirname, 'retired-sites.json');
+let retiredList = null;
+function retiredSites() {
+  if (retiredList) return retiredList;
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(RETIRED_FILE, 'utf8')); } catch (e) {
+    die(`the retired sites list ${RETIRED_FILE} could not be read (${e.message}), so no address can be checked against it and nothing runs.`);
+  }
+  const text = (v) => typeof v === 'string' && v.trim() !== '';
+  const ok = doc && doc.version === 1 && Array.isArray(doc.retired) && doc.retired.every(r =>
+    r && text(r.host) && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(r.host) && text(r.since) && text(r.why) && text(r.instead));
+  if (!ok) die(`the retired sites list ${RETIRED_FILE} is not in its shape (version 1; each entry a lower-case host, since, why and instead), so nothing runs.`);
+  retiredList = doc.retired.concat(testRetired());
+  return retiredList;
+}
+// Tests only. The robot's browser refuses a retired host at the address lookup (retiredResolverRules),
+// so a test needs a name that resolves without the block and is refused with it; no real site is ever
+// used. AGENT_RETIRED_SITES_TEST retires extra names, and AGENT_BROWSER_TEST_RESOLVER points names at
+// this Mac ("allowed.test=127.0.0.1,retired.test=127.0.0.1"). Both take only names ending .test or
+// .example (reserved, never a real site), the resolver only the target 127.0.0.1; anything else stops
+// the command. The first only ever ADDS to the list, and the second's rules come after the retired
+// ones, where Chrome never reaches them for a retired name (its first matching rule wins).
+const TEST_NAME_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.(test|example)$/;
+function testRetired() {
+  const raw = String(process.env.AGENT_RETIRED_SITES_TEST || '').trim();
+  if (!raw) return [];
+  return raw.split(',').map(x => x.trim().toLowerCase()).filter(Boolean).map((x) => {
+    if (!TEST_NAME_RE.test(x)) die(`AGENT_RETIRED_SITES_TEST takes names ending .test or .example only, got "${x}".`);
+    return { host: x, since: 'test', test: true, why: 'a practice name retired by AGENT_RETIRED_SITES_TEST', instead: 'nothing, it is a test' };
+  });
+}
+function testResolverRules() {
+  const raw = String(process.env.AGENT_BROWSER_TEST_RESOLVER || '').trim();
+  if (!raw) return [];
+  return raw.split(',').map(x => x.trim().toLowerCase()).filter(Boolean).map((x) => {
+    const [name, target, extra] = x.split('=');
+    if (extra !== undefined || !TEST_NAME_RE.test(name || '') || target !== '127.0.0.1') {
+      die(`AGENT_BROWSER_TEST_RESOLVER takes name=127.0.0.1 pairs with names ending .test or .example only, got "${x}".`);
+    }
+    return `MAP ${name} 127.0.0.1`;
+  });
+}
+// A host or an address as a bare lower-case host: no port, no trailing dot.
+function hostOf(hostOrUrl) {
+  const s = String(hostOrUrl || '').trim();
+  try { return new URL(s.includes('://') ? s : 'https://' + s).hostname.toLowerCase().replace(/\.$/, ''); } catch { return ''; }
+}
+// The retired entry HOST is, or sits under, or null. The list is read first, so an unreadable list
+// stops even a call with nothing to check.
+function retiredSite(hostOrUrl) {
+  const list = retiredSites();
+  const s = String(hostOrUrl || '').trim();
+  const h = hostOf(hostOrUrl);                                         // no address, no match
+  if (!h) return null;
+  return list.find(r => h === r.host || h.endsWith('.' + r.host)) || null;
+}
+
+// The robot's browser and the retired sites (15 Nov 2026). The invariant: a retired host is never
+// reached, and the robot never ACTS on a retired host's page.
+//   1. BLOCK at the address lookup: Chrome is launched with a host-resolver rule per retired entry
+//      (the host and everything under it resolve to nothing), so a navigation, click, redirect hop,
+//      new tab, image or service-worker fetch there fails before a connection is made. No request is
+//      intercepted, nothing passes through Node and the HTTP cache is untouched: every other site
+//      the robot works on pays nothing for the block. (A context route was tried first: it turns on
+//      interception for the whole context, disables the cache, and misses redirect hops.)
+//   2. REPORT, passively: a main-frame navigation that failed on a retired host is recorded, so a step
+//      that then fails says why in plain words. A run whose own work finished is NOT failed by it (a
+//      click-out tab or a pre-load to a retired host): the ledger line carries retiredBlocked instead.
+//   3. A backstop: a page whose main frame ever does land on a retired host is closed, and fails the
+//      run, since a step may have been about to act on it.
+// Neither listener can fail a run on its own: an error inside one goes on the ledger as
+// retiredCheckError and is never thrown.
+function retiredResolverRules() {
+  return retiredSites().flatMap(r => [`MAP ${r.host} ~NOTFOUND`, `MAP *.${r.host} ~NOTFOUND`]).concat(testResolverRules());
+}
+// The launch arguments with the retired rules FIRST in --host-resolver-rules: an existing value is
+// kept after them, never overwritten (Chrome takes the first rule that matches a name).
+function withRetiredRules(args = []) {
+  const flag = '--host-resolver-rules=';
+  const rules = retiredResolverRules();
+  const had = args.filter(a => String(a).startsWith(flag)).map(a => String(a).slice(flag.length)).filter(Boolean);
+  return args.filter(a => !String(a).startsWith(flag)).concat(flag + rules.concat(had).join(', '));
+}
+function watchRetired(ctx, state) {
+  const checkError = (e) => {
+    try { ledger({ cmd: 'retired-check', retiredCheckError: String((e && e.message) || e).slice(0, 300) }); } catch { /* never thrown */ }
+  };
+  const watch = (page) => {
+    try {
+      page.on('requestfailed', (req) => {
+        try {
+          if (!req.isNavigationRequest() || req.frame() !== page.mainFrame() || !retiredSite(req.url())) return;
+          state.hosts.add(hostOf(req.url()));
+          if (!state.message) state.message = retiredRefusal(req.url());
+        } catch (e) { checkError(e); }
+      });
+      page.on('framenavigated', (frame) => {
+        try {
+          if (frame !== page.mainFrame() || !retiredSite(frame.url())) return;
+          state.hosts.add(hostOf(frame.url()));
+          if (!state.landed) state.landed = retiredRefusal(frame.url());
+          page.close().catch(checkError);
+        } catch (e) { checkError(e); }
+      });
+    } catch (e) { checkError(e); }
+  };
+  try {
+    ctx.on('page', watch);
+    for (const page of ctx.pages()) watch(page);
+  } catch (e) { checkError(e); }
+}
+// The plain refusal for a retired host, or '' for any other: what came off, when, why, and the route.
+function retiredRefusal(hostOrUrl) {
+  const r = retiredSite(hostOrUrl);
+  if (!r) return '';
+  const clip = (t) => String(t).trim().replace(/\.+$/, '');
+  return `${hostOf(hostOrUrl)} came off the robot on ${r.since} (Kevin): ${clip(r.why)}. Instead: ${clip(r.instead)}.`;
+}
+
 function loadSites() {
   let extra = {};
   try { extra = JSON.parse(fs.readFileSync(SITES_FILE, 'utf8')); } catch { /* first run */ }
@@ -343,12 +467,16 @@ function loadSites() {
   for (const [host, entry] of Object.entries(extra || {})) {
     merged[host] = Object.assign({}, BUILTIN_SITES[host] || {}, entry || {});
   }
+  // A retired host is dropped after the merge, so no file can hold it on the list (15 Nov 2026).
+  for (const host of Object.keys(merged)) if (retiredSite(host)) delete merged[host];
   return merged;
 }
 
 function hostAllowed(url) {
   let h;
   try { h = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  // AND, never OR: a retired host is refused even under a parent the list still holds (acturis.com).
+  if (retiredSite(url)) return false;
   return Object.keys(loadSites()).some(d => h === d || h.endsWith('.' + d));
 }
 
@@ -416,6 +544,9 @@ function recordLoginSite(url, { label, profile, add } = {}) {
   try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
   if (u.username || u.password) die('that address carries a name or password in it. A sign-in page address never does.');
   const host = u.hostname.toLowerCase();
+  // A retired site is never recorded, with or without `add`, and nothing is written (15 Nov 2026).
+  const retired = retiredRefusal(host);
+  if (retired) die(retired);
   const sites = loadSites();
   // The OWNING entry, not the exact host. Found in review: an exact-host match
   // made an HMRC or Loom sign-in, whose pages sit on www., write a second entry
@@ -521,6 +652,8 @@ function signinTargets(sites = loadSites(), problems = []) {
 let openPages = 0;
 // How many session cookies the last withPage run kept (the fallback `login` logs it).
 let lastKept = 0;
+// The retired hosts the last withPage run's browser was refused (15 Nov 2026), for its ledger lines.
+let lastRetiredBlocked = [];
 function die(msg, code = 1) {
   msg = hideSignToken(msg);
   if (require.main !== module || openPages > 0) {
@@ -540,7 +673,8 @@ const hideSignToken = (t) => String(t).replace(/([?&](?:tsid|pid)=)[^&\s"'<>)]+/
 function ledger(entry) {
   try {
     fs.mkdirSync(path.dirname(LEDGER), { recursive: true });
-    fs.appendFileSync(LEDGER, hideSignToken(JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry))) + '\n');
+    const blocked = lastRetiredBlocked.length ? { retiredBlocked: lastRetiredBlocked } : {};
+    fs.appendFileSync(LEDGER, hideSignToken(JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry, blocked))) + '\n');
     return true;
   } catch (e) {
     // A ledger that cannot be written is a real problem, not a nicety: it is
@@ -1148,15 +1282,30 @@ async function withPage(profile, headed, fn) {
     launch.channel = 'chrome';
     launch.ignoreDefaultArgs = ['--enable-automation'];
   }
+  launch.args = withRetiredRules(launch.args);                         // the retired sites never resolve
   const ctx = await chromium.launchPersistentContext(dir, launch);
   openPages++;
+  const retired = { message: '', landed: '', hosts: new Set() };
+  lastRetiredBlocked = [];
   try {
+    watchRetired(ctx, retired);
     await ctx.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
     const page = ctx.pages()[0] || await ctx.newPage();
-    return await fn(page, ctx);
+    // A step that met a retired host says so in plain words, never as a closed page or net::ERR_.
+    // Only a FAILURE is put down to a retired host (a retired page that loaded and was closed, or a
+    // navigation that met the block), and then that wins over the raw error it caused. A run whose
+    // own work finished stands, with the blocked hosts on its ledger line.
+    let out;
+    try { out = await fn(page, ctx); } catch (e) {
+      if (retired.landed || retired.message) die(retired.landed || retired.message);
+      throw e;
+    }
+    if (retired.landed) die(retired.landed);
+    return out;
   } finally {
+    lastRetiredBlocked = [...retired.hosts];
     openPages--;
     await ctx.close().catch(() => {});
     // A site can replace its session cookie during the step, and the new one is
@@ -1339,7 +1488,7 @@ async function runSteps(page, steps, allowSubmit, confirm) {
     }
     switch (s.do) {
       case 'goto':
-        if (!hostAllowed(s.url)) die(`${s.url} is not on the allowlist. Add it with \`login\` or edit ${SITES_FILE}.`);
+        if (!hostAllowed(s.url)) die(retiredRefusal(s.url) || `${s.url} is not on the allowlist. Add it with \`login\` or edit ${SITES_FILE}.`);
         await page.goto(s.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
         break;
       case 'fill':
@@ -1973,7 +2122,7 @@ async function runHandover(page, plan, opts = {}) {
       if (s.do === 'kevin') {
         if (opts.skipKevin) continue;            // a dry run: his steps are skipped, and still seen by the step before
         if (s.goto) {
-          if (!hostAllowed(s.goto)) throw new Error(`${s.goto} is not on the allowlist`);
+          if (!hostAllowed(s.goto)) throw new Error(retiredRefusal(s.goto) || `${s.goto} is not on the allowlist`);
           await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45000 });
         }
         await turnBanner(page, 'Your turn: ' + s.say + ' The robot carries on when you have.');
@@ -2577,6 +2726,14 @@ function readPlan(p) {
   let plan;
   try { plan = JSON.parse(raw); } catch (e) { die(`plan is not valid JSON: ${e.message}`); }
   if (!plan || !Array.isArray(plan.steps)) die('plan has no steps array');
+  // A plan aimed at a retired site is refused here, before any browser opens (15 Nov 2026): the
+  // `goto` check would refuse it too, but only after the window was up.
+  for (const s of plan.steps) {
+    for (const u of [s && s.url, s && s.goto]) {
+      const retired = u ? retiredRefusal(u) : '';
+      if (retired) die(retired);
+    }
+  }
   return plan;
 }
 
@@ -3175,6 +3332,8 @@ async function main() {
   const profile = arg(rest, 'profile', 'default');
 
   if (cmd === 'sites') {
+    // --retired: the hosts Kevin took off the robot, each with why and the route instead.
+    if (rest.includes('--retired')) { console.log(JSON.stringify(retiredSites(), null, 2)); return; }
     console.log(JSON.stringify(loadSites(), null, 2));
     return;
   }
@@ -3309,12 +3468,12 @@ async function main() {
     const site = String(arg(rest, 'site', '')).toLowerCase();
     const sites = loadSites();
     const entry = sites[site];
-    if (!entry || !entry.login) die(`${site || '(no --site)'} is not a login site on the allowlist.`);
+    if (!entry || !entry.login) die(retiredRefusal(site) || `${site || '(no --site)'} is not a login site on the allowlist.`);
     // checkUrl (7 Oct 2026): a page that shows the account when signed in and sends the robot to
     // the door when not (Virgin Media's bills page). Without one the check walks the loginUrl.
     const start = arg(rest, 'url') || entry.checkUrl || entry.loginUrl;
     if (!start) die(`${site} has no login page to open (no loginUrl).`);
-    if (!hostAllowed(start)) die(`${start} is not on the allowlist.`);
+    if (!hostAllowed(start)) die(retiredRefusal(start) || `${start} is not on the allowlist.`);
     const shot = arg(rest, 'shot');
     const walk = Array.isArray(entry.sessionWalk) ? entry.sessionWalk : [];
     const walkOnce = () => withPage(profile, false, async (page) => {
@@ -3364,7 +3523,7 @@ async function main() {
   if (cmd === 'read') {
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
-    if (!hostAllowed(url)) die(`${url} is not on the allowlist.`);
+    if (!hostAllowed(url)) die(retiredRefusal(url) || `${url} is not on the allowlist.`);
     const shot = arg(rest, 'shot');
     const readOnce = () => withPage(profile, false, async (page) => {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -3765,7 +3924,7 @@ if (require.main === module) {
 }
 
 module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
-                   recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
+                   recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile, retiredSite, retiredRefusal, retiredSites, withRetiredRules, retiredResolverRules,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
