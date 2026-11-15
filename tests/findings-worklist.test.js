@@ -240,6 +240,40 @@ describe('findings worklist: what blocks work comes first', () => {
     expect(j.notInQueue.map(n => n.finding).sort()).toEqual(['f-other-pr', 'f-p1', 'f-p2', 'f-p3']);   // still listed
   });
 
+  // 15 Nov 2026 review finding 14: two stop findings for one PR (a red stop, then a moved stop) each
+  // carry the same walled tasks. The header counts a task once.
+  it('the header counts distinct tasks when one PR has two stop findings', () => {
+    seed([add('f-p1'),
+          add('f-stop-red', 'high', 10, { routine: 'merge-approved', holds_merge_pr: 812, title: 'invented red stop' }),
+          add('f-stop-moved', 'high', 9, { routine: 'merge-approved', holds_merge_pr: 812, title: 'invented moved stop' }),
+          { op: 'close', id: 'f-p1', ts: stamp(5), outcome: 'pending', pr: '812', note: 'n' }]);
+    blockers([wall('rA', 'f-p1', 3), wall('rB', 'f-p1', 1)]);
+    const out = worklist().out;
+    expect(sections(out).blocking.sort()).toEqual(['f-stop-moved', 'f-stop-red']);
+    expect(out.split('\n')[0]).toMatch(/^BLOCKING: 2 finding\(s\) hold 2 task\(s\) behind a TOOL wall/);
+  });
+
+  // Review T3: the stop-finding loop's own guards. A stop finding a fixer is working (a fresh claim)
+  // or one merged into another is not ranked as blocking work; a stale claim is, and an open one is.
+  it('a freshly claimed or merged-repeat stop finding is not ranked; a stale-claimed one is', () => {
+    seed([add('f-p1'), add('f-p2'), add('f-p3'), add('f-p4'),
+          add('f-busy', 'high', 10, { routine: 'merge-approved', holds_merge_pr: 801, title: 'invented busy stop' }),
+          add('f-surv', 'high', 10, { routine: 'merge-approved', holds_merge_pr: 802, title: 'invented survivor' }),
+          add('f-rep', 'high', 9, { routine: 'merge-approved', holds_merge_pr: 803, title: 'invented repeat stop' }),
+          add('f-dead', 'high', 10, { routine: 'merge-approved', holds_merge_pr: 804, title: 'invented stale stop' }),
+          ...[['f-p1', '801'], ['f-p2', '802'], ['f-p3', '803'], ['f-p4', '804']].map(([id, pr]) =>
+            ({ op: 'close', id, ts: stamp(5), outcome: 'pending', pr, note: 'n' })),
+          { op: 'claim', id: 'f-busy', ts: stamp(1), by: 'queue-fixer' },
+          { op: 'dupe', id: 'f-rep', of: 'f-surv', ts: stamp(4), note: 'same stop' },
+          { op: 'claim', id: 'f-dead', ts: stamp(30), by: 'queue-fixer' }]);
+    blockers([wall('rA', 'f-p1', 2), wall('rB', 'f-p2', 2), wall('rC', 'f-p3', 2), wall('rD', 'f-p4', 2)]);
+    const ids = json().blocking.map(b => b.finding);
+    expect(ids).not.toContain('f-busy');
+    expect(ids).not.toContain('f-rep');
+    expect(ids).toEqual(expect.arrayContaining(['f-surv', 'f-dead']));
+    expect(json().blocking.find(b => b.finding === 'f-dead').staleClaim).toBe(true);
+  });
+
   it('`add --holds-merge-pr` stores the field; without it nothing changes', () => {
     seed([]);
     const a = run(['add', '--routine', 'merge-approved', '--severity', 'high', '--title', 'invented stop',

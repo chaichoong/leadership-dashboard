@@ -265,6 +265,12 @@ def merge_pr(pr, head, dry_run=False):
 ma.sh, ma.py, ma.run_merge_pr = sh, py, merge_pr
 ma.merge_card.patch_card = lambda task, fields: PATCHES.append([task, fields])
 ma.time.sleep = lambda s: None
+import urllib.request
+def _no_network(*a, **k): raise RuntimeError("network call in a test")
+urllib.request.urlopen = _no_network
+# The card re-read before a real merge is driven in merge-card-no-loop.test.js; here every card is
+# unchanged since the run read it.
+ma.card_moved_on = lambda card: ""
 C = lambda **k: dict(json.loads(${JSON.stringify(card())}), **k)
 ${prelude}
 `);
@@ -431,27 +437,30 @@ print(json.dumps({"recycled": recycled, "oldCode": old_code, "started": len(STAR
     expect(r.gone).toBeNull();
   });
 
-  it('a green refreshed card whose send-back failed to write is re-sent by the next run, never merged on the old approval', () => {
+  it('a green refresh whose one write failed leaves the card on the OLD head and rests; a record from the old two-write refresh is still re-sent, never merged', () => {
     const r = drive(`
 GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
 ma.run_merge_pr = lambda pr, head, dry_run=False: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "head": head, "why": "green"}), "")
-ma.refresh_card = lambda card, head, res: None
+import findings as F_
+F_.current_state = lambda *a, **k: {}
 def bad_patch(task, fields): raise RuntimeError("Airtable 503")
 ma.merge_card.patch_card = bad_patch
 res = ma.merge_one(C(), {})
 att = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
 refreshed = C(head="${NEWHEAD}", agentOutput=${JSON.stringify(OUTPUT)}.replace("${HEAD}", "${NEWHEAD}"), prState="OPEN", prHead="${NEWHEAD}")
-print(json.dumps({"res": res, "att": att["812"], "plan": ma.plan(refreshed, att)}))`, tmpd());
-    expect(r.res).toMatchObject({ result: 'refreshed', backToKevin: false });
-    expect(r.att).toMatchObject({ result: 'refreshed', head: NEWHEAD, back: false });
-    expect(r.plan[0]).toBe('send-back');          // re-sent, never 'merge' on his approval of the OLD head
+legacy = {"812": {"result": "refreshed", "approvedAt": "2026-10-07T09:00:00.000Z", "at": "x", "head": "${NEWHEAD}", "back": False}}
+print(json.dumps({"res": res, "att": att["812"], "plan": ma.plan(refreshed, legacy)}))`, tmpd());
+    expect(r.res).toMatchObject({ result: 'moved' });
+    expect(r.res.backToKevin).toBeUndefined();
+    expect(r.att).toMatchObject({ result: 'moved', newHead: NEWHEAD, head: HEAD });
+    expect(r.plan[0]).toBe('send-back');          // the old shape: re-sent, never 'merge' on his approval of the OLD head
   });
 
   it('red: the gate\'s last lines go on the card, his approval STANDS (no send-back), and nothing is completed or landed', () => {
     const r = drive(`
 def merge_pr(pr, head, dry_run=False):
     MERGES.append([pr, head])
-    return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "the gate is RED: 2 tests failed"}), "\\n".join("progress %d" % i for i in range(30)))
+    return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "the gate is RED: 2 tests failed", "vitest": {"ok": False, "tail": "2 failed"}}), "\\n".join("progress %d" % i for i in range(30)))
 ma.run_merge_pr = merge_pr
 res = ma.merge_one(C(), {})
 print(json.dumps({"res": res, "calls": CALLS, "notes": NOTES, "patches": PATCHES}))`, tmpd());
@@ -481,7 +490,7 @@ print(json.dumps({"res": res, "calls": CALLS, "patches": PATCHES}))`, tmpd());
     expect(r.calls).toContain('agent-dispatch.py complete recCardAaaaaaaaaa');
   });
 
-  it('merged but the card would not close: said truly, not sent back, and the next run closes it', () => {
+  it('merged but the card would not close: said truly, not sent back, rests on the clock, then the robot closes it', () => {
     const dir = tmpd();
     const r = drive(`
 def py(script, *args, timeout=300):
@@ -492,14 +501,19 @@ def py(script, *args, timeout=300):
         return subprocess.CompletedProcess([script], 1, "", "Airtable 503")
     return subprocess.CompletedProcess([script], 0, "", "")
 ma.py = py
+ma.clock = lambda: 1791367200.0
 first = ma.merge_one(C(), {})
 att = json.load(open(os.path.join(ma.STATE_DIR, ma.ATTEMPTS)))
-print(json.dumps({"first": first, "notes": NOTES, "patches": PATCHES, "again": ma.plan(C(), att)[0]}))`, dir);
+live = C(prState="MERGED", prSha="abc123def4567890", prHead="${HEAD}")
+print(json.dumps({"first": first, "notes": NOTES, "patches": PATCHES, "again": ma.plan(live, att, now=1791367200.0 + 1800)[0],
+                  "later": ma.plan(live, att, now=1791367200.0 + 7 * 3600)[0]}))`, dir);
     expect(r.first.result).toBe('merged-open');
+    expect(r.first.retryAt).toBe('2026-10-07T16:00:00Z');
     expect(r.notes[0]).toMatch(/^MERGED, CARD NOT CLOSED: PR #812 merged as abc123def456/);
     expect(r.notes[0]).not.toMatch(/left open/);
     expect(r.patches).toEqual([]);
-    expect(r.again).toBe('merge');      // the next run reads MERGED and goes straight to complete
+    expect(r.again).toBe('skip');       // rests on the clock, never every half hour (review finding 10)
+    expect(r.later).toBe('merge');      // then reads MERGED and goes straight to complete
   });
 
   it('a failed Pages deploy still closes the card (the merge is done) and files a HIGH finding', () => {

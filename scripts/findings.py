@@ -1178,7 +1178,9 @@ def cmd_worklist(a):
         print("Nothing below is ranked by what it blocks. Work it in severity order and say in the "
               "report that the blocking list could not be read.")
     else:
-        tasks = sum(b["tasksBlocked"] for b in w["blocking"])
+        # Distinct tasks (15 Nov 2026 review finding 14): two stop findings holding one PR each list the
+        # same walled tasks, and a task is blocked once however many findings hold it.
+        tasks = len({t for b in w["blocking"] for t in b["tasks"]})
         print("BLOCKING: %d finding(s) hold %d task(s) behind a TOOL wall (sweep read the board at %s). "
               "Work these first, top to bottom." % (len(w["blocking"]), tasks, blockers.get("readAt") or "?"))
         for b in w["blocking"]:

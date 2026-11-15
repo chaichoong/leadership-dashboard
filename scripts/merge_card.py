@@ -275,6 +275,21 @@ def patch_card(task_id, fields):
     return _request("PATCH", "/%s/%s" % (TASKS, task_id), {"fields": fields, "typecast": True})
 
 
+def get_card(task_id):
+    """The card as Airtable holds it NOW, read by its record id (merge-approved.py re-reads it just
+    before a real merge, 15 Nov 2026 review finding 2). Raises on a failed read."""
+    return card_view(_request("GET", "/%s/%s?returnFieldsByFieldId=true" % (TASKS, task_id)))
+
+
+def refreshed_fields(output, plain):
+    """Every field a card refreshed for a NEW head carries, in ONE write (15 Nov 2026 review finding 1).
+    The new body, the plain lines, his verdict and Approved At cleared and Status Approval go together,
+    so no crash or failed write can leave the card showing the new head beside an approval he gave
+    for the old one. An approval is only ever honoured for the head the card showed when he gave it."""
+    return {F["agentOutput"]: output, PLAIN_SUMMARY: plain, F["approvalOutcome"]: None,
+            F["approvedAt"]: None, F["status"]: "Approval"}
+
+
 def cards_formula():
     return "LEFT({Task Name}, %d)='%s'" % (len(MERGE_PREFIX), MERGE_PREFIX)
 
