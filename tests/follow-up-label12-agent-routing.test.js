@@ -124,41 +124,6 @@ describe('approvals worker routing (approverFor)', () => {
   });
 });
 
-describe('the Supabase shadow twin carries the same routing', () => {
-  // follow-up-supabase.html writes to the SAME Airtable base, so an old copy
-  // of the routing there mints human-assigned tasks the dispatch engine
-  // never sees.
-  const TWIN = readFileSync(resolve(__dirname, '../follow-up-supabase.html'), 'utf8');
-
-  it('routes both labels to the agents with an approver', () => {
-    expect(TWIN).toContain('function isAgentRoutedLabel');
-    expect(TWIN).toContain('function getApproverForLabel');
-    expect(TWIN).not.toContain('function getAssigneeForLabel');
-  });
-
-  it('knows the agent roster and the agent-routed health check', () => {
-    expect(TWIN).toContain('AI_AGENT_TEAM_MEMBER_RECS');
-    expect(TWIN).toContain('healthCheckAgentRoutedTask');
-    expect(TWIN).not.toContain('healthCheckKevinTask');
-  });
-
-  it('the twin roster CONTENTS equal the main page roster — containment is not enough', () => {
-    // 24 Aug 2026: the Response agent was added to follow-up.html but not the
-    // twin, and this suite stayed green because it only checked the constant
-    // NAME existed. Extract both literal sets and compare the record ids.
-    const extract = (src) => {
-      const start = src.indexOf('AI_AGENT_TEAM_MEMBER_RECS = new Set([');
-      expect(start).toBeGreaterThan(-1);
-      const body = src.slice(start, src.indexOf(']);', start));
-      return (body.match(/rec[A-Za-z0-9]{14}/g) || []).sort();
-    };
-    const FOLLOWUP = readFileSync(resolve(__dirname, '../follow-up.html'), 'utf8');
-    const mainIds = extract(FOLLOWUP);
-    expect(mainIds.length).toBeGreaterThan(0); // control: the parse works
-    expect(extract(TWIN)).toEqual(mainIds);
-  });
-});
-
 describe('the task drawer approval box works for any approver', () => {
   // Mica approves label-8 work in the SAME drawer Kevin uses. Before
   // 12 Aug 2026 the box was gated on assigneeEmail === KEVIN_EMAIL, so Mica

@@ -22,8 +22,6 @@ const tasksPage = read('os/tasks/index.html');
 const agentsPage = read('os/agents/index.html');
 const skills = read('js/skills.js');
 const dashboard = read('js/dashboard.js');
-const shim = read('os/systemisation/systemisation-shim.js');
-const spec = read('docs/supabase-schema-spec.md');
 
 describe('every owner surface reads the register', () => {
   for (const [name, src] of [['Tasks & Projects', tasksPage], ['AI Agents page', agentsPage], ['Skills Library', skills]]) {
@@ -74,20 +72,8 @@ describe('the role-agent deep link has both halves', () => {
   });
 });
 
-describe('the client build knows what it owes', () => {
-  it('the shim warning names all three unmapped tables and points to the spec', () => {
-    expect(shim).toContain(REGISTER);
-    expect(shim).toContain(DAILY_LOG);
-    expect(shim).toMatch(/2\.8/);
-  });
-
-  it('the spec section 2.8 specs ai_agents, agent_daily_log and the module gate', () => {
-    expect(spec).toMatch(/### 2\.8 AI Agents register \+ daily log/);
-    expect(spec).toContain('ai_agents');
-    expect(spec).toContain('agent_daily_log');
-    expect(spec).toMatch(/agents: bool/);
-  });
-});
+// 'the client build knows what it owes' (the Systemisation shim and the Supabase schema spec)
+// was removed on 15 Nov 2026 with the Supabase shadow build.
 
 describe("the shell's badge poll mirrors the page's approval queue", () => {
   // The sidebar badge is polled by js/shared.js BEFORE the tab is ever

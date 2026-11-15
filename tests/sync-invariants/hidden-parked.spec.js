@@ -81,8 +81,8 @@ test.describe('Parked screens are hidden, not deleted', () => {
 // invoice Apps Script is retired from Inbound Comms as ONE change. Label 3 has had no mail since 17 Aug,
 // yet applying it fired the script, and the health bar and the Run health check button pinged it. This
 // drives the REAL page: Gmail is a stub (one invented thread), Airtable the usual fixtures, and every
-// request to script.google.com is recorded. Both pages are driven: the live one and its parked twin.
-for (const pagePath of ['/follow-up.html', '/follow-up-supabase.html']) {
+// request to script.google.com is recorded. (Its parked Supabase twin was removed on 15 Nov 2026.)
+for (const pagePath of ['/follow-up.html']) {
   test.describe(`Inbound Comms (${pagePath}): the invoice Apps Script is retired`, () => {
     test('applying label 3 (move, inbox apply, bulk apply) and every health check make no Apps Script call', async ({ page }) => {
       const calls = [];

@@ -3,7 +3,7 @@
 ## Stack
 
 **Current:** Vanilla JS, Airtable (API + linked records), GitHub Pages, plain `<script>` tags (no bundler).
-**Migration (PARKED 8 Sep 2026, Kevin's ruling):** the Supabase + Vercel shadow build (`supabase-app.html` shell, `*-supabase.html` twins + shims, spec `docs/supabase-schema-spec.md`) stays in the repo but no cut-over work runs. Airtable is the system of record. Revisit at client three, or for a client who needs a multi-user login. Ruling: brain `Decisions/2026-09-08 Keep the Airtable stack, park the Supabase and Vercel migration, move the app to the OD domain.md`.
+**Supabase + Vercel shadow build: REMOVED 15 Nov 2026** (Kevin's ruling), recoverable from git history. Airtable is the system of record. Ruling: brain `Decisions/2026-11-15 Remove what Kevin does not use, the Supabase shadow build included.md`.
 
 ## THE MASTER PLAN (one plan, always)
 

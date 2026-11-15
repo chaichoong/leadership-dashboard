@@ -19,11 +19,12 @@ on:
     # (os/index.html removed — Operating Systems Hub deleted Apr 2026.
     #  os/launch-plan.html removed — duplicated Strategy OS, deleted Apr 2026.
     #  os/business-plan-builder/index.html removed 2026-08-06 — retired from the
-    #  shell 1 Aug 2026, has no PAGE_REGISTRY entry, so it triggered a no-op run.)
+    #  shell 1 Aug 2026, has no PAGE_REGISTRY entry, so it triggered a no-op run.
+    #  crm-supabase.html and js/crm-walkthrough.js removed 15 Nov 2026: the CRM
+    #  page went with the Supabase shadow build.)
     paths:
       - 'ai-brain.html'
       - 'compliance.html'
-      - 'crm-supabase.html'
       - 'follow-up.html'
       - 'growth-plan.html'
       - 'publishing.html'
@@ -41,7 +42,6 @@ on:
       - 'js/cfv.js'
       - 'js/coa.js'
       - 'js/costs.js'
-      - 'js/crm-walkthrough.js'
       - 'js/dashboard.js'
       - 'js/re-kpis.js'
       - 'js/fintable.js'

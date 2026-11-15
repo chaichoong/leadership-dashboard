@@ -68,18 +68,9 @@ FILE_TO_PAGE = {
     'js/cashflow.js':       'overview',
     'js/arrears.js':        'cfv',
     'js/reconciliation.js': 'overview',
-    # CRM ships as a Supabase-only page. Unmapped until 2026-08-01, so its
-    # pageVer sat at 1.0 while the file changed — and every staleness signal
-    # built on pageVer quietly read CRM as up to date.
-    #
-    # That 1 Aug fix did not work. Mapping a file here is only half of it: the
-    # `paths:` filter in .github/workflows/auto-bump-pagever.yml decides whether the
-    # workflow runs at all, and crm-supabase.html was never added there. So the CRM
-    # page took a 14-step interactive walkthrough on 2026-08-04 (319b438) and pageVer
-    # still read 1.0 two days later. Both lists, every time — enforced by
-    # tests/constant-drift.test.js.
-    'crm-supabase.html':    'crm',
-    'js/crm-walkthrough.js': 'crm',
+    # Removed 15 Nov 2026 with the Supabase shadow build: 'crm-supabase.html' and
+    # 'js/crm-walkthrough.js' (page 'crm'). A file mapped here must also be in the
+    # workflow `paths:` filter. Both lists, every time: tests/constant-drift.test.js.
 }
 
 # DELIBERATELY UNMAPPED: 'content-machine' is registered as a page but its source

@@ -17,11 +17,13 @@ import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PAGES = ['os/tasks/index.html', 'os/tasks/index-supabase.html'];
+// The Supabase twin (os/tasks/index-supabase.html) was removed on 15 Nov 2026 with the
+// shadow build, so the live Tasks page is the one page left to guard.
+const PAGES = ['os/tasks/index.html'];
 const RAISER_FIELD_ID = 'fld30Yw8SWYVp049g'; // Tasks → "Sent For Approval By"
 
 describe('the approval-gate guard on the Slack catch-up', () => {
-  it('CONTROL — both pages actually run the catch-up', () => {
+  it('CONTROL — the page actually runs the catch-up', () => {
     for (const p of PAGES) {
       const src = readFileSync(join(ROOT, p), 'utf8');
       expect(src, `${p} should define the catch-up`).toContain('function runNotificationCatchup(');

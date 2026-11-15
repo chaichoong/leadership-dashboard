@@ -19,10 +19,10 @@ import { fileURLToPath } from 'node:url';
 // this test cannot pass against a fixed copy while the shipped page regresses.
 //
 // 20260823-queue-fixer-330: the fix landed in index.html only, and the Supabase
-// twin sat on the pre-fix shape for four months. Both pages are exercised here,
-// because a shadow build nobody tests is a bug waiting for its cutover.
+// twin sat on the pre-fix shape for four months. The twin was removed on 15 Nov 2026
+// with the shadow build, so only the live page is exercised now.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PAGES = ['os/tasks/index.html', 'os/tasks/index-supabase.html'];
+const PAGES = ['os/tasks/index.html'];
 
 function extract(src, page, name) {
   const start = src.indexOf(`async function ${name}(`);

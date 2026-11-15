@@ -32,7 +32,6 @@ const runner = readFileSync(path.join(root, 'scripts/task-manager-run.sh'), 'utf
 const skill = readFileSync(path.join(root, '.claude/scheduled-tasks/task-manager-board/SKILL.md'), 'utf8');
 const dispatch = readFileSync(path.join(root, 'scripts/agent-dispatch.py'), 'utf8');
 const followUp = readFileSync(path.join(root, 'follow-up.html'), 'utf8');
-const followUpSupabase = readFileSync(path.join(root, 'follow-up-supabase.html'), 'utf8');
 const sched = JSON.parse(readFileSync(path.join(root, 'scripts/job-schedule.json'), 'utf8'));
 const triageSkill = readFileSync(path.join(root, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md'), 'utf8');
 const dailyOpsDoc = readFileSync(path.join(root, 'docs/daily-ops-routine.md'), 'utf8');
@@ -182,7 +181,7 @@ describe('the wiring names one identity everywhere', () => {
     });
 
     it('both follow-up pages count the Task Manager as agent-owned', () => {
-        for (const page of [followUp, followUpSupabase]) {
+        for (const page of [followUp]) {
             expect(page).toContain(`'${TASKMGR_TEAM_REC}'`);
         }
     });

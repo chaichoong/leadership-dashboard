@@ -7,7 +7,7 @@
 // The chain is now real, and this file is what keeps each link attached:
 //
 //   post-manager email "Deadline: YYYY-MM-DD"
-//     → follow-up.html / follow-up-supabase.html parse it on task creation
+//     → follow-up.html parses it on task creation
 //       (Due Date = the real date, Hard Deadline ticked — never rolled)
 //     → scripts/loop-health.py rule "deadline" warns from 3 days out
 //       (twin-tested against os/tasks in tests/loop-health.test.js)
@@ -19,7 +19,6 @@ import { resolve } from 'node:path';
 
 const ROOT = resolve(__dirname, '..');
 const FOLLOWUP = readFileSync(resolve(ROOT, 'follow-up.html'), 'utf8');
-const TWIN = readFileSync(resolve(ROOT, 'follow-up-supabase.html'), 'utf8');
 const INVARIANTS = readFileSync(resolve(ROOT, 'scripts/check-data-invariants.py'), 'utf8');
 
 // Extract the REAL function (the tests/follow-up-init-errors pattern) so this
@@ -60,10 +59,8 @@ describe('parseDeadlineLine (real source from follow-up.html)', () => {
   });
 });
 
-describe('task creation carries the date (both twins)', () => {
-  // The twin writes to the SAME Airtable base; a stale copy there mints
-  // undated tasks for the same letters.
-  for (const [label, src] of [['follow-up.html', FOLLOWUP], ['follow-up-supabase.html', TWIN]]) {
+describe('task creation carries the date', () => {
+  for (const [label, src] of [['follow-up.html', FOLLOWUP]]) {
     it(`${label}: parses the body, sets Due Date to the letter date, ticks Hard Deadline`, () => {
       expect(src).toContain('function parseDeadlineLine');
       expect(src).toContain("hardDeadline: 'fldZKzIxgyrQ8CG8a'");
@@ -73,10 +70,6 @@ describe('task creation carries the date (both twins)', () => {
       expect(src).toContain('DEADLINE FROM THE LETTER: ');
     });
   }
-
-  it('the two parsers are byte-identical', () => {
-    expect(extract(TWIN, 'parseDeadlineLine')).toBe(extract(FOLLOWUP, 'parseDeadlineLine'));
-  });
 });
 
 describe('the chain is closed end to end', () => {
