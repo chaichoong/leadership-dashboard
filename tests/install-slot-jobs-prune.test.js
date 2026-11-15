@@ -109,6 +109,45 @@ describe('install-slot-jobs.sh --prune', () => {
     expect(readdirSync(la)).toEqual([]);
   });
 
+  // --only (finding 20261111-agent-dispatch-1296). A bare --install unloads and reloads
+  // every job, and launchctl unload on a RUNNING job kills it, so reinstalling one plist
+  // in the morning was not safe to ask a routine to do.
+  describe('--only narrows the run to one job', () => {
+    const dry = (args) => {
+      const r = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf8' });
+      return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
+    };
+
+    it('--dry-run --only writes one job to stdout and no other', () => {
+      const one = dry(['--dry-run', '--only', 'prod-sweep-weekly']);
+      expect(one.code, one.out).toBe(0);
+      expect((one.out.match(/^=== /gm) || []).length, 'more than one job was printed').toBe(1);
+      expect(one.out).toMatch(/com\.kevinbrittain\.prod-sweep-weekly\.plist/);
+      // CONTROL: without --only the same command prints every job.
+      const all = dry(['--dry-run']);
+      expect((all.out.match(/^=== /gm) || []).length).toBeGreaterThan(1);
+    });
+
+    it('prod-sweep-weekly is written with its Sunday, not every day', () => {
+      // The installed plist had Hour 11 and no Weekday, so launchd fired the slot daily
+      // and the skill stopped at step one on the other six days.
+      const r = dry(['--dry-run', '--only', 'prod-sweep-weekly']);
+      expect(r.out).toMatch(/<key>Weekday<\/key><integer>0<\/integer>/);
+    });
+
+    it('a name that matches nothing fails loudly rather than doing nothing', () => {
+      const r = dry(['--dry-run', '--only', 'no-such-job']);
+      expect(r.code, 'a typo read as success').toBe(1);
+      expect(r.out).toMatch(/NO SUCH JOB/);
+    });
+
+    it('--only with no name is refused', () => {
+      const r = dry(['--install', '--only']);
+      expect(r.code).toBe(2);
+      expect(r.out).toMatch(/--only needs a job name/);
+    });
+  });
+
   it('an unreadable schedule parks nothing', () => {
     writeFileSync(schedule, 'not json');
     plist('feed-brain');

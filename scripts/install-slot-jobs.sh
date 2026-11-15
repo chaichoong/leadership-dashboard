@@ -18,6 +18,7 @@
 #   install-slot-jobs.sh --dry-run     print what would be written, touch nothing
 #   install-slot-jobs.sh --install     write the plists and load them
 #   install-slot-jobs.sh --uninstall   unload and remove them again
+#   install-slot-jobs.sh --install --only NAME   write and load ONE job's plist
 #   install-slot-jobs.sh --prune       unload a RETIRED job's plist and park it
 #   install-slot-jobs.sh --prune-check report what --prune would do, touch nothing
 #
@@ -44,6 +45,18 @@ SLOT="$REPO/scripts/agent-slot-run.sh"
 TASKS="$HOME/.claude/scheduled-tasks"
 
 MODE="${1:---dry-run}"
+
+# --only NAME narrows --install and --dry-run to a single job (finding
+# 20261111-agent-dispatch-1296). A bare --install unloads and reloads every job in
+# JOBS, and launchctl unload on a job that is RUNNING kills it, so "reinstall
+# prod-sweep-weekly with its Sunday back" could not be done in the morning without
+# risking the routine asking for it. With --only, one plist is written and reloaded
+# and the rest are untouched.
+ONLY=""
+if [ "${2:-}" = "--only" ]; then
+  ONLY="${3:-}"
+  [ -n "$ONLY" ] || { echo "--only needs a job name" >&2; exit 2; }
+fi
 
 # name|hour:minute[,hour:minute...]|command...
 #   or name|*:minute|command...     for an HOURLY job (every hour at that minute)
@@ -191,8 +204,11 @@ $intervals	</array>
 PLIST
 }
 
+matched=0
 for spec in "${JOBS[@]}"; do
   IFS='|' read -r name times cmd <<< "$spec"
+  if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then continue; fi
+  matched=$((matched + 1))
   label="com.kevinbrittain.$name"
   target="$LA/$label.plist"
   case "$MODE" in
@@ -226,6 +242,12 @@ for spec in "${JOBS[@]}"; do
       ;;
   esac
 done
+
+# A name that matches nothing is a typo, and a silent zero here looks like success.
+if [ -n "$ONLY" ] && [ "$matched" -eq 0 ]; then
+  echo "NO SUCH JOB: --only $ONLY is not in the JOBS array" >&2
+  exit 1
+fi
 
 if [ "$MODE" = "--install" ]; then
   echo
