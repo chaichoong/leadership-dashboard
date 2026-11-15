@@ -1493,13 +1493,17 @@ CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
 EDITS_APPLIED_MARK = "EDITS APPLIED:"
 
 
-def ledger_append(task_id, event, fingerprint=None):
+def ledger_append(task_id, event, fingerprint=None, lengths=None):
     """One line on the carry-out ledger. A rest's own event (`done` from a keep-open, `status` from a
-    filed update) carries `fp`, the fingerprint of the task as the rest left it (rest_fingerprint)."""
+    filed update) carries `fp`, the fingerprint of the task as the rest left it (rest_fingerprint),
+    and `fpLen`, the length of its Description and Notes as fingerprinted (rest_lengths), so a
+    later wake can show the text added since (rest_added_text)."""
     os.makedirs(STATE_DIR, exist_ok=True)
     rec = {"task": task_id, "ts": now_iso(), "event": event}
     if fingerprint:
         rec["fp"] = fingerprint
+    if fingerprint and lengths:
+        rec["fpLen"] = lengths
     with open(INTENT_LEDGER, "a") as fh:
         fh.write(json.dumps(rec) + "\n")
 
@@ -1559,6 +1563,37 @@ def ledger_rest_prints():
     return prints
 
 
+# The only ledger step that may follow a rest's own event and still leave that rest the task's last
+# look: `intent`, which a run writes just before it carries the woken task out (cmd_intent).
+REST_LOOK_FOLLOWERS = ("intent",)
+
+
+def ledger_rest_events():
+    """task id -> {"event", "ts", "fp", "lens", "after"} for the newest event that began a rest (`done`
+    or `status`), with the kinds of every step written after it (`after`). One pass, so the line a
+    wake is read from is the line the rest was begun on."""
+    out = {}
+    try:
+        with open(INTENT_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("event") == FOLD_EVENT:
+                    continue
+                tid, event = rec.get("task"), rec.get("event")
+                if event in ("done", "status"):
+                    lens = rec.get("fpLen") if isinstance(rec.get("fpLen"), dict) else {}
+                    out[tid] = {"event": event, "ts": str(rec.get("ts") or ""), "fp": str(rec.get("fp") or ""),
+                                "lens": lens, "after": []}
+                elif tid in out:
+                    out[tid]["after"].append(str(event))
+    except FileNotFoundError:
+        pass
+    return out
+
+
 def ledger_last_done(task_id):
     """The ts of the newest `done` the ledger holds for this task, or '' (none, or no ledger)."""
     best = ""
@@ -1601,17 +1636,24 @@ def rest_view(rec):
             "approvedAt": f.get(AF["approvedAt"], ""), "teamMemberIds": links(f.get(AF["teamMember"]))}
 
 
-def _print_part(key, value):
+def _print_text(key, value):
+    """The text a field is fingerprinted from."""
     if key == "teamMemberIds":
-        text = ",".join(sorted(str(x) for x in (value or [])))
-    elif key == "dueDate":
-        text = str(value or "")[:10]
-    else:
-        # Line ends and trailing spaces are not material: a store that normalises them must never
-        # read as a change, or no rest would ever hold.
-        text = "\n".join(ln.rstrip() for ln in str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-                         .split("\n")).strip()
+        return ",".join(sorted(str(x) for x in (value or [])))
+    if key == "dueDate":
+        return str(value or "")[:10]
+    # Line ends and trailing spaces are not material: a store that normalises them must never
+    # read as a change, or no rest would ever hold.
+    return "\n".join(ln.rstrip() for ln in str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+                     .split("\n")).strip()
+
+
+def _text_hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _print_part(key, value):
+    return _text_hash(_print_text(key, value))
 
 
 def rest_fingerprint(t):
@@ -1628,6 +1670,136 @@ def rest_print_changes(t, fingerprint):
     stored = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
     changed = [label for key, label in REST_PRINT_FIELDS if stored.get(key) != _print_part(key, t.get(key))]
     return changed
+
+
+# The two fields a reply or a folded item lands in, whose added text a woken run is shown.
+REST_TEXT_FIELDS = (("description", "Description"), ("notes", "Notes"))
+REST_ADDED_MAX = 1500
+
+
+def rest_lengths(t):
+    """{"description": n, "notes": n}: the fingerprinted length of each text field, stored with a rest."""
+    return {key: len(_print_text(key, t.get(key))) for key, _ in REST_TEXT_FIELDS}
+
+
+def rest_added_text(t, fingerprint, lengths):
+    """({label: the text added since the rest began}, [labels changed some other way]) for Description
+    and Notes. Shown only when the field as it stood at the rest is, byte for byte, the start of the
+    field now (its hash at that length matches the fingerprint): a plain append. Anything else (an edit,
+    a rewrite, a rest with no stored length) is listed as rewritten, for the run to read whole."""
+    changed = set(rest_print_changes(t, fingerprint))
+    stored = dict(p.split("=", 1) for p in str(fingerprint or "").split("|")[1:] if "=" in p)
+    added, rewritten = {}, []
+    for key, label in REST_TEXT_FIELDS:
+        if label not in changed:
+            continue
+        now_text = _print_text(key, t.get(key))
+        try:
+            n = int((lengths or {}).get(key))
+        except (TypeError, ValueError):
+            n = -1
+        if 0 <= n <= len(now_text) and _text_hash(now_text[:n]) == stored.get(key):
+            tail = now_text[n:].strip()
+            added[label] = tail[:REST_ADDED_MAX] + ("\n[… cut: read the whole field]" if len(tail) > REST_ADDED_MAX else "")
+        else:
+            rewritten.append(label)
+    return added, rewritten
+
+
+def rest_wake(t, rest):
+    """What woke a task whose last rest ended because the task changed, or None. `rest` is the task's
+    ledger_rest_events entry. None when no fingerprinted rest was begun, when the task has taken a
+    step of its own since (a wall, a clear: that step, not the change, is what it is waiting on; only
+    a run's `intent` may follow), when nothing changed (the rest ended on its date), or when the rest
+    carried no fingerprint at all (every rest begun before 15 Nov 2026: nothing can be said changed)."""
+    if not rest or not rest.get("fp") or any(a not in REST_LOOK_FOLLOWERS for a in rest.get("after") or []):
+        return None
+    changed = rest_print_changes(t, rest["fp"])
+    if not changed or changed == ["no fingerprint"]:
+        return None
+    added, rewritten = rest_added_text(t, rest["fp"], rest.get("lens"))
+    return {"changed": changed, "restBegan": rest.get("ts", ""), "restEvent": rest.get("event", ""),
+            "added": added, "rewritten": rewritten}
+
+
+# THE RUN'S WINDOW (15 Nov 2026, review of PR 936, finding 2). A rest's fingerprint is taken after
+# its own write, so a reply that lands while the run works (after the queue was read, before
+# `complete --keep-open` or a status filing) is baked into the new rest and sleeps up to 14 days.
+# So those two commands compare the live task with the queue snapshot the run was handed, BEFORE
+# their own write. The fields compared are the ones a run never writes itself: a reply or a fold
+# lands in the Description (a twin closed onto the task writes a dated UPDATE line there too,
+# carry_output_to_keeper), a verdict in Approval Outcome and Approved At, a hand-over in the holder.
+# Notes and Due Date are left out because the run writes them itself (annotate, EDITS APPLIED, the
+# send scripts' lines, `due`). A due date someone else moves mid-run is therefore not refused here,
+# and is in the next rest's fingerprint: that one case is not caught.
+RUN_WINDOW_LABELS = ("Description", "Approval Outcome", "Approved At", "holder")
+# THE RUN'S OWN QUEUE (review of PR 938, finding 2). Each runner exports the path of the queue.json it
+# hands its agent; `queue` also writes a copy there when the variable is set (a slot run's agent
+# writes its queue itself). Nothing else is ever guessed: picking a folder by name chose another run's
+# queue (folders are named by each runner) and refused a correct run for hours.
+RUN_QUEUE_ENV = "AGENT_RUN_QUEUE"
+# A run is capped at 45 minutes; a queue older than this belongs to a run the Mac's sleep suspended,
+# whose window is unknown, so it counts as no snapshot (the strict fallback).
+RUN_SNAPSHOT_MAX_HOURS = 3
+
+
+def run_snapshot(task_id, now=None):
+    """(the task's entry in the queue its run was handed, the queue's path) or (None, why not). Read
+    ONLY from the file AGENT_RUN_QUEUE names. No variable, an unreadable or stale file, or a queue that
+    does not hand the task out (it lists it resting, or not at all) is no snapshot, said in words."""
+    path = os.environ.get(RUN_QUEUE_ENV, "").strip()
+    if not path:
+        return None, f"{RUN_QUEUE_ENV} is not set, so this run has no queue of its own (a run by hand?)"
+    now = now or datetime.now(timezone.utc)
+    try:
+        with open(path) as fh:
+            q = json.load(fh)
+        made = datetime.fromisoformat(str(q.get("generatedAt") or "").replace("Z", "+00:00"))
+    except (OSError, ValueError, AttributeError) as exc:
+        print(f"WARNING: the run's queue {path} could not be read ({str(exc)[:80]}); treated as no snapshot",
+              file=sys.stderr)
+        return None, f"the run's queue {path} could not be read ({str(exc)[:80]})"
+    if made.tzinfo is None or now - made > timedelta(hours=RUN_SNAPSHOT_MAX_HOURS):
+        return None, f"the run's queue {path} is more than {RUN_SNAPSHOT_MAX_HOURS} hours old"
+    for pool in ("worklist", "reserve"):
+        for entry in q.get(pool) or []:
+            if isinstance(entry, dict) and entry.get("id") == task_id:
+                return entry, path
+    if any(isinstance(e, dict) and e.get("id") == task_id for e in q.get("idleHandbacks") or []):
+        return None, f"the run's queue ({path}) lists it resting, so this run was not handed it"
+    return None, f"the run's queue ({path}) does not hand it out"
+
+
+def write_run_queue(q):
+    """When AGENT_RUN_QUEUE is set, the queue this command printed is also the run's own snapshot:
+    written there atomically. A failure is said on stderr and leaves the run with no snapshot (the
+    strict fallback), never a stopped queue."""
+    path = os.environ.get(RUN_QUEUE_ENV, "").strip()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(q, fh, indent=2)
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"WARNING: the run's queue could not be written to {path} ({str(exc)[:120]}); "
+              "keep-open and status filings in this run compare with the last rest instead", file=sys.stderr)
+
+
+def run_window_problem(task_id, live_view, snapshot):
+    """Why the task changed while the run worked, or ''. `snapshot` is the run's queue entry
+    (run_snapshot); `live_view` is the task as read now, before this command's own write."""
+    if not snapshot:
+        return ""
+    raced = [label for label in rest_print_changes(live_view, rest_fingerprint(snapshot))
+             if label in RUN_WINDOW_LABELS]
+    if not raced:
+        return ""
+    return (f"the task changed while you were working ({', '.join(raced)} changed since the queue you were "
+            "handed was read): read it again, and raise what changed as its own card (or carry it out if "
+            "it is approved work) before you rest it")
 
 
 def rest_due_cap(until_day, due_raw, start_day):
@@ -2681,17 +2853,28 @@ def status_changed_problem(task_rec):
     fold, a reply appended, a twin folded in or a note added since then is something new, and a new
     status update would only move the clock past it."""
     tid = task_rec.get("id")
+    live = rest_view(task_rec)
+    # THE RUN'S OWN NOTE IS NOT NEWS (15 Nov 2026, review of PR 936, finding 7). With the queue the run
+    # was handed, the rest is compared with the task AS HANDED (so a note the agent writes during its
+    # own run is never "something new"), and the run's window is checked on the fields a run never
+    # writes (run_window_problem). With no snapshot, the live task is compared with the rest, as before.
+    snap, snap_why = run_snapshot(tid)
+    window = run_window_problem(tid, live, snap)
+    if window:
+        return window
     last = ledger_last_events().get(tid)
     if not last or last[0] not in ("done", "status"):
         return ""
     fp = ledger_rest_prints().get(tid, "")
     if not fp:
         return ""
-    changed = rest_print_changes(rest_view(task_rec), fp)
+    changed = rest_print_changes(snap if snap else live, fp)
     if not changed:
         return ""
     return (f"the task has changed since it last rested ({', '.join(changed)} changed), so something new "
-            "has reached it: read it, and raise what changed as a card")
+            "has reached it: read it, and raise what changed as a card"
+            + ("" if snap else f" (no queue snapshot was found for it: {snap_why}; so the live task was compared, "
+               "and a note you wrote in this run counts as a change)"))
 
 
 def status_history_terms(body, task_rec):
@@ -2905,7 +3088,24 @@ def rest_state(t, last, fingerprint=None, now=None):
     else:
         why = status_rest(t, last, now, fingerprint)
         until = status_until(t, last[1])
-    return {"state": "resting" if why else "due", "until": until.isoformat() if until else "", "why": why}
+    out = {"state": "resting" if why else "due", "until": until.isoformat() if until else "", "why": why}
+    if not why:
+        out["dueFrom"] = rest_due_from(t, last, fingerprint, until, now)
+    return out
+
+
+def rest_due_from(t, last, fingerprint, until, now=None):
+    """The FIXED day an ended rest came due (finding 6, review of PR 936): its stamped date when the rest
+    ran to it untouched; otherwise (it carried no date, the task changed, or it never had a fingerprint)
+    the day the rest began, the earliest the change can have come. Never "today", which moved on every
+    read, so an ended rest read "moving" for ever and never reached the stuck clock."""
+    today = (now or datetime.now(timezone.utc)).astimezone(LONDON).date()
+    if until and until <= today and not rest_print_changes(t, fingerprint):
+        return until.isoformat()
+    try:
+        return datetime.fromisoformat(str(last[1]).replace("Z", "+00:00")).astimezone(LONDON).date().isoformat()
+    except ValueError:
+        return today.isoformat()
 
 
 # THE NO-OP CARD (backstop, 14 Nov 2026; shrunk 15 Nov 2026). An approve line that, taken WHOLE, says
@@ -2921,6 +3121,24 @@ NOOP_WHOLE_RE = re.compile(
     r"(?:(?:nothing(?:\s+(?:at\s+all|happens|runs|changes|further|else))?|no\s+action(?:\s+(?:is\s+)?(?:taken|needed|required))?)"
     r"(?:\W+(?:(?:this\s+is\s+)?(?:for\s+)?information\s+only|for\s+information))?"
     r"|(?:this\s+is\s+)?(?:for\s+)?information\s+only)\W*$", re.I)
+# ...and its close family (15 Nov 2026, review of PR 936, finding 4): the shrunk check passed the very
+# line the 14 Nov ruling was measured on, "Nothing happens. This only tells you no reply has come
+# yet…". A line that OPENS with the no-op form and goes straight on to say it is only information
+# ("this only tells you", "for your information", "information only", "no reply yet") is refused
+# too. A line whose next clause names a thing (the fourteen real cards, "Nothing is paid today. The
+# bill goes on the Friday payment list.") never opens this way, so it still passes.
+NOOP_INFO_RE = re.compile(
+    r"^\W*(?:if\s+you\s+approve\W*)?"
+    r"(?:nothing(?:\s+(?:at\s+all|happens|runs|changes|further|else))?|no\s+action(?:\s+(?:is\s+)?(?:taken|needed|required))?)"
+    r"[\s.,;:!\-]+"
+    r"(?:(?:this|it)\s+(?:only|just)\s+(?:tells|lets|shows)\s+you\b"
+    r"|(?:this\s+is\s+)?(?:just\s+)?for\s+your\s+information\b"
+    r"|(?:this\s+is\s+)?(?:for\s+)?information\s+only\b"
+    r"|no\s+reply\s+(?:has\s+(?:come|arrived)\s+)?yet\b)", re.I)
+# A family line that goes on to name who acts is a real card, not a no-op (review of PR 938, finding
+# 11): "No reply yet, so the agent closes this chase…", "…approving this closes the old reminder." A
+# refused real card stops real work, which is worse than a worded no-op getting through.
+NOOP_ACTOR_RE = re.compile(r"\b(?:the\s+(?:agent|robot|task)|approving)\b", re.I)
 NOOP_HELP = (
     "       Kevin's ruling (14 Nov 2026): a card whose Approve runs nothing is refused. Two honest routes:\n"
     "         (a) if nothing has changed and nothing is owed, submit it as a STATUS ONLY update: it is\n"
@@ -2930,9 +3148,11 @@ NOOP_HELP = (
 
 
 def approve_line_noop(line):
-    """The line itself when, taken whole, it says Approve runs nothing (NOOP_WHOLE_RE), or ''."""
+    """The line itself when, taken whole, it says Approve runs nothing (NOOP_WHOLE_RE), or when it opens
+    that way and goes on only to say it is information (NOOP_INFO_RE), or ''."""
     text = " ".join(str(line or "").split())
-    if not text or not NOOP_WHOLE_RE.match(text):
+    if not text or not (NOOP_WHOLE_RE.match(text)
+                        or (NOOP_INFO_RE.match(text) and not NOOP_ACTOR_RE.search(text))):
         return ""
     return text[:80]
 
@@ -3285,12 +3505,22 @@ def carry_output_to_keeper(twin_id, twin_fields, keeper_id, stamp):
              f"at Level A. {label}, carried here so nothing on the folded card is lost:"
              + ("\n" + carried if carried else ""))
     keeper = get_task(keeper_id)
-    existing = str((keeper.get("fields", {}) or {}).get(AF["notes"]) or "").rstrip()
+    kf = keeper.get("fields", {}) or {}
+    existing = str(kf.get(AF["notes"]) or "").rstrip()
     if f"FOLDED {twin_id} " in existing:
         # A retry after the twin's own close failed: the block is already
         # there, and a second copy would only pad the keeper's Notes.
         return ""
-    patch_task(keeper_id, {AF["notes"]: (existing + "\n\n" + block).strip()[-90000:]})
+    # A FOLD IS NEWS ON THE KEEPER'S DESCRIPTION TOO (15 Nov 2026, review of PR 938, finding 1). A
+    # twin closed onto a task while a run works on it landed in Notes only, which the run's window
+    # cannot watch (the run writes Notes itself), so the next rest's fingerprint swallowed it and the
+    # task slept up to 14 days on a final notice. One dated line in the Description, in the same
+    # write, is what the window, the fingerprint and wokeByChange all see. The gate's own fold
+    # (create-agent-task.py fold_update) already appends its UPDATE block to the Description.
+    desc = str(kf.get(AF["description"]) or "").rstrip()
+    line = f"UPDATE {datetime.now(LONDON).date().isoformat()}: {twin_id} folded in: {' '.join(twin_name.split())}"
+    patch_task(keeper_id, {AF["notes"]: (existing + "\n\n" + block).strip()[-90000:],
+                           AF["description"]: (desc + "\n\n" + line).strip()[-80000:]})
     return block
 
 
@@ -3432,6 +3662,10 @@ def file_status_update(args, output, level, notes_seen):
     owed = approval_owed_problem(dict(fresh_rec, id=args.task))
     if owed:
         sys.exit(f"ERROR: refusing to file {args.task} as a status update: {owed}.")
+    # A reply that landed while this run worked, read just before the write (run_window_problem).
+    window = run_window_problem(args.task, rest_view(fresh_rec), run_snapshot(args.task)[0])
+    if window:
+        sys.exit(f"ERROR: refusing to file {args.task} as a status update: {window}.")
     status_now = sel(fresh.get(AF["status"])) or "open"
     holder = next(iter(links(fresh.get(AF["teamMember"]))), "")
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
@@ -3455,7 +3689,8 @@ def file_status_update(args, output, level, notes_seen):
         sys.exit(f"ERROR: {args.task} was approved while the status update was being written: {owed}. "
                  "The update's line stands in Notes, and the task does NOT rest.")
     # The rest holds only while the task is exactly as this read shows it (rest_fingerprint).
-    ledger_append(args.task, "status", fingerprint=rest_fingerprint(rest_view(check_rec)))
+    ledger_append(args.task, "status", fingerprint=rest_fingerprint(rest_view(check_rec)),
+                  lengths=rest_lengths(rest_view(check_rec)))
     print(json.dumps({"submitted": args.task, "handled": True, "card": False, "level": AUTONOMY_ACT,
                       "category": STATUS_CATEGORY, "carry": "status", "status": status_now,
                       "restsUntil": level["restUntil"]}))
@@ -4447,8 +4682,8 @@ def queue_lanes(ai_agents=None, role_roster=None, role_roster_error=""):
         if rest["state"] == "resting":
             lanes[t["id"]] = ("resting", {"restUntil": rest["until"], "restWhy": rest["why"], "restFrom": lane})
         elif rest["state"] == "due":
-            # The day it came due: its rest's end, or today when the task changed before that day.
-            lanes[t["id"]] = (lane, dict(extra or {}, restDue=min(rest["until"] or today_london(), today_london())))
+            # The fixed day it came due (rest_due_from): never today, or it would never read stuck.
+            lanes[t["id"]] = (lane, dict(extra or {}, restDue=rest["dueFrom"]))
     return lanes
 
 
@@ -4641,6 +4876,16 @@ def build_queue(args=None):
 
     combined = approved_hb + changes_hb + new_work + deferred_hb
     intents = open_intents()
+    # WOKEN BY A CHANGE (15 Nov 2026, review of PR 936, finding 1). A task whose rest ended because
+    # something on it changed (a reply appended, a twin folded in, a verdict, a holder) used to reach
+    # the run looking exactly like one whose date came, so a second keep-open could bury the reply
+    # for another fortnight. The entry now says what changed and, for a plain append, the new text;
+    # `complete --keep-open` refuses such a task without --changed.
+    rest_events = ledger_rest_events()
+    for t in combined:
+        woke = rest_wake(t, rest_events.get(t["id"]))
+        if woke:
+            t["wokeByChange"] = woke
     for t in combined:
         t["kind"] = ("carry_out" if t["outcome"] in APPROVED
                      else "redo" if t["outcome"] == "Changes requested"
@@ -4794,7 +5039,9 @@ def build_queue(args=None):
 
 
 def cmd_queue(args):
-    print(json.dumps(build_queue(), indent=2))
+    q = build_queue()
+    write_run_queue(q)
+    print(json.dumps(q, indent=2))
 
 
 # ─── WRITES ───────────────────────────────────────────────────────────
@@ -6809,25 +7056,34 @@ def lesson_line(date, task_name, feedback):
     return f"- {date}: {name} — {words}"
 
 
-def _lessons_section_bounds(text):
+def _lessons_section_bounds(text, heading=LESSONS_HEADING):
     """Where the lessons live, so a line is appended INSIDE the section even
     when later sections follow it. Appending at end-of-file looked right until
     someone added a section below, which silently orphaned every new lesson.
     A generated block's opening marker ends the section too (7 Oct 2026): the
     binding rules block opens with a marker line BEFORE its own "## " heading,
     so 18 lessons landed inside it that day, the block read as stale in 5 of 24
-    agents, the test gate went red, and the next push would have deleted them."""
-    start = text.find(LESSONS_HEADING)
-    if start == -1:
+    agents, the test gate went red, and the next push would have deleted them.
+
+    The heading is a whole LINE, exactly `heading` (15 Nov 2026). A plain text
+    search matched the first MENTION of the words: the Content Engine's and
+    Inbox Triage's files say "read the `## Lessons from Kevin` section below"
+    near the top, so every lesson was filed under an unrelated heading there
+    and watch.kevin_lessons never saw them. A brand section ("## Lessons from
+    Kevin (Operations Director)") is its own heading and is never matched by
+    the plain one: a caller that wants it passes it."""
+    m = re.search(r"^" + re.escape(heading) + r"[ \t]*$", text, re.M)
+    if not m:
         return None
-    body = start + len(LESSONS_HEADING)
+    start, body = m.start(), m.end()
     nxt = re.search(r"^(?:## |<!-- )", text[body:], re.M)
     return (start, body + nxt.start() if nxt else len(text))
 
 
-def append_lesson_to_file(agent_slug, line):
+def append_lesson_to_file(agent_slug, line, heading=LESSONS_HEADING):
     """Append one lesson to the agent's definition file. Idempotent on the
-    exact line, so a re-run after a crash cannot duplicate it."""
+    exact line, so a re-run after a crash cannot duplicate it. `heading` is the
+    section's exact heading line (a brand section passes its own)."""
     path = os.path.join(AGENT_DIR, f"{agent_slug}.md")
     if not os.path.exists(path):
         raise RuntimeError(f"no agent file at {path}")
@@ -6835,9 +7091,9 @@ def append_lesson_to_file(agent_slug, line):
         text = fh.read()
     if line in text:
         return {"path": path, "written": False, "reason": "already present"}
-    bounds = _lessons_section_bounds(text)
+    bounds = _lessons_section_bounds(text, heading)
     if bounds is None:
-        new = (text.rstrip("\n") + "\n\n" + LESSONS_HEADING + "\n\n"
+        new = (text.rstrip("\n") + "\n\n" + heading + "\n\n"
                + LESSONS_PREAMBLE + "\n\n" + line + "\n")
     else:
         _, end = bounds
@@ -6851,7 +7107,7 @@ def append_lesson_to_file(agent_slug, line):
         landed = fh.read()
     if line not in landed:         # claimed writes get checked, always
         raise RuntimeError(f"lesson did not land in {path}")
-    bounds = _lessons_section_bounds(landed)
+    bounds = _lessons_section_bounds(landed, heading)
     count = len([l for l in landed[bounds[0]:bounds[1]].splitlines()
                  if l.startswith("- ")]) if bounds else 0
     return {"path": path, "written": True, "lessonCount": count}
@@ -9034,6 +9290,38 @@ def demote_for_cost(level, cost_owed):
     return level
 
 
+# A wake that is Kevin's verdict and nothing else (he approved again, or approved a card that was
+# resting on a status update): the carry-out IS the answer to it, so no --changed is asked for.
+VERDICT_LABELS = {"Approval Outcome", "Approved At"}
+
+
+def kept_open_woke(task_id, t):
+    """([labels of what woke the task by a change], a note for the refusal) before a keep-open writes.
+    Exits when the task changed while the run worked (run_window_problem). With the run's queue
+    snapshot, the wake is what the queue told the run (its wokeByChange). With none, it is read from
+    the ledger's last rest against the task as it is now, Notes included."""
+    snap, why = run_snapshot(task_id)
+    window = run_window_problem(task_id, t, snap)
+    if window:
+        sys.exit(f"ERROR: refusing to keep {task_id} open: {window}.")
+    if snap is not None:
+        labels = list(((snap.get("wokeByChange") or {}).get("changed")) or [])
+        # Kevin's own verdict alone is the instruction this carry-out acts on, not news it could bury.
+        return ([] if set(labels) <= VERDICT_LABELS else labels), ""
+    # No snapshot (a run by hand, a run suspended past the age limit, a runner without the variable):
+    # every change since the last rest counts, Notes included (review of PR 938, finding 3). A note
+    # this run wrote itself then costs one --changed sentence, the safe direction: a twin folded into
+    # Notes is never let through unasked.
+    woke = rest_wake(t, ledger_rest_events().get(task_id))
+    labels = list((woke or {}).get("changed", []))
+    if set(labels) <= VERDICT_LABELS:
+        labels = []
+    print(f"INFO: no queue snapshot for {task_id} ({why}); its last rest was compared with the task as it is "
+          "now, Notes included.", file=sys.stderr)
+    return labels, (f"\n       (No queue snapshot was found for it: {why}. Compared with its last rest instead, "
+                    "Notes included, so a note you wrote yourself in this run counts too: say so in --changed.)")
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
@@ -9120,12 +9408,21 @@ def cmd_complete(args):
         problem, until = next_look_problem(until_raw, "--until", KEPT_OPEN_MAX_DAYS, due=t.get("dueDate"))
         if problem:
             sys.exit(f"ERROR: refusing to keep {args.task} open: {problem}.\n" + KEPT_OPEN_UNTIL_HELP)
+        changed_said = " ".join(str(getattr(args, "changed", "") or "").split())
+        woke, snap_note = kept_open_woke(args.task, t)
+        if woke and not changed_said:
+            sys.exit(f"ERROR: refusing to keep {args.task} open: it woke because something on it changed "
+                     f"since its last rest ({', '.join(woke)} changed). Read the whole task again and raise what "
+                     "changed as its own card (or carry it out if it is already approved work) first. Then keep "
+                     "it open with --changed \"<one sentence: what changed on the task and what you did about "
+                     "it>\", which goes on the CARRIED OUT line for Kevin to read." + snap_note)
         holder = next(iter(t.get("teamMemberIds") or []), "")
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         # One line: a note with line breaks could otherwise forge a stamped line of its own.
         detail = " ".join((args.note or "the approved action").split())
         mark = (f"[{stamp} — agent] {CARRIED_OUT_MARK} {detail}. "
-                "Left OPEN deliberately: the approval said so. "
+                + (f"What changed since the last look: {changed_said.rstrip('.')}. " if changed_said else "")
+                + "Left OPEN deliberately: the approval said so. "
                 f"Next look: it rests until {until.isoformat()}." + (f" Holder: {holder}." if holder else ""))
         # Through append_notes, never by hand: this line had no cap, so a full Notes field
         # refused the write and the carried-out work was never recorded (finding 20261102-phase-3-1166).
@@ -9133,14 +9430,16 @@ def cmd_complete(args):
         # The rest holds only while the task is exactly as it stands now, the line above included
         # (rest_fingerprint, 15 Nov 2026). A re-read that fails still records the carry-out: the rest
         # then has no fingerprint and ends at its next read, the safe direction, and says so.
+        lens = None
         try:
-            fp = rest_fingerprint(rest_view(get_task(args.task)))
+            after = rest_view(get_task(args.task))
+            fp, lens = rest_fingerprint(after), rest_lengths(after)
         except (Exception, SystemExit) as exc:          # noqa: BLE001 — reported, never silent
             fp = ""
             print(f"WARNING: {args.task} could not be re-read after the carry-out line was written "
                   f"({str(exc)[:120]}), so its rest has no fingerprint and it wakes at its next read.",
                   file=sys.stderr)
-        ledger_append(args.task, "done", fingerprint=fp)
+        ledger_append(args.task, "done", fingerprint=fp, lengths=lens)
         print(json.dumps({"carriedOut": args.task, "keptOpen": True,
                           "status": t["status"], "restsUntil": until.isoformat()}))
         return
@@ -10720,11 +11019,45 @@ def read_merge_attempts(path=None):
     return v if isinstance(v, dict) else {}
 
 
+# What each of merge-approved.py's error kinds (its ERR_* names, attempts.json errKind) was, in
+# plain words, so a stop is never called "failed test runs" when no test failed (review of PR 937,
+# findings 13 and 16). An unknown kind is named as it is.
+MERGE_ERR_WORDS = {
+    "gate-refused": "merge-pr.py refused it without a failing test",
+    "card-not-closed": "the PR merged but its card would not close",
+    "card-unreadable": "the card could not be read again just before the merge",
+    "pr-unreadable": "GitHub could not be read for the PR",
+    "pr-state": "GitHub showed the PR in a state the robot cannot merge from",
+    "github-disagrees": "merge-pr.py and GitHub disagreed on whether it merged",
+    "run-broke": "the merge run itself broke",
+}
+
+
+def _same_head(a, b):
+    """Two commit ids name one head (either may be the short form)."""
+    a, b = str(a or ""), str(b or "")
+    return bool(a and b) and (a.startswith(b) or b.startswith(a))
+
+
+def merge_stop_facts(pr, card, entry):
+    """{"kind": "red" | "moved" | an error kind, "words", "tries", "finding"} for an approved merge card
+    the robot has STOPPED on, or None. The one reading approved_merge_state and the Estate sentence
+    share, so neither says more than the attempts record holds."""
+    state = _merge_rest(pr, card, entry)
+    return state[2] if state and state[0] == "merge-stopped" else None
+
+
 def approved_merge_state(pr, card, entry):
     """(code, words) for an APPROVED merge card that is resting, or None for the plain wording.
     Pure. ENTRY is merge-approved.py's attempts.json entry for the PR; anything malformed is None.
     A card the robot STOPPED on (RED_MAX reds, or RED_MAX failed re-tests of a moved head) is
     "merge-stopped": it needs a fix, so the Estate row must not count it as being merged."""
+    state = _merge_rest(pr, card, entry)
+    return state[:2] if state else None
+
+
+def _merge_rest(pr, card, entry):
+    """(code, words, stop facts or None), or None. See approved_merge_state."""
     e = entry if isinstance(entry, dict) else {}
 
     def count(key):
@@ -10741,39 +11074,48 @@ def approved_merge_state(pr, card, entry):
         return (at + timedelta(hours=merge_card.RED_RETRY_HOURS)).astimezone(LONDON).strftime("%H:%M on %d %b")
 
     head, cap = str((card or {}).get("head") or ""), merge_card.RED_MAX
+    finding = str(e.get("finding") or "")
+    filed = finding or "its finding is not filed yet"
     if e.get("result") == "red" and (not head or str(e.get("head") or "") == head):
         reds = count("reds")
         if reds >= cap:
-            return "merge-stopped", (f"the merge card for PR #{pr} stopped after {reds} failed test runs "
-                                     f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix "
-                                     "before it can merge")
+            return ("merge-stopped", (f"the merge card for PR #{pr} stopped after {reds} failed test runs "
+                                      f"({filed}); it needs a fix before it can merge"),
+                    {"kind": "red", "words": f"its tests failed {reds} times", "tries": reds, "finding": finding})
         if reds > 0:
-            return "merge-approved", (f"you approved the merge card for PR #{pr}; its tests failed ({reds} of {cap}), "
-                                      f"the robot tries again after {after('lastRedAt')}")
+            return ("merge-approved", (f"you approved the merge card for PR #{pr}; its tests failed ({reds} of {cap}), "
+                                       f"the robot tries again after {after('lastRedAt')}"), None)
     new = str(e.get("newHead") or "")
-    if e.get("result") == "moved" and not (new and head and new.startswith(head)):
+    # A moved record written against an older card head is stale once the card was refreshed to a newer
+    # head (review of PR 937, finding 13): the card Kevin approved is not the one that record stopped on.
+    stale = bool(head) and ((bool(e.get("head")) and not _same_head(e.get("head"), head))
+                            or (not e.get("head") and bool(e.get("noHead"))))
+    if e.get("result") == "moved" and not stale and not (new and head and new.startswith(head)):
         tries = count("movedTries")
         if tries >= cap:
-            return "merge-stopped", (f"the merge card for PR #{pr} stopped: the PR changed after you approved it and "
-                                     f"its new code failed {tries} re-tests "
-                                     f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix before "
-                                     "it can merge")
+            return ("merge-stopped", (f"the merge card for PR #{pr} stopped: the PR changed after you approved it and "
+                                      f"its new code failed {tries} re-tests ({filed}); it needs a fix before it "
+                                      "can merge"),
+                    {"kind": "moved", "words": f"its changed code failed {tries} re-tests", "tries": tries,
+                     "finding": finding})
         if tries > 0:
             what = ("the card recorded no tested head and the PR's code" if e.get("noHead") else
                     "the PR changed since and its new code")
-            return "merge-approved", (f"you approved the merge card for PR #{pr}, but {what} is not green "
-                                      f"({tries} of {cap}); the robot re-tests it after {after('lastMovedAt')}")
+            return ("merge-approved", (f"you approved the merge card for PR #{pr}, but {what} is not green "
+                                       f"({tries} of {cap}); the robot re-tests it after {after('lastMovedAt')}"), None)
     # Any other failure (merge-approved.py ERROR_RESULT with an errKind, 14 Nov 2026): retried by the
-    # robot on the same clock, stopped after RED_MAX of one kind.
+    # robot on the same clock, stopped after RED_MAX of one kind. The Estate sentence words it by its
+    # kind (MERGE_ERR_WORDS): no test failed.
     if e.get("result") == "error" and e.get("errKind") and str(e.get("head") or "") == head:
-        tries, kind = count("errTries"), e.get("errKind")
+        tries, kind = count("errTries"), str(e.get("errKind"))
+        what = MERGE_ERR_WORDS.get(kind, f"the merge run failed ({kind})")
         if tries >= cap:
-            return "merge-stopped", (f"the merge card for PR #{pr} stopped: the merge run failed {tries} times ({kind}) "
-                                     f"({e.get('finding') or 'its finding is not filed yet'}); it needs a fix before "
-                                     "it can merge")
+            return ("merge-stopped", (f"the merge card for PR #{pr} stopped: the merge run failed {tries} times ({kind}) "
+                                      f"({filed}); it needs a fix before it can merge"),
+                    {"kind": kind, "words": f"{what}, {tries} times", "tries": tries, "finding": finding})
         if tries > 0:
-            return "merge-approved", (f"you approved the merge card for PR #{pr}; the merge run failed ({kind}, "
-                                      f"{tries} of {cap}), the robot tries again after {after('lastErrAt')}")
+            return ("merge-approved", (f"you approved the merge card for PR #{pr}; the merge run failed ({kind}, "
+                                       f"{tries} of {cap}), the robot tries again after {after('lastErrAt')}"), None)
     return None
 
 
@@ -10791,6 +11133,11 @@ def tool_wall_state(b, status, detail, cards, days, findings_error="", cards_err
         if card.get("status") == "Completed" and status in ("open", "claimed"):
             # Closed by the robot because its PR was closed unmerged (14 Nov 2026): the finding is back
             # in the fixer's queue, so the card says nothing about this wall any more.
+            card = None
+        elif (card.get("status") == "Completed" and status == "pending"
+              and str((detail or {}).get("pr") or "") not in ("", str(pr))):
+            # The finding is pending on a NEW pull request (review of PR 937, finding 8): the old card
+            # was closed, and the wall now waits on the new PR, not on the closed card.
             card = None
     if card:
         pr = card["pr"]
@@ -11042,6 +11389,10 @@ def blockers_scan(sweep=False, now=None):
             if card:
                 row["mergeCard"] = {"pr": card["pr"], "task": card["id"], "status": card["status"],
                                     "outcome": card["outcome"]}
+                if code == "merge-stopped":
+                    # What it stopped on and whether its finding is filed, for the Estate sentence.
+                    row["mergeStop"] = merge_stop_facts(
+                        card["pr"], card, (once("mergeAttempts", read_merge_attempts)[0] or {}).get(str(card["pr"])))
         open_walls.append(row)
         if days is None or days >= BLOCKER_STALE_DAYS:
             stale.append(row)
@@ -14490,6 +14841,10 @@ def main():
                    help="REQUIRED with --keep-open: the next look (the chase date, a reply due, the "
                         "hearing), after today and at most %d days ahead; the task rests until then"
                         % KEPT_OPEN_MAX_DAYS)
+    c.add_argument("--changed", default="", metavar="SENTENCE",
+                   help="REQUIRED with --keep-open when the task woke because something on it changed "
+                        "(the queue entry's wokeByChange): one sentence, what changed and what you did "
+                        "about it; written on the CARRIED OUT line")
     c.add_argument("--no-certificate", default="", metavar="REASON",
                    help="the file that arrived on this task is not a certificate "
                         "(say what it is); recorded in Notes")

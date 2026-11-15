@@ -852,8 +852,11 @@ print(json.dumps({"st": st, "detail": detail, "one": one[1], "counts": [payload[
     const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
     expect(r.counts).toEqual([1, 3, 0]);                                  // never "being merged", never the daily fix
     expect(r.detail).toMatch(/ 1 fix approved by you and being merged by the robot\./);
-    expect(r.detail).toMatch(/ 3 tasks waiting on 2 merges you approved that stopped after failed test runs and need a fix \(PR #890, PR #901\); the robot filed a stop finding for the daily robot fix\./);
-    expect(r.one).toMatch(/1 task waiting on 1 merge you approved that stopped after failed test runs and needs a fix \(PR #890\)/);
+    // Rows from a sweep that carried no mergeStop (review of PR 937, finding 16): the sentence claims
+    // neither failed tests nor a filed finding it has not seen.
+    expect(r.detail).toMatch(/ 3 tasks waiting on 2 merges you approved that the robot stopped retrying and need a fix \(PR #890; PR #901\)\./);
+    expect(r.detail).not.toMatch(/failed test runs|filed a stop finding/);
+    expect(r.one).toMatch(/1 task waiting on 1 merge you approved that the robot stopped retrying and needs a fix \(PR #890\)/);
     expect(r.one).not.toMatch(/being merged|waiting on the daily robot fix/);
     expect(r.states).toEqual(['merge-approved', 'merge-stopped', 'merge-stopped', 'merge-stopped']);
     expect(r.fix[1]).toMatch(/stopped after 4 failed test runs/);        // each wall's own words reach the page

@@ -40,7 +40,8 @@ def kevin_lessons(path=None):
     path = path or AGENT_FILE
     if not os.path.exists(path): return ""
     text = open(path).read()
-    m = re.search(r"^## Lessons from Kevin\s*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    # The heading LINE, never a mention; ends at the next heading or a generated block's marker line.
+    m = re.search(r"^## Lessons from Kevin[ \t]*\n(.*?)(?=^## |^<!-- |\Z)", text, re.S | re.M)
     body = (m.group(1) if m else "").strip()
     return ("Lessons Kevin has asked you to remember (apply every one):\n" + body) if body else ""
 WORK = os.path.expanduser("~/knowledge-os/logs/content-engine/work")
