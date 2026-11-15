@@ -204,6 +204,9 @@ def fake_query_all(table, formula, fields, why, **kw):
 m.query_all = fake_query_all
 m.read_role_roster = lambda: (None, "not read in this test")
 m.read_activity = lambda *a, **k: ([], set())
+# Offline: the lane read goes through agent-dispatch.py's own Airtable client, which fake_query_all
+# never reaches (15 Nov 2026).
+m.read_dispatch_lanes = lambda *a, **k: (None, "not read in this test")
 buf, err = io.StringIO(), ""
 try:
     with contextlib.redirect_stdout(buf):

@@ -55,6 +55,10 @@ m.query_all = fake_query_all
 m.read_role_roster = lambda: (None, "not read in this test")   # the register read goes through agent-dispatch.py
 m.read_activity = lambda *a, **k: ([], set())
 m.dispatch_in_flight = lambda *a, **k: set()
+# The lane read goes through agent-dispatch.py's own Airtable client (queue_lanes), which this stub
+# never reaches: left live it read every open task over the network and timed the case out
+# (15 Nov 2026). The lanes are not what this case is about.
+m.read_dispatch_lanes = lambda *a, **k: (None, "not read in this test")
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     m.cmd_board()
