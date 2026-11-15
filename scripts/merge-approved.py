@@ -898,9 +898,12 @@ def fail(card, attempts, result, why, merged=False, kind=""):
                     % (out["retryAt"], reds, RED_MAX))
     else:
         kind = ERR_CLOSE if merged else (kind or ERR_RUN)
-        # ONE count per card head and approval across every kind (15 Nov 2026 review R3): two failures
-        # taking turns used to restart each other's count and never reach the stop.
-        same = (prev.get("result") == ERROR_RESULT and same_head and prev.get("approvedAt") == card["approvedAt"])
+        # ONE count per card head and approval across every kind BEFORE a merge (15 Nov 2026 review
+        # R3): two failures taking turns used to restart each other's count and never reach the stop.
+        # A merged card that will not close is a different job (review N2): it keeps a count of its
+        # own, as before R3, and never shares a count or a stop finding with anything before the merge.
+        same = (prev.get("result") == ERROR_RESULT and same_head and prev.get("approvedAt") == card["approvedAt"]
+                and (prev.get("errKind") == ERR_CLOSE) == (kind == ERR_CLOSE))
         tries = (_count(prev, "errTries") if same else 0) + 1
         seen = dict(prev["lastErrors"]) if same and isinstance(prev.get("lastErrors"), dict) else {}
         new_kind = kind not in seen
@@ -980,9 +983,12 @@ def held_fail(card, attempts, kind, about, why, noted=False):
         filed = prev.get("finding") or held_finding(card, kind, tries, why)
         entry["finding"] = filed
         out["stopped"] = True
-        note = not prev.get("finding")
+        # ONE stop line per episode (review N3): a finding that will not file is retried silently.
+        note = not prev.get("stopNoted")
+        if prev.get("stopNoted"):
+            entry["stopNoted"] = True
         why += (" Seen %d times, so the robot has stopped looking (%s)."
-                % (tries, filed or "finding not filed; the next run files it"))
+                % (tries, filed or "finding not filed; the robot files it on a later run"))
     else:
         out["retryAt"] = now_iso(at if tries == 1 else at + RED_RETRY_HOURS * 3600)
         why += " The robot looks again by itself %s (try %d of %d)." % (
@@ -994,6 +1000,9 @@ def held_fail(card, attempts, kind, about, why, noted=False):
     if note:
         try:
             annotate(card["id"], "MERGE CARD HELD: %s" % why)
+            if out.get("stopped"):
+                entry["stopNoted"] = True     # recorded only once the line is on the card
+                save_attempts(attempts)
         except Exception as e:  # noqa: BLE001 — the result still says what happened
             out["annotateError"] = str(e)[:200]
             print("WARNING: %s" % e, file=sys.stderr)

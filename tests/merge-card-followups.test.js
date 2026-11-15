@@ -62,6 +62,7 @@ ma.clock = lambda: NOW[0]
 NOTES, MERGES, ADDS, COMPLETES, PATCHES = [], [], [], [], []
 PENDING = []
 LIST_RC, FIND_RC = [0], [0]
+COMPLETE_FAIL = [0]      # the next N closes fail
 GH = {}
 def gh(pr):
     return GH.setdefault(int(pr), {"state": "OPEN", "mergeCommit": None, "headRefOid": "${HEAD}"})
@@ -80,6 +81,9 @@ def py(script, *args, timeout=300):
         c = card(args[1]); c["notes"] = (c["notes"] + "\\n" + args[3]).strip()
     if script == "agent-dispatch.py" and args[0] == "complete":
         COMPLETES.append(list(args))
+        if COMPLETE_FAIL[0]:
+            COMPLETE_FAIL[0] -= 1
+            return subprocess.CompletedProcess([script], 1, "", "Airtable PATCH -> HTTP 503 (invented)")
         c = card(args[1])
         if c["outcome"] not in MC.APPROVED:     # agent-dispatch.py cmd_complete's own refusal
             return subprocess.CompletedProcess([script], 1, "", "ERROR: refusing to complete %s - outcome is '%s', not an approval." % (args[1], c["outcome"] or "empty"))
@@ -359,6 +363,53 @@ print(json.dumps({"log": log, "adds": ADDS, "notes": len(NOTES), "gates": len(re
   });
 });
 
+describe('N2 (I2): after a merge has landed, closing the card never shares a count with anything before it', () => {
+  it('three gate refusals, then a merge whose close fails once: the close is try 1 of its own, rests, and the card closes', () => {
+    const r = drive(`
+GATE = (1, json.dumps({"merged": False, "why": "cannot judge: a busy gate (invented)", "vitest": None}), "")
+log = []
+for h in (0, 6.5, 13):
+    at(h); MERGE_RESULTS[:] = [GATE]; cmd_run()
+at(19.5); COMPLETE_FAIL[0] = 1
+code, out = cmd_run()
+d = out["done"][0]
+e = att()["812"]
+log.append([d["result"], d.get("kind"), bool(d.get("stopped")), e.get("errTries"), sorted(e.get("lastErrors", {}))])
+at(25.6)
+code2, out2 = cmd_run()
+print(json.dumps({"log": log, "code": code, "done2": out2["done"][0], "status": card("recCardAaaaaaaaaa")["status"], "adds": [title(a) for a in ADDS]}))`);
+    expect(r.log[0]).toEqual(['merged-open', 'card-not-closed', false, 1, ['card-not-closed']]);
+    expect(r.code).toBe(0);
+    expect(r.done2).toMatchObject({ action: 'merge', result: 'merged' });
+    expect(r.status).toBe('Completed');
+    expect(r.adds).toEqual([]);                             // no stop finding of any kind
+  });
+
+  it('four refusals (stopped, finding 001), then merged by hand and the close fails once: never borrows finding 001, closes 6 hours later', () => {
+    const r = drive(`
+GATE = (1, json.dumps({"merged": False, "why": "cannot judge: a busy gate (invented)", "vitest": None}), "")
+for h in (0, 6.5, 13, 19.5):
+    at(h); MERGE_RESULTS[:] = [GATE]; cmd_run()
+stopped = att()["812"]
+gh(812).update(state="MERGED", mergeCommit={"oid": "abc123def4567890"})
+at(20); COMPLETE_FAIL[0] = 1
+_, out = cmd_run()
+after = att()["812"]
+at(26.1)
+_, out2 = cmd_run()
+print(json.dumps({"stopped": stopped.get("finding"), "done": out["done"][0], "after": after, "done2": out2["done"][0],
+                  "status": card("recCardAaaaaaaaaa")["status"], "adds": [title(a) for a in ADDS]}))`);
+    expect(r.stopped).toBe('20261106-merge-approved-001');
+    expect(r.done).toMatchObject({ result: 'merged-open', kind: 'card-not-closed' });
+    expect(r.done.stopped).toBeUndefined();
+    expect(r.after.finding).toBeUndefined();               // finding 001 is about gate refusals, never this
+    expect(r.after).toMatchObject({ errKind: 'card-not-closed', errTries: 1 });
+    expect(r.done2).toMatchObject({ action: 'merge', result: 'merged' });
+    expect(r.status).toBe('Completed');
+    expect(r.adds).toHaveLength(1);
+  });
+});
+
 describe('D (R4, R5): a held card rests and stops like any failure, and never makes a merge more likely', () => {
   it('a bad attempts record on the only approved card: queued, noted once, rests, ONE stop finding, exit 0 after the first try', () => {
     const r = drive(`
@@ -409,6 +460,45 @@ print(json.dumps({"log": log, "adds": ADDS}))`);
   });
 });
 
+describe('N3 (I3): a held card at its cap writes ONE stop line, however often its finding fails to file', () => {
+  it('a bad record whose stop finding will not file: one first-try line, one stop line, silent retries, exit 0, then filed once', () => {
+    const r = drive(`
+ma.save_attempts({"812": "red"})
+FIND_RC[0] = 1
+codes = []
+for h in (0, 0.5, 6.6, 12.7, 13.2, 13.7, 14.2, 14.7):
+    at(h); codes.append(cmd_run()[0])
+held_lines = [n for n in NOTES if n.startswith("MERGE CARD HELD:")]
+tries = att()["held"]["812"]["tries"]
+FIND_RC[0] = 0
+at(15.2); codes.append(cmd_run()[0])
+at(15.7); last = cmd_run()[1]["done"][0]
+print(json.dumps({"codes": codes, "held_lines": len(held_lines), "after": len([n for n in NOTES if n.startswith("MERGE CARD HELD:")]),
+                  "tries": tries, "adds": len(ADDS), "filed": att()["held"]["812"].get("finding"), "last": last["action"]}))`);
+    expect(r.codes).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(r.held_lines).toBe(2);                           // the first try and the stop, never one per run
+    expect(r.after).toBe(2);                                // filing it later writes no more lines
+    expect(r.tries).toBe(8);
+    expect(r.adds).toBe(6);                                 // five silent refusals, then filed
+    expect(r.filed).toBe('20261106-merge-approved-006');
+    expect(r.last).toBe('skip');
+  });
+
+  it('a closed PR whose findings list and findings add both fail: one stop line in all, exit 0 while it rests', () => {
+    const r = drive(`
+CARDS[:] = [C(findings=["20261101-invented-001"])]
+gh(812).update(state="CLOSED")
+PENDING[:] = [{"id": "20261101-invented-001", "status": "pending", "pr": "812"}]
+LIST_RC[0] = 1; FIND_RC[0] = 1
+codes = []
+for h in (0, 0.5, 6.6, 12.7, 13.2, 13.7, 14.2, 20.3):
+    at(h); codes.append(cmd_run()[0])
+print(json.dumps({"codes": codes, "held": len([n for n in NOTES if n.startswith("MERGE CARD HELD:")])}))`);
+    expect(r.codes).toEqual([1, 0, 0, 0, 0, 0, 0, 0]);
+    expect(r.held).toBe(1);                                 // the close's own note says try 1; then the stop, once
+  });
+});
+
 describe('E (finding 5): a PR closed and then reopened gets a MERGE card again', () => {
   const fixer = (prelude) => run(GUARD + `
 import importlib.util, json, sys, io, contextlib, argparse
@@ -432,33 +522,95 @@ def rec(id, status, outcome="", notes="", head="${HEAD}"):
     return {"id": id, "createdTime": "2026-11-06T08:00:00.000Z", "fields": {F["name"]: "MERGE: PR #812 — fix", F["status"]: status,
             F["approvalOutcome"]: outcome, F["notes"]: notes,
             F["agentOutput"]: "MERGE CARD: PR #812, fix\\nTested head: %s\\n" % head}}
-CLOSED_NOTE = "[06 Nov 2026 09:00 — merge-approved] PR CLOSED, NOT MERGED: PR #812 was closed on GitHub without merging, so nothing was merged."
 ROWS = []
 merge_card.read_tasks = lambda formula, fields=None, max_records=None: ROWS
+import os, tempfile
+os.environ["MERGE_APPROVED_DIR"] = tempfile.mkdtemp(prefix="od-fm-att-")
+def robot_closed(*ids):
+    """merge-approved.py's own record: the cards it closed because PR 812 was closed unmerged."""
+    with open(os.path.join(os.environ["MERGE_APPROVED_DIR"], "attempts.json"), "w") as fh:
+        json.dump({"812": {"result": "closed-unmerged", "at": "2026-11-06T09:00:00Z", "tasks": list(ids), "reopened": []}}, fh)
+GH_STATE = ["OPEN"]       # what GitHub says PR 812 is now; None = the read fails
+GH_READS = []
+def sh(args, cwd=None, timeout=1800):
+    if args[:3] == ["gh", "pr", "view"] and "state" in args:
+        GH_READS.append(args[3])
+        if GH_STATE[0] is None:
+            return subprocess.CompletedProcess(args, 1, "", "HTTP 502: invented outage")
+        return subprocess.CompletedProcess(args, 0, json.dumps({"state": GH_STATE[0]}), "")
+    raise RuntimeError("unexpected command in a test: %r" % (args,))
+fm.sh = sh
+ERR = io.StringIO()
 def merge():
     buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(ERR):
         code = fm.cmd_merge(argparse.Namespace(pr=812))
     return code, json.loads(buf.getvalue())
 ${prelude}
 `);
 
-  it('a card the robot closed for a closed PR: the reopened PR gets a NEW card for its current head; the old card is left closed', () => {
+  // I1 (review N1, N5): a card the ROBOT closed (it is in its own record's `tasks`) is no decision only
+  // while GitHub says the PR is OPEN now. Its Notes line plays no part: here it is deliberately absent.
+  it('reopened: the robot closed the card (its record says so, no Notes line), GitHub says OPEN: ONE new card for the current head; the old one is left closed', () => {
     const r = fixer(`
-ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "Approved as-is", CLOSED_NOTE)]
+robot_closed("recOldCardAaaaaa")
+ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "Approved as-is")]
 code, out = merge()
 print(json.dumps({"code": code, "card": out["mergeCard"], "created": len(CREATED), "head": "Tested head: ${NEWHEAD}" in CREATED[0][F["agentOutput"]] if CREATED else None,
-                  "patched": PATCHED, "gates": len(GATES)}))`);
+                  "patched": PATCHED, "gates": len(GATES), "reads": GH_READS}))`);
     expect(r.gates).toBe(1);
     expect(r.card).toMatchObject({ task: 'recNewCardAaaaaa', already: false });
     expect(r.created).toBe(1);
     expect(r.head).toBe(true);
     expect(r.patched).toEqual([]);                         // the old closed card is not touched
+    expect(r.reads.length).toBeGreaterThan(0);              // GitHub's state was asked
   });
 
-  it('never two open cards: with a new open card beside the old closed one, that open card is the one used', () => {
+  for (const state of ['CLOSED', 'MERGED']) {
+    it(`still ${state}: the robot-closed card keeps answering, so no card, no gate, and no daily loop of cards`, () => {
+      const r = fixer(`
+robot_closed("recOldCardAaaaaa")
+ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "Approved as-is")]
+GH_STATE[0] = "${state}"
+runs = [merge() for _ in range(3)]
+print(json.dumps({"cards": [o["mergeCard"] for _, o in runs], "created": len(CREATED), "gates": len(GATES)}))`);
+      expect(r.created).toBe(0);
+      expect(r.gates).toBe(0);
+      expect(r.cards).toEqual([0, 1, 2].map(() => ({ task: 'recOldCardAaaaaa', already: true })));
+    });
+  }
+
+  it('a closed card NOT in the robot\'s record (closed some other way) stands, even with the robot\'s words in its Notes', () => {
     const r = fixer(`
-ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "", CLOSED_NOTE), rec("recNewCardBbbbbb", "Approval", "", "", "${NEWHEAD}")]
+robot_closed("recSomeOtherCard")
+ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "Approved as-is", "PR CLOSED, NOT MERGED: copied words (invented)")]
+code, out = merge()
+print(json.dumps({"card": out["mergeCard"], "created": len(CREATED)}))`);
+    expect(r.card).toEqual({ task: 'recOldCardAaaaaa', already: true });
+    expect(r.created).toBe(0);
+  });
+
+  it('the robot\'s record unreadable, or GitHub\'s state unreadable: the old card keeps blocking (the safe side) and says so', () => {
+    const r = fixer(`
+ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "Approved as-is")]
+open(os.path.join(os.environ["MERGE_APPROVED_DIR"], "attempts.json"), "w").write("{ truncated")
+_, a = merge()
+said_a = ERR.getvalue(); ERR.seek(0); ERR.truncate()
+robot_closed("recOldCardAaaaaa")
+GH_STATE[0] = None
+_, b = merge()
+print(json.dumps({"a": a["mergeCard"], "b": b["mergeCard"], "said_a": said_a, "said_b": ERR.getvalue(), "created": len(CREATED)}))`);
+    expect(r.a).toEqual({ task: 'recOldCardAaaaaa', already: true });
+    expect(r.b).toEqual({ task: 'recOldCardAaaaaa', already: true });
+    expect(r.created).toBe(0);
+    expect(r.said_a).toMatch(/attempts\.json unreadable .*, so a card the robot closed is treated as standing/);
+    expect(r.said_b).toMatch(/the robot closed card recOldCardAaaaaa, and PR #812's state could not be read/);
+  });
+
+  it('never two open cards: with a new open card beside the old robot-closed one, that open card is the one used', () => {
+    const r = fixer(`
+robot_closed("recOldCardAaaaaa")
+ROWS[:] = [rec("recOldCardAaaaaa", "Completed", ""), rec("recNewCardBbbbbb", "Approval", "", "", "${NEWHEAD}")]
 code, out = merge()
 print(json.dumps({"card": out["mergeCard"], "created": len(CREATED), "gates": len(GATES)}))`);
     expect(r.card).toEqual({ task: 'recNewCardBbbbbb', already: true });
@@ -466,9 +618,10 @@ print(json.dumps({"card": out["mergeCard"], "created": len(CREATED), "gates": le
     expect(r.gates).toBe(0);
   });
 
-  it('a card Kevin rejected still stands: no new card, even if the robot had closed an older one for the same PR', () => {
+  it('a card Kevin rejected always answers: no new card, even listed in the robot\'s record and with the PR open', () => {
     const r = fixer(`
-ROWS[:] = [rec("recOldCardAaaaaa", "Completed", "", CLOSED_NOTE), rec("recRejectedAaaaa", "Completed", "Rejected", CLOSED_NOTE)]
+robot_closed("recOldCardAaaaaa", "recRejectedAaaaa")
+ROWS[:] = [rec("recOldCardAaaaaa", "Completed", ""), rec("recRejectedAaaaa", "Completed", "Rejected")]
 code, out = merge()
 print(json.dumps({"card": out["mergeCard"], "created": len(CREATED)}))`);
     expect(r.card).toEqual({ task: 'recRejectedAaaaa', already: true });
