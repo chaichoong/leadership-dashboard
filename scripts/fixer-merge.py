@@ -706,7 +706,21 @@ def cmd_merge(args):
     return 0
 
 
+def exit_on_signals():
+    """A TERM, HUP or INT becomes SystemExit, so every `finally` runs: the merge tree and the review's
+    trees are removed and fixer-review.py's run_group stops its child's group (second review M5).
+    Python's default for TERM skips every finally and leaves them behind. A SIGKILL cannot be caught:
+    run_group's watchdog covers the reviewer and vitest children then."""
+    import signal
+
+    def stop(signum, frame):
+        raise SystemExit(128 + signum)
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, stop)
+
+
 def main():
+    exit_on_signals()
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     for name, fn in (("check", cmd_check), ("merge", cmd_merge)):

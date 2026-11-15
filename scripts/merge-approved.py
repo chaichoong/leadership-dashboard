@@ -674,6 +674,13 @@ def _merge_locked(card, attempts):
         if moved_on:
             return {"pr": pr, "task": task, "result": "skip",
                     "why": "%s since this run read it, so nothing was merged; the next run decides afresh" % moved_on}
+        # Nothing merges a fixer PR without the second reviewer's pass for this exact head, on every
+        # path (second review V3): a card raised before the reviewer existed waits too. A plain rest,
+        # never counted: nothing failed, the review has not happened.
+        problem = second_review_problem(pr, card["head"])
+        if problem:
+            return {"pr": pr, "task": task, "result": "skip",
+                    "why": "waiting for the second review of this code (%s), so nothing was merged" % problem}
         r = run_merge_pr(pr, card["head"], card=card)
         try:
             res = json.loads(r.stdout or "{}")

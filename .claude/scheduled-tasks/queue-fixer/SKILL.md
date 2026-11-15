@@ -170,6 +170,11 @@ Then MERGE IT YOURSELF, through the gate:
 python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/fixer-merge.py merge --pr <n>
 ```
 
+Run it with the Bash tool's `run_in_background` (or a timeout of at least 45 minutes) and wait for
+its notification. It runs the full gate (about 10 minutes) and then the second review (up to 25
+more), so a 10-minute call kills it part way. Never start a second run on the same PR while one is
+in flight. If it ends with no JSON, treat it as a could-not-run (STEP 5a).
+
 **Kevin's ruling, 29 Aug 2026:** "the fixer needs to merge them all so that there's nothing left
 hanging that's not finished." He was the drain on the whole queue and he is not a code reviewer.
 On the day he said it there were 213 open findings, 4 critical, 8 more in overflow, and two fixer
@@ -200,19 +205,30 @@ raises a MERGE card. It tries to break each fix with three checks: the test fail
 the fix tackles the cause and not the symptom, and the same bug is nowhere else. "Nowhere else"
 means any file, skills and agent instructions included: the same bug is the same bug.
 
-Write every fix so it can pass:
+Write every fix so it can pass. Each finding needs one of these three, from the PR itself, and
+nothing else passes:
 
-- **A test that fails without the fix.** Each finding needs at least one vitest test in
-  `tests/*.test.js` that fails on the code from before your PR and passes with it. The back-test
-  runs your changed test files both ways and lists those tests by name, and the reviewer must name
-  one for each finding. Never counted: a Python selftest, a Playwright spec, or a line that only
-  adds a script to a list test (the `py-undefined-names` list).
-- **"Not needed" only when the PR changes no code.** A PR that touches `scripts/`, `js/`,
-  `workers/`, `os/`, or any `.py`, `.js`, `.sh`, `.html` or `.css` file needs the test above.
+1. **A vitest test that fails without the fix.** A test in `tests/*.test.js` that fails on the code
+   from before your PR and passes with it, in a new test file or in a test file that already loaded
+   on the old code. The back-test runs your changed test files both ways and lists those tests by
+   name, and the reviewer names one for each finding. Never counted: a line that only adds a script
+   to a list test (the `py-undefined-names` list), or an old test in a file that no longer loads on
+   the old code.
+2. **"Not needed", for a finding that is only text.** When the finding's own `where` and fix name
+   skill, agent or doc text and no code file, it needs no test.
+3. **"Not needed", naming a check your PR changes.** A `tests/sync-invariants/*.spec.js`,
+   `scripts/check-data-invariants.py`, or the selftest in a script your PR changes, which covers
+   the finding. The reviewer names it, and code checks it is in your PR.
+
+Also:
+
 - **Never delete a test.** A PR that deletes a file in `tests/` is refused. If a test truly has to
   go, leave that finding for a working session.
 - **Refused outright:** a new test file that already passes on the old code, and a test that fails
   with your fix.
+- **Keep every finding on the PR between rounds.** If a finding reviewed in round 1 is no longer
+  recorded against the PR in round 2 (closed elsewhere or reopened), round 2 is refused without
+  running and the PR closes as below.
 
 Read `secondReview` in the merge JSON; it is there on every run. It is `null` when the run stopped
 before the reviewer (a red gate, a PR that would not build, tests that could not run, or a MERGE
