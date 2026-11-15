@@ -674,6 +674,13 @@ def _merge_locked(card, attempts):
         if moved_on:
             return {"pr": pr, "task": task, "result": "skip",
                     "why": "%s since this run read it, so nothing was merged; the next run decides afresh" % moved_on}
+        # Nothing merges a fixer PR without the second reviewer's pass for this exact head, on every
+        # path (second review V3): a card raised before the reviewer existed waits too. A plain rest,
+        # never counted: nothing failed, the review has not happened.
+        problem = second_review_problem(pr, card["head"])
+        if problem:
+            return {"pr": pr, "task": task, "result": "skip",
+                    "why": "waiting for the second review of this code (%s), so nothing was merged" % problem}
         r = run_merge_pr(pr, card["head"], card=card)
         try:
             res = json.loads(r.stdout or "{}")
@@ -1086,6 +1093,13 @@ def changed(card, attempts, head):
                % (head or "an unreadable head")[:12])
     if not head:
         return moved_wait(card, attempts, head, why + " The new head could not be read.")
+    problem = second_review_problem(pr, head)
+    if problem:
+        # Never a card for code the second reviewer has not passed (review B1, 15 Nov 2026): the
+        # fixer's own `fixer-merge.py merge` reviews the new head and refreshes the card if it passes.
+        return moved_wait(card, attempts, head, why + " The new code was not put on the card because %s. The queue "
+                          "fixer's next `fixer-merge.py merge --pr %d` reviews it and refreshes this card if it passes."
+                          % (problem, pr))
     r = run_merge_pr(pr, head, dry_run=True)
     try:
         res = json.loads(r.stdout or "{}")
@@ -1113,6 +1127,28 @@ def changed(card, attempts, head):
         res = {}
     return moved_wait(card, attempts, head, why + " The new code was re-tested and is not green: %s" % last_lines(
         (r.stderr or "") + "\nwhy: " + str(res.get("why") or ""), 5).replace("\n", " | ")[:300])
+
+
+def second_reviewer():
+    """scripts/fixer-review.py: the one record of which fixer PR heads the second reviewer passed."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fixer_review", os.path.join(HERE, "fixer-review.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def second_review_problem(pr, head):
+    """None when the second reviewer passed exactly this head of the PR, else the plain reason why not.
+    A record that cannot be read is a reason, never a pass."""
+    try:
+        reviewer = second_reviewer()
+        reviewer.load_state()             # an unreadable record is named as such, not as "not passed"
+        if reviewer.passed(pr, head):
+            return None
+    except Exception as e:  # noqa: BLE001 — said on the card's note, and the card rests
+        return "the second reviewer's record could not be read (%s)" % str(e)[:160]
+    return "the second reviewer has not passed head %s" % head[:12]
 
 
 def refreshed_back(card, attempts, head, why):

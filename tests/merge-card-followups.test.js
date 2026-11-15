@@ -53,6 +53,7 @@ import findings
 findings.current_state = lambda *a, **k: {}
 spec = importlib.util.spec_from_file_location("ma", ${JSON.stringify(S('merge-approved.py'))})
 ma = importlib.util.module_from_spec(spec); spec.loader.exec_module(ma)
+ma.second_reviewer = lambda: type("Reviewed", (), {"passed": staticmethod(lambda pr, head: True), "load_state": staticmethod(lambda: {"records": []})})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 mspec = importlib.util.spec_from_file_location("mp", ${JSON.stringify(S('merge-pr.py'))})
 mp = importlib.util.module_from_spec(mspec); mspec.loader.exec_module(mp)
 MC = ma.merge_card
@@ -250,6 +251,7 @@ class FakeProc:
     def communicate(self, timeout=None): return ('{"merged": false}', "")
 fspec = importlib.util.spec_from_file_location("ma2", ${JSON.stringify(S('merge-approved.py'))})
 fresh = importlib.util.module_from_spec(fspec); fspec.loader.exec_module(fresh)
+fresh.second_reviewer = lambda: type("Reviewed", (), {"passed": staticmethod(lambda pr, head: True), "load_state": staticmethod(lambda: {"records": []})})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 fresh.subprocess.Popen = FakeProc       # the real run_merge_pr, with no process started
 fresh.run_merge_pr(812, "${HEAD}", card=C())
 fresh.run_merge_pr(812, "${HEAD}", dry_run=True, card=C())
@@ -505,10 +507,12 @@ import importlib.util, json, sys, io, contextlib, argparse
 sys.path.insert(0, ${JSON.stringify(S(''))})
 spec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(S('fixer-merge.py'))})
 fm = importlib.util.module_from_spec(spec); spec.loader.exec_module(fm)
+fm.pinned_base = lambda: "b" * 40
+fm.second_reviewer = lambda: type("Reviewed", (), {"review": staticmethod(lambda pr, base, tree=None: {"pr": pr, "pass": True, "head": fm.tested_head(pr), "refusedBy": None, "why": "stubbed here", "sendBack": []}), "passed": staticmethod(lambda pr, head: True)})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 import merge_card, findings
 CREATED, PATCHED, GATES = [], [], []
 fm.decide = lambda pr: {"pr": pr, "files": 2, "protected": [{"file": "scripts/agent-dispatch.py", "rule": "scripts/agent-dispatch.py"}], "mayAutoMerge": False}
-fm.build_merge_result = lambda pr: ("/tmp/od-fm-tree-invented", None)
+fm.build_merge_result = lambda pr, base="origin/main": ("/tmp/od-fm-tree-invented", None)
 fm.destroy_merge_result = lambda p: None
 fm.tests_cannot_run = lambda tree: None
 fm.tested_head = lambda pr: "${NEWHEAD}"
@@ -786,6 +790,7 @@ import urllib.request as UR
 import merge_card as MC
 spec = importlib.util.spec_from_file_location("ma", ${JSON.stringify(S('merge-approved.py'))})
 ma = importlib.util.module_from_spec(spec); spec.loader.exec_module(ma)
+ma.second_reviewer = lambda: type("Reviewed", (), {"passed": staticmethod(lambda pr, head: True), "load_state": staticmethod(lambda: {"records": []})})()   # the reviewer itself is tested in tests/fixer-second-review*.test.js
 F = MC.F
 REC = {"id": "recCardAaaaaaaaaa", "createdTime": "2026-11-06T08:00:00.000Z", "fields": {
     F["name"]: "MERGE: PR #812 — fix", F["status"]: "Today", F["approvalOutcome"]: "Approved as-is",

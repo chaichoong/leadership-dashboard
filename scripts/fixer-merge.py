@@ -30,6 +30,11 @@ nothing — it is this script, and it is stricter than a glance:
      finding 414: the gate used to run wherever it happened to be standing, so
      it passed #196 on 1748 tests while the branch it merged runs 1777. It now
      builds origin/main + the PR in a throwaway worktree and tests that.
+  5. A SECOND REVIEWER PASSES IT FIRST (Kevin, 22 Oct 2026). On a green gate,
+     scripts/fixer-review.py back-tests the PR's changed tests and puts one
+     read-only reviewer on the same tree, on the base pinned before it was
+     built. Nothing merges and no MERGE card is raised unless it passed exactly
+     the head the gate tested, and the merge names that head.
 
 Usage:
     fixer-merge.py check --pr 123          # decide, run nothing
@@ -87,6 +92,8 @@ PROTECTED = (
     # protected PR merge without Kevin, and it would merge itself through this very gate.
     "scripts/merge_card.py", "scripts/merge-approved.py", "scripts/merge-pr.py",
     "scripts/approval_evidence.py",
+    # The second reviewer (Kevin, 22 Oct 2026). A fix that weakened it would pass itself.
+    "scripts/fixer-review.py",
 )
 
 
@@ -390,6 +397,58 @@ def merge_cards():
     return merge_card
 
 
+# ─── THE SECOND REVIEWER (Kevin, 22 Oct 2026; card recWxof2DATkOQfcb) ──
+#
+# Green is not enough: before anything of the fixer's merges or reaches Kevin as a MERGE card,
+# scripts/fixer-review.py runs the PR's changed tests on the code from before it and puts one
+# read-only reviewer on THIS merge tree. Three rules from its independent review (15 Nov 2026):
+# the base is pinned to one commit before the tree is built, so the gate, the back-test and the
+# reviewer all judge the same change (A4); nothing merges or is carded unless the reviewer passed
+# exactly the head the gate tested; and the merge names that head (B2).
+
+
+def pinned_base():
+    """origin/main fetched and resolved to ONE commit before the merge tree is built, or ''."""
+    _git(["fetch", "origin", "main", "--quiet"])
+    r = _git(["rev-parse", "--verify", "--quiet", "origin/main^{commit}"])
+    sha = (r.stdout or "").strip()
+    return sha if r.returncode == 0 and len(sha) == 40 else ""
+
+
+def second_reviewer():
+    """scripts/fixer-review.py beside this file, pointed at the same repository as the gate."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "fixer_review", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixer-review.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.REPO = mod.fm.REPO = REPO
+    return mod
+
+
+def run_second_review(pr, base, tree):
+    """The reviewer's verdict on this tree, never an exception: anything that goes wrong, loading it
+    included, is a could-not-run, so nothing merges and the JSON still says why (review C5)."""
+    try:
+        return second_reviewer().review(pr, base, tree=tree)
+    except Exception as e:  # noqa: BLE001 — reported in the JSON as could-not-run, never swallowed
+        print("SECOND REVIEW BROKE for PR #%d: %s" % (pr, e), file=sys.stderr)
+        return {"pr": pr, "pass": False, "refusedBy": "cannot-run", "sendBack": [], "base": base,
+                "why": "the second reviewer could not run: %s: %s" % (type(e).__name__, str(e)[:300])}
+
+
+def second_review_passed(pr, head, review):
+    """True only when this run's review passed AND the reviewer's own record says this exact head
+    passed. A record that cannot be read is not a pass."""
+    if not (head and isinstance(review, dict) and review.get("pass") is True and review.get("head") == head):
+        return False
+    try:
+        return bool(second_reviewer().passed(pr, head))
+    except Exception as e:  # noqa: BLE001 — cannot tell is not a pass, and it is said
+        print("SECOND REVIEW RECORD UNREADABLE for PR #%d: %s" % (pr, e), file=sys.stderr)
+        return False
+
+
 def gh_pr_state(pr):
     """GitHub's state for PR (OPEN, CLOSED, MERGED), or raises with gh's words."""
     r = sh(["gh", "pr", "view", str(pr), "--json", "state"])
@@ -535,15 +594,25 @@ def cmd_merge(args):
             old, now_head = None, ""
         if old and (old["status"] == "Completed" or (now_head and old.get("head") == now_head)):
             print(json.dumps({**d, "merged": False, "mergeCard": {"task": old["id"], "already": True},
+                              "secondReview": None,
                               "why": "touches a protected path; its MERGE card already stands (%s)"
                                      % (old["status"] or "open"),
                               "tell Kevin": [h["file"] for h in d["protected"]]}, indent=2))
             return 0
-    tree, err = build_merge_result(args.pr)
+    # secondReview is in the JSON on EVERY path (null when the run never got that far), so the
+    # fixer's report line always has a source (review C6).
+    review = None
+    base = pinned_base()
+    if not base:
+        print(json.dumps({**d, "merged": False, "gate": {"error": "could not pin origin/main to a commit"},
+                          "secondReview": None,
+                          "why": "could not pin the base commit — left open, nothing merged"}, indent=2))
+        return 0
+    tree, err = build_merge_result(args.pr, base)
     if err:
         # Cannot build the merge result = cannot judge it. That is a red gate,
         # never a pass. A conflicting PR lands here and stays open.
-        print(json.dumps({**d, "merged": False, "gate": {"error": err},
+        print(json.dumps({**d, "merged": False, "gate": {"error": err}, "secondReview": None,
                           "why": "could not build the merge result — "
                                  "left open, nothing merged"}, indent=2))
         return 0
@@ -554,19 +623,31 @@ def cmd_merge(args):
             ok, gate = False, {"testedTree": tree, "testsRan": False}
         else:
             ok, gate = run_gate(tree)
+        if ok:
+            # Only on a green gate, in this same tree, on the base it was built on.
+            review = run_second_review(args.pr, base, tree)
     finally:
         destroy_merge_result(tree)
     gate["head"] = head
+    gate["base"] = base
     if cannot:
         # Not a red gate: no test ran. Saying RED here is how a broken
         # workspace gets mistaken for a broken PR (5 Oct 2026, PR #709).
-        print(json.dumps({**d, "merged": False, "gate": gate,
+        print(json.dumps({**d, "merged": False, "gate": gate, "secondReview": None,
                           "why": "tests could not run: %s. Left open, nothing merged"
                                  % cannot}, indent=2))
         return 0
     if not ok:
-        print(json.dumps({**d, "merged": False, "gate": gate,
+        print(json.dumps({**d, "merged": False, "gate": gate, "secondReview": None,
                           "why": "the gate is RED — left open, nothing merged"},
+                         indent=2))
+        return 0
+    if not second_review_passed(args.pr, head, review):
+        # Sent back, rounds used, or the reviewer could not run: no merge and no MERGE card, raised
+        # or refreshed. The queue-fixer skill (STEP 5a) says what the fixer does next.
+        print(json.dumps({**d, "merged": False, "gate": gate, "secondReview": review,
+                          "why": "the second reviewer did not pass head %s: %s. Nothing merged and no MERGE card"
+                                 % (head[:12] or "?", (review or {}).get("why") or "no review recorded")},
                          indent=2))
         return 0
     if not d["mayAutoMerge"]:
@@ -575,7 +656,7 @@ def cmd_merge(args):
         # runs merge-pr.py once he approves (7 Oct 2026). Before this the PR sat open and
         # "left open for Kevin" reached nobody.
         card = raise_merge_card(args.pr, d, gate)
-        print(json.dumps({**d, "merged": False, "gate": gate, "mergeCard": card,
+        print(json.dumps({**d, "merged": False, "gate": gate, "mergeCard": card, "secondReview": review,
                           "why": ("touches a protected path; the gate is green, so a MERGE card "
                                   "is in Kevin's queue" if not card.get("error") else
                                   "touches a protected path; the gate is green but the MERGE card "
@@ -583,7 +664,9 @@ def cmd_merge(args):
                           "tell Kevin": [h["file"] for h in d["protected"]]},
                          indent=2))
         return 0 if not card.get("error") else 1
-    m = sh(["gh", "pr", "merge", str(args.pr), "--squash", "--delete-branch"])
+    # The merge names the head the gate tested and the reviewer passed: a push in between makes
+    # GitHub refuse it rather than merge code nobody reviewed (review B2).
+    m = sh(["gh", "pr", "merge", str(args.pr), "--squash", "--delete-branch", "--match-head-commit", head])
     # gh exits non-zero when it cannot check out main locally (a worktree holds
     # it), even though the merge itself succeeded. Confirm against the API
     # rather than trusting the exit code.
@@ -595,7 +678,7 @@ def cmd_merge(args):
         pass
     merged = state.get("state") == "MERGED"
     said = (m.stdout or m.stderr or "").strip()
-    out = {**d, "merged": merged, "gate": gate, "mergeOutput": said[-200:]}
+    out = {**d, "merged": merged, "gate": gate, "secondReview": review, "mergeOutput": said[-200:]}
     # The same reading merge-pr.py makes, and from the same place, so the two can never
     # disagree about whether a git error beside merged:true is the local checkout this Mac
     # cannot do or a real half-merge (findings 20261025-queue-fixer-1081 and
@@ -623,7 +706,21 @@ def cmd_merge(args):
     return 0
 
 
+def exit_on_signals():
+    """A TERM, HUP or INT becomes SystemExit, so every `finally` runs: the merge tree and the review's
+    trees are removed and fixer-review.py's run_group stops its child's group (second review M5).
+    Python's default for TERM skips every finally and leaves them behind. A SIGKILL cannot be caught:
+    run_group's watchdog covers the reviewer and vitest children then."""
+    import signal
+
+    def stop(signum, frame):
+        raise SystemExit(128 + signum)
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, stop)
+
+
 def main():
+    exit_on_signals()
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     for name, fn in (("check", cmd_check), ("merge", cmd_merge)):
