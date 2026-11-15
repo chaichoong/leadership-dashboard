@@ -290,6 +290,19 @@ def refreshed_fields(output, plain):
             F["approvedAt"]: None, F["status"]: "Approval"}
 
 
+# The line merge-approved.py writes on a card it closed because its PR was closed on GitHub without
+# merging (14 Nov 2026). That close is the robot's, not Kevin's decision.
+CLOSED_MARK = "PR CLOSED, NOT MERGED:"
+
+
+def closed_unmerged(card):
+    """True for a Completed card the ROBOT closed because its PR was closed unmerged, and that Kevin
+    never rejected (15 Nov 2026 review finding 5). It is no decision about the PR, so a PR reopened
+    later may get a new card. A card he rejected, or one closed any other way, still stands."""
+    return (card.get("status") == "Completed" and card.get("outcome") != "Rejected"
+            and CLOSED_MARK in str(card.get("notes") or ""))
+
+
 def cards_formula():
     return "LEFT({Task Name}, %d)='%s'" % (len(MERGE_PREFIX), MERGE_PREFIX)
 
@@ -307,8 +320,9 @@ def existing_card(pr, read=None):
     read = read or read_tasks
     rows = read("FIND('%s%d ', {Task Name})=1" % (MERGE_PREFIX, int(pr)))
     hits = [card_view(r) for r in rows if pr_number((r.get("fields") or {}).get(F["name"])) == int(pr)]
-    # An open card first: it is the one to refresh; a closed one only stops a second card.
-    hits.sort(key=lambda c: c["status"] == "Completed")
+    # An open card first: it is the one to refresh; a closed one only stops a second card. A card
+    # the robot closed for a closed PR comes last, so any card that is a real decision answers first.
+    hits.sort(key=lambda c: (c["status"] == "Completed", closed_unmerged(c)))
     return hits[0] if hits else None
 
 

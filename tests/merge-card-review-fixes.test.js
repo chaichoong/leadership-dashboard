@@ -76,7 +76,7 @@ def py(script, *args, timeout=300):
     return subprocess.CompletedProcess([script], 0, "landed 1 finding(s)" if script == "findings.py" else "", "")
 MERGE_RESULTS = []        # per REAL merge-pr.py run: "green", or (exit, json, stderr)
 DRY = []                  # per dry run: "green", else red
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     MERGES.append([pr, head[:8], "dry" if dry_run else "REAL"])
     if dry_run:
         if DRY and DRY.pop(0) == "green":
@@ -249,7 +249,7 @@ describe('2: the card is re-read just before the real merge, so a verdict change
   const twoCards = (change) => drive(`
 CARDS[:] = [C(id="recCardAaaaaaaaaa", pr=811), C(id="recCardBbbbbbbbbb", pr=812)]
 real = ma.run_merge_pr
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     if pr == 811:
         ${change}
     return real(pr, head, dry_run)
@@ -521,8 +521,10 @@ print(json.dumps({"detach": d, "dcode": dc, "code": code, "done": out["done"], "
       const b = r.done.find((x) => x.pr === 812);
       expect(b).toMatchObject({ action: 'bad-record', result: 'error' });
       expect(b.why).toMatch(/is not an object/);
-      expect(r.code).toBe(1);
-      expect(r.detach.todo).toEqual([811]);
+      expect(r.code).toBe(1);                                  // loud on the first try (review R4)
+      // The poll queues the held card too, so a run counts it and says it on the card (review R4);
+      // it was left out before, and nothing ever told anyone.
+      expect(r.detach.todo).toEqual([811, 812]);
     });
   }
 });

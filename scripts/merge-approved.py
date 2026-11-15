@@ -63,8 +63,17 @@ Usage:
 Exit: 0 done, nothing to do, or a card resting on the robot's own retry clock (red, moved, no head,
 a merge whose card would not close, any other failure: each listed in the JSON with its retryAt or
 stopped); 1 a step of the run itself failed (a send-back, a close or a stop finding that could not
-be written, findings of a closed PR not yet back in the queue, an edit request not yet filed, an
-attempts record that cannot be read); 2 the card read failed.
+be written, an edit request not yet filed, and the FIRST try only of a held card: an attempts record
+that cannot be read, or findings of a closed PR not yet back in the queue); 2 the card read failed.
+
+Follow-ups to that review (15 Nov 2026, R1 to R10): merge-pr.py re-reads the card just before its
+merge call (--card) and a verdict changed during the tests merges nothing (R1); a verdict changed in
+the seconds after that read is said as "merged before your change was seen"; the refresh of a moved
+card re-reads it first (R2); one error count per card head and approval across every kind (R3); a bad
+record and a closed PR's owed reopen rest and stop like any failure (R4, R5); a card with no tested
+head keeps its count (R6); a browser run with no failing test is not a red (R7); an edit request is
+keyed on the finding filed for that verdict (R8); one failed card read is retried next run (R9); a
+closed card the robot closed for a closed PR lets a reopened PR get a new card (finding 5).
 
 15 Nov 2026 independent review, fixed here: a moved card is refreshed and put back in Kevin's queue
 in ONE write (1); each card is re-read just before its real merge (2); only a gate that ran and
@@ -143,6 +152,13 @@ ERR_WORDS = {
 # Written once on a card, so a re-run never stacks the same line.
 REJECTED_MARK = "MERGE CARD REJECTED:"
 EDIT_MARK = "MERGE CARD NOT MERGED:"
+# A card held for something that is not a merge run (15 Nov 2026 review R4, R5): a PR record in
+# attempts.json that cannot be read, or a closed PR whose findings are not back in the queue. Counted
+# in attempts.json under HELD_KEY (never under the PR's own key, which a bad record must keep as it
+# is), on the same clock and cap as every other failure, then ONE stop finding.
+HELD_KEY = "held"
+HELD_BAD = "bad-record"
+HELD_REOPEN = "reopen-owed"
 
 
 def now_iso(now=None):
@@ -289,6 +305,8 @@ def error_rest(card, last, now):
     if last.get("approvedAt") and card["approvedAt"] and card["approvedAt"] != last["approvedAt"]:
         return None    # he approved again since: his newer press runs now
     tries, head = _count(last, "errTries"), (card["head"] or "no head")[:12]
+    if tries == 1 and kind == ERR_REREAD:
+        return None    # one failed card read is a blip: the next run reads again (review R9)
     if tries >= RED_MAX:
         if not last.get("finding"):
             return "file-finding", ("the merge run failed %d times (%s) on %s and the finding is not filed yet"
@@ -299,6 +317,33 @@ def error_rest(card, last, now):
     if since is not None and now < since + RED_RETRY_HOURS * 3600:
         return "skip", ("the merge run failed (%s, try %d of %d on %s); his approval stands and the robot tries again "
                         "by itself after %s" % (kind, tries, RED_MAX, head, now_iso(since + RED_RETRY_HOURS * 3600)))
+    return None
+
+
+def _held(attempts, pr, kind, about):
+    """The count for a card held as KIND (HELD_BAD or HELD_REOPEN) about ABOUT, or {}. A count about
+    something else (a record fixed and broken again, a later close) starts again."""
+    held = attempts.get(HELD_KEY)
+    e = held.get(str(pr)) if isinstance(held, dict) else None
+    return e if isinstance(e, dict) and e.get("kind") == kind and e.get("about") == about else {}
+
+
+def held_rest(attempts, pr, kind, about, now):
+    """(action, why) while a held card rests, or None to try again. Pure. The same clock and cap as
+    error_rest: the first try is retried on the next run (a blip), then RED_RETRY_HOURS apart, and at
+    RED_MAX ONE stop finding, then quiet. A stop whose finding did not file goes again, which files it."""
+    last = _held(attempts, pr, kind, about)
+    tries = _count(last, "tries")
+    if not tries:
+        return None
+    if tries >= RED_MAX:
+        if not last.get("finding"):
+            return None
+        return "skip", "resting: %s, seen %d times, so the robot stopped (%s)" % (kind, tries, last["finding"])
+    since = _epoch(last.get("lastAt"))
+    if tries > 1 and since is not None and now < since + RED_RETRY_HOURS * 3600:
+        return "skip", ("%s (try %d of %d); the robot looks again by itself after %s"
+                        % (kind, tries, RED_MAX, now_iso(since + RED_RETRY_HOURS * 3600)))
     return None
 
 
@@ -313,11 +358,13 @@ def plan(card, attempts, now=None):
             return "note-rejected", "Kevin rejected it"
         if last.get("result") == CLOSED_RESULT and last.get("reopenOwed"):
             # The card was closed but its pending findings were not all put back (15 Nov 2026 review
-            # finding 6): what is owed is retried every run until they are.
-            return "reopen-owed", "PR #%d was closed unmerged and its pending findings are not back in the queue yet" % pr
+            # finding 6): what is owed is retried, on the held clock and cap (review R5).
+            return held_rest(attempts, pr, HELD_REOPEN, last.get("at"), now) or (
+                "reopen-owed", "PR #%d was closed unmerged and its pending findings are not back in the queue yet" % pr)
         return "skip", "closed"
     if bad:
-        return "bad-record", bad
+        # Held, never read as "never tried" (finding 15), on the held clock and cap (review R4).
+        return held_rest(attempts, pr, HELD_BAD, bad, now) or ("bad-record", bad)
     live_state, live_head = card.get("prState") or "", card.get("prHead") or ""
     if card.get("prReadError") and not live_head and last.get("result") == MOVED_RESULT:
         # One failed GitHub read must not break a moved-head rest (15 Nov 2026 review finding 7): with
@@ -445,12 +492,14 @@ def pr_state(pr):
     return v.get("state") or "", ((v.get("mergeCommit") or {}).get("oid") or ""), (v.get("headRefOid") or "")
 
 
-def run_merge_pr(pr, head, dry_run=False):
+def run_merge_pr(pr, head, dry_run=False, card=None):
     """merge-pr.py on PR at HEAD only (with dry_run, the gate alone: it never merges). It cleans
     up its worktree, server and port on TERM, never on KILL, so a run past MERGE_TIMEOUT gets TERM
-    and a grace before KILL (review, 7 Oct 2026)."""
+    and a grace before KILL (review, 7 Oct 2026). With CARD, merge-pr.py re-reads that card just
+    before its merge call and refuses unless it still holds this approval (15 Nov 2026 review R1)."""
     args = [sys.executable, os.path.join(HERE, "merge-pr.py"), "--pr", str(pr), "--expect-head", head] + \
-        (["--dry-run"] if dry_run else [])
+        (["--dry-run"] if dry_run else []) + \
+        (["--card", card["id"], "--card-approved-at", card["approvedAt"]] if card and not dry_run else [])
     p = subprocess.Popen(args, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          start_new_session=True)
     try:
@@ -478,7 +527,11 @@ def gate_failed(returncode, res):
     if isinstance(vitest, dict) and vitest.get("ok") is False:
         return True
     if isinstance(browser, dict) and browser.get("ok") is False and not browser.get("okAfterRetry"):
-        return True
+        # A retry that re-ran no test means no failing test was recorded (the web server did not
+        # start, a setup failure): not a red (15 Nov 2026 review R7).
+        retry = browser.get("retry")
+        if not (isinstance(retry, dict) and not retry.get("retried")):
+            return True
     return bool(isinstance(walk, dict) and walk.get("newFailures"))
 
 
@@ -486,15 +539,56 @@ def card_moved_on(card):
     """'' when the card Airtable holds now is the one this run planned on, else what changed. Raises
     when it cannot be read."""
     fresh = merge_card.get_card(card["id"])
-    for key, what in (("pr", "the PR it names"), ("status", "its status"), ("outcome", "Kevin's verdict"),
-                      ("approvedAt", "his Approved At"), ("head", "the head it shows")):
+    for key, what in (("pr", "PR number"), ("status", "status"), ("outcome", "verdict"),
+                      ("approvedAt", "Approved At"), ("head", "tested head")):
         if (fresh.get(key) or "") != (card.get(key) or ""):
             return "the card's %s changed (%s, now %s)" % (what, str(card.get(key) or "blank")[:40],
                                                            str(fresh.get(key) or "blank")[:40])
-    body = merge_card.card_body_problem(fresh)
+    # A card that had no tested head still has none (compared above): only the rest of its body counts.
+    body = merge_card.card_body_problem(fresh if fresh.get("head") else dict(fresh, head="x"))
     if body:
         return "the card is not a MERGE card any more (%s)" % body
     return ""
+
+
+def verdict_changed_in_gate(card, res):
+    """merge-pr.py re-read the card just before its merge call and found Kevin's verdict had moved
+    while it tested (15 Nov 2026 review R1): nothing merged. Not a red and not a counted failure: no
+    record is written, so the next run decides from the card as it is now. The Notes say so."""
+    out = {"pr": card["pr"], "task": card["id"], "result": "skip", "verdictChanged": True,
+           "why": "Kevin's verdict changed during the tests, so nothing was merged: %s" % str(res.get("why"))[:300]}
+    try:
+        annotate(card["id"], "MERGE NOT DONE: Kevin's verdict on this card changed while merge-pr.py was testing PR #%d, "
+                             "so nothing was merged (%s). The PR is left open; the next run decides from the card as it "
+                             "is now." % (card["pr"], str(res.get("why"))[:200]))
+    except Exception as e:  # noqa: BLE001 — the result still says what happened
+        out["annotateError"] = str(e)[:200]
+        print("WARNING: %s" % e, file=sys.stderr)
+    return out
+
+
+def merged_before_change(card, attempts, sha, moved_on, landed, deploy):
+    """The PR merged, and the card no longer holds the approval this run acted on: his verdict moved
+    in the seconds between merge-pr.py's last read of the card and GitHub completing the merge (review
+    R1, the remaining window). Said as it is: merged before his change was seen. Never "his approval
+    stands", and never "nothing was merged" afterwards (the record says merged, with the commit)."""
+    pr = card["pr"]
+    attempts[str(pr)] = {"result": "merged", "sha": sha, "approvedAt": card["approvedAt"], "at": now_iso(),
+                         "verdictMovedFirst": True}
+    save_attempts(attempts)
+    out = {"pr": pr, "task": card["id"], "result": "merged-before-change", "sha": sha, "deploy": deploy,
+           "findings": landed, "why": "%s after merge-pr.py's last read of the card" % moved_on}
+    try:
+        annotate(card["id"], "MERGED BEFORE YOUR CHANGE WAS SEEN: PR #%d merged as %s. merge-pr.py read this card just "
+                             "before its merge call and it was still approved; then %s, while GitHub was merging. The "
+                             "merge stands (undoing it is a new PR that reverts it). The card was not closed, so it "
+                             "keeps your newer verdict. Findings: %s. Deploy: %s."
+                 % (pr, sha[:12], moved_on, landed or "none pending", deploy))
+    except Exception as e:  # noqa: BLE001 — the result still says what happened
+        out["annotateError"] = str(e)[:200]
+        print("WARNING: %s" % e, file=sys.stderr)
+    out["workspace"] = teardown_worktree(pr)
+    return out
 
 
 def deploy_state(sha, wait=DEPLOY_WAIT, poll=DEPLOY_POLL, clock=time.time, sleep=time.sleep):
@@ -580,7 +674,7 @@ def _merge_locked(card, attempts):
         if moved_on:
             return {"pr": pr, "task": task, "result": "skip",
                     "why": "%s since this run read it, so nothing was merged; the next run decides afresh" % moved_on}
-        r = run_merge_pr(pr, card["head"])
+        r = run_merge_pr(pr, card["head"], card=card)
         try:
             res = json.loads(r.stdout or "{}")
         except ValueError:
@@ -592,6 +686,12 @@ def _merge_locked(card, attempts):
             state, sha, _ = pr_state(pr)
             if state != "MERGED" or not sha:
                 tail = last_lines((r.stderr or "") + "\n" + "why: " + str(res.get("why") or (r.stdout or "")[-300:]))
+                if res.get("cardCheck") == "changed":
+                    return verdict_changed_in_gate(card, res)
+                if res.get("cardCheck") == "unreadable":
+                    # Counted like the re-read before the gate (R9: the first is retried next run).
+                    return fail(card, attempts, ERROR_RESULT, "merge-pr.py could not read the card for PR #%d just before "
+                                "its merge call, so nothing was merged: %s" % (pr, str(res.get("why"))[:200]), kind=ERR_REREAD)
                 if gate_failed(r.returncode, res):
                     return fail(card, attempts, "red", "merge-pr.py did not merge PR #%d (exit %d). Its last lines:\n%s"
                                 % (pr, r.returncode, tail))
@@ -619,6 +719,13 @@ def _merge_locked(card, attempts):
                 % (pr, sha[:12], gate_note, landed or "none pending", deploy))
     c = py("agent-dispatch.py", "complete", task, "--evidence", evidence)
     if c.returncode != 0:
+        try:
+            moved_on = card_moved_on(card)
+        except Exception as e:  # noqa: BLE001 — unread: the plain "would not close" path below says so
+            moved_on = ""
+            print("WARNING: card %s not re-read after the merge: %s" % (task, e), file=sys.stderr)
+        if moved_on:
+            return merged_before_change(card, attempts, sha, moved_on, landed, deploy)
         return fail(card, attempts, "merged-open", "PR #%d merged as %s, but the card would not close: %s"
                     % (pr, sha[:12], (c.stderr or c.stdout or "").strip()[-300:]), merged=True)
     attempts[str(pr)] = {"result": "merged", "sha": sha, "approvedAt": card["approvedAt"], "at": now_iso()}
@@ -724,18 +831,26 @@ def stop_finding(card, tries, why, kind="red"):
             "touch, fix main in its own PR, then update PR #%d's branch from main so its head changes and the card "
             "comes back to Kevin for the new code." % ((pr,) * 3),
             "PR #%d (its branch), from its MERGE card" % pr, holds_pr=pr)
-    what = ERR_WORDS.get(kind, "This is the merge machinery or GitHub, not the PR's tests.")
+    # KIND may name several kinds, comma-separated: one cap counts them all (review R3).
+    kinds = [k.strip() for k in kind.split(",") if k.strip()]
+    what = " ".join([ERR_WORDS[k] for k in kinds if k in ERR_WORDS] + (
+        ["Otherwise this is the merge machinery or GitHub, not the PR's tests."] if any(k not in ERR_WORDS for k in kinds) else []))
     return file_finding(
         ("PR #%d merged but its MERGE card would not close %d times; the robot stopped" % (pr, tries)) if kind == ERR_CLOSE
         else "PR #%d's MERGE card: the merge run failed %d times (%s); the robot stopped" % (pr, tries, kind),
-        ("Kevin approved the MERGE card for PR #%d (head %s). The merge run failed %d times, at least %d hours apart, "
-         "with the same kind of failure (%s), none of them a red gate, so the robot stopped retrying it. %s Last "
+        ("Kevin approved the MERGE card for PR #%d (head %s). The merge run failed %d times, at least %d hours apart "
+         "(kinds of failure: %s), none of them a red gate, so the robot stopped retrying it. %s Last "
          "error:\n%s")
         % (pr, head, tries, RED_RETRY_HOURS, kind, what, why[:1000]),
         "Fix the cause in a working session (scripts/merge-approved.py, merge-pr.py, agent-dispatch.py complete or the "
         "gh read, whichever the last error names). The card rests until PR #%d's head changes or Kevin approves the "
         "card again, and then the robot tries once more." % pr,
         "PR #%d's MERGE card (scripts/merge-approved.py)" % pr, holds_pr=pr)
+
+
+def errors_text(seen):
+    """The last error of each kind seen on one count, for its stop finding (review R3)."""
+    return "\n".join("%s: %s" % (k, v) for k, v in seen.items())
 
 
 def fail(card, attempts, result, why, merged=False, kind=""):
@@ -752,7 +867,8 @@ def fail(card, attempts, result, why, merged=False, kind=""):
     one stop finding, never a close tried and a Notes line written every half hour for ever."""
     out = {"pr": card["pr"], "task": card["id"], "result": result, "why": why[:400]}
     prev, _ = _entry(attempts, card["pr"])
-    same_head = bool(card["head"]) and prev.get("head") == card["head"]
+    # A card with NO tested head compares as "" too (15 Nov 2026 review R6), as moved_wait() does.
+    same_head = (prev.get("head") or "") == (card["head"] or "")
     reds = (_reds(prev) if same_head else 0) + (result == "red" and not merged)
     at = clock()
     # A merged card that would not close is recorded as an error of its own kind (15 Nov 2026 review
@@ -782,24 +898,31 @@ def fail(card, attempts, result, why, merged=False, kind=""):
                     % (out["retryAt"], reds, RED_MAX))
     else:
         kind = ERR_CLOSE if merged else (kind or ERR_RUN)
-        same =(prev.get("result") == ERROR_RESULT and prev.get("errKind") == kind
-                and (prev.get("head") or "") == (card["head"] or "") and prev.get("approvedAt") == card["approvedAt"])
+        # ONE count per card head and approval across every kind (15 Nov 2026 review R3): two failures
+        # taking turns used to restart each other's count and never reach the stop.
+        same = (prev.get("result") == ERROR_RESULT and same_head and prev.get("approvedAt") == card["approvedAt"])
         tries = (_count(prev, "errTries") if same else 0) + 1
-        entry.update(errKind=kind, errTries=tries, lastErrAt=entry["at"], lastError=why[:500])
+        seen = dict(prev["lastErrors"]) if same and isinstance(prev.get("lastErrors"), dict) else {}
+        new_kind = kind not in seen
+        seen[kind] = why[:300]
+        entry.update(errKind=kind, errTries=tries, lastErrAt=entry["at"], lastError=why[:500], lastErrors=seen)
         out["kind"] = kind
         if tries >= RED_MAX:
-            filed = prev.get("finding") if same and prev.get("finding") else stop_finding(card, tries, why, kind=kind)
+            filed = prev.get("finding") if same and prev.get("finding") else stop_finding(
+                card, tries, errors_text(seen), kind=", ".join(seen))
             entry["finding"] = filed
             out["stopped"] = True
-            why += (" It has now failed %d times this way, so the robot has stopped retrying (%s). The card rests out "
+            why += (" It has now failed %d times (%s), so the robot has stopped retrying (%s). The card rests out "
                     "of Kevin's queue until the PR's head changes or he approves it again."
-                    % (tries, filed or "finding not filed; the next run files it"))
+                    % (tries, ", ".join(seen), filed or "finding not filed; the next run files it"))
         else:
-            out["retryAt"] = now_iso(at + RED_RETRY_HOURS * 3600)
+            # One failed card read is a blip: the next run reads again (review R9).
+            soon = tries == 1 and kind == ERR_REREAD
+            out["retryAt"] = now_iso(at if soon else at + RED_RETRY_HOURS * 3600)
             why += (" Kevin's approval stands, so the card is not sent back for an Approve that would re-run the same "
-                    "thing: the robot tries again by itself after %s (try %d of %d for this failure)."
-                    % (out["retryAt"], tries, RED_MAX))
-            note = tries == 1     # the reason is written once; the retries are in the run's output
+                    "thing: the robot tries again by itself %s (try %d of %d since his approval, whatever failed)."
+                    % ("on its next run" if soon else "after " + out["retryAt"], tries, RED_MAX))
+            note = new_kind       # each kind's reason is written once; the retries are in the run's output
     out["why"] = why[:700]
     attempts[str(card["pr"])] = entry
     save_attempts(attempts)
@@ -822,7 +945,9 @@ def file_stop(card, attempts):
         fid = stop_finding(dict(card, head=last.get("newHead") or "?"), _count(last, "movedTries"), gate,
                            kind="nohead" if last.get("noHead") else "moved")
     elif last.get("result") == ERROR_RESULT and last.get("errKind"):
-        fid = stop_finding(card, _count(last, "errTries"), last.get("lastError") or gate, kind=last["errKind"])
+        seen = last.get("lastErrors") if isinstance(last.get("lastErrors"), dict) and last.get("lastErrors") else None
+        fid = stop_finding(card, _count(last, "errTries"), errors_text(seen) if seen else (last.get("lastError") or gate),
+                           kind=", ".join(seen) if seen else last["errKind"])
     else:
         fid = stop_finding(card, _reds(last), gate)
     if not fid:
@@ -836,6 +961,63 @@ def file_stop(card, attempts):
     except Exception as e:  # noqa: BLE001
         print("WARNING: %s" % e, file=sys.stderr)
     return {"pr": card["pr"], "task": card["id"], "result": "finding-filed", "finding": fid}
+
+
+def held_fail(card, attempts, kind, about, why, noted=False):
+    """Count one more try of a held card (HELD_BAD or HELD_REOPEN, review R4 and R5) and say what is
+    next: the next run after the first try, then RED_RETRY_HOURS apart, and at RED_MAX ONE stop finding
+    saying what is wrong and how to clear it. Written under HELD_KEY only, so a bad PR record is kept
+    exactly as it is: nothing here can make a merge more likely. The card's Notes get the reason on
+    the first try (unless NOTED, already said) and the stop."""
+    pr = card["pr"]
+    prev = _held(attempts, pr, kind, about)
+    tries = _count(prev, "tries") + 1
+    at = clock()
+    entry = {"kind": kind, "about": about, "tries": tries, "lastAt": now_iso(at), "lastError": why[:500]}
+    out = {"pr": pr, "task": card["id"], "result": ERROR_RESULT, "kind": kind, "held": True, "tries": tries}
+    note = tries == 1 and not noted
+    if tries >= RED_MAX:
+        filed = prev.get("finding") or held_finding(card, kind, tries, why)
+        entry["finding"] = filed
+        out["stopped"] = True
+        note = not prev.get("finding")
+        why += (" Seen %d times, so the robot has stopped looking (%s)."
+                % (tries, filed or "finding not filed; the next run files it"))
+    else:
+        out["retryAt"] = now_iso(at if tries == 1 else at + RED_RETRY_HOURS * 3600)
+        why += " The robot looks again by itself %s (try %d of %d)." % (
+            "on its next run" if tries == 1 else "after " + out["retryAt"], tries, RED_MAX)
+    out["why"] = why[:700]
+    held = attempts.get(HELD_KEY) if isinstance(attempts.get(HELD_KEY), dict) else {}
+    attempts[HELD_KEY] = dict(held, **{str(pr): entry})
+    save_attempts(attempts)
+    if note:
+        try:
+            annotate(card["id"], "MERGE CARD HELD: %s" % why)
+        except Exception as e:  # noqa: BLE001 — the result still says what happened
+            out["annotateError"] = str(e)[:200]
+            print("WARNING: %s" % e, file=sys.stderr)
+    return out
+
+
+def held_finding(card, kind, tries, why):
+    """The ONE stop finding for a held card: what is wrong and how to clear it."""
+    pr = card["pr"]
+    if kind == HELD_BAD:
+        return file_finding(
+            "PR #%d's MERGE card is held: its merge-approved record cannot be read (seen %d times)" % (pr, tries),
+            "Kevin's MERGE card for PR #%d cannot run: %s" % (pr, why[:1000]),
+            "Open %s and fix or delete the key \"%d\". Deleting it makes the robot treat the card as never tried: if "
+            "Kevin's approval is still on it, its gate runs once more and it merges when green. Nothing runs for PR #%d "
+            "until then." % (os.path.join(STATE_DIR, ATTEMPTS), pr, pr),
+            "PR #%d's MERGE card (scripts/merge-approved.py, %s)" % (pr, ATTEMPTS), holds_pr=pr)
+    return file_finding(
+        "PR #%d was closed unmerged and its pending findings could not be put back (%d tries)" % (pr, tries),
+        "PR #%d was closed on GitHub without merging, so its pending findings must go back to the fixer's queue. "
+        "That failed %d times: %s" % (pr, tries, why[:1000]),
+        "Make `python3 scripts/findings.py list --status pending --json` work again, then put PR #%d's pending "
+        "findings back with `findings.py reopen <id> --force`. The robot has stopped trying by itself." % pr,
+        "PR #%d's closed MERGE card (scripts/merge-approved.py reopen)" % pr)
 
 
 def close_merged(card, attempts):
@@ -901,6 +1083,17 @@ def changed(card, attempts, head):
     except ValueError:
         res = {}
     if r.returncode == 0 and isinstance(res, dict) and str(res.get("head") or "").startswith(head):
+        # The refresh clears his verdict, so it must not land on a verdict newer than this run's read
+        # (15 Nov 2026 review R2): the dry run alone takes 5 to 45 minutes.
+        try:
+            moved_on = card_moved_on(card)
+        except Exception as e:  # noqa: BLE001 — not re-read: no refresh, and the moved clock rests it
+            return moved_wait(card, attempts, head, why + " Re-tested green, but the card could not be read again "
+                              "before its refresh, so it was not refreshed: %s" % str(e)[:160])
+        if moved_on:
+            return {"pr": pr, "task": card["id"], "result": "skip",
+                    "why": "%s since this run read it, so the card was not refreshed and nothing was merged; the next "
+                           "run decides afresh" % moved_on}
         try:
             refresh_card(card, head, res)
         except Exception as e:  # noqa: BLE001 — said on the card; the old head stays, so it cannot merge
@@ -1026,17 +1219,20 @@ def reopen_owed(card, attempts):
         if problem:
             entry["reopenProblem"] = problem
             attempts[str(pr)] = entry
-            save_attempts(attempts)
-            return {"pr": pr, "task": task, "result": "error", "reopened": reopened,
-                    "why": "PR #%d's pending findings are still not all back in the queue: %s" % (pr, problem)}
+            # The held clock and cap, then ONE stop finding (review R5), never every half hour for ever.
+            return dict(held_fail(card, attempts, HELD_REOPEN, last.get("at"), "PR #%d's pending findings are still "
+                                  "not all back in the queue: %s." % (pr, problem)), reopened=reopened)
         entry.pop("reopenOwed", None)
         entry.pop("reopenProblem", None)
         attempts[str(pr)] = entry
+        held = attempts.get(HELD_KEY)
+        if isinstance(held, dict) and (held.get(str(pr)) or {}).get("kind") == HELD_REOPEN:
+            attempts[HELD_KEY] = {k: v for k, v in held.items() if k != str(pr)}
         save_attempts(attempts)
         out = {"pr": pr, "task": task, "result": "reopened", "reopened": reopened}
         try:
-            annotate(task, "PR CLOSED, NOT MERGED: the findings left pending on PR #%d are now back in the fixer's "
-                           "queue: %s." % (pr, ", ".join(reopened) or "none were still pending"))
+            annotate(task, "%s the findings left pending on PR #%d are now back in the fixer's "
+                           "queue: %s." % (merge_card.CLOSED_MARK, pr, ", ".join(reopened) or "none were still pending"))
         except Exception as e:  # noqa: BLE001 — recorded; the run's output says the note failed
             out["annotateError"] = str(e)[:200]
             print("WARNING: %s" % e, file=sys.stderr)
@@ -1071,12 +1267,15 @@ def _close_unmerged_locked(card, attempts):
              else "No finding was left pending on it.")
     out = {"pr": pr, "task": task, "result": CLOSED_RESULT, "reopened": reopened}
     if problem:
-        words += " Findings %s. The robot tries that again on its next runs until they are back." % problem
+        words += " Findings %s. The robot tries that again by itself until they are back." % problem
         out["findingsProblem"] = problem
         out["reopenOwed"] = True
+        # Try 1 on the held clock (review R5); this close's own note below says why.
+        out.update({k: v for k, v in held_fail(card, attempts, HELD_REOPEN, attempts[str(pr)]["at"], problem,
+                                               noted=True).items() if k in ("retryAt", "tries", "held")})
     try:
-        annotate(task, "PR CLOSED, NOT MERGED: PR #%d was closed on GitHub without merging, so nothing was merged. "
-                       "The robot closed this card; there is nothing to approve. %s" % (pr, words))
+        annotate(task, "%s PR #%d was closed on GitHub without merging, so nothing was merged. "
+                       "The robot closed this card; there is nothing to approve. %s" % (merge_card.CLOSED_MARK, pr, words))
     except Exception as e:  # noqa: BLE001 — closed and recorded; the run's output says the note failed
         out["annotateError"] = str(e)[:200]
         print("WARNING: %s" % e, file=sys.stderr)
@@ -1111,30 +1310,36 @@ def refresh_card(card, head, res):
     merge_card.patch_card(card["id"], merge_card.refreshed_fields(output, plain))
 
 
-def note_edit(card):
+def note_edit(card, attempts):
     """Kevin asked for a change a merge card cannot make. The change goes to the fixer as a HIGH
     finding, the card says so, and it goes back to his queue: approve merges the PR as it is,
-    reject leaves it. Nothing merges on an edit request (review, 7 Oct 2026)."""
+    reject leaves it. Nothing merges on an edit request (review, 7 Oct 2026).
+    "Already passed on" is keyed on the finding filed for THIS verdict's Approved At, stored in
+    attempts.json before the Notes write (15 Nov 2026 review R8), never on his words already being in
+    the Notes: the same words asked again are a new request, and a Notes write that failed is retried
+    without filing the finding twice."""
+    pr = card["pr"]
     note = " ".join(card["feedback"].split())[:600]
-    if note and note in " ".join(card["notes"].split()):
-        # Already passed on (a run that filed it then failed to move the card): move it only.
-        back_to_kevin(card, "You asked for a change to PR #%d. A merge card cannot make one, so it went to the fixer."
-                      % card["pr"], "the robot merges PR #%d as it is now. Reject leaves the PR open." % card["pr"],
-                      clear_feedback=True)
-        return
-    fid = file_finding("Kevin asked for a change to PR #%d" % card["pr"],
-                       "On the MERGE card for PR #%d (%s) Kevin wrote: %s" % (card["pr"], card["outcome"], note or "(no note)"),
-                       "Make the change as a new commit on PR #%d's own branch (gh pr checkout %d), never a new PR. "
-                       "fixer-merge.py merge --pr %d then refreshes the MERGE card for the new head." % ((card["pr"],) * 3),
-                       "PR #%d (its branch), from its MERGE card" % card["pr"])
+    prev, _ = _entry(attempts, pr)
+    asked = prev.get("edit") if isinstance(prev.get("edit"), dict) else {}
+    fid = asked.get("finding") if (asked.get("approvedAt"), asked.get("note")) == (card["approvedAt"], note) else ""
     if not fid:
-        # Never say it went to the fixer until it did (15 Nov 2026 review finding 4): his note stays
-        # where it is, the card is not moved, and the next run files it again.
-        raise RuntimeError("Kevin's change request on PR #%d was not filed as a finding, so his note stays on the "
-                           "card and the next run tries again" % card["pr"])
-    annotate(card["id"], "%s Kevin's note asks for a change (%s), which a merge card cannot make, so nothing "
-                         "merged. It went to the fixer (%s). Note: %s"
-             % (EDIT_MARK, card["outcome"], fid, note))
+        fid = file_finding("Kevin asked for a change to PR #%d" % pr,
+                           "On the MERGE card for PR #%d (%s) Kevin wrote: %s" % (pr, card["outcome"], note or "(no note)"),
+                           "Make the change as a new commit on PR #%d's own branch (gh pr checkout %d), never a new PR. "
+                           "fixer-merge.py merge --pr %d then refreshes the MERGE card for the new head." % ((pr,) * 3),
+                           "PR #%d (its branch), from its MERGE card" % pr)
+        if not fid:
+            # Never say it went to the fixer until it did (15 Nov 2026 review finding 4): his note stays
+            # where it is, the card is not moved, and the next run files it again.
+            raise RuntimeError("Kevin's change request on PR #%d was not filed as a finding, so his note stays on the "
+                               "card and the next run tries again" % pr)
+        attempts[str(pr)] = dict(prev, edit={"approvedAt": card["approvedAt"], "note": note, "finding": fid})
+        save_attempts(attempts)
+    if fid not in card["notes"]:
+        annotate(card["id"], "%s Kevin's note asks for a change (%s), which a merge card cannot make, so nothing "
+                             "merged. It went to the fixer (%s). Note: %s"
+                 % (EDIT_MARK, card["outcome"], fid, note))
     back_to_kevin(card, "You asked for a change to PR #%d. A merge card cannot make one, so it went to the fixer."
                   % card["pr"], "the robot merges PR #%d as it is now. Reject leaves the PR open." % card["pr"],
                       clear_feedback=True)
@@ -1148,6 +1353,8 @@ def run_failed(res):
     whose card would not close, a refreshed card whose send-back did not write, and an error the
     robot could not schedule (no retryAt, no stop) are."""
     result = res.get("result")
+    if res.get("held") and res.get("tries") == 1:
+        return True    # a held card's first try is loud once (review R4, R5); its retries rest
     if result == REFRESHED_RESULT:
         return not res.get("backToKevin")
     if result in ("red", ERROR_RESULT, MOVED_RESULT, "merged-open"):
@@ -1181,14 +1388,16 @@ def cmd_run(args):
                              **({"prReadError": card["prReadError"]} if card.get("prReadError") else {})})
                 continue
             if action == "bad-record":
-                # One unreadable record costs only its own PR, and says so loudly (finding 15).
-                failed += 1
-                done.append({"pr": card["pr"], "task": card["id"], "action": action, "result": "error", "why": why})
+                # One unreadable record costs only its own PR (finding 15), counted on the held clock
+                # and cap with ONE stop finding (review R4); loud on the first try only.
+                res = held_fail(card, attempts, HELD_BAD, why, why)
+                failed += run_failed(res)
+                done.append(dict(res, action=action))
                 continue
             if action in ("close-merged", "close-unmerged", "file-finding", "reopen-owed"):
                 res = {"close-merged": close_merged, "close-unmerged": close_unmerged,
                        "file-finding": file_stop, "reopen-owed": reopen_owed}[action](card, attempts)
-                failed += res["result"] == "error" or bool(res.get("reopenOwed"))
+                failed += run_failed(res)
                 done.append(dict(res, action=action))
                 continue
             if action == "send-back":
@@ -1214,11 +1423,17 @@ def cmd_run(args):
                 continue
             if action in ("note-rejected", "note-edit"):
                 try:
-                    if action == "note-rejected":
+                    last, _ = _entry(attempts, card["pr"])
+                    if action == "note-rejected" and last.get("result") == "merged" and last.get("sha"):
+                        # Merged before his rejection was seen (review R1): never "nothing was merged".
+                        annotate(card["id"], "%s Kevin rejected the merge card, but PR #%d had already merged as %s "
+                                             "before the rejection was seen. Nothing more runs."
+                                 % (REJECTED_MARK, card["pr"], last["sha"][:12]))
+                    elif action == "note-rejected":
                         annotate(card["id"], "%s Kevin rejected the merge card, so PR #%d is left open and "
                                              "nothing was merged." % (REJECTED_MARK, card["pr"]))
                     else:
-                        note_edit(card)
+                        note_edit(card, attempts)
                     done.append({"pr": card["pr"], "task": card["id"], "action": action})
                 except Exception as e:  # noqa: BLE001
                     failed += 1
@@ -1344,11 +1559,13 @@ def cmd_detach(args):
     attempts = load_attempts()
     attach_live(cards)
     plans = [(c, plan(c, attempts)) for c in cards]
-    todo = [c["pr"] for c, (action, _) in plans if action not in ("skip", "bad-record")]
+    # A bad record is queued like any other try (review R4): the run counts it, says it on the card
+    # once and files ONE stop finding; resting, plan() says skip. Never exit 1 on every poll.
+    todo = [c["pr"] for c, (action, _) in plans if action != "skip"]
     bad = [{"pr": c["pr"], "why": why} for c, (action, why) in plans if action == "bad-record"]
     if not todo:
-        print(json.dumps({"cards": len(cards), "todo": [], **({"badRecords": bad} if bad else {})}))
-        return 1 if bad else 0
+        print(json.dumps({"cards": len(cards), "todo": []}))
+        return 0
     os.makedirs(STATE_DIR, exist_ok=True)
     log = open(os.path.join(STATE_DIR, "runs.log"), "a")
     log.write("===== merge-approved queued %s for PR %s =====\n" % (now_iso(), todo))
@@ -1362,7 +1579,7 @@ def cmd_detach(args):
         # queued_alive): a bare number is what a recycled pid walked through.
         fh.write("%s %s" % (p.pid, _proc_started(p.pid) or ""))
     os.replace(tmp, os.path.join(STATE_DIR, QUEUED_PID))
-    print(json.dumps({"cards": len(cards), "todo": todo, "queued": p.pid}))
+    print(json.dumps({"cards": len(cards), "todo": todo, "queued": p.pid, **({"badRecords": bad} if bad else {})}))
     return 0
 
 

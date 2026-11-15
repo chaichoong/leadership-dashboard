@@ -399,6 +399,11 @@ def raise_merge_card(pr, d, gate):
         merge_card = merge_cards()
         import findings
         old = merge_card.existing_card(pr)
+        if old and merge_card.closed_unmerged(old):
+            # The robot closed it because the PR was closed unmerged (15 Nov 2026 review finding 5).
+            # The PR is open again, so it gets a NEW card; the old one stays closed. existing_card
+            # returns an open card or a real decision first, so this never makes a second open card.
+            old = None
         title, url, files, gh_head = pr_facts(pr)
         # The head the gate tested. gh's head is only a fallback, and merge-pr.py --expect-head
         # re-gates whatever is approved, so a stale fallback can never merge untested code.
@@ -499,6 +504,8 @@ def cmd_merge(args):
     if not d["mayAutoMerge"]:
         try:
             old = merge_cards().existing_card(args.pr)
+            if old and merge_cards().closed_unmerged(old):
+                old = None    # closed by the robot for a closed PR: no decision (finding 5)
             now_head = pr_facts(args.pr)[3] if old else ""
         except Exception as e:  # noqa: BLE001 — cannot tell: run the gate, which says so too
             print("MERGE CARD CHECK FAILED for PR #%d: %s" % (args.pr, e), file=sys.stderr)
