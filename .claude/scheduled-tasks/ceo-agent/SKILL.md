@@ -22,13 +22,22 @@ lease lapses in about five minutes rather than blocking everything for hours.
 like this:
 
 ```
-ESTATE_DRIFT_SWEEP_DONE=1 python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-estate-drift.py
+python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-estate-drift.py --sweep-done
 ```
 
 It scans the CEO, the heads, the workers, the CEO skills, these slot instructions, the five
 brain files the CEO loads and the 09:00 brief worker for wording a dated ruling has retired,
 and it fails if a ruling in the brain's Decisions/ folder is newer than
 `~/.claude/agents/ESTATE.md`. It also runs on its own at 07:00.
+
+**Start the command with `python3`, never with an env assignment** (findings
+20261114-agent-dispatch-1308, 20261114-agent-dispatch-1310). This line used to read
+`ESTATE_DRIFT_SWEEP_DONE=1 python3 .../agent-estate-drift.py`. The headless allowlist
+(`scripts/agent-tools.sh`) grants `Bash(python3:*)`, which matches the command's FIRST word, so
+an env prefix is a different command and the permission layer refused it. That killed this slot
+on four mornings running, 12-15 Nov 2026, and with it the daily huddle and the nightly memory
+sweep. `--sweep-done` carries the same meaning with no prefix. The same rule applies to every
+command in this file: if it needs an environment variable, the script takes a flag instead.
 
 **Why it moved (findings 20261108-ceo-agent-1244 and 20261109-ceo-huddle-1247).** The rulings
 this check reads are written by the memory sweep in step 2 of THIS slot. Run first, it read a

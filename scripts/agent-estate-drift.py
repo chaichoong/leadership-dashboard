@@ -53,6 +53,7 @@ sweep that writes the rulings it reads, finding 20261101-phase-1-1156), and by h
     python3 scripts/agent-estate-drift.py            # scan the live estate
     python3 scripts/agent-estate-drift.py --selftest # prove the patterns fire
     python3 scripts/agent-estate-drift.py --json
+    python3 scripts/agent-estate-drift.py --sweep-done  # caller's memory sweep has written
 """
 import argparse
 import datetime as dt
@@ -630,6 +631,18 @@ def main(argv=None):
     # (finding 20261105-agent-dispatch-1210).
     p.add_argument("--now", default=None,
                    help="ISO timestamp to judge the pre-sweep staleness window on (tests)")
+    # Same signal as ESTATE_DRIFT_SWEEP_DONE=1, as a FLAG (finding
+    # 20261114-agent-dispatch-1310 / 1308). The ceo-agent slot ran
+    # `ESTATE_DRIFT_SWEEP_DONE=1 python3 .../agent-estate-drift.py`, and the
+    # headless allowlist in scripts/agent-tools.sh grants `Bash(python3:*)`,
+    # which matches on the command's first word. An env assignment in front of
+    # it is not `python3`, so the permission layer refused Step 0 and the 06:45
+    # CEO slot died on four mornings running (13-15 Nov 2026), taking the daily
+    # huddle and the nightly memory sweep with it. A flag needs no prefix, so
+    # the command the slot runs starts with python3 and is allowed.
+    p.add_argument("--sweep-done", action="store_true",
+                   help="the caller's memory sweep has already written today's ruling notes "
+                        "(same meaning as %s=1)" % SWEEP_DONE_ENV)
     a = p.parse_args(argv)
     now = None
     if a.now:
@@ -642,7 +655,8 @@ def main(argv=None):
     code, res = run(a.agents, a.skills, a.tasks, a.brain, a.repo,
                     a.claude_md, a.memory)
     # Before the sweep has written, a clean answer is only an early one (1156).
-    stale = read_may_be_stale(now)
+    stale = read_may_be_stale(
+        now, env=dict(os.environ, **{SWEEP_DONE_ENV: "1"}) if a.sweep_done else None)
     if stale and code == 0:
         code, res = 2, dict(res, reason=stale)
     if a.json:
