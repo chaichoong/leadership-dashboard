@@ -1688,10 +1688,20 @@ function assertHandoverPlan(plan, now = new Date()) {
   }
   // "carryOn" (9 Oct 2026): the robot goes on page by page from where the steps end. Its facts are
   // the only source the planner may answer from, so a plan without them cannot carry on.
+  // "factsFor" (Nov 2026): whose form it is, so the stored facts (scripts/form-facts.js) are read first.
+  // Only its shape is checked here; the file is read by storedFactsFor. With it, carryOn's own facts may be empty.
+  if (plan.factsFor !== undefined) {
+    const f = plan.factsFor;
+    const okOwner = f && (f.owner === undefined || (typeof f.owner === 'string' && f.owner.trim()));
+    const okProps = f && (f.properties === undefined || (Array.isArray(f.properties) && f.properties.every(r => typeof r === 'string' && r.trim())));
+    if (!f || typeof f !== 'object' || Array.isArray(f) || !okOwner || !okProps || (f.owner === undefined && f.properties === undefined)) {
+      die('the plan\'s "factsFor" must be {"owner": "<name>", "properties": ["<address>", ...]} with at least one of the two');
+    }
+  }
   if (plan.carryOn !== undefined) {
     const c = plan.carryOn;
     const facts = c && (Array.isArray(c.facts) ? c.facts.join('\n') : String(c.facts || ''));
-    if (!c || typeof c !== 'object' || !facts.trim()) die('the plan\'s "carryOn" needs "facts": every answer the form may ask for, one per line, from its sources');
+    if (!c || typeof c !== 'object' || (!facts.trim() && plan.factsFor === undefined)) die('the plan\'s "carryOn" needs "facts": every answer the form may ask for, one per line, from its sources');
     if (c.maxPages !== undefined && !(Number(c.maxPages) >= 1 && Number(c.maxPages) <= CARRY_ON_MAX_PAGES)) die(`"carryOn.maxPages" must be 1 to ${CARRY_ON_MAX_PAGES}`);
   }
   plan.steps.forEach((s, i) => {
@@ -2028,7 +2038,7 @@ async function waitForWindowClose(ctx, capMs, onTick) {
 // read on the page, citing one whole fact line and giving that line's own words, and press only a
 // button worded as moving on, read again the moment before it is pressed.
 const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
-const DECLARATION_TOPIC_RE = /\b(claims?|convict\w*|criminal|offences?|ccjs?|county court|judge?ments?|bankrupt\w*|refused|cancell?ed|voided|declined|special terms|terms imposed|imposed|charged?|prosecut\w*|investigat\w*|police|cautions?|insolven\w*|liquidat\w*|disqualif\w*|struck off|strike off|material facts?|iva|individual voluntary|debt relief|sequestrat\w*|arrangements? with (?:your |their |its )?creditors|administration|administrators?|receivership)\b/i;
+const { DECLARATION_TOPIC_RE } = require('./declaration-words');   // shared with form-facts.js, which never stores one
 const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 // A form that asks for a declaration, anywhere in it however long: his page.
 function declarationWords(text) {
@@ -2234,6 +2244,7 @@ const PLANNER_RULES = [
   'A typed value ("fill") must be copied exactly from the fact line you cite (dates as DD/MM/YYYY; TODAY is given).',
   'If no fact answers a question the page needs, put the question in "unknown" and do not guess. Skip optional questions no fact answers.',
   'Leave a question alone when its current value is already right.',
+  'A fact line whose label ends with a tag in square brackets ("Year built [12 Test Lane]: 1930") is about that house only. Cite it only for a question about that house; if the page does not say which house it is asking about, put the question in "unknown".',
   'Never answer a declaration (claims, convictions, CCJs, bankruptcy, insurance refused or cancelled, charges, "I declare"): put it in "unknown". Kevin answers those himself.',
   'Never touch: a password, card or bank details, a signature, a final "I declare / I confirm the information is true" box, or any Buy, Pay, Purchase, Submit, Confirm, Accept or Agree button.',
   'Contact or marketing preferences: email only, never phone, SMS, text, post or WhatsApp. Payment: monthly instalments.',
@@ -2266,14 +2277,18 @@ function planner() {
 const lineKey = t => normWords(t).replace(/[.;,\s]+$/, '');
 const squashFact = t => normWords(t).replace(/[\s,£]/g, '');
 const tokensOf = t => normWords(t).match(/[a-z0-9]+/g) || [];
-// A typed value is the cited line's own words: in it (spaces, commas and £ aside), a short value as a
-// whole word of it, never a fragment ("0" inside "2009"); or it is today.
+// What a fact line says: the part after its first colon (the whole line when it has none).
+const valueSide = line => { const s = String(line); const i = s.indexOf(':'); return i < 0 ? s : s.slice(i + 1); };
+// A typed value is the cited line's own words: in its VALUE side (spaces, commas and £ aside), a short
+// value as a whole word of it, never a fragment ("0" inside "2009"); or it is today. The label never
+// backs a value: "Trees over 20 ft within 30 ft: No" never backs a typed 20.
 function valueInLine(v, line) {
   const want = squashFact(fillTokens(v));
   if (!want) return false;
   if (want === squashFact(fillTokens('{{today}}'))) return true;
-  if (want.length < 3) return tokensOf(line).includes(want);
-  return squashFact(line).includes(want);
+  const said = valueSide(line);
+  if (want.length < 3) return tokensOf(said).includes(want);
+  return squashFact(said).includes(want);
 }
 const COMMON_WORDS = new Set(['property', 'insurance', 'insured', 'there', 'which', 'would', 'other', 'about', 'years', 'house',
   'please', 'select', 'answer', 'question', 'details', 'currently', 'within', 'under']);
@@ -2282,28 +2297,78 @@ const stems = t => new Set(tokensOf(t).filter(w => w.length >= 5 && !COMMON_WORD
 // ("Listed: No" for "Is the property listed?") holding that one answer and no other; any other option,
 // every word of it in what the line says it IS (the part after "never", "not" or "no" set aside, so
 // "email only; never phone" never ticks Phone), and never an option worded with a negation.
+// A "Label: value" line (Nov 2026) must ALSO hold the answer in its value and, for a Yes or No, its
+// subject in its label with any "[house]" tag taken out: "House in multiple occupation (HMO): No" never
+// ticks HMO, and a "No" or a word inside an address never answers anything. Both checks only ever ADD to
+// the first, so a line refused before is refused still.
 function pickInLine(label, line, question = '') {
   const words = tokensOf(label);
   if (!words.length) return false;
+  const text = String(line);
+  const colon = text.indexOf(':');
+  const inValue = new Set(tokensOf(valueSide(text)));
   if (words.length === 1 && /^(yes|no)$/.test(words[0])) {
-    const yn = new Set(tokensOf(line).filter(w => w === 'yes' || w === 'no'));
+    const yn = new Set(tokensOf(text).filter(w => w === 'yes' || w === 'no'));
     const subject = stems(question);
-    return yn.size === 1 && yn.has(words[0]) && [...stems(line)].some(w => subject.has(w));
+    if (!(yn.size === 1 && yn.has(words[0]) && [...stems(text)].some(w => subject.has(w)))) return false;
+    if (colon < 0) return true;
+    return inValue.has(words[0]) && [...stems(text.slice(0, colon).replace(/\[[^\]]*\]/g, ' '))].some(w => subject.has(w));
   }
   if (/\b(no|not|never|none|nil|free|without)\b/i.test(label)) return false;
-  const said = normWords(line).replace(/\b(never|not|no|none)\b[^;.]*/g, ' ');
+  const picked = words.filter(w => w.length >= 3 || /^\d+$/.test(w));
+  const said = normWords(text).replace(/\b(never|not|no|none)\b[^;.]*/g, ' ');
   const have = new Set(tokensOf(said));
-  return words.filter(w => w.length >= 3 || /^\d+$/.test(w)).every(w => have.has(w));
+  if (!picked.every(w => have.has(w))) return false;
+  return colon < 0 || picked.every(w => inValue.has(w));
 }
 // Is this value any fact line's own words? (The dry-run report.)
 function valueInFacts(v, factsText) {
   return String(factsText || '').split('\n').some(l => valueInLine(v, l));
 }
 
-function factsOf(plan, standingFacts) {
+const planFactLines = plan => {
   const own = plan.carryOn && plan.carryOn.facts;
-  const lines = [].concat(Array.isArray(own) ? own : String(own || '').split('\n'), standingFacts || []);
-  return lines.map(l => String(l).trim()).filter(Boolean);
+  return (Array.isArray(own) ? own : String(own || '').split('\n')).map(l => String(l).trim()).filter(Boolean);
+};
+// The plan's own lines first, then the stored facts, then his standing facts; a line that repeats an
+// earlier one whole is dropped.
+function factsOf(plan, standingFacts, storedLines) {
+  const seen = new Set();
+  return [].concat(planFactLines(plan), storedLines || [], standingFacts || []).map(l => String(l).trim()).filter(Boolean)
+    .filter(l => { const k = lineKey(l); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+// The stored facts for a plan that says whose form it is ("factsFor"). A dry run refuses a name the file
+// does not hold, a file it cannot read, and a plan line that says otherwise than a stored fact, so the
+// card never carries a wrong answer. The live window runs the plan Kevin approved as approved: its own
+// line wins, the stored line with the same label is left out, and both are returned for the ledger line;
+// a facts file it cannot read is a ledger problem, and the window opens on the plan's own and standing facts.
+function storedFactsFor(plan, { dryRun = false, today, file } = {}) {
+  const none = { lines: [], used: [], expired: [], missing: [], conflicts: [], problems: [], ownerDiffers: [], resolved: { owner: null, properties: [] } };
+  if (!plan || !plan.factsFor) return none;
+  const ff = require('./form-facts');
+  let store;
+  try { store = ff.loadStore(file); } catch (e) {
+    if (dryRun) die(`the facts file cannot be read: ${e.message}`);
+    return Object.assign({}, none, { problems: [{ scope: 'file', ref: String((e && e.message) || e).slice(0, 300) }] });
+  }
+  const r = ff.linesFor(store, { owner: plan.factsFor.owner, properties: plan.factsFor.properties || [], today });
+  if (dryRun && r.problems.length) {
+    const p = r.problems[0];
+    die(`${p.ref} is not in the facts file: add it with \`node scripts/form-facts.js ${p.scope === 'owner' ? 'add-owner --key <key> --name <name>'
+      : 'add-property --key <record id> --address <first line> --town <town> --postcode <postcode> --owner <owner key>'}\``);
+  }
+  // Only the stored FACT lines: a plan's own "Property:" address line is never a clash.
+  const clash = ff.conflicts(planFactLines(plan), r.used.map(u => u.line));
+  if (dryRun && clash.length) {
+    const c = clash[0];
+    const u = r.used.find(x => x.line === c.stored);
+    die(`the plan says '${c.plan}' but the facts file holds '${c.stored}' (${u ? `${u.source}, ${u.date}` : 'the facts file'}). If the fact has changed, `
+      + 'store the new one with `node scripts/form-facts.js set ...` and take the line out of the plan; else take the line out of the plan.');
+  }
+  const out = new Set(clash.map(c => c.stored));
+  return { lines: r.lines.filter(l => !out.has(l)), used: r.used.filter(u => !out.has(u.line)), expired: r.expired, missing: r.missing,
+    conflicts: clash, problems: r.problems, ownerDiffers: r.ownerDiffers || [], resolved: r.resolved };
 }
 
 // The planner's steps, checked. Each must target an answer the robot read on the page (a radio
@@ -2363,7 +2428,7 @@ async function carryOn(page, plan, opts = {}) {
 }
 
 async function carryOnPages(page, plan, opts, done) {
-  const facts = factsOf(plan, opts.standingFacts === undefined ? loadStandingFacts() : opts.standingFacts);
+  const facts = factsOf(plan, opts.standingFacts === undefined ? loadStandingFacts() : opts.standingFacts, opts.storedFacts);
   const plan_ = opts.planner || planner();
   const maxPages = Math.min(Number(plan.carryOn.maxPages) || 15, CARRY_ON_MAX_PAGES);
   let lastSig = '', samePage = 0;
@@ -3457,22 +3522,37 @@ async function main() {
     const task = arg(rest, 'task');
     if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
     const plan = assertHandoverPlan(readPlan(arg(rest, 'plan') || handoverPlanPath(task)));
+    const dryRun = rest.includes('--dry-run');
+    // Estate fix 3 (Nov 2026): a form that carries on reads the stored facts for its house and owner
+    // first, so Kevin is never asked again what he has already said. Refused in the dry run only: a card
+    // Kevin already approved must still open.
+    if (dryRun && plan.carryOn && !plan.factsFor) {
+      die('this plan carries on but does not say whose form it is. Add "factsFor": {"owner": "<name>", "properties": ["<address>"]} '
+        + 'so the stored facts are read first, and run `node scripts/form-facts.js lines --owner <name> --property <address>` '
+        + 'to see what is already on file.');
+    }
+    const stored = storedFactsFor(plan, { dryRun });
     // The agent's proof, before the card reaches Kevin: the same guard, no window, his own
     // steps skipped, a screenshot for the card, and the browser closed at the end. Nothing is
     // his yet, so no approval is read; the guard still stops before any final click.
-    if (rest.includes('--dry-run')) {
+    if (dryRun) {
       const shot = arg(rest, 'shot');
       if (!shot) die('--shot is required: the screenshot goes on the card');
       const res = await withPage(profile, false, async (page) => {
-        const r = await runHandover(page, plan, { quiet: true, skipKevin: true });
+        const r = await runHandover(page, plan, { quiet: true, skipKevin: true, storedFacts: stored.lines });
         // The address it reached: a plan's `site` is the agent's own words ("axa-via-topcashback"), and the
         // keep-warm reads a line's address to know which site was used (16 Oct 2026).
         return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null), url: page.url() });
       });
       // A plan that carries on reaches the price headless when no step is his: the agent's card then
       // carries the price, and his window only re-runs the quote for him to buy (9 Oct 2026).
-      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
-      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
+      const facts = { stored: stored.used.length, expired: [...new Set(stored.expired.map(x => x.label))],
+        missing: [...new Set(stored.missing.map(x => (stored.resolved.properties.length > 1 && x.address ? `${x.address} ${x.label}` : x.label)))] };
+      // A house owned by someone other than the owner the form is in: said, never refused.
+      if (stored.ownerDiffers.length) facts.ownerDiffers = stored.ownerDiffers.map(d => d.address);
+      const out = { mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length, facts };
+      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, facts });
+      console.log(JSON.stringify(out));
       if (res.stuck) process.exitCode = 3;
       return;
     }
@@ -3503,7 +3583,7 @@ async function main() {
         // For a robot form card the log IS the guard against a second government form: no log, no window.
         if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
-        const r = await runHandover(page, plan, { onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined });
+        const r = await runHandover(page, plan, { onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined, storedFacts: stored.lines });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         r.url = page.url();                                         // before his window closes the page
         await turnBanner(page, r.stuck
@@ -3516,7 +3596,8 @@ async function main() {
     } finally {
       releaseSigninHold(dir);
     }
-    ledger({ cmd: 'handover', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+    ledger(Object.assign({ cmd: 'handover', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot },
+      stored.conflicts.length ? { factConflicts: stored.conflicts } : {}, stored.problems.length ? { factProblems: stored.problems } : {}));
     console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
     if (res.stuck) process.exitCode = 3;
     return;
@@ -3691,7 +3772,7 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
                    doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
-                   loadStandingFacts, declarationWords, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
+                   loadStandingFacts, declarationWords, DECLARATION_TOPIC_RE, factsOf, storedFactsFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
                    movedOn, assertNotFinalAction, PLANNER_SCHEMA, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
                    adobeSignRefusal, SIGN_WORDS_RE, isAdobeSigningPage, signBinding, runSignFlow, SIGN_DOORS,
                    agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus,

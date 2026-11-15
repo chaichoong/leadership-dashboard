@@ -274,7 +274,11 @@ function home(outcome = 'Approved as-is', env = {}) {
   writeFileSync(planner, PLANNER);
   const standing = join(h, 'standing-answers.json');
   writeFileSync(standing, JSON.stringify(STANDING));
-  return { h, plans, env: { HOME: h, AGENT_BROWSER_SITES_FILE: sites, AGENT_HANDOVER_DIR: plans, AGENT_OUTCOME_SCRIPT: outcomeScript,
+  // The house's stored facts (scripts/form-facts.js): a dry run of a plan that carries on must say whose form it is.
+  const formFacts = join(h, 'form-facts.json');
+  writeFileSync(formFacts, JSON.stringify({ version: 1, general: { facts: {} }, owners: { 'practice-owner': { name: 'Practice Owner Ltd', facts: {} } },
+    properties: { 'practice-house': { address: '1 Practice Row', town: 'Testtown', postcode: 'ZZ99 9ZZ', owner: 'practice-owner', facts: {} } }, asked: [] }));
+  return { h, plans, env: { HOME: h, AGENT_BROWSER_SITES_FILE: sites, AGENT_HANDOVER_DIR: plans, AGENT_OUTCOME_SCRIPT: outcomeScript, AGENT_FORM_FACTS: formFacts,
     AGENT_HANDOVER_HEADLESS: '1', AGENT_HANDOVER_WAIT_MS: '1500', AGENT_HANDOVER_PAUSE_MS: '100',
     AGENT_HANDOVER_PLANNER: planner, AGENT_STANDING_ANSWERS: standing, PLANNER_LOG: join(h, 'planner.log'), ...env } };
 }
@@ -295,7 +299,7 @@ const PLAN = (steps, extra = {}) => ({ why: 'read the price and buy on monthly i
 const ledgerOf = x => readFileSync(join(x.h, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
 async function dryRun(path, env = {}) {
   const x = home('Changes requested', env);
-  writeFileSync(join(x.plans, TASK + '.json'), JSON.stringify(PLAN([{ do: 'goto', url: `${base}${path}` }])));
+  writeFileSync(join(x.plans, TASK + '.json'), JSON.stringify(PLAN([{ do: 'goto', url: `${base}${path}` }], { factsFor: { owner: 'practice-owner', properties: ['practice-house'] } })));
   const r = await run(x.env, ['handover', '--task', TASK, '--dry-run', '--shot', join(x.h, 'dry.png')]);
   return { x, r, last: JSON.parse(r.out.trim().split('\n').pop()) };
 }

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "property": {
+    "property-type": { "label": "Property type", "goodForDays": null },
+    "bedrooms": { "label": "Number of bedrooms", "goodForDays": null },
+    "bathrooms": { "label": "Number of bathrooms", "goodForDays": null },
+    "storeys": { "label": "Number of storeys", "goodForDays": null },
+    "year-built": { "label": "Year built", "goodForDays": null },
+    "construction": { "label": "Construction (walls and roof)", "goodForDays": null },
+    "standard-construction": { "label": "Standard construction (brick, stone or concrete walls, slate or tile roof)", "goodForDays": null },
+    "flat-roof": { "label": "Percentage of roof that is flat", "goodForDays": null },
+    "listed": { "label": "Listed building", "goodForDays": null },
+    "trees": { "label": "Trees over 20 ft within 30 ft of the property", "goodForDays": 730 },
+    "water": { "label": "Within a quarter of a mile of any water course, river, lake or sea", "goodForDays": null },
+    "flood": { "label": "Flooded in the last 10 years or ever", "goodForDays": 365 },
+    "subsidence": { "label": "Subsidence, landslip or heave, signs or history", "goodForDays": 365 },
+    "rebuild-sum": { "label": "Buildings sum insured (rebuild cost)", "goodForDays": 365 },
+    "occupancy": { "label": "Occupancy (tenanted or unoccupied)", "goodForDays": 30 },
+    "tenant-type": { "label": "Tenant type", "goodForDays": 90 },
+    "hmo": { "label": "House in multiple occupation (HMO)", "goodForDays": 365 },
+    "sub-let": { "label": "Is the property sub-let", "goodForDays": 365 },
+    "mortgage": { "label": "Mortgage company or lender", "goodForDays": 365 },
+    "renovation": { "label": "Renovation work planned beyond cosmetic", "goodForDays": 90 },
+    "year-purchased": { "label": "Year purchased", "goodForDays": null },
+    "legal-owner": { "label": "Legal owner", "goodForDays": null }
+  },
+  "owner": {
+    "title": { "label": "Title", "goodForDays": null },
+    "first-name": { "label": "First name", "goodForDays": null },
+    "last-name": { "label": "Last name", "goodForDays": null },
+    "date-of-birth": { "label": "Date of birth", "goodForDays": null },
+    "gender": { "label": "Gender", "goodForDays": null },
+    "marital-status": { "label": "Marital status", "goodForDays": null },
+    "occupation": { "label": "Occupation", "goodForDays": null },
+    "second-occupation": { "label": "Second occupation", "goodForDays": null },
+    "landlord-since": { "label": "Landlord for how long", "goodForDays": null },
+    "correspondence-address": { "label": "Correspondence address", "goodForDays": null },
+    "correspondence-postcode": { "label": "Correspondence postcode", "goodForDays": null },
+    "email": { "label": "Email address", "goodForDays": null },
+    "phone": { "label": "Phone number", "goodForDays": null }
+  }
+}
