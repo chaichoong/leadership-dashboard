@@ -18,6 +18,22 @@
 #   install-slot-jobs.sh --dry-run     print what would be written, touch nothing
 #   install-slot-jobs.sh --install     write the plists and load them
 #   install-slot-jobs.sh --uninstall   unload and remove them again
+#   install-slot-jobs.sh --install --only NAME   write and load ONE job's plist
+#   install-slot-jobs.sh --prune       unload a RETIRED job's plist and park it
+#   install-slot-jobs.sh --prune-check report what --prune would do, touch nothing
+#
+# WHY --prune EXISTS (finding 20261031-agent-dispatch-1149). --install only ever
+# touches the jobs in the JOBS array below, so a job Kevin retires keeps its
+# plist and keeps firing. feed-brain was retired on 14 Oct 2026 and its own
+# schedule note said "launchd job unloaded, plist in ~/Library/LaunchAgents.parked/";
+# on 15 Nov 2026 it was still in LaunchAgents and still loaded, 32 days later.
+# A retirement that leaves the job running is not a retirement, and nothing
+# errored, because a loaded plist cannot know it was retired.
+#
+# --prune is deliberately narrow. It will only touch a label whose job name is
+# ABSENT from JOBS **and** marked `"enabled": false` in scripts/job-schedule.json.
+# A plist for a live job, or one the schedule has never heard of, is reported and
+# left alone, so it can never unload the estate.
 set -uo pipefail
 
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
@@ -29,6 +45,18 @@ SLOT="$REPO/scripts/agent-slot-run.sh"
 TASKS="$HOME/.claude/scheduled-tasks"
 
 MODE="${1:---dry-run}"
+
+# --only NAME narrows --install and --dry-run to a single job (finding
+# 20261111-agent-dispatch-1296). A bare --install unloads and reloads every job in
+# JOBS, and launchctl unload on a job that is RUNNING kills it, so "reinstall
+# prod-sweep-weekly with its Sunday back" could not be done in the morning without
+# risking the routine asking for it. With --only, one plist is written and reloaded
+# and the rest are untouched.
+ONLY=""
+if [ "${2:-}" = "--only" ]; then
+  ONLY="${3:-}"
+  [ -n "$ONLY" ] || { echo "--only needs a job name" >&2; exit 2; }
+fi
 
 # name|hour:minute[,hour:minute...]|command...
 #   or name|*:minute|command...     for an HOURLY job (every hour at that minute)
@@ -176,8 +204,11 @@ $intervals	</array>
 PLIST
 }
 
+matched=0
 for spec in "${JOBS[@]}"; do
   IFS='|' read -r name times cmd <<< "$spec"
+  if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then continue; fi
+  matched=$((matched + 1))
   label="com.kevinbrittain.$name"
   target="$LA/$label.plist"
   case "$MODE" in
@@ -202,15 +233,99 @@ for spec in "${JOBS[@]}"; do
       rm -f "$target"
       echo "removed $label"
       ;;
+    --prune|--prune-check)
+      : # handled after the loop, once, over the LaunchAgents folder
+      ;;
     *)
-      echo "usage: install-slot-jobs.sh --dry-run|--install|--uninstall" >&2
+      echo "usage: install-slot-jobs.sh --dry-run|--install|--uninstall|--prune|--prune-check" >&2
       exit 2
       ;;
   esac
 done
 
+# A name that matches nothing is a typo, and a silent zero here looks like success.
+if [ -n "$ONLY" ] && [ "$matched" -eq 0 ]; then
+  echo "NO SUCH JOB: --only $ONLY is not in the JOBS array" >&2
+  exit 1
+fi
+
 if [ "$MODE" = "--install" ]; then
   echo
   echo "Now verify the guard still agrees with the register:"
   echo "  python3 $REPO/scripts/check-routines.py"
+fi
+
+# ─── PRUNE A RETIRED JOB'S PLIST (finding 20261031-agent-dispatch-1149) ──────
+if [ "$MODE" = "--prune" ] || [ "$MODE" = "--prune-check" ]; then
+  # Every write path is an option so the test drives the real script without
+  # touching the real LaunchAgents folder or calling the real launchctl.
+  LA="${LA_DIR:-$LA}"
+  PARKED="${LA_PARKED:-$HOME/Library/LaunchAgents.parked}"
+  LAUNCHCTL="${LAUNCHCTL_BIN:-launchctl}"
+  SCHEDULE="${JOB_SCHEDULE:-$REPO/scripts/job-schedule.json}"
+  live=""
+  for spec in "${JOBS[@]}"; do
+    IFS='|' read -r n _rest <<< "$spec"
+    live="$live $n"
+  done
+  touched=0
+  left_live=0
+  left_unknown=0
+  left_unjudged=0
+  shopt -s nullglob
+  for plist in "$LA"/com.kevinbrittain.*.plist; do
+    label="$(basename "$plist" .plist)"
+    name="${label#com.kevinbrittain.}"
+    case " $live " in *" $name "*) continue ;; esac
+    verdict="$(JOB_NAME="$name" /usr/bin/python3 - "$SCHEDULE" <<'PY'
+import json, os, sys
+name = os.environ["JOB_NAME"]
+try:
+    sched = json.load(open(sys.argv[1]))
+except Exception as e:
+    print("CANNOT-READ %s" % e)
+    raise SystemExit(0)
+job = sched.get(name)
+if job is None:
+    print("UNKNOWN")
+elif job.get("enabled") is False:
+    print("RETIRED")
+else:
+    print("ENABLED")
+PY
+)"
+    case "$verdict" in
+      RETIRED)
+        if [ "$MODE" = "--prune-check" ]; then
+          echo "would park  $label  (retired in job-schedule.json, not in JOBS)"
+        else
+          mkdir -p "$PARKED"
+          "$LAUNCHCTL" unload "$plist" 2>/dev/null
+          mv "$plist" "$PARKED/$label.plist"
+          echo "parked  $label  ->  ${PARKED/#$HOME/~}/$label.plist"
+        fi
+        touched=$((touched + 1))
+        ;;
+      ENABLED)
+        # Normal: this installer's JOBS array is only part of the estate, and a
+        # live job installed elsewhere is none of --prune's business.
+        left_live=$((left_live + 1))
+        ;;
+      UNKNOWN)
+        echo "LEFT    $label  is not in job-schedule.json at all, so --prune will not judge it"
+        left_unknown=$((left_unknown + 1))
+        ;;
+      *)
+        echo "LEFT    $label  could not be judged: $verdict" >&2
+        left_unjudged=$((left_unjudged + 1))
+        ;;
+    esac
+  done
+  shopt -u nullglob
+  # Say what did NOT happen: a prune that reports nothing reads like a clean estate.
+  if [ "$touched" -eq 0 ]; then
+    echo "no retired plist to park (checked ${LA/#$HOME/~})"
+  fi
+  echo "left alone: $left_live live, $left_unknown not in the schedule, $left_unjudged unjudged"
+  exit 0
 fi

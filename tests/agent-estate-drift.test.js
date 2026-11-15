@@ -17,7 +17,7 @@
 // MEMORY.md and CLAUDE.md are fully live.
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -514,5 +514,57 @@ print(json.dumps({
     const sched = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
     const [min, hour] = sched['estate-drift'].cron.split(' ');
     expect(Number(hour) * 60 + Number(min)).toBe(at('estate-drift'));
+  });
+
+  // THE REGRESSION (findings 20261114-agent-dispatch-1308 and 20261114-agent-dispatch-1310,
+  // effect described in 20261113-phase-2-1298). The ceo-agent slot's Step 0 read
+  //   ESTATE_DRIFT_SWEEP_DONE=1 python3 .../agent-estate-drift.py
+  // and the headless allowlist in scripts/agent-tools.sh grants `Bash(python3:*)`, which
+  // matches a command's FIRST word. An env assignment in front of python3 is not python3, so
+  // the permission layer refused Step 0 and the 06:45 slot died twice a morning for four
+  // mornings (12-15 Nov 2026), taking the daily huddle and the nightly memory sweep with it.
+  // Nothing errored in the drift check itself, which is why it ran four days.
+  describe('the slot can clear Step 0 with a command the allowlist matches', () => {
+    it('--sweep-done lifts the pre-sweep downgrade, and without it the same run cannot verify', () => {
+      const e = estate();
+      // 03:00: before the sweep, so the clock alone would downgrade a clean read.
+      const withFlag = run(e, ['--now', '2026-11-15T03:00:00', '--sweep-done']);
+      const without = run(e, ['--now', '2026-11-15T03:00:00']);
+      expect(withFlag.code, withFlag.stdout + withFlag.stderr).toBe(0);
+      expect(withFlag.stderr).not.toMatch(/CANNOT VERIFY/);
+      // CONTROL: the window it lifts is real, so the same run without the flag still refuses.
+      expect(without.code, 'CONTROL — the pre-sweep window no longer fires at all').toBe(2);
+      expect(without.stderr).toMatch(/CANNOT VERIFY/);
+    });
+
+    it('a real red is still red with --sweep-done', () => {
+      // The flag says "today's rulings are written", never "answer clean".
+      const e = estate({ stamp: '2026-09-01' });
+      writeFileSync(join(e.brain, 'Decisions', '2026-09-06 Approval gate change.md'),
+        '# gate\nAgents now route differently.\n');
+      const r = run(e, ['--now', '2026-11-15T03:00:00', '--sweep-done']);
+      expect(r.code, r.stdout + r.stderr).toBe(1);
+      expect(r.json.rulings_behind).toEqual(['2026-09-06 Approval gate change.md']);
+    });
+
+    it('no command in a slot job\'s instructions starts with an environment assignment', () => {
+      // The allowlist matches on the first word, so `FOO=1 python3 ...` is a different
+      // command from `python3 ...` and is refused. A script that needs a setting takes a
+      // flag. Guards every slot, not just the one that broke.
+      const dir = resolve(__dirname, '../.claude/scheduled-tasks');
+      const skills = readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => join(dir, d.name, 'SKILL.md'))
+        .filter((f) => existsSync(f));
+      expect(skills.length, 'no slot instructions found to check').toBeGreaterThan(0);
+      const offenders = [];
+      for (const f of skills) {
+        readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+          const m = line.trim().match(/^([A-Z][A-Z0-9_]*)=\S*\s+(python3|node|curl|\/usr\/bin\/python3)\b/);
+          if (m) offenders.push(`${f.replace(/.*scheduled-tasks\//, '')}:${i + 1}  ${line.trim()}`);
+        });
+      }
+      expect(offenders, offenders.join('\n')).toEqual([]);
+    });
   });
 });
