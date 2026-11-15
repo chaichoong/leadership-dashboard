@@ -225,6 +225,20 @@ describe('the back-test runs the changed tests on the code from before the fix',
     expectClean(repo, s);
   }, SLOW);
 
+  it('a new test that cannot even load on the old code counts as failing there (the PR 912 shape)', () => {
+    // py-undefined-names in PR 912 listed a script the old code lacked, so it failed as a file.
+    const repo = miniRepo({ base: { 'lib.js': LIB_OLD }, fix: {
+      'lib.js': LIB_FIX, 'newlib.js': 'export const twice = (a) => a * 2;\n',
+      'tests/twice.test.js': "import { it, expect } from 'vitest';\nimport { twice } from '../newlib.js';\nit('doubles', () => { expect(twice(2)).toBe(4); });\n",
+    } });
+    const s = scenario(repo);
+    const r = cli(s, 'backtest', '--pr', '1', '--json');
+    expect(r.code, r.out + r.err).toBe(0);
+    expect(r.json.files[0]).toMatchObject({ file: 'tests/twice.test.js', kind: 'new', tests: 0,
+      status: 'failed-to-load', verdict: 'fails-without-fix' });
+    expectClean(repo, s);
+  }, SLOW);
+
   it('a NEW test that already passes on the old code is refused', () => {
     const repo = miniRepo({ base: { 'lib.js': LIB_OLD }, fix: { 'lib.js': LIB_FIX, 'tests/zero.test.js': PASSES_ON_OLD } });
     const s = scenario(repo);
@@ -356,6 +370,14 @@ describe('the reviewer is launched read-only and its answer is checked field by 
     const r = cli(s, 'run', '--pr', '1');
     expect(r.code, r.out + r.err).toBe(3);
     expect(r.json.sendBack[0].why).toMatch(/no test fails without the fix, and no flagged test explains why/);
+  }, SLOW);
+
+  it('a "yes" when the back-test ran no test that fails is sent back (the reviewer cannot invent a test)', () => {
+    const repo = codeOnly();
+    const s = scenario(repo, { claude: { stdout: answer(repo.head, [ok(F1)]) } });
+    const r = cli(s, 'run', '--pr', '1');
+    expect(r.code, r.out + r.err).toBe(3);
+    expect(r.json.sendBack[0].why).toMatch(/says a test fails without the fix, but the back-test ran none that does/);
   }, SLOW);
 
   it('a "no" the flagged test explains is accepted (the PR 912 shape: the test itself was the bug)', () => {
@@ -511,8 +533,11 @@ describe('review() records each verdict and passed() answers only for the exact 
     s.setClaude({ stdout: sendBackF1(repo.head) });
     cli(s, 'run', '--pr', '1');
     cli(s, 'run', '--pr', '1');
-    // The fixer takes F1's change out, reopens F1, pushes: the head moves and F1 leaves the ledger.
+    // Reopening F1 without taking its change out (the head has not moved) is not the final round.
     appendFileSync(s.ledger, JSON.stringify({ op: 'reopen', id: F1, ts: '2026-11-15T08:00:00Z', note: 'sent back twice' }) + '\n');
+    expect(cli(s, 'run', '--pr', '1').json).toMatchObject({ round: 3, refusedBy: 'rounds' });
+    expect(s.claudeCalls()).toHaveLength(2);
+    // The fixer takes F1's change out and pushes: the head moves and F1 has left the ledger.
     const h3 = pushNewHead(repo, { 'lib.js': LIB_FIX + '// F1 taken out\n' });
     writeFileSync(s.ghSpec, JSON.stringify({ body: 'Fixes F2.', heads: [h3] }));
     rmSync(s.ghLog + '.views', { force: true });

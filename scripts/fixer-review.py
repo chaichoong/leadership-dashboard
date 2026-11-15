@@ -162,15 +162,13 @@ def file_verdict(kind, res):
     failed = sum(1 for a in asserts if a.get("status") == "failed")
     passed = sum(1 for a in asserts if a.get("status") == "passed")
     row.update(tests=len(asserts), failedOnBase=failed)
-    if res.get("status") == "failed":
+    if failed or res.get("status") == "failed":
         # A file that fails to load on the old code (an import of a script the fix adds, a
         # list naming one) fails without the fix too: PR 912's py-undefined-names did exactly that.
         row["status"] = "failed" if asserts else "failed-to-load"
         if not asserts:
             row["note"] = (res.get("message") or "").strip()[-200:]
         return dict(row, verdict=GOOD)
-    if failed:
-        return dict(row, status="failed", verdict=GOOD)
     if not passed:
         return dict(row, status="skipped", verdict=CANNOT,
                     note="no test in this file ran on the old code (all skipped or empty)")
