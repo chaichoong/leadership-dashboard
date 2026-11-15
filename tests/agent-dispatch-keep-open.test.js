@@ -79,7 +79,7 @@ describe('THE REGRESSION: a keep-open carry-out must not close the task', () => 
     // Without this the next run sees an open intent and could re-execute an
     // action that already happened — the crash-safety rule cmd_intent exists for.
     const branch = SRC.match(/if args\.keep_open:([\s\S]*?)\n\n    patch_task/)[1];
-    expect(branch).toContain('ledger_append(args.task, "done")');
+    expect(branch).toMatch(/ledger_append\(args\.task, "done"[,)]/);
   });
 
   it('the Notes marker is a fixed machine-readable string, not prose', () => {

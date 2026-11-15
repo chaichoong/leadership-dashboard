@@ -18,7 +18,8 @@ const GATE = resolve(ROOT, 'scripts/create-agent-task.py');
 // build_queue run here with Airtable swapped for an in-memory task. Fixtures are invented. Dates
 // are worked out from today in the script, because NEXT CHECK must lie in the next seven days.
 function run({ op = 'submit', output, plainTask = TASK, plainApprove = STATUS_APPROVE, stored = {},
-               tier1 = false, creditor = false, type = 'Research', attach = null, certOwed = false, hist = 'quiet' }) {
+               tier1 = false, creditor = false, type = 'Research', attach = null, certOwed = false, hist = 'quiet',
+               done = null }) {
   const script = `
 import importlib.util, json, sys, tempfile, os, types, io, contextlib
 from datetime import datetime, timedelta
@@ -34,7 +35,16 @@ def fill(s):
              .replace('{LASTWEEK}', (today - timedelta(days=9)).strftime('%d %b %Y')))
 agent = m.CREDITOR_REC_ID if p['creditor'] else sorted(m.AGENTS)[0]
 fields = {m.AF[k]: v for k, v in p['stored'].items()}
+# The last look: a card stamped five days ago (creation is not a look, 15 Nov 2026).
+LOOK = (datetime.now(m.LONDON) - timedelta(days=5)).strftime('%d %b %Y') + ' 09:00'
+fields.setdefault(m.AF['notes'], '[' + LOOK + ' — agent-dispatch] SUBMITTED (round 1) as Research with no new file')
 fields.setdefault(m.AF['teamMember'], [agent])
+# A ledger of this run of its own (a done event after Kevin's approval when the case says it was carried out).
+m.STATE_DIR = tempfile.mkdtemp()
+m.INTENT_LEDGER = os.path.join(m.STATE_DIR, 'carryout-intent.jsonl')
+if p['done']:
+    with open(m.INTENT_LEDGER, 'w') as fh:
+        fh.write(json.dumps({'task': 'recTESTTESTTEST01', 'ts': p['done'], 'event': 'done'}) + '\\n')
 fields.setdefault(m.AF['status'], 'Today')
 created = (datetime.now(m.LONDON) - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 captured, ledger = {}, []
@@ -44,7 +54,7 @@ def fake_patch(task, f):
     return {'id': task}
 m.patch_task = fake_patch
 m.get_task = lambda task: {'id': task, 'createdTime': created, 'fields': json.loads(json.dumps(fields))}
-m.ledger_append = lambda task, event: ledger.append(event)
+m.ledger_append = lambda task, event, *a, **k: ledger.append(event)
 m.ledger_last_events = lambda: {}
 m.finding_details = lambda: {}
 uploads = []
@@ -55,7 +65,7 @@ m.task_owes_cost = lambda *a, **k: []
 m.BROWSER_LEDGER = '/nonexistent/od-test-browser-ledger.jsonl'
 m.HANDOVER_DIR = tempfile.mkdtemp()
 searched = []
-def fake_history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmail=True):
+def fake_history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmail=True, gmail_accounts=None):
     searched.append({'emails': list(emails), 'refs': list(refs), 'gmail': gmail})
     mode = p['hist']
     if mode == 'raise':
@@ -112,7 +122,7 @@ out['stdout'] = buf.getvalue()
 print('---JSON---')
 print(json.dumps(out))
 `;
-  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ op, output, plainTask, plainApprove, stored, tier1, creditor, type, attach, certOwed, hist })],
+  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ op, output, plainTask, plainApprove, stored, tier1, creditor, type, attach, certOwed, hist, done })],
     { encoding: 'utf8', env: { ...process.env, SIGNIN_SKIP_WALK: '1' } });
   return JSON.parse(raw.split('---JSON---')[1]);
 }
@@ -157,7 +167,7 @@ describe('a status-only update on a creditor task files itself', () => {
     const stored = { ...CHASE, status: 'Today', approvalOutcome: 'Approved as-is', approvedAt: '2026-11-01T09:00:00.000Z',
       agentOutput: 'The approved chase card.', plainSummary: 'TASK: x\nIF YOU APPROVE: the chase goes.',
       sentForApprovalBy: ['recAgentAaaaaaaaa'] };
-    const r = run({ output: status(QUIET), tier1: true, creditor: true, stored });
+    const r = run({ output: status(QUIET), tier1: true, creditor: true, stored, done: '2026-11-02T09:00:00.000Z' });
     expect(r.refused, r.error).toBe(false);
     for (const k of ['status', 'approvalOutcome', 'approvedAt', 'agentOutput', 'plainSummary', 'sentForApprovalBy',
                      'teamMember', 'assignee', 'dueDate', 'completion', 'approvalFeedback']) {
@@ -168,7 +178,7 @@ describe('a status-only update on a creditor task files itself', () => {
   it('decision_level puts it at Level A on a tier-1 name, before the tier check', () => {
     const d = py(`
 out = m.TIER1_BANNER + "\\n\\nSTATUS ONLY: No reply yet and nothing new has arrived.\\nNEXT CHECK: " + (today + timedelta(days=2)).isoformat() + "\\n\\n**Carrying this out will involve:** Nothing. Information only."
-rec = {'id': 'recTHIS0000000001', 'createdTime': '2026-11-01T10:00:00.000Z', 'fields': {m.AF['name']: 'INBOUND: bailiff notice of enforcement', m.AF['description']: 'From enforcement@example-bailiffs.test', m.AF['notes']: ''}}
+rec = {'id': 'recTHIS0000000001', 'createdTime': '2026-11-01T10:00:00.000Z', 'fields': {m.AF['name']: 'INBOUND: bailiff notice of enforcement', m.AF['description']: 'From enforcement@example-bailiffs.test', m.AF['notes']: '[02 Nov 2026 09:00 — agent-dispatch] SUBMITTED (round 1) as Research with no new file'}}
 m.history = lambda **kw: {'terms': ['email x'], 'searched': ['tasks', 'Gmail'], 'entries': [], 'notes': []}
 lv = m.decision_level(out, 'Research', rec, fetch=lambda i: {})
 print(json.dumps([lv['level'], lv['category'], lv['carry'], lv.get('restUntil')]))`);
@@ -266,11 +276,14 @@ describe('anything with an ask, a reply or something to carry out is refused bac
 });
 
 describe('a card whose Approve runs nothing is refused, with the two honest routes', () => {
+  // Shrunk 15 Nov 2026 (finding 11): only a line that, taken whole, says nothing happens. Longer lines
+  // pass, because a wrongly refused card stops real work. The fourteen real cards are in
+  // tests/agent-dispatch-rest-fingerprint.test.js.
   const REPORT = 'The account was checked line by line against the bank feed for October. '.repeat(4) + '\n\n' + RECORD + '\n\n' + CLOSING;
   it.each([
-    'Nothing happens. This only tells you no reply has come yet and the next check is on 2 November.',
-    'Nothing is sent. We already froze this debt on 10 Sep and are waiting on them.',
-    'Nothing happens. It stays parked until January, as already agreed.',
+    'Nothing happens.',
+    'Nothing. Information only.',
+    'Nothing happens. Information only.',
   ])('refuses %s on a tier-1 card', (line) => {
     const r = run({ output: REPORT, plainApprove: line, tier1: true, creditor: true, stored: CHASE });
     expect(r.refused).toBe(true);
@@ -281,7 +294,7 @@ describe('a card whose Approve runs nothing is refused, with the two honest rout
   });
 
   it('the first look refuses before any file is uploaded', () => {
-    const r = run({ output: REPORT, plainApprove: 'Nothing happens. This only tells you no reply has come yet.',
+    const r = run({ output: REPORT, plainApprove: 'Nothing happens.',
       tier1: true, creditor: true, stored: CHASE, attach: true });
     expect(r.refused).toBe(true);
     expect(r.error).toContain('says Approve runs nothing');
@@ -289,7 +302,7 @@ describe('a card whose Approve runs nothing is refused, with the two honest rout
   });
 
   it('the last look refuses a report that would have filed itself but becomes a card (a certificate owed)', () => {
-    const r = run({ output: REPORT, plainApprove: 'Nothing happens. This is information only, for your records.',
+    const r = run({ output: REPORT, plainApprove: 'Nothing. Information only.',
       type: 'Analysis', certOwed: true });
     expect(r.refused).toBe(true);
     expect(r.error).toContain('it would be a card');
@@ -303,43 +316,21 @@ describe('a card whose Approve runs nothing is refused, with the two honest rout
   });
 
   it('a report that files itself keeps its Nothing line: there is no card to refuse', () => {
-    const r = run({ output: REPORT, plainApprove: 'Nothing happens. This is information only, for your records.', type: 'Analysis' });
+    const r = run({ output: REPORT, plainApprove: 'Nothing. Information only.', type: 'Analysis' });
     expect(r.refused, r.error).toBe(false);
     expect(r.captured.fields[r.fieldMap.status]).toBe('Completed');
   });
 
   it('escalate refuses a decision card whose Approve runs nothing', () => {
     const r = run({ op: 'escalate', output: '', plainTask: 'The phone contract ends at the end of the month.',
-      plainApprove: 'Nothing happens. This only tells you the contract ends soon.' });
+      plainApprove: 'Nothing happens.' });
     expect(r.refused).toBe(true);
     expect(r.error).toContain('says Approve runs nothing');
-  });
-
-  it('the backstop reads the stored lines the back-test read (60 days to 14 Nov 2026) the same way', () => {
-    const lines = py(`print(json.dumps({l: bool(m.approve_line_noop(l)) for l in [
-  "Nothing happens. This only tells you no reply has come yet and the next check is on 2 November.",
-  "Nothing is sent. The matter is checked again on 6 November and a chase comes to you then if needed.",
-  "Nothing to do — checked live, the pattern doesn't exist anymore. The code issue is already logged for a future build session.",
-  "Nothing changes. The notice is filed as covered by the agreed 20 pounds a month plan.",
-  "Nothing happens - this just closes the task, no action needed.",
-  "Nothing happens — the task closes, no purchase made",
-  "Nothing changes in Google. The plan stays the same, this 25.50 pound a month saving is closed as not now, and the bill stays at 135.50 pounds.",
-  "Nothing runs yet - Kevin is only approving the plan to stop that check from being skipped.",
-  "Nothing changes now. A later session fixes today's files, then rewrites history on route A.",
-  "The card closes as read. Nothing is sent.",
-  "If you approve, the robot runs merge-pr.py and the deploy, nothing else.",
-  "Nothing is written. Use Request changes to give one line of real context and the post is written from it.",
-]}))`);
-    expect(Object.entries(lines).filter(([, v]) => v).map(([k]) => k)).toEqual([
-      'Nothing happens. This only tells you no reply has come yet and the next check is on 2 November.',
-      'Nothing is sent. The matter is checked again on 6 November and a chase comes to you then if needed.',
-      "Nothing to do — checked live, the pattern doesn't exist anymore. The code issue is already logged for a future build session.",
-    ]);
   });
 });
 
 describe('a filed task rests until its NEXT CHECK and counts as the run\'s outcome', () => {
-  it('status_rest reads the stamped line and the status event; a fold, a new holder, a newer step or Kevin wakes it', () => {
+  it('status_rest holds only while the task is exactly as the filing left it, and only until NEXT CHECK', () => {
     const r = py(`
 d = lambda n: (today + timedelta(days=n)).isoformat()
 stamp = today.strftime('%d %b %Y') + ' 09:00'
@@ -347,30 +338,32 @@ line = lambda until, holder='recHOLDERaaaaaaaa': f"[{stamp} — agent-dispatch] 
 ts = datetime.now(m.LONDON).replace(hour=9, minute=0).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 later = datetime.now(m.LONDON).replace(hour=9, minute=30).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 ev = ("status", ts)
-t = lambda **kw: dict({"outcome": "", "notes": line(d(3)), "approvedAt": "", "description": "", "teamMemberIds": ["recHOLDERaaaaaaaa"]}, **kw)
+t = lambda **kw: dict({"outcome": "", "notes": line(d(3)), "approvedAt": "", "description": "Chase the refund.", "dueDate": "", "teamMemberIds": ["recHOLDERaaaaaaaa"]}, **kw)
+FP = m.rest_fingerprint(t())
+rs = lambda task, e=ev, fp=FP: m.status_rest(task, e, fingerprint=fp)
 print(json.dumps([
-  m.status_rest(t(), ev),
-  m.status_rest(t(notes=line(d(0))), ev),
-  m.status_rest(t(approvedAt=later), ev),
-  m.status_rest(t(outcome="Changes requested"), ev),
-  m.status_rest(t(), ("parked", ts)),
-  m.status_rest(t(notes="[" + stamp + " — agent] HANDLED WITHOUT YOU (status update): typed. rests until " + d(3) + "."), ev),
-  m.status_rest(t(), ev, folded_at=later),
-  m.status_rest(t(description="old text\\n\\nUPDATE " + d(1) + ": new item folded in by the duplicate gate (one subject = one open task)."), ev),
-  m.status_rest(t(teamMemberIds=["recSOMEONEELSEaa"]), ev),
-  m.status_rest(t(), ev, folded_at="2000-01-01T00:00:00.000Z"),
-  m.status_rest(t(description="UPDATE " + d(-2) + ": new item folded in by the duplicate gate"), ev),
+  rs(t()),
+  rs(t(notes=line(d(0))), fp=m.rest_fingerprint(t(notes=line(d(0))))),
+  rs(t(approvedAt=later)),
+  rs(t(outcome="Changes requested")),
+  rs(t(), ("parked", ts)),
+  rs(t(), fp=""),
+  rs(t(description="Chase the refund.\\n\\nUPDATE " + d(0) + ": new item folded in by the duplicate gate (one subject = one open task).")),
+  rs(t(description="Chase the refund.\\n\\nNEW MESSAGE " + d(0) + ": they replied.")),
+  rs(t(teamMemberIds=["recSOMEONEELSEaa"])),
+  rs(t(teamMemberIds=[])),
+  rs(t(notes=line(d(3)) + "\\n\\n[x — agent] looked.")),
+  rs(t(description="Chase the refund.  \\r\\n")),
 ]))`);
     expect(r[0]).toMatch(/^status update filed at .* with nothing to approve; rests until \d{4}-\d{2}-\d{2}/);
-    // ends on: next check reached, a newer verdict, changes requested, a newer step, a typed line,
-    // a fold after the filing, a fold block dated after the filing day, a new holder
-    expect(r.slice(1, 9)).toEqual(['', '', '', '', '', '', '', '']);
-    // an older fold, by the ledger or by the Description, wakes nothing
-    expect(r[9]).toMatch(/rests until/);
-    expect(r[10]).toMatch(/rests until/);
+    // ends on: next check reached, a newer verdict, changes requested, a newer step, no fingerprint, a
+    // fold block, a reply line, a new holder, the holder removed, a note
+    expect(r.slice(1, 11)).toEqual(['', '', '', '', '', '', '', '', '', '']);
+    // line ends and trailing spaces are not a change
+    expect(r[11]).toMatch(/rests until/);
   });
 
-  it('a fold is not a step in the task\'s own life: other rests and open carry-out intents read as before', () => {
+  it('a fold is not a step in the task\'s own life: other rests, prints and open carry-out intents read as before', () => {
     const dir = mkdtempSync(tmpdir() + '/od-status-fold-ledger-');
     const r = py(`
 import os
@@ -379,14 +372,16 @@ m.INTENT_LEDGER = os.path.join(${JSON.stringify(dir)}, 'carryout-intent.jsonl')
 with open(m.INTENT_LEDGER, 'w') as fh:
     for task, ev, ts in (('recDoneAaaaaaaaaa', 'done', '2026-11-14T08:00:00.000Z'), ('recDoneAaaaaaaaaa', 'folded', '2026-11-14T09:00:00.000Z'),
                          ('recIntentAaaaaaaa', 'intent', '2026-11-14T08:00:00.000Z'), ('recIntentAaaaaaaa', 'folded', '2026-11-14T09:00:00.000Z')):
-        fh.write(json.dumps({'task': task, 'ts': ts, 'event': ev}) + '\\n')
-print(json.dumps([m.ledger_last_events().get('recDoneAaaaaaaaaa'), sorted(m.open_intents()), m.ledger_fold_times()]))`);
+        row = {'task': task, 'ts': ts, 'event': ev}
+        if ev == 'done': row['fp'] = 'v1|x=1'
+        fh.write(json.dumps(row) + '\\n')
+print(json.dumps([m.ledger_last_events().get('recDoneAaaaaaaaaa'), sorted(m.open_intents()), m.ledger_rest_prints()]))`);
     expect(r[0]).toEqual(['done', '2026-11-14T08:00:00.000Z']);
     expect(r[1]).toEqual(['recIntentAaaaaaaa']);
-    expect(r[2]).toEqual({ recDoneAaaaaaaaaa: '2026-11-14T09:00:00.000Z', recIntentAaaaaaaa: '2026-11-14T09:00:00.000Z' });
+    expect(r[2]).toEqual({ recDoneAaaaaaaaaa: 'v1|x=1', recIntentAaaaaaaa: '' });
   });
 
-  it('THE REAL GATE: a new item folded into a resting task ends its rest in the real build_queue', () => {
+  it('THE REAL GATE: a new item folded into a resting task ends its rest in the real build_queue, with no ledger write', () => {
     const dir = mkdtempSync(tmpdir() + '/od-status-fold-');
     const res = py(`
 import os, io, contextlib
@@ -402,12 +397,11 @@ filed = f"[{stamp} — agent-dispatch] HANDLED WITHOUT YOU (status update): No r
 NAME = 'Chase: Example Phones refund reply ref EXP-55102'
 live = {g.F['name']: NAME, g.F['status']: {'name': 'Today'}, g.F['due']: today.isoformat(),
         g.F['team']: [ANALYST], g.F['desc']: 'CREDITOR MATTER', g.F['notes']: filed}
-writes = []
 def req(method, path, body=None):
     if method == 'GET' and TID in path:
         return {'id': TID, 'fields': dict(live)}
     if method == 'PATCH':
-        writes.append(body['fields']); return {'id': TID}
+        live.update(body['fields']); return {'id': TID}
     if method == 'POST' and path.endswith('/comments'):
         return {}
     raise RuntimeError('unexpected ' + method + ' ' + path)
@@ -415,20 +409,21 @@ g._request = req
 d = g._dispatch()
 d.STATE_DIR = ${JSON.stringify(dir)}
 d.INTENT_LEDGER = os.path.join(${JSON.stringify(dir)}, 'carryout-intent.jsonl')
+A = d.AF
+def row():
+    return {'id': TID, 'fields': {A['name']: live[g.F['name']], A['status']: {'name': 'Today'}, A['dueDate']: live[g.F['due']],
+            A['teamMember']: live[g.F['team']], A['notes']: live[g.F['notes']], A['description']: live[g.F['desc']]}}
 ts = (datetime.now(timezone.utc) - timedelta(minutes=30)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 with open(d.INTENT_LEDGER, 'w') as fh:
-    fh.write(json.dumps({'task': TID, 'ts': ts, 'event': 'status'}) + '\\n')
+    fh.write(json.dumps({'task': TID, 'ts': ts, 'event': 'status', 'fp': d.rest_fingerprint(d.rest_view(row()))}) + '\\n')
 g.fetch_open_tasks = lambda: [{'id': TID, 'fields': dict(live)}]
 g.settle_owner = lambda fields, owner, day: (fields, None, [])
 g.load_scan_cache = lambda: {}
 g.write_track_record = lambda *a, **k: None
 g.auto_reply_refusal = lambda *a, **k: ''
 g.never_a_card_refusal = lambda *a, **k: ''
-A = d.AF
 def queue():
-    row = {'id': TID, 'fields': {A['name']: NAME, A['status']: {'name': 'Today'}, A['dueDate']: today.isoformat(),
-           A['teamMember']: [ANALYST], A['notes']: filed, A['description']: 'CREDITOR MATTER'}}
-    d.query_tasks = lambda formula, **kw: [row] if formula == d.QUEUE_FORMULA else []
+    d.query_tasks = lambda formula, **kw: [row()] if formula == d.QUEUE_FORMULA else []
     d.fetch_role_roster = lambda: {}
     d.fetch_ai_agents = lambda: {ANALYST: 'AI Worker — Analyst'}
     d.rent_reply_senders = lambda *a, **k: set()
@@ -437,7 +432,6 @@ def queue():
     q = d.build_queue()
     return {'idle': [t['id'] for t in q['idleHandbacks']], 'work': [t['id'] for t in q['worklist'] + q['reserve']]}
 before = queue()
-fold = ${JSON.stringify(process.env.STATUS_FOLD_OFF || '')} != '1'
 out = io.StringIO()
 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
     code = g.cmd_create({g.F['name']: NAME + ' (follow-up)', g.F['desc']: 'They replied: the refund is refused.',
@@ -445,18 +439,17 @@ with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
 print(json.dumps({'before': before, 'after': queue(), 'code': code, 'gate': out.getvalue().strip().splitlines()[0],
                   'ledger': [json.loads(l)['event'] for l in open(d.INTENT_LEDGER)]}))`);
     expect(res.gate).toContain('"action": "updated"');
-    expect(res.ledger).toEqual(['status', 'folded']);
+    expect(res.ledger).toEqual(['status']);
     expect(res.before.idle).toEqual(['recRestedAaaaaaaa']);
     expect(res.after.idle).toEqual([]);
     expect(res.after.work).toEqual(['recRestedAaaaaaaa']);
   });
 
-  // A GATE TEST NEVER WRITES THE REAL LEDGER (14 Nov 2026). record_fold appends to the dispatcher's
-  // ledger through its own ledger_append, at STATE_DIR. A test that drives a real fold without
-  // overriding STATE_DIR by hand used to write ~/knowledge-os/logs/agent-dispatch, the ledger that
-  // decides which of Kevin's tasks rest. AGENT_DISPATCH_DIR, read at import, now moves it. HOME is a
-  // temp folder here, so "the real path" is one this test can look at without touching his.
-  it('a real fold under AGENT_DISPATCH_DIR writes the ledger there, and nothing under the default path', () => {
+  // A FOLD WRITES NOTHING TO THE CARRY-OUT LEDGER (15 Nov 2026). The create gate used to record a
+  // `folded` event there (record_fold); the rest fingerprint made it redundant, because a fold
+  // changes the Description and that alone ends any rest. HOME is a temp folder here, so "the real
+  // path" is one this test can look at without touching his.
+  it('a real fold writes no ledger line, under AGENT_DISPATCH_DIR or on the default path', () => {
     const fold = (env) => {
       const script = `
 import importlib.util, json, io, contextlib
@@ -486,7 +479,7 @@ out = io.StringIO()
 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
     g.cmd_create({g.F['name']: NAME + ' (follow-up)', g.F['desc']: 'They replied.', g.F['status']: 'Today',
                   g.F['team']: [ANALYST]}, force=False)
-print(json.dumps({'gate': out.getvalue().strip().splitlines()[0], 'dir': g._dispatch().STATE_DIR}))`;
+print(json.dumps({'gate': out.getvalue().strip().splitlines()[0]}))`;
       return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8', env }).trim().split('\n').pop());
     };
     const home = mkdtempSync(tmpdir() + '/od-fold-home-');
@@ -494,16 +487,12 @@ print(json.dumps({'gate': out.getvalue().strip().splitlines()[0], 'dir': g._disp
     const real = `${home}/knowledge-os/logs/agent-dispatch/carryout-intent.jsonl`;
     const r = fold({ ...process.env, HOME: home, AGENT_DISPATCH_DIR: dir });
     expect(r.gate).toContain('"action": "updated"');
-    expect(r.dir).toBe(dir);
-    expect(readFileSync(`${dir}/carryout-intent.jsonl`, 'utf8').trim().split('\n').map((l) => JSON.parse(l).event)).toEqual(['folded']);
-    expect(existsSync(real)).toBe(false);
-    // The control: with no override the same fold lands on the default path, so the check above
-    // is looking at the right place.
+    expect(existsSync(`${dir}/carryout-intent.jsonl`)).toBe(false);
     const env = { ...process.env, HOME: home };
     delete env.AGENT_DISPATCH_DIR;
     const c = fold(env);
     expect(c.gate).toContain('"action": "updated"');
-    expect(existsSync(real)).toBe(true);
+    expect(existsSync(real)).toBe(false);
   });
 
   it('every vitest file runs with AGENT_DISPATCH_DIR and MERGE_APPROVED_DIR on temp folders (tests/setup-state-dirs.js)', () => {
@@ -533,7 +522,8 @@ def rec(i, notes):
             A["dueDate"]: today.isoformat(), A["teamMember"]: [ANALYST], A["notes"]: notes}}
 rows = [rec("recRestedAaaaaaaa", filed), rec("recFreshAaaaaaaaa", ""), rec("recNoEventAaaaaaa", filed)]
 with open(m.INTENT_LEDGER, "w") as fh:
-    fh.write(json.dumps({"task": "recRestedAaaaaaaa", "ts": "2026-11-14T09:00:00.000Z", "event": "status"}) + "\\n")
+    fh.write(json.dumps({"task": "recRestedAaaaaaaa", "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                         "event": "status", "fp": m.rest_fingerprint(m.task_view(rows[0]))}) + "\\n")
 m.query_tasks = lambda formula, **kw: rows if formula == m.QUEUE_FORMULA else []
 m.fetch_role_roster = lambda: {}
 m.fetch_ai_agents = lambda: {ANALYST: "AI Worker — Analyst"}

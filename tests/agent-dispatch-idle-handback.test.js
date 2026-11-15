@@ -39,10 +39,14 @@ ${snippet}
 }
 
 describe('idle hand-backs rest for a day', () => {
-  it('carried out and kept open (done + mark with no stamped date, 1h ago) rests three days, not a day', () => {
-    const r = py(`print(json.dumps(m.idle_handback(t(notes="x " + m.CARRIED_OUT_MARK + " chase due 16 Sep"), ("done", "2026-09-14T07:03:50.000Z"), NOW)))`);
-    expect(r).toBe("carried out and kept open at 2026-09-14T07:03 with no next-look date; rests until 17 Sep 2026 "
-      + "(3 days), when the agent sets one, or until Kevin's verdict changes");
+  it('a keep-open rest with no fingerprint (every rest begun before 15 Nov 2026) ends at its next read', () => {
+    // Before the fingerprint, an undated line rested three days and a dated one until its date. A rest
+    // that cannot prove the task is as it left it now wakes once; the next keep-open carries a print.
+    const r = py(`print(json.dumps([
+  m.idle_handback(t(notes="x " + m.CARRIED_OUT_MARK + " chase due 16 Sep"), ("done", "2026-09-14T07:03:50.000Z"), NOW),
+  m.idle_handback(t(notes="[14 Sep 2026 — agent] " + m.CARRIED_OUT_MARK + " chased. Left OPEN deliberately: the approval said so. Next look: it rests until 2026-09-20."),
+                  ("done", "2026-09-14T07:03:50.000Z"), NOW)]))`);
+    expect(r).toEqual(['', '']);
   });
 
   it('a done with NO keep-open mark is an incomplete close and is NOT rested', () => {
@@ -87,7 +91,7 @@ import io, contextlib
 W, L = [], []
 m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "", m.AF["status"]: "Today", m.AF["teamMember"]: ["recAgentAaaaaaaaa"]}}
 m.patch_task = lambda i, f: W.append(f)
-m.ledger_append = lambda t, e: L.append(e)
+m.ledger_append = lambda t, e, *a, **k: L.append(e)
 m.load_login_sites = lambda: {}
 class A:
     def __init__(self, **kw): self.__dict__.update(kw)
@@ -250,54 +254,69 @@ on = queue()
 d5 = TODAY + timedelta(days=5)
 print(json.dumps({"before": before, "eve": eve, "on": on, "d5": "%d %s" % (d5.day, d5.strftime("%b %Y"))}))`);
     expect(r.before.work).toEqual(['recFreeWorkAaaaaa']);
-    expect(r.before.idle.recKeepQueueAaaaa).toMatch(new RegExp(`^carried out and kept open at \\S+; rests until ${r.d5}, or until Kevin's verdict changes, a wall opens or it changes hands$`));
+    expect(r.before.idle.recKeepQueueAaaaa).toMatch(new RegExp(`^carried out and kept open at \\S+; rests until ${r.d5}, or until anything on the task changes`));
     expect(Object.keys(r.eve.idle)).toEqual(['recKeepQueueAaaaa']);
     expect(r.on.work).toEqual(['recFreeWorkAaaaaa', 'recKeepQueueAaaaa']);
     expect(r.on.idle).toEqual({});
   });
 
-  it('an old done with no stamped date rests 3 days: not 24 hours, and not for ever', () => {
+  it('a rest begun before fingerprints wakes at its first read, once; the next keep-open rests again', () => {
     const r = run(`
 rec("recKeepOldAaaaaaa", "[10 Nov 2026 — agent] " + m.CARRIED_OUT_MARK + " chased again. Left OPEN deliberately: the approval said so.")
-m.ledger_append("recKeepOldAaaaaaa", "done")
-out = {}
-for k, h in [("h25", 25), ("h71", 71), ("h73", 73), ("d30", 720)]:
-    SHIFT[0] = timedelta(hours=h)
-    out[k] = queue()["work"]
-print(json.dumps(out))`);
-    expect(r.h25).toEqual([]);
-    expect(r.h71).toEqual([]);
-    expect(r.h73).toEqual(['recKeepOldAaaaaaa']);
-    expect(r.d30).toEqual(['recKeepOldAaaaaaa']);
+m.ledger_append("recKeepOldAaaaaaa", "done")                 # what the old complete wrote: no fingerprint
+first = queue()
+err = complete("recKeepOldAaaaaaa", until=day(5))
+SHIFT[0] = timedelta(hours=1)
+second = queue()
+print(json.dumps({"first": first["work"], "err": err, "second": second["work"], "idle": sorted(second["idle"])}))`);
+    expect(r.first).toEqual(['recKeepOldAaaaaaa']);
+    expect(r.err).toBeNull();
+    expect(r.second).toEqual([]);
+    expect(r.idle).toEqual(['recKeepOldAaaaaaa']);
   });
 
-  it("wakes early on Kevin's newer verdict, a new holder, a wall clearing or a fold; a wall opening takes over the rest; never past 14 days", () => {
+  it("wakes on ANY change to the task (verdict, holder added or removed, a reply line, a fold block, a folded twin, a due date, a note), and on a wall; an untouched task keeps resting", () => {
     const r = run(`
-for i in ("recWakeVerdictAaa", "recWakeHolderAaaa", "recWakeWallAaaaaa", "recWakeClearAaaaa", "recWakeFoldAaaaaa", "recWakeCapAaaaaaa"):
+ids = ("recWakeVerdictAaa", "recWakeHolderAaaa", "recWakeBlankAaaaa", "recWakeWallAaaaaa", "recWakeClearAaaaa",
+       "recWakeReplyAaaaa", "recWakeFoldAaaaaa", "recWakeTwinAaaaaa", "recWakeDueAaaaaaa", "recWakeNoteAaaaaa", "recQuietAaaaaaaaa")
+for i in ids:
     rec(i, "")
+    TASKS[i]["fields"][AF["description"]] = "Chase the example supplier for a delivery date."
     complete(i, until=day(10))
-TASKS["recWakeVerdictAaa"]["fields"][AF["approvedAt"]] = (_dt.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-TASKS["recWakeHolderAaaa"]["fields"][AF["teamMember"]] = [OTHER]
+F = lambda i: TASKS[i]["fields"]
+F("recWakeVerdictAaa")[AF["approvedAt"]] = (_dt.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+F("recWakeHolderAaaa")[AF["teamMember"]] = [OTHER]
+F("recWakeBlankAaaaa")[AF["teamMember"]] = []
 SITE = "\\n\\n[y — agent] BLOCKER OPEN (SITE example-portal.test): why Fix: f [since 2026-11-01T09:00:00.000Z]"
 for i in ("recWakeWallAaaaaa", "recWakeClearAaaaa"):
-    TASKS[i]["fields"][AF["notes"]] += SITE
+    F(i)[AF["notes"]] += SITE
     m.ledger_append(i, "parked")                   # what block writes with its BLOCKER line
-TASKS["recWakeClearAaaaa"]["fields"][AF["notes"]] += "\\n\\n[z — agent-dispatch] BLOCKER CLEARED (SITE example-portal.test): on the list now."
+F("recWakeClearAaaaa")[AF["notes"]] += "\\n\\n[z — agent-dispatch] BLOCKER CLEARED (SITE example-portal.test): on the list now."
 m.ledger_append("recWakeClearAaaaa", "unblocked")  # what wake_blocked writes
-# the gate's fold, a minute after the carry-out (the ledger stamps whole seconds)
-open(m.INTENT_LEDGER, "a").write(json.dumps({"task": "recWakeFoldAaaaaa", "event": m.FOLD_EVENT,
-    "ts": (_dt.now(timezone.utc) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")}) + "\\n")
-TASKS["recWakeCapAaaaaaa"]["fields"][AF["notes"]] = TASKS["recWakeCapAaaaaaa"]["fields"][AF["notes"]].replace(day(10), "2099-01-01")
+# Inbox Triage Step 3's hand PATCH: no ledger event, no gate
+F("recWakeReplyAaaaa")[AF["description"]] += "\\n\\nNEW MESSAGE " + day(0) + ": the supplier replied with two dates."
+# the gate's fold block with its ledger write lost
+F("recWakeFoldAaaaaa")[AF["description"]] += "\\n\\nUPDATE " + day(0) + ": new item folded in by the duplicate gate (one subject = one open task).\\nThey offered Tuesday."
+# a twin closed as a duplicate of this task: carry_output_to_keeper's own block, the real function
+m.carry_output_to_keeper("recTwinAaaaaaaaaa", {AF["name"]: "Supplier follow-up", AF["description"]: "They offered Tuesday."},
+                         "recWakeTwinAaaaaa", "10 Nov 2026 09:30")
+F("recWakeDueAaaaaaa")[AF["dueDate"]] = day(2)
+F("recWakeNoteAaaaaa")[AF["notes"]] += "\\n\\n[x — agent] looked at the portal."
 SHIFT[0] = timedelta(minutes=10)
 now = queue()
-SHIFT[0] = timedelta(days=15)
-later = queue()
-print(json.dumps({"now": now, "capLater": "recWakeCapAaaaaaa" in later["work"]}))`);
-    expect(r.now.work).toEqual(['recWakeClearAaaaa', 'recWakeFoldAaaaaa', 'recWakeHolderAaaa', 'recWakeVerdictAaa']);
-    expect(Object.keys(r.now.idle).sort()).toEqual(['recWakeCapAaaaaaa', 'recWakeWallAaaaaa']);
+print(json.dumps({"now": now}))`);
+    expect(r.now.work).toEqual(['recWakeBlankAaaaa', 'recWakeClearAaaaa', 'recWakeDueAaaaaaa', 'recWakeFoldAaaaaa',
+      'recWakeHolderAaaa', 'recWakeNoteAaaaaa', 'recWakeReplyAaaaa', 'recWakeTwinAaaaaa', 'recWakeVerdictAaa']);
+    expect(Object.keys(r.now.idle).sort()).toEqual(['recQuietAaaaaaaaa', 'recWakeWallAaaaaa']);
     // a wall opening ends the kept-open rest and hands it to the wall's own rule (rests until it clears)
     expect(r.now.idle.recWakeWallAaaaaa).toMatch(/^parked on SITE example-portal\.test at \S+; rests until the wall clears/);
-    expect(r.capLater).toBe(true);
+  });
+
+  it('a kept-open rest never runs past 14 days from its event, whatever the line says', () => {
+    const r = py(`
+line = "[14 Sep 2026 — agent] " + m.CARRIED_OUT_MARK + " chased. Left OPEN deliberately: the approval said so. Next look: it rests until 2099-01-01."
+print(json.dumps(m.kept_open_until({"notes": line}, "2026-09-14T07:00:00.000Z").isoformat()))`);
+    expect(r).toBe('2026-09-28');
   });
 
   it('a KEVIN-walled parked task behaves exactly as before: the day\'s clock, then owed', () => {

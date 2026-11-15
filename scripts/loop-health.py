@@ -441,9 +441,10 @@ def report():
         rules_loaded = True
     except Exception:  # noqa: BLE001 — not swallowed: agent_work loads it again and names the failure (splitCheck)
         rules_loaded = False
+    resting, resting_err = dispatch_resting(now)
     if rules_loaded:
         ledger, ledger_err, ledger_skipped = carryout_ledger()
-        added = reply_overdue_rows(tasks, now, ledger, roy_ids, {s["id"] for s in res["stalled"]})
+        added = reply_overdue_rows(tasks, now, ledger, roy_ids, {s["id"] for s in res["stalled"]}, resting)
     if added:
         res["stalled"] = sorted(res["stalled"] + added,
                                 key=lambda s: (RULE_ORDER.get(s["rule"], 9), -s["days"]))
@@ -452,7 +453,8 @@ def report():
     try:
         res["agentWork"] = agent_work(tasks, agent_ids, res["stalled"], held_ids, held_err, now=now,
                                       ledger=ledger, ledger_error=ledger_err, ledger_skipped=ledger_skipped,
-                                      open_check=(open_before, open_after))
+                                      open_check=(open_before, open_after),
+                                      resting=resting, resting_error=resting_err)
     except SplitCheckFailed as exc:
         # Only the card's split is withdrawn: it shows the plain open count, amber, with
         # this reason. The stalled list above and every other number still stand.
@@ -626,9 +628,27 @@ def reply_wait(f, now, events=None):
     return _reply_wait(f, now, events)[0]
 
 
-def _reply_wait(f, now, events):
-    """(reply_wait's answer, when the wait began as a London date or None)."""
+def _reply_wait(f, now, events, rest_until=None):
+    """(reply_wait's answer, when the wait began as a London date or None), or ("resting", the day the
+    rest ends) while the dispatcher lists the task as resting (`rest_until`, from dispatch_resting).
+
+    A REST IS NOT STUCK, AND AN ENDED REST IS DUE (findings 9 and 10, 15 Nov 2026). `rest_until` is
+    the day the dispatcher's queue says the rest ends, '' when the queue was read and the task is not
+    resting, None when it was not read. While a rest holds the task is waiting (never on the Stuck
+    list); once the newest event that began a rest (`done` or `status`) no longer holds, the task is
+    due, which is live work for the dispatcher. A gate fold is not a step in the task's own life and
+    is skipped, as the dispatcher's own ledger readers skip it. With no queue the older ledger rule
+    decides, `status` counting as a rest event like `done`."""
     d = dispatcher()
+    if rest_until:
+        try:
+            return "resting", datetime.strptime(rest_until[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return "", None
+    if events is not None:
+        events = [e for e in events if e[0] != d.FOLD_EVENT]
+        if rest_until == "" and events and events[-1][0] in ("done", "status"):
+            return "", None
     if f.get("Approval Outcome") not in d.APPROVED:
         return "", None
     notes = str(f.get("Notes") or "")
@@ -639,7 +659,7 @@ def _reply_wait(f, now, events):
     if f.get("Approved At") and approved is None:
         return "", None    # cannot tell which came first: shown as live, never hidden
     if events is not None:
-        if not events or events[-1][0] != "done":
+        if not events or events[-1][0] not in ("done", "status"):
             return "", None
         after = [when for event, when in events if event == "done" and (approved is None or when >= approved)]
         if not after:
@@ -656,7 +676,7 @@ def _reply_wait(f, now, events):
     return ("overdue" if waited > REPLY_STUCK_DAYS else "waiting"), began
 
 
-def work_bucket(f, now, events=None):
+def work_bucket(f, now, events=None, rest_until=None):
     """(bucket, wait) for an OPEN agent task: bucket is one of WORK_BUCKETS and
     wait is reply_wait's answer ("" outside the dispatch window). The Approval
     lanes are lane_for's own: a card knocked back to a later date is scheduled,
@@ -670,11 +690,11 @@ def work_bucket(f, now, events=None):
         return ("scheduled" if lane == "deferred" else "approval"), ""
     if not in_dispatch_window(status, f.get("Due Date"), today, bool(f.get("Some Day"))):
         return ("scheduled" if status == "Upcoming" else "other"), ""
-    wait = reply_wait(f, now, events)
-    return ("waitingReply" if wait == "waiting" else "live"), wait
+    wait = _reply_wait(f, now, events, rest_until)[0]
+    return ("waitingReply" if wait in ("waiting", "resting") else "live"), wait
 
 
-def reply_overdue_rows(tasks, now, ledger, roy_ids=(), already=()):
+def reply_overdue_rows(tasks, now, ledger, roy_ids=(), already=(), resting=None):
     """Stalled rows, rule "reply", for every open task in the dispatch window
     whose carried-out wait is past REPLY_STUCK_DAYS. report() adds them to the
     stalled list, so the Estate tab shows each task the card counts as stuck
@@ -690,7 +710,8 @@ def reply_overdue_rows(tasks, now, ledger, roy_ids=(), already=()):
             continue
         if not in_dispatch_window(status, f.get("Due Date"), today, bool(f.get("Some Day"))):
             continue
-        wait, began = _reply_wait(f, now, None if ledger is None else ledger.get(r["id"], []))
+        wait, began = _reply_wait(f, now, None if ledger is None else ledger.get(r["id"], []),
+                                  None if resting is None else resting.get(r["id"], ""))
         if wait != "overdue":
             continue
         days = (now.astimezone(LONDON).date() - began).days
@@ -719,10 +740,8 @@ def open_agent_ids(agent_ids, fetcher=None):
     return {r["id"] for r in fetcher(TASKS, ["Status"], formula=formula)}
 
 
-def dispatch_held_ids(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
-    """(set of task ids, None) from the dispatcher's newest queue, or (None, why not).
-    A missing, half-written, unreadable or stale queue is NOT CHECKED, never an
-    empty list, and never a crash."""
+def _dispatch_queue(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
+    """(queue dict, None) from the dispatcher's newest queue, or (None, why not)."""
     path = path or DISPATCH_QUEUE
     try:
         with open(path, encoding="utf-8") as fh:
@@ -731,20 +750,48 @@ def dispatch_held_ids(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
         return None, "no dispatch queue at %s" % path
     except (OSError, ValueError) as exc:
         return None, "the dispatch queue could not be read: %s" % str(exc)[:120]
-    held = q.get("heldUnderLead") if isinstance(q, dict) else None
-    if not isinstance(held, list):
-        return None, "the dispatch queue carries no heldUnderLead list"
+    if not isinstance(q, dict):
+        return None, "the dispatch queue is not a JSON object"
     made = _aware(q.get("generatedAt"))
     if made is None:
         return None, "the dispatch queue carries no readable generatedAt with a time zone"
     age = (now - made).total_seconds() / 60.0
     if age > max_min:
         return None, "the dispatch queue is %d minutes old (the hand-back poll writes it every 30)" % age
+    return q, None
+
+
+def dispatch_held_ids(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
+    """(set of task ids, None) from the dispatcher's newest queue, or (None, why not).
+    A missing, half-written, unreadable or stale queue is NOT CHECKED, never an
+    empty list, and never a crash."""
+    q, why = _dispatch_queue(now, path, max_min)
+    if q is None:
+        return None, why
+    held = q.get("heldUnderLead")
+    if not isinstance(held, list):
+        return None, "the dispatch queue carries no heldUnderLead list"
     return {t.get("id") for t in held if isinstance(t, dict) and t.get("id")}, None
 
 
+def dispatch_resting(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
+    """({task id: the day its rest ends, ISO}, None) for every task the dispatcher's newest queue lists
+    as resting on a keep-open or a status update (idleHandbacks with restUntil, 15 Nov 2026), or
+    (None, why not). Read from the queue, never recomputed here: whether a rest holds is the
+    dispatcher's one answer (its fingerprint, its due date, its clock). NOT CHECKED, never empty."""
+    q, why = _dispatch_queue(now, path, max_min)
+    if q is None:
+        return None, why
+    idle = q.get("idleHandbacks")
+    if not isinstance(idle, list):
+        return None, "the dispatch queue carries no idleHandbacks list"
+    return {t["id"]: str(t["restUntil"])[:10] for t in idle
+            if isinstance(t, dict) and t.get("id") and t.get("restUntil")}, None
+
+
 def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
-               ledger=None, ledger_error=None, ledger_skipped=0, open_check=None):
+               ledger=None, ledger_error=None, ledger_skipped=0, open_check=None,
+               resting=None, resting_error=None):
     """The Agent Work card's numbers. `open` splits into WORK_BUCKETS, which add up
     to it. `notMoving` counts the rows of `stalled` that are open agent tasks and
     not held under a lead, so every task it counts is on the list a person reads;
@@ -777,6 +824,7 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
     if mark and ledger is None and ledger_error is None:
         ledger, ledger_error, ledger_skipped = carryout_ledger()
     counts = dict.fromkeys(WORK_BUCKETS, 0)
+    rest_rows = []
     owned_open = set()
     marked = readable = 0
     for r in tasks:
@@ -792,7 +840,11 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
         if mark in notes:
             marked += 1
             readable += bool(carried_out_days(notes))
-        counts[work_bucket(f, now, None if ledger is None else ledger.get(r["id"], []))[0]] += 1
+        bucket, wait = work_bucket(f, now, None if ledger is None else ledger.get(r["id"], []),
+                                   None if resting is None else resting.get(r["id"], ""))
+        counts[bucket] += 1
+        if wait == "resting":
+            rest_rows.append({"id": r["id"], "until": resting.get(r["id"])})
     open_note, failed = None, None
     if mark and sum(counts.values()) != len(owned_open):
         failed = ("agent work split placed %d of %d open agent tasks in a bucket"
@@ -816,7 +868,10 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
                replyOverdue=sum(1 for s in stuck if s.get("rule") == "reply"),
                replyWindowDays=REPLY_STUCK_DAYS, held=None if held_ids is None else len(held),
                heldCheck=held_error, waitCheck=ledger_error if mark else None,
-               ledgerSkipped=ledger_skipped if mark else 0, openCheck=open_note, splitCheck=split_error)
+               ledgerSkipped=ledger_skipped if mark else 0, openCheck=open_note, splitCheck=split_error,
+               # Resting in dispatch (counted under waitingReply, never stuck), each with the day it ends.
+               resting=sorted(rest_rows, key=lambda x: (x["until"] or "", x["id"])),
+               restCheck=resting_error)
     if mark and marked and not readable:
         split_error = ("%d task(s) carry '%s' and none carries a readable dated line, so "
                        "carried-out work cannot be told from live work" % (marked, mark))
@@ -865,7 +920,10 @@ def main():
           f"held under a lead {aw['held']}")
     if aw["ledgerSkipped"]:
         print(f"  CANNOT CHECK: {aw['ledgerSkipped']} line(s) of the carry-out ledger were unreadable and skipped")
-    for why in (aw["heldCheck"], aw["waitCheck"], aw["openCheck"], aw["splitCheck"]):
+    if aw.get("resting"):
+        print(f"  Resting     : {len(aw['resting'])} (next look: "
+              + ", ".join(f"{x['id']} {x['until']}" for x in aw["resting"][:5]) + ")")
+    for why in (aw["heldCheck"], aw["waitCheck"], aw["openCheck"], aw["splitCheck"], aw.get("restCheck")):
         if why:
             print(f"  CANNOT CHECK: {why}")
     print(f"  NOT MOVING  : {len(res['stalled'])}  "
