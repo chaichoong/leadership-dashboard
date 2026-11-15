@@ -721,6 +721,39 @@ describe('the reviewer is launched read-only and its answer is checked field by 
     expect(r.json.why).toMatch(/reviewer could not run: its answer was not one JSON object/);
   }, SLOW);
 
+  // The second real run (15 Nov 2026, PR 930) wrote a sentence before its JSON. Prose around ONE
+  // answer object is read, and every field is still checked; two answer objects are never a pass.
+  it('prose around one answer object is read and checked like a bare answer', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    const obj = JSON.stringify({ head: repo.head, findings: [ok(F1, { tests: [ADD_TEST] })], verdict: 'pass' });
+    s.setClaude({ stdout: wrap(`Both checks hold, so it passes. The JSON verdict follows:\n\n${obj}\n\nThat is all.`) });
+    const r = cli(s, 'run', '--pr', '1');
+    expect(r.code, r.out + r.err).toBe(0);
+    expect(r.json).toMatchObject({ pass: true, refusedBy: null });
+  }, SLOW);
+
+  it('prose around one answer object that fails a check is still sent back', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    const obj = JSON.stringify({ head: repo.head, findings: [ok(F1, { tests: [ADD_TEST], cause: 'fail' })], verdict: 'send-back' });
+    s.setClaude({ stdout: wrap(`It treats a symptom, so I am sending it back.\n${obj}`) });
+    const r = cli(s, 'run', '--pr', '1');
+    expect(r.code, r.out + r.err).toBe(3);
+    expect(r.json).toMatchObject({ pass: false, refusedBy: 'reviewer' });
+  }, SLOW);
+
+  it('two answer objects in the text are never a pass', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    const good = JSON.stringify({ head: repo.head, findings: [ok(F1, { tests: [ADD_TEST] })], verdict: 'pass' });
+    const bad = JSON.stringify({ head: repo.head, findings: [ok(F1, { tests: [ADD_TEST], cause: 'fail' })], verdict: 'send-back' });
+    s.setClaude({ stdout: wrap(`First thought:\n${bad}\nOn reflection:\n${good}`) });
+    const r = cli(s, 'run', '--pr', '1');
+    expect(r.code, r.out + r.err).toBe(1);
+    expect(r.json.why).toMatch(/its answer was not one JSON object \(2 answer objects in it\)/);
+  }, SLOW);
+
   it('a non-zero exit is not a pass, even with a passing answer on stdout', () => {
     const repo = withTest();
     const s = scenario(repo);

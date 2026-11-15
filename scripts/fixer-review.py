@@ -664,8 +664,31 @@ def _strs(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+ANSWER_KEYS = {"head", "findings", "verdict"}
+
+
+def _answer_objects(s):
+    """Every JSON object in the text whose keys are exactly the answer's. The reviewer is told to
+    answer with the object alone, and the second real run (15 Nov 2026, PR 930) still wrote a
+    sentence before it. Prose around ONE such object is not a reason to throw the morning's fixes
+    away: every field is still checked below. Two such objects is ambiguous and is never a pass."""
+    found, dec, i = [], json.JSONDecoder(), 0
+    while True:
+        i = s.find("{", i)
+        if i < 0:
+            return found
+        try:
+            obj, end = dec.raw_decode(s, i)
+        except ValueError:
+            i += 1
+            continue
+        if isinstance(obj, dict) and set(obj) == ANSWER_KEYS:
+            found.append(obj)
+        i = end
+
+
 def parse_answer(text, head, expected):
-    """(answer, None) when the text is exactly one JSON object of the fixed shape, else (None, why)."""
+    """(answer, None) when the text holds exactly one JSON object of the fixed shape, else (None, why)."""
     s = text.strip()
     fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", s, re.S)
     if fence:
@@ -673,7 +696,11 @@ def parse_answer(text, head, expected):
     try:
         obj = json.loads(s)
     except ValueError as e:
-        return None, "its answer was not one JSON object (%s): %s" % (e, s[:200])
+        objs = _answer_objects(s)
+        if len(objs) != 1:
+            return None, "its answer was not one JSON object (%s): %s" % (
+                "%d answer objects in it" % len(objs) if objs else e, s[:200])
+        obj = objs[0]
     if not isinstance(obj, dict) or set(obj) != {"head", "findings", "verdict"}:
         return None, "its answer had the wrong shape (keys %s)" % (
             sorted(obj) if isinstance(obj, dict) else type(obj).__name__)
