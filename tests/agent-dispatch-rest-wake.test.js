@@ -47,15 +47,21 @@ m.HANDOVER_DIR = tempfile.mkdtemp()
 m.BROWSER_LEDGER = "/nonexistent/od-test-browser-ledger.jsonl"
 AF = m.AF
 SHIFT = [timedelta(0)]
+# Every clock in this harness reads one fixed instant, noon today in London (15 Nov 2026). The cases
+# move the clock by whole days plus an hour, so read off the real clock they failed whenever a run
+# began after 23:00 London: the hour carried the day over and every expected date was one out.
+_NOON = _dt.now(m.LONDON).replace(hour=12, minute=0, second=0, microsecond=0)
+def _real_now(tz=None):
+    return _NOON.astimezone(tz) if tz else _NOON.astimezone().replace(tzinfo=None)
 class Clock(_dt):
     @classmethod
     def now(cls, tz=None):
-        return _dt.now(tz) + SHIFT[0]
+        return _real_now(tz) + SHIFT[0]
 m.datetime = Clock
 AGENT = [k for k, v in m.ALL_AGENTS.items() if v.get("agent") == "worker-builder"][0]
-TODAY = _dt.now(m.LONDON).date()
+TODAY = _real_now(m.LONDON).date()
 def day(n): return (TODAY + timedelta(days=n)).isoformat()
-CREATED = (_dt.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+CREATED = (_real_now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 TASKS = {}
 def rec(i, notes="", approved=True, desc="Chase Exampleton Council about the bill. Contact: recovery@exampleton-council.test",
         approved_at="2026-09-01T09:00:00.000Z"):
@@ -155,7 +161,7 @@ assert complete("recRewriteAaaaaaa", until=day(14)) is None
 old = (TODAY - timedelta(days=6)).strftime("%d %b %Y")
 rec("recPreFpAaaaaaaaa", notes="[%s — agent] %s chased. Left OPEN deliberately: the approval said so." % (old, m.CARRIED_OUT_MARK))
 with open(m.INTENT_LEDGER, "a") as fh:
-    fh.write(json.dumps({"task": "recPreFpAaaaaaaaa", "ts": (_dt.now(timezone.utc) - timedelta(days=6)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "event": "done"}) + "\\n")
+    fh.write(json.dumps({"task": "recPreFpAaaaaaaaa", "ts": (_real_now(timezone.utc) - timedelta(days=6)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "event": "done"}) + "\\n")
 F("recWokeAaaaaaaaaa")[AF["description"]] += "\\n\\n" + REPLY
 F("recRewriteAaaaaaa")[AF["description"]] = "Someone rewrote this task by hand."
 SHIFT[0] = timedelta(days=3, hours=1)
@@ -306,11 +312,11 @@ describe('C. an ended rest is due from a fixed day, and a long wait is stuck wha
     const r = py(`
 spec2 = importlib.util.spec_from_file_location('tm', ${JSON.stringify(BOARD)})
 tm = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(tm)
-old = (_dt.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+old = (_real_now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 old_day = (TODAY - timedelta(days=29)).strftime("%d %b %Y")
 rec("recUndatedAaaaaaa", notes="[%s — agent] %s chased the council. Left OPEN deliberately: the approval said so." % (old_day, m.CARRIED_OUT_MARK), approved_at=old)
 with open(m.INTENT_LEDGER, "a") as fh:
-    fh.write(json.dumps({"task": "recUndatedAaaaaaa", "ts": (_dt.now(timezone.utc) - timedelta(days=29)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "event": "done"}) + "\\n")
+    fh.write(json.dumps({"task": "recUndatedAaaaaaa", "ts": (_real_now(timezone.utc) - timedelta(days=29)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "event": "done"}) + "\\n")
 rec("recChangedAaaaaaa", approved_at=old); complete("recChangedAaaaaaa", until=day(14))
 F("recChangedAaaaaaa")[AF["description"]] += "\\n\\n" + REPLY
 rec("recRanOutAaaaaaaa", approved_at=old); complete("recRanOutAaaaaaaa", until=day(2))
@@ -321,7 +327,7 @@ def named(i):
 out = {}
 for d in (3, 5, 10):
     SHIFT[0] = timedelta(days=d, hours=1)
-    now = _dt.now(timezone.utc) + SHIFT[0]
+    now = _real_now(timezone.utc) + SHIFT[0]
     lanes = m.queue_lanes({}, {}, "")
     out[d] = {i[3:10]: [tm.task_view(named(i), set(), set(), now, lanes)[0], (lanes[i][1] or {}).get("restDue")]
               for i in ("recUndatedAaaaaaa", "recChangedAaaaaaa", "recRanOutAaaaaaaa")}
