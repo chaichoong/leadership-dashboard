@@ -167,7 +167,7 @@ def file_verdict(kind, res):
         # list naming one) fails without the fix too: PR 912's py-undefined-names did exactly that.
         row["status"] = "failed" if asserts else "failed-to-load"
         if not asserts:
-            row["note"] = (res.get("message") or "").strip()[-200:]
+            row["note"] = " ".join((res.get("message") or "").split())[-200:]
         return dict(row, verdict=GOOD)
     if not passed:
         return dict(row, status="skipped", verdict=CANNOT,
