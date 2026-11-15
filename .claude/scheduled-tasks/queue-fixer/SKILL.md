@@ -196,14 +196,23 @@ unreviewed change to the approval loop reaches production.
 
 **Kevin's ruling, 22 Oct 2026** (card recWxof2DATkOQfcb): tests passing is not enough. On a green
 gate, `fixer-merge.py merge` runs `scripts/fixer-review.py` on the merge result before it merges or
-raises a MERGE card. It tries to break each fix with three checks:
+raises a MERGE card. It tries to break each fix with three checks: the test fails without the fix,
+the fix tackles the cause and not the symptom, and the same bug is nowhere else. "Nowhere else"
+means any file, skills and agent instructions included: the same bug is the same bug.
 
-1. The test fails without the fix. This one is measured: your changed test files are run on the
-   code from before your PR. A brand-new test file that already passes there is refused outright,
-   because it does not prove the fix. A changed test file that passes there is flagged, and the
-   reviewer must say why (for example, the change repaired the test itself).
-2. The fix tackles the cause, not the symptom.
-3. The same bug is not somewhere else.
+Write every fix so it can pass:
+
+- **A test that fails without the fix.** Each finding needs at least one vitest test in
+  `tests/*.test.js` that fails on the code from before your PR and passes with it. The back-test
+  runs your changed test files both ways and lists those tests by name, and the reviewer must name
+  one for each finding. Never counted: a Python selftest, a Playwright spec, or a line that only
+  adds a script to a list test (the `py-undefined-names` list).
+- **"Not needed" only when the PR changes no code.** A PR that touches `scripts/`, `js/`,
+  `workers/`, `os/`, or any `.py`, `.js`, `.sh`, `.html` or `.css` file needs the test above.
+- **Never delete a test.** A PR that deletes a file in `tests/` is refused. If a test truly has to
+  go, leave that finding for a working session.
+- **Refused outright:** a new test file that already passes on the old code, and a test that fails
+  with your fix.
 
 Read `secondReview` in the merge JSON. If the JSON has no `secondReview`, the reviewer is not wired
 in yet: carry on as before.
@@ -211,16 +220,18 @@ in yet: carry on as before.
 - **Passed.** The merge, or the MERGE card, went ahead as normal.
 - **Sent back** (`refusedBy` is `back-test` or `reviewer`, with a `sendBack` list of finding ids
   and why). That was round 1. Fix each one on the same branch, commit, push, and run
-  `fixer-merge.py merge --pr <n>` again. That is round 2.
-- **Sent back again in round 2.** Take that finding's changes out of the branch, its code and its
-  test. Then run `python3 scripts/findings.py reopen <id> --force --note "<the reviewer's why>"`,
-  commit, push, and run `fixer-merge.py merge --pr <n>` a final time. That final round runs only
-  when every finding round 2 sent back is off the PR and the head has moved. Anything else is
-  refused with "two rounds used: take the failing findings out and reopen them". If the final
-  round still sends something back, leave the PR open for tomorrow and say so in the report.
-- **The reviewer could not run** (`refusedBy` is `cannot-run`: no token, the CLI missing, a
-  timeout, the allowance out, an answer it could not read). Nothing merges this morning. Leave the
-  PR open, do not retry, and put its `why` in the report word for word.
+  `fixer-merge.py merge --pr <n>` again. That is round 2, and the last.
+- **Sent back again, or refused with "two rounds used".** Nothing from this PR merges. Close it with
+  a comment that lists each finding and the reviewer's why: `gh pr close <n> --comment "<...>"`.
+  Then reopen EVERY finding on it, not only the ones sent back:
+  `python3 scripts/findings.py reopen <id> --force --note "<the reviewer's why, or: closed with PR <n>>"`.
+  Tomorrow's run starts fresh from the worklist. Code refuses a third round on the same PR, ever.
+- **The reviewer could not run** (`refusedBy` is `cannot-run`). If its why says no finding is
+  recorded against the PR, close each finding `--outcome pending --pr <n>` and run the merge again:
+  that was not a round. For anything else (no token, the CLI missing, a timeout, the allowance out,
+  an answer it could not read), nothing merges this morning. Close the PR with a comment that
+  quotes the why word for word, reopen every finding on it the same way, and put the why in the
+  report. Never leave a fixer PR open with nothing to pick it up.
 
 The reviewer reads only. It never edits, commits or merges anything itself.
 
@@ -242,8 +253,8 @@ From the MAIN checkout, never from inside the workspace:
 Run it unconditionally after a successful merge. It already REFUSES while anything
 would be lost — uncommitted files, commits that exist nowhere else, or a branch not
 yet merged into origin/main — so a refusal is information, not a problem to force
-past. If the merge did NOT happen (red gate, a protected-path refusal, or the second
-reviewer sent it back or could not run), leave the
+past. If the merge did NOT happen (red gate, a protected-path refusal, or a round-1
+send-back from the second reviewer), leave the
 workspace exactly where it is: the PR is still open and the branch is still needed.
 
 ## STEP 6 — Release, always
