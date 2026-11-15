@@ -1507,13 +1507,17 @@ async function isoForDateBox(page, selector, value) {
 // aria-haspopup="listbox" included: the plain fill goes on as before. Decided from the element runSteps has
 // already found (assertNotCredential needs it there), with no wait of its own (review R4).
 async function comboboxKind(page, selector) {
-  const loc = page.locator(selector).first();
-  if (!(await loc.count().catch(() => 0))) return null;   // not there, or a selector this page cannot parse: the plain fill says why
-  return loc.evaluate(el => {
-    if (el.tagName !== 'INPUT' || String(el.getAttribute('role') || '').toLowerCase() !== 'combobox'
-      || String(el.getAttribute('aria-haspopup') || '').toLowerCase() !== 'listbox') return null;
-    return el.readOnly ? 'readonly' : 'typed';
-  }, null, { timeout: 2000 }).catch(() => null);   // gone in the meantime: the plain fill fails on its own terms
+  // Anything that stops the box being read (a page with no locator, a selector it cannot parse, a box gone in
+  // the meantime) means "not a combobox": the plain fill goes on exactly as before and fails on its own terms.
+  try {
+    const loc = page.locator(selector).first();
+    if (!(await loc.count())) return null;
+    return await loc.evaluate(el => {
+      if (el.tagName !== 'INPUT' || String(el.getAttribute('role') || '').toLowerCase() !== 'combobox'
+        || String(el.getAttribute('aria-haspopup') || '').toLowerCase() !== 'listbox') return null;
+      return el.readOnly ? 'readonly' : 'typed';
+    }, null, { timeout: 2000 });
+  } catch { return null; }
 }
 // Fills a combobox by its one option of VALUE (lineKey on both), the guard run on the option first, the box
 // read back after. The list is only ever the box's OWN (review R6): the one its aria-owns or aria-controls
