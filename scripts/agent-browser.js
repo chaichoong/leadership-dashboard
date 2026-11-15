@@ -1476,6 +1476,30 @@ async function adobeSignRefusal(page, s) {
   return SIGN_WORDS_RE.test(words) ? `"${words.replace(/\s+/g, ' ').trim().slice(0, 60)}" is a signing control: ${why}` : '';
 }
 
+// D/M/YYYY or DD/MM/YYYY (or with - or .) as YYYY-MM-DD, only when it is a real day; else null.
+function isoFromUkDate(v) {
+  const m = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{4})$/.exec(String(v || '').trim());
+  if (!m) return null;
+  const d = Number(m[1]), mo = Number(m[3]), y = Number(m[4]);
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+  return `${m[4]}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+// The ISO date to set into SELECTOR when it is an <input type=date> and VALUE is a real day (UK order, or
+// already YYYY-MM-DD); else null, and the value goes as given.
+async function isoForDateBox(page, selector, value) {
+  const iso = isoFromUkDate(value) || (/^\d{4}-\d{2}-\d{2}$/.test(value) && isoFromUkDate(value.split('-').reverse().join('/')) === value ? value : null);
+  if (!iso) return null;
+  let isDate;
+  try {
+    isDate = await page.locator(selector).first().evaluate(el => el.tagName === 'INPUT' && String(el.type).toLowerCase() === 'date', null, { timeout: 20000 });
+  } catch (e) {
+    // The box cannot be read: the value goes as given, and the fill fails or succeeds on its own terms.
+    return null;
+  }
+  return isDate ? iso : null;
+}
+
 async function runSteps(page, steps, allowSubmit, confirm) {
   const done = [];
   let submitted = false;
@@ -1496,10 +1520,21 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         // {{today}} for every plan, so a prepare proof fills what the handover will.
         // `typed: true` types it key by key: some forms only count keystrokes, and a plain fill
         // shows the value but never adds it up (Splitwise's amount, 5 Nov 2026: "£0.00/person").
-        if (s.typed) {
-          await page.fill(s.selector, '', { timeout: 20000 });
-          await page.type(s.selector, String(fillTokens(s.value)), { delay: 40, timeout: 20000 });
-        } else await page.fill(s.selector, String(fillTokens(s.value)), { timeout: 20000 });
+        {
+          // A date box takes only YYYY-MM-DD (RightSure's date of birth, 15 Nov 2026): a real UK date going into
+          // one is turned round, always set whole (typed key by key it read back as 61115-02-20), and read back.
+          // Only what is typed changes; the fact check read the cited line's own words.
+          const v = String(fillTokens(s.value));
+          const iso = await isoForDateBox(page, s.selector, v);
+          if (iso) {
+            await page.fill(s.selector, iso, { timeout: 20000 });
+            const got = await page.inputValue(s.selector, { timeout: 20000 });
+            if (got !== iso) throw new Error(`the date box ${s.selector} did not hold ${iso} after it was filled (it holds "${String(got).slice(0, 40)}")`);
+          } else if (s.typed) {
+            await page.fill(s.selector, '', { timeout: 20000 });
+            await page.type(s.selector, v, { delay: 40, timeout: 20000 });
+          } else await page.fill(s.selector, v, { timeout: 20000 });
+        }
         break;
       case 'select': {
         // By what the page SHOWS (25 Sep 2026): the agent wrote "Terraced" and
@@ -1995,6 +2030,12 @@ async function assertNotFinalAction(page, s, ctx = {}) {
       const host = el.closest('button,a,label,summary,input,[onclick],[role=button],[role=link],[role=checkbox],' +
         '[role=radio],[role=menuitem],[role=tab],[role=switch],[role=option]') || el;
       const control = host.tagName === 'LABEL' ? host.control : host;
+      // A label clicked for a control on show that takes no pointer (RightSure, 15 Nov 2026: snapshotForm now
+      // names its label where it once named the input) is read as the control would be, all its labels
+      // included, so the label route refuses all the input route did. Any other label keeps the reading
+      // below (AXA, 30 Sep 2026: the control's other label is the question, not the option).
+      const onShow = n => { const r = n.getBoundingClientRect(); const st = getComputedStyle(n); return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) !== 0; };
+      const asControl = host.tagName === 'LABEL' && !!control && onShow(control) && getComputedStyle(control).pointerEvents === 'none';
       const ctype = control ? String(control.type || '').toLowerCase() : '';
       const crole = control ? String(control.getAttribute('role') || '').toLowerCase() : '';
       const parts = [];
@@ -2003,7 +2044,7 @@ async function assertNotFinalAction(page, s, ctx = {}) {
         // A pressed control's labels, however attached (a label wrapping a tick box). Not
         // when the robot clicks one label: the control's other label is the question
         // ("How would you like to pay?"), not the option (found on AXA, 30 Sep 2026).
-        if (n.labels && !(host.tagName === 'LABEL' && n === control)) for (const l of n.labels) parts.push(l.textContent || '');
+        if (n.labels && !(host.tagName === 'LABEL' && n === control && !asControl)) for (const l of n.labels) parts.push(l.textContent || '');
         parts.push(...textOf(n, 'aria-labelledby'));
       }
       // An answer: a tick box, radio, ARIA toggle, or a short button such as "Yes" (round 4).
@@ -2180,9 +2221,16 @@ async function waitForWindowClose(ctx, capMs, onTick) {
 // say for certain which question a box answers (a list under a legend, a block inserted above Next, a
 // vague label), and a wrong declaration can void a policy. So a page whose form mentions claims,
 // convictions, CCJs, bankruptcy, refused or cancelled insurance, charges or a first-person declaration
-// is handed to him whole: the robot touches nothing on it and carries on once he presses Next. His
-// standing answers stay on file (HANDOVER_DIR/standing-answers.json) for the day an insurer's page is
-// mapped well enough to use them.
+// is handed to him whole: the robot touches nothing on it and carries on once he presses Next.
+// MAPPED PAGES (estate fix 3, Nov 2026). One exception, and only one shape of it: a page in
+// scripts/declaration-maps.json, matched by its exact address, its exact text from the first declaration
+// question to the end, and exactly the mapped questions with their exact Yes and No radios. On that page
+// the robot fills the other questions as on any page, then answers No to a mapped question only when his
+// standing answers file (HANDOVER_DIR/standing-answers.json, its "exact" list) holds his own No to those
+// exact words for the owner this plan is for, the question is not marked his, and it names nothing on the
+// never list (convictions, insolvency and the rest: NEVER_ROBOT_RE). It never presses Next there: the page
+// is always his to check. Anything not exactly as mapped is the whole page handed to him, as before; no
+// reading of a page decides which box answers which declaration.
 // The planner never decides alone: it may answer only a radio, tick box, dropdown or text box the robot
 // read on the page, citing one whole fact line and giving that line's own words, and press only a
 // button worded as moving on, read again the moment before it is pressed.
@@ -2203,6 +2251,229 @@ function loadStandingFacts(file = STANDING_FILE()) {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     return Array.isArray(raw && raw.facts) ? raw.facts.map(String) : [];
   } catch { return []; }
+}
+
+// ── Mapped declaration pages (estate fix 3, Nov 2026) ─────────────────────────────────────────────
+// The built-in maps are public (the site's own wording only). AGENT_DECLARATION_MAPS is for tests: a map
+// in that file counts only when its host is this machine, so the switch can never widen which real
+// sites get robot-answered declarations.
+const DECLARATION_MAPS_FILE = path.join(__dirname, 'declaration-maps.json');
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const ID_SELECTOR_RE = /^#[A-Za-z][A-Za-z0-9_-]*$/;
+const nonEmpty = v => typeof v === 'string' && v.trim() !== '';
+// A loopback map's host with its port ("127.0.0.1:5123"), exactly; anything else is not loopback.
+function loopbackHost(h) {
+  try { const u = new URL(`http://${h}`); return u.host === String(h).toLowerCase() && LOOPBACK_HOSTS.has(u.hostname); } catch { return false; }
+}
+// Each map checked whole: a map with any bad part is dropped, never half used. Never throws: a file that
+// cannot be read means no mapped page (the page is handed to him whole, as before), with the reason.
+function loadDeclarationMaps() {
+  const override = process.env.AGENT_DECLARATION_MAPS;
+  const file = override || DECLARATION_MAPS_FILE;
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+    return { maps: [], problems: [`the declaration maps file ${file} cannot be read: ${String(e.message || e).slice(0, 160)}`] };
+  }
+  const maps = [], problems = [];
+  if (!raw || !Array.isArray(raw.maps)) return { maps, problems: [`the declaration maps file ${file} has no "maps" list`] };
+  raw.maps.forEach((m, i) => {
+    const bad = why => problems.push(`declaration map ${i + 1}${m && nonEmpty(m.site) ? ` (${m.site})` : ''}: ${why}`);
+    if (!m || typeof m !== 'object' || ![m.site, m.host, m.path, m.tail, m.text].every(nonEmpty)) return bad('needs site, host, path, tail and text');
+    if (!normWords(m.text).endsWith(normWords(m.tail))) return bad('its text does not end with its tail');
+    if (!Array.isArray(m.items) || !m.items.length || !m.items.every(it => Array.isArray(it) && it.length === 2 && it.every(nonEmpty))) {
+      return bad('needs "items": every question on the page as [kind, question], in order');
+    }
+    if (override && !loopbackHost(m.host)) return bad(`host ${m.host} is not this machine, so a test file cannot map it`);
+    if (!override && !/^[a-z0-9.-]+$/.test(m.host)) return bad(`host ${m.host} is not a plain host name`);
+    if (!m.path.startsWith('/')) return bad('path must start with /');
+    const qs = m.questions;
+    if (!Array.isArray(qs) || !qs.length) return bad('has no questions');
+    const tail = normWords(m.tail), ids = new Set(), sels = new Set();
+    for (const q of qs) {
+      if (!q || typeof q !== 'object' || ![q.id, q.text, q.name, q.yes, q.no, q.yesValue, q.noValue].every(nonEmpty)) return bad('a question needs id, text, name, yes, no, yesValue and noValue');
+      if (!ID_SELECTOR_RE.test(q.yes) || !ID_SELECTOR_RE.test(q.no)) return bad(`"${q.id}": yes and no must be fixed #id selectors`);
+      if (ids.has(q.id) || sels.has(q.yes) || sels.has(q.no) || q.yes === q.no) return bad(`"${q.id}": an id or selector repeats`);
+      if (!tail.includes(normWords(q.text))) return bad(`"${q.id}": its words are not in the tail`);
+      ids.add(q.id); sels.add(q.yes); sels.add(q.no);
+    }
+    // Its questions, in order, are the radios among its items.
+    const radios = m.items.filter(([k, t]) => k === 'radio' && qs.some(q => normWords(q.text) === normWords(t))).map(([, t]) => normWords(t));
+    if (radios.join('\n') !== qs.map(q => normWords(q.text)).join('\n')) return bad('its questions are not radios in its items, in the same order');
+    maps.push({ site: m.site, host: m.host.toLowerCase(), path: m.path, tail: m.tail, text: m.text, items: m.items.map(([k, t]) => [k, t]), loopback: !!override,
+      questions: qs.map(q => ({ id: q.id, text: q.text, name: q.name, yes: q.yes, no: q.no, yesValue: q.yesValue, noValue: q.noValue, his: q.his ? String(q.his) : '' })) });
+  });
+  return { maps, problems };
+}
+
+// Kevin's exact approvals: his own No to one site's exact question words, for named owners, with where he
+// said it. Read only, never written by code. A missing file or list means no covers; anything else wrong
+// drops that entry (or the whole list) and says why. Never throws: the live window always opens.
+const COVER_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function loadExactCovers(file = STANDING_FILE()) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return { covers: [], problems: [] };
+    return { covers: [], problems: [`the standing answers file cannot be read: ${String(e.message || e).slice(0, 160)}`] };
+  }
+  let data;
+  try { data = JSON.parse(raw); } catch (e) { return { covers: [], problems: [`the standing answers file is not valid JSON: ${String(e.message || e).slice(0, 160)}`] }; }
+  if (!data || typeof data !== 'object' || !Object.prototype.hasOwnProperty.call(data, 'exact')) return { covers: [], problems: [] };
+  if (!Array.isArray(data.exact)) return { covers: [], problems: ['the standing answers "exact" is not a list'] };
+  const covers = [], problems = [];
+  data.exact.forEach((c, i) => {
+    const ok = c && typeof c === 'object' && [c.site, c.question, c.said, c.date].every(nonEmpty)
+      && COVER_DATE_RE.test(c.date) && !Number.isNaN(Date.parse(c.date + 'T00:00:00Z'))
+      && Array.isArray(c.owners) && c.owners.length > 0 && c.owners.every(nonEmpty) && c.pick === 'No';
+    if (!ok) { problems.push(`standing answers "exact" entry ${i + 1} was not used: it needs site, question, said, a YYYY-MM-DD date, a list of owners and pick "No"`); return; }
+    covers.push({ site: c.site, question: c.question, pick: 'No', owners: c.owners.slice(), said: c.said, date: c.date });
+  });
+  return { covers, problems };
+}
+
+// A question the robot never answers, whatever his covers say: crime, insolvency, motoring, "anything
+// else", material facts, and any declaration in the first person.
+const NEVER_ROBOT_RE = /\b(convict\w*|criminal|offen[cs]es?|charg(?:e|ed|es|ing)|prosecut\w*|investigat\w*|police|cautions?|insolven\w*|liquidat\w*|iva|individual voluntary arrangements?|debt relief|sequestrat\w*|arrangements? with (?:\w+ )?creditors|administrat(?:ion|ors?)|receiver\w*|disqualif\w*|struck off|strike off|motoring|anything else|material facts?)\b/i;
+// A question naming other people. On its own it is never the robot's; the only door is an exact cover
+// of those words (which every robot answer needs anyway), and the never list still comes first.
+const OTHER_PEOPLE_RE = /\b(any persons? to be insured|anyone|any other persons?|directors?|partners?|tenants?)\b/i;
+const neverRobot = t => NEVER_ROBOT_RE.test(String(t || '')) || NEARBY_DECLARATION_RE.test(String(t || ''));
+// The words an item carries, as declarationPage reads them: its question and every option label.
+const itemWords = i => [i.question, i.option || ''].concat((i.options || []).map(o => (typeof o === 'string' ? o : o.label))).join(' ');
+// The page's address on a map's terms: the exact host (with its port for a loopback map, and https for a
+// real one), and the path with one trailing slash taken off.
+function mapForUrl(maps, url) {
+  let u;
+  try { u = new URL(String(url || '')); } catch { return null; }
+  let p = u.pathname;
+  if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
+  const hits = (maps || []).filter(m => (m.loopback ? u.host === m.host : (u.protocol === 'https:' && u.hostname === m.host)) && p === m.path);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// The two targets snapshotForm gives a radio with this #id: the input itself when it is shown, or its one
+// visible label when the input is hidden behind it (RightSure styles the label as the button).
+const radioTargets = sel => [sel, `label[for="${sel.slice(1)}"] >> nth=0`];
+// Is this snapshot EXACTLY a mapped page? null when anything differs (the old rule then hands the page
+// over whole). FIRST (the default) is the first look in a run, before anything on the page is touched:
+// the whole form text and every question, kind and order must be the map's. A re-check later in the same
+// visit (after a planner step or a tick) may see validation words added, so it needs the tail exact and
+// the questions still exactly the map's. When it holds, each mapped question carries the robot's
+// decision: its own No only under one exact cover for this owner, never on a question that is his or on
+// the never list. OWNERWHY says why there is no owner, when the caller knows.
+const sameItems = (snap, map) => snap.items.length === map.items.length
+  && snap.items.every((it, k) => it.kind === map.items[k][0] && normWords(it.question) === normWords(map.items[k][1]));
+function mappedDeclarations(snap, url, { covers = [], ownerKey = null, maps, first = true, ownerWhy = '' } = {}) {
+  if (!snap || !Array.isArray(snap.items)) return null;
+  const map = mapForUrl(maps === undefined ? loadDeclarationMaps().maps : maps, url);
+  if (!map) return null;
+  if (!sameItems(snap, map)) return null;
+  if (first && normWords(snap.formText) !== normWords(map.text)) return null;
+  const text = normWords(snap.formText), tail = normWords(map.tail);
+  if (!tail || !text.endsWith(tail)) return null;
+  if (declarationWords(text.slice(0, text.length - tail.length)) !== '') return null;
+  const asked = snap.items.filter(i => declarationWords(itemWords(i)) !== '');
+  if (asked.length !== map.questions.length) return null;
+  const owner = nonEmpty(ownerKey) ? ownerKey : null;
+  const questions = [];
+  for (let k = 0; k < map.questions.length; k++) {
+    const q = map.questions[k], item = asked[k];
+    if (item.kind !== 'radio' || normWords(item.question) !== normWords(q.text)) return null;
+    const opts = item.options || [];
+    if (opts.length !== 2) return null;
+    const yes = opts.filter(o => o.label === 'Yes'), no = opts.filter(o => o.label === 'No');
+    if (yes.length !== 1 || no.length !== 1 || !radioTargets(q.yes).includes(yes[0].target) || !radioTargets(q.no).includes(no[0].target)) return null;
+    let decision;
+    if (q.his || neverRobot(q.text)) decision = { robot: false, why: 'always your own answer' };
+    else {
+      const sameWords = (covers || []).filter(c => c.site === map.site && normWords(c.question) === normWords(q.text));
+      const forOwner = owner ? sameWords.filter(c => Array.isArray(c.owners) && c.owners.includes(owner)) : [];
+      if (!sameWords.length) {
+        decision = { robot: false, why: OTHER_PEOPLE_RE.test(q.text) ? 'it asks about other people, and your standing answers do not cover these exact words'
+          : 'your standing answers do not cover these exact words' };
+      }
+      else if (!owner) decision = { robot: false, why: nonEmpty(ownerWhy) ? ownerWhy : 'this plan does not say whose policy it is' };
+      else if (!forOwner.length) decision = { robot: false, why: `not covered for ${owner}` };
+      else if (forOwner.length > 1 || forOwner[0].pick !== 'No') decision = { robot: false, why: `your standing answers hold these words more than once for ${owner}` };
+      else decision = { robot: true, pick: 'No', said: forOwner[0].said, date: forOwner[0].date };
+    }
+    questions.push({ id: q.id, text: q.text, name: q.name, yes: q.yes, no: q.no, yesValue: q.yesValue, noValue: q.noValue, item, decision });
+  }
+  return { map, questions };
+}
+
+// The robot's one press on a declaration: the mapped No, and only when the element IS that No. Each of
+// the No input and its Yes twin must be exactly one input[type=radio] with the mapped id, the mapped group
+// name and the mapped value, with exactly ONE label, that label shown and reading exactly "No" (or "Yes").
+// The input is never clicked with the pointer: on RightSure it sits under its label with pointer-events
+// off, and a click on it never settles (measured live, 15 Nov 2026). The one label is clicked; if that
+// throws, the one element with the exact id gets a DOM click, and nothing else does.
+// Neither may already be ticked Yes. Read back after: this No ticked, its Yes not. Throws on anything else;
+// an error after a click was tried carries `clicked: true`, so the hand-over says to check that answer.
+// It does not go through assertNotFinalAction's declaration refusal: the map and his cover are its
+// authority. A final action's words on it are still refused.
+function mappedRadioProblem(x, sel, label, name, value) {
+  if (!x || !x.radio || x.count !== 1 || x.id !== sel.slice(1)) return `"${sel}" is not exactly one radio with that id`;
+  if (x.name !== name) return `"${sel}" is not in the group "${name}"`;
+  if (String(x.value || '').trim().toLowerCase() !== String(value).trim().toLowerCase()) return `"${sel}" sends "${x.value}", not "${value}"`;
+  if (!Array.isArray(x.labels) || x.labels.length !== 1) return `"${sel}" has ${Array.isArray(x.labels) ? x.labels.length : 'no'} labels, not exactly one`;
+  if (!x.labels[0].shown) return `the label of "${sel}" is not shown`;
+  if (x.labels[0].text !== label) return `the label of "${sel}" reads "${x.labels[0].text}", not "${label}"`;
+  return '';
+}
+async function clickMappedNo(page, q) {
+  if (!ID_SELECTOR_RE.test(q.no) || !ID_SELECTOR_RE.test(q.yes)) throw new Error(`refused: "${q.no}" is not a fixed #id selector`);
+  if (![q.name, q.yesValue, q.noValue].every(nonEmpty)) throw new Error(`refused: the map gives "${q.id}" no group name or values`);
+  const read = () => page.evaluate(([noId, yesId]) => {
+    const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+    const shown = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) !== 0; };
+    const of = id => {
+      const all = document.querySelectorAll('#' + CSS.escape(id));
+      const el = all[0];
+      if (!el) return null;
+      const labels = Array.from(el.labels || []);
+      return { count: all.length, radio: el.tagName === 'INPUT' && String(el.type).toLowerCase() === 'radio', id: el.id, name: el.name, value: el.value,
+        inputShown: shown(el), checked: !!el.checked, labels: labels.map(l => ({ text: clean(l.textContent), shown: shown(l), forId: l.htmlFor || '' })),
+        words: [el.value, el.getAttribute('aria-label'), el.getAttribute('title')].concat(labels.map(l => l.textContent)).map(clean).join(' ') };
+    };
+    return { no: of(noId), yes: of(yesId) };
+  }, [q.no.slice(1), q.yes.slice(1)]);
+  const s = await read();
+  const bad = mappedRadioProblem(s.no, q.no, 'No', q.name, q.noValue) || mappedRadioProblem(s.yes, q.yes, 'Yes', q.name, q.yesValue);
+  if (bad) throw new Error(`refused: ${bad}`);
+  if (HARD_ACTION_RE.test(s.no.words)) throw new Error(`refused: "${s.no.words.slice(0, 60)}" looks like the final action, which is Kevin's`);
+  if (s.yes.checked) throw new Error(`refused: "${q.text}" is already answered Yes on the page`);
+  // Already No when the robot arrived: not its tick. Nothing is clicked, and the caller says so.
+  if (s.no.checked) return 'already';
+  const tried = msg => Object.assign(new Error(msg), { clicked: true });
+  {
+    // Its one label, found by its for= or as the label round the input.
+    const id = q.no.slice(1);
+    const label = s.no.labels[0].forId === id ? page.locator(`label[for="${id}"]`) : page.locator(q.no).locator('xpath=ancestor::label[1]');
+    if (await label.count() !== 1) throw new Error(`refused: the No of "${q.text}" could not be found as one label to click`);
+    try {
+      await label.click({ timeout: 5000 });
+    } catch (e1) {
+      let ok;
+      try {
+        // Re-checked on the element itself, in the same breath as the click: the one element with the id, a
+        // connected radio, not disabled, in the mapped group, sending the mapped No value.
+        ok = await page.evaluate(({ i, name, value }) => {
+          const all = document.querySelectorAll('#' + CSS.escape(i));
+          const el = all.length === 1 ? all[0] : null;
+          if (!el || !el.isConnected || el.tagName !== 'INPUT' || String(el.type).toLowerCase() !== 'radio' || el.disabled
+            || el.name !== name || String(el.value || '').trim().toLowerCase() !== String(value).trim().toLowerCase()) return false;
+          el.click();
+          return true;
+        }, { i: id, name: q.name, value: q.noValue });
+      } catch (e2) { throw tried(`"${q.text}": No could not be clicked (${String(e1.message || e1).slice(0, 80)}; then ${String(e2.message || e2).slice(0, 80)})`); }
+      // The label click was tried, so this counts as tried: the hand-over asks him to check it.
+      if (!ok) throw tried(`"${q.text}": the label could not be clicked (${String(e1.message || e1).slice(0, 80)}), and its input was no longer one enabled radio sending "${q.noValue}" in "${q.name}"`);
+    }
+  }
+  let after;
+  try { after = await read(); } catch (e) { throw tried(`"${q.text}": No could not be read back (${String(e.message || e).slice(0, 120)})`); }
+  if (!(after.no && after.no.checked && after.yes && !after.yes.checked)) throw tried(`"${q.text}": No did not read back as ticked`);
+  return 'ticked';
 }
 
 const CARRY_ON_MAX_PAGES = 25;
@@ -2280,7 +2551,12 @@ async function snapshotForm(page) {
       if (type === 'radio' || type === 'checkbox') {
         // The label he would click when the box itself is hidden; the shortest one is the option.
         const labels = Array.from(el.labels || []).filter(l => shown(l) && clean(l.textContent)).sort((a, b) => clean(a.textContent).length - clean(b.textContent).length);
-        const clickable = shown(el) ? el : labels[0];
+        // An input that takes no pointer (RightSure's sit under their labels with pointer-events off, 15 Nov
+        // 2026) is clicked by its label, as a hidden one is: a click on the input itself never settles. Only
+        // when its id is unique and that label points at it by for=; otherwise the input stays the target.
+        const noPointer = shown(el) && getComputedStyle(el).pointerEvents === 'none' && labels[0]
+          && el.id && document.querySelectorAll(cssId(el.id)).length === 1 && labels[0].htmlFor === el.id;
+        const clickable = shown(el) && !noPointer ? el : labels[0];
         if (!clickable) continue;
         const t = clickable === el ? target(el) : (el.id ? `label[for="${CSS.escape(el.id)}"] >> nth=${Array.from(document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)).indexOf(labels[0])}` : target(labels[0]));
         const option = clean(labels.length ? labels[0].textContent : el.value);
@@ -2581,10 +2857,17 @@ async function carryOnPages(page, plan, opts, done) {
   const plan_ = opts.planner || planner();
   const maxPages = Math.min(Number(plan.carryOn.maxPages) || 15, CARRY_ON_MAX_PAGES);
   let lastSig = '', samePage = 0;
-  const his = async (p, questions, snapBefore) => {
-    // His turn, mid-form: he answers these and presses Next himself; the robot then carries on.
-    if (opts.skipKevin) return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + questions.join(' | ').slice(0, 400), unknown: questions } };
-    await turnBanner(page, `Your turn: ${questions.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${questions.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
+  const his = async (p, questions, snapBefore, banner, notes) => {
+    // His turn, mid-form: he answers these and presses Next himself; the robot then carries on. A mapped
+    // page brings its own BANNER, built so its first line can never be cut off, and its NOTES (lines that
+    // are not questions), which a dry run lists apart so the card carries only real questions.
+    if (opts.skipKevin) {
+      const stuck = { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + questions.join(' | ').slice(0, 400),
+        unknown: notes ? questions.filter(x => !notes.has(x)) : questions };
+      if (notes) stuck.notes = questions.filter(x => notes.has(x));
+      return { done, stuck };
+    }
+    await turnBanner(page, banner || `Your turn: ${questions.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${questions.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
     const moved = await waitForPageMove(page, snapBefore, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick);
     if (!moved) return { done, stuck: { step: `page ${p}`, do: 'kevin', error: 'not done in time: ' + questions.join(' | ').slice(0, 300) } };
     done.push({ do: 'kevin', executed: true, say: questions.join(' | ').slice(0, 300), carryOn: p });
@@ -2601,6 +2884,146 @@ async function carryOnPages(page, plan, opts, done) {
     const qs = snap.items.map(i => i.question).filter(Boolean);
     return his(p, [`this page asks your declarations ("${word}")`].concat(qs).slice(0, 12), snap);
   };
+  // ── A mapped declarations page (estate fix 3, Nov 2026) ──
+  const decl = opts.declarationMaps || loadDeclarationMaps();
+  // His covers come from the handover (read once per run); a caller that passes none has them read the
+  // first time a page maps, so no other page reads his standing answers for them.
+  let covers = opts.covers || null;
+  const ownerKey = nonEmpty(opts.ownerKey) ? opts.ownerKey : null;
+  const ownerWhy = nonEmpty(opts.ownerWhy) ? opts.ownerWhy : '';
+  // FIRST: the first look at the page in this run, the whole page exact; later re-checks in the same visit
+  // need the declarations' text and every question still exact.
+  const mapped = (s, first) => {
+    if (!mappedDeclarations(s, s.url, { covers: [], ownerKey: null, maps: decl.maps, first })) return null;
+    if (!covers) covers = loadExactCovers().covers;
+    return mappedDeclarations(s, s.url, { covers, ownerKey, ownerWhy, maps: decl.maps, first });
+  };
+  // A mapped address is the robot's once per run: any later visit (validation bounced, the site reloaded,
+  // he went Back) is his whole, so it never ticks a No over an answer he changed. The first visit's record
+  // is kept, so the later one can remind him of it.
+  const visited = new Map();
+  const mapKey = mp => `${mp.host}${mp.path}`;
+  const snapOr = async (last) => { try { return await snapshotForm(page); } catch (e) { return Object.assign({}, last, { readError: String(e.message || e).slice(0, 120) }); } };
+  const plural = (n, one, many) => (n === 1 ? one : many);
+  const leadLine = n => (n ? `The robot ticked No on ${n} declaration ${plural(n, 'question', 'questions')} below: check each one` : '');
+  const alreadyLines = st => st.alreadyNo.map(a => `"${a.question}" was already ticked No when the robot arrived: check it`);
+  const triedLines = st => st.attempted.map(a => `the robot tried to tick No on "${a.question}" and could not confirm it: check it`);
+  // The banner on a mapped page: its first line always whole, then the rest cut to fit.
+  const mappedBanner = (lead, rest) => {
+    const r = rest.join(' | ');
+    return `Your turn: ${lead ? `${lead}. ` : ''}${r.length > 300 ? `${r.slice(0, 299)}…` : r}`;
+  };
+  // The record goes on `done` before the page is his, built from what the robot itself did, on every way out.
+  // A question the robot was never going to answer keeps its own reason; one it refused carries the refusal.
+  const record = (p, m, st, why, refused) => {
+    if (st.recorded) return;
+    st.recorded = true;
+    const touched = id => [st.answered, st.attempted, st.alreadyNo].some(l => l.some(a => a.id === id));
+    done.push({ do: 'declarations', executed: true, carryOn: p, site: m.map.site, answered: st.answered.slice(), alreadyNo: st.alreadyNo.slice(),
+      attempted: st.attempted.slice(),
+      his: m.questions.filter(q => !touched(q.id)).map(q => ({ id: q.id, question: q.text,
+        why: refused && refused.id === q.id ? refused.why : (!q.decision.robot ? q.decision.why : (why || q.decision.why || 'not answered')) })) });
+  };
+  // The page stopped being exactly as mapped: his whole, in the old words, led by what the robot had done.
+  const wholePage = async (p, now, m, st, why = 'the page changed, so the robot stopped', refused) => {
+    record(p, m, st, why, refused);
+    const word = declarationWords([now.formText].concat((now.items || []).map(itemWords)).join(' | '));
+    const qs = (now.items || []).map(i => i.question).filter(Boolean);
+    const head = word ? `this page asks your declarations ("${word}")` : 'this page changed while the robot was answering it';
+    const lead = leadLine(st.answered.length);
+    const said = alreadyLines(st).concat(triedLines(st));
+    const rest = said.concat([head], qs);
+    const list = (lead ? [lead] : []).concat(rest).slice(0, 12);
+    return his(p, list, now, mappedBanner(lead, rest), new Set((lead ? [lead] : []).concat(said)));
+  };
+  const mappedPage = async (p, snap, m, st) => {
+    const targets = new Set([].concat(...m.questions.map(q => [q.yes, q.no])));
+    // What the planner sees: the page without the mapped questions, their items or their words.
+    const hide = s => {
+      const flat = String(s.formText || '').replace(/\s+/g, ' ').trim();
+      const tail = normWords(m.map.tail);
+      const before = flat.length === flat.toLowerCase().length && flat.toLowerCase().endsWith(tail) ? flat.slice(0, flat.length - tail.length).trim() : '';
+      return Object.assign({}, s, { formText: before, items: s.items.filter(i => declarationWords(itemWords(i)) === '') });
+    };
+    const mappedTexts = new Set(m.questions.map(q => normWords(q.text)));
+    const unknown = [];
+    let view = hide(snap);
+    for (let round = 1; round <= CARRY_ON_ROUNDS; round++) {
+      let out;
+      try {
+        const raw = await plan_({ today: fillTokens('{{today}}'), task: plan.label || plan.site || '', facts, page: view });
+        // A press on a mapped radio is never the planner's, and neither is Next: both dropped unread.
+        const kept = Object.assign({}, raw, { next: null, steps: (raw.steps || []).filter(s => !targets.has(String(s.target || '').trim())) });
+        out = checkPlannerSteps(kept, view, facts);
+      } catch (e) {
+        record(p, m, st, 'the page planner failed, so the robot stopped');
+        return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: String(e.message || e).slice(0, 300) } };
+      }
+      if (out.done === 'blocked') {
+        record(p, m, st, 'the site would not go on');
+        return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the site will not go on: ${out.reason || 'no reason given'}` } };
+      }
+      for (let i = 0; i < out.steps.length; i++) {
+        const s = out.steps[i];
+        try {
+          await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers });
+          const r = await runSteps(page, [s], false, null);
+          done.push(...r.done.map(d => Object.assign(d, { carryOn: p })));
+          await page.waitForTimeout(400);
+        } catch (e) {
+          const why = String(e.message || '');
+          if (/^(refused|could not read|BROWSER REFUSED)/.test(why)) out.unknown.push(`${s.question} (${why.slice(0, 160)})`);
+        }
+        const now = await snapOr(snap);
+        if (now.readError || !mapped(now, false)) return wholePage(p, now, m, st);
+      }
+      for (const u of out.unknown) if (!mappedTexts.has(normWords(u)) && !unknown.includes(u)) unknown.push(u);
+      const after = await snapOr(snap);
+      if (after.readError || !mapped(after, false)) return wholePage(p, after, m, st);
+      const fresh = after.items.some(i => !snap.items.some(j => j.question === i.question));
+      snap = after;
+      view = hide(after);
+      if (unknown.length || (!out.steps.length && !fresh)) break;
+    }
+    // His covered declarations, one by one, each by its exact No; the page and its address re-checked after every one.
+    for (const q of m.questions) {
+      if (!q.decision.robot) continue;
+      let how;
+      try {
+        how = await clickMappedNo(page, q);
+      } catch (e) {
+        const error = String(e.message || e).slice(0, 200);
+        if (e.clicked) st.attempted.push({ id: q.id, question: q.text, error });
+        done.push({ do: 'click', executed: false, selector: q.no, carryOn: p, error });
+        return wholePage(p, await snapOr(snap), m, st, 'the robot stopped at an earlier question, so it did not answer this one',
+          e.clicked ? null : { id: q.id, why: error.replace(/^refused: /, '') });
+      }
+      if (how === 'already') { st.alreadyNo.push({ id: q.id, question: q.text }); continue; }
+      st.answered.push({ id: q.id, question: q.text, pick: 'No', said: q.decision.said, date: q.decision.date });
+      done.push({ do: 'click', executed: true, selector: q.no, carryOn: p, declaration: q.id });
+      if (mapForUrl(decl.maps, page.url()) !== m.map) {
+        // The page moved under the robot: it stops, says what it ticked, and touches nothing more.
+        record(p, m, st, 'the page moved to another address, so the robot stopped');
+        const lead = leadLine(st.answered.length);
+        const rest = alreadyLines(st).concat(['the page moved to another address after the robot ticked No, so it stopped: go Back and check its answers']);
+        const list = [lead].concat(rest);
+        return his(p, list, await snapOr(snap), mappedBanner(lead, rest), new Set(list));
+      }
+      await page.waitForTimeout(300);    // an answer can redraw the form
+      const now = await snapOr(snap);
+      if (now.readError || !mapped(now, false)) return wholePage(p, now, m, st);
+      snap = now;
+    }
+    const after = await snapOr(snap);
+    if (after.readError || !mapped(after, false)) return wholePage(p, after, m, st);
+    record(p, m, st);
+    // Never Next on this page: the robot's ticks first, his questions by name, then Next is his.
+    const lead = leadLine(st.answered.length);
+    const said = alreadyLines(st);
+    const asks = m.questions.filter(q => !q.decision.robot).map(q => `"${q.text}" (${q.decision.why})`).concat(unknown);
+    const rest = said.concat(asks, ['press Next when the page is right']);
+    return his(p, (lead ? [lead] : []).concat(rest), after, mappedBanner(lead, rest), new Set((lead ? [lead] : []).concat(said, ['press Next when the page is right'])));
+  };
   for (let p = 1; p <= maxPages; p++) {
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(Number(opts.settleMs) || 1500);
@@ -2615,6 +3038,35 @@ async function carryOnPages(page, plan, opts, done) {
     // The quote: a price on screen with a button to buy it. The robot's part ends here, whatever else
     // the page asks (its "I declare" tick is his with the Buy, as it always was).
     if (snap.prices.length && snap.buttons.some(x => BUY_RE.test(x.text))) return { done, stuck: null, end: 'price' };
+    // A page mapped exactly (scripts/declaration-maps.json) is filled and its covered declarations answered,
+    // then handed to him to check and press Next. Any other page goes on exactly as before.
+    const at = mapForUrl(decl.maps, snap.url);
+    if (at && visited.has(mapKey(at))) {
+      const before = visited.get(mapKey(at));
+      const n = before ? before.answered.length + before.attempted.length : 0;
+      const lead = n ? `The robot ticked No on ${n} declaration ${plural(n, 'question', 'questions')} on this page earlier: check each one is still as you want it` : '';
+      const again = 'the robot has already been on this page once in this run, so it is yours whole: the robot touches nothing on it';
+      const rest = [again].concat(snap.items.map(i => i.question).filter(Boolean));
+      const list = (lead ? [lead] : []).concat(rest).slice(0, 12);
+      const r = await his(p, list, snap, mappedBanner(lead, rest), new Set((lead ? [lead] : []).concat([again])));
+      if (r) return r;
+      continue;
+    }
+    if (at) visited.set(mapKey(at), null);
+    const m = mapped(snap, true);
+    if (m) {
+      const st = { answered: [], attempted: [], alreadyNo: [], recorded: false };
+      visited.set(mapKey(at), st);
+      let r;
+      try {
+        r = await mappedPage(p, snap, m, st);
+      } catch (e) {
+        record(p, m, st, 'the robot stopped reading the page');
+        throw e;
+      }
+      if (r) return r;
+      continue;
+    }
     const dec = await declarationPage(p, snap);
     if (dec === null) continue;
     if (dec) return dec;
@@ -3691,6 +4143,21 @@ async function main() {
         + 'to see what is already on file.');
     }
     const stored = storedFactsFor(plan, { dryRun });
+    // A mapped declarations page (estate fix 3, Nov 2026): the maps and his exact covers, read once per
+    // handover. Whose policy it is comes only from an owner the plan names AND the facts file holds, with
+    // every house on the form on file under that same owner; otherwise nothing is robot-answered. A file
+    // that cannot be read is said on the line, never a reason not to open.
+    const declMaps = loadDeclarationMaps();
+    const exact = loadExactCovers();
+    const declarationsProblem = declMaps.problems.concat(exact.problems);
+    const ownerElsewhere = stored.ownerDiffers.length > 0;
+    const ownerKey = !ownerElsewhere && plan.factsFor && nonEmpty(plan.factsFor.owner) && nonEmpty(stored.resolved.owner) ? stored.resolved.owner : null;
+    const declOpts = { declarationMaps: declMaps, covers: exact.covers, ownerKey,
+      ownerWhy: ownerElsewhere ? 'a house on this form is on file under another owner' : '' };
+    const declarationsOf = r => {
+      const d = (r.done || []).filter(x => x.do === 'declarations').pop();
+      return d ? { site: d.site, answered: d.answered, alreadyNo: d.alreadyNo || [], attempted: d.attempted || [], his: d.his } : null;
+    };
     // The agent's proof, before the card reaches Kevin: the same guard, no window, his own
     // steps skipped, a screenshot for the card, and the browser closed at the end. Nothing is
     // his yet, so no approval is read; the guard still stops before any final click.
@@ -3698,7 +4165,7 @@ async function main() {
       const shot = arg(rest, 'shot');
       if (!shot) die('--shot is required: the screenshot goes on the card');
       const res = await withPage(profile, false, async (page) => {
-        const r = await runHandover(page, plan, { quiet: true, skipKevin: true, storedFacts: stored.lines });
+        const r = await runHandover(page, plan, Object.assign({ quiet: true, skipKevin: true, storedFacts: stored.lines }, declOpts));
         // The address it reached: a plan's `site` is the agent's own words ("axa-via-topcashback"), and the
         // keep-warm reads a line's address to know which site was used (16 Oct 2026).
         return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null), url: page.url() });
@@ -3709,8 +4176,18 @@ async function main() {
         missing: [...new Set(stored.missing.map(x => (stored.resolved.properties.length > 1 && x.address ? `${x.address} ${x.label}` : x.label)))] };
       // A house owned by someone other than the owner the form is in: said, never refused.
       if (stored.ownerDiffers.length) facts.ownerDiffers = stored.ownerDiffers.map(d => d.address);
-      const out = { mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length, facts };
-      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, facts });
+      // The labels of the stored lines it read ("Label" or "Label [house]"), never a value, source or date: the
+      // agent checks a stuck question against these before it goes on a card.
+      facts.held = [...new Set(stored.used.map(u => String(u.line).slice(0, String(u.line).length - `: ${u.value}`.length)))];
+      const declarations = declarationsOf(res);
+      const out = { mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length, facts, declarations,
+        declarationsProblem: declarationsProblem.length ? declarationsProblem : null };
+      if (res.stuck && Array.isArray(res.stuck.unknown) && plan.factsFor) {
+        out.factsHelp = 'Before any question in stuck.unknown goes on a card, check facts.held: a question the facts file already answers is written into the plan '
+          + 'as a step with the stored value (node scripts/form-facts.js lines shows it), never put to Kevin. Only a fact in facts.missing or facts.expired is asked, once.';
+      }
+      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, facts,
+        declarations, declarationsProblem: out.declarationsProblem });
       console.log(JSON.stringify(out));
       if (res.stuck) process.exitCode = 3;
       return;
@@ -3742,7 +4219,7 @@ async function main() {
         // For a robot form card the log IS the guard against a second government form: no log, no window.
         if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
-        const r = await runHandover(page, plan, { onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined, storedFacts: stored.lines });
+        const r = await runHandover(page, plan, Object.assign({ onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined, storedFacts: stored.lines }, declOpts));
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         r.url = page.url();                                         // before his window closes the page
         await turnBanner(page, r.stuck
@@ -3755,8 +4232,10 @@ async function main() {
     } finally {
       releaseSigninHold(dir);
     }
-    ledger(Object.assign({ cmd: 'handover', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot },
-      stored.conflicts.length ? { factConflicts: stored.conflicts } : {}, stored.problems.length ? { factProblems: stored.problems } : {}));
+    ledger(Object.assign({ cmd: 'handover', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot,
+      declarations: declarationsOf(res) },
+      stored.conflicts.length ? { factConflicts: stored.conflicts } : {}, stored.problems.length ? { factProblems: stored.problems } : {},
+      declarationsProblem.length ? { declarationsProblem } : {}));
     console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
     if (res.stuck) process.exitCode = 3;
     return;
@@ -3931,8 +4410,9 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
                    doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
-                   loadStandingFacts, declarationWords, DECLARATION_TOPIC_RE, factsOf, storedFactsFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
-                   movedOn, assertNotFinalAction, PLANNER_SCHEMA, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
+                   loadStandingFacts, declarationWords, DECLARATION_TOPIC_RE, factsOf,
+                   loadDeclarationMaps, loadExactCovers, mappedDeclarations, clickMappedNo, NEVER_ROBOT_RE, storedFactsFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
+                   movedOn, assertNotFinalAction, PLANNER_SCHEMA, isoFromUkDate, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
                    adobeSignRefusal, SIGN_WORDS_RE, isAdobeSigningPage, signBinding, runSignFlow, SIGN_DOORS,
                    agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus,
                    runSign, runSignCheck, verifyApprovedCopy, hideSignToken };

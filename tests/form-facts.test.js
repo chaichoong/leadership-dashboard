@@ -333,6 +333,7 @@ describe('the handover dry run reads the stored facts first', () => {
     expect(last.facts.stored).toBe(4);
     expect(last.facts.missing).toContain('Number of bedrooms');
     expect(hits.some(u => u.startsWith('/f2?storeys=2&built=1930'))).toBe(true);
+    expect(last).not.toHaveProperty('factsHelp');      // it reached the price: nothing to put on a card
     const typed = ledgerOf(x).find(l => l.cmd === 'handover-dry-run');
     expect(typed.facts).toEqual(last.facts);
     expect(typed.steps.filter(s => s.do === 'fill').map(s => s.selector)).toEqual(['#storeys', '#built']);
@@ -347,6 +348,10 @@ describe('the handover dry run reads the stored facts first', () => {
     expect(r.code).toBe(3);
     const first = lastJson(r);
     expect(first.stuck.unknown).toEqual(['Number of storeys']);
+    // The labels it read, never their values; and the reminder to check them before a question reaches his card.
+    expect(first.facts.held).toEqual(['Contact', 'First name', 'Year built']);
+    expect(JSON.stringify(first.facts.held)).not.toMatch(/Testa|1930|email only/);
+    expect(first.factsHelp).toMatch(/^Before any question in stuck\.unknown goes on a card, check facts\.held/);
     for (const k of ['askedBefore', 'askedBeforeHelp', 'askedLogError']) expect(first).not.toHaveProperty(k);
     expect(readFileSync(x.facts, 'utf8')).toBe(before);
     const again = lastJson(await dry(x, TASK2, PLAN({ carryOn: {}, ...FOR })));
