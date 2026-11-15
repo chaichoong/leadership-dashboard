@@ -9,6 +9,11 @@
 // data. Every fact carries where it came from and its date, and goes stale on the schema's clock.
 // Declarations (claims, convictions, refused insurance) are never facts: they live in Kevin's standing
 // answers file under his own ruling, and this file refuses them.
+// Forms round 2 (15 Nov 2026): a plan step reads one fact by its key ({{fact:<key>}}, resolveFact), and the
+// answers Kevin gives in his own "Your turn" window are RECORDED in "captured" (addCaptured). A record never
+// answers a form: after his window the agent runs `node scripts/form-facts.js captured --task <id>` and stores
+// each real fact with `set` and its source, so the next form reads it as a fact. A declaration, a loss or a
+// private value (card, bank, password, code, identity number) is never recorded: refused here and by the caller.
 //
 // USAGE (prints JSON; exits 1 with a plain message on a refusal)
 //   node scripts/form-facts.js lines --owner <ref> [--property <ref>]... [--with-source]
@@ -17,6 +22,7 @@
 //   node scripts/form-facts.js add-property --key <k> --address <a> --town <t> --postcode <p> [--owner <owner-key>]
 //   node scripts/form-facts.js add-owner --key <k> --name <n>
 //   node scripts/form-facts.js import --file <json>
+//   node scripts/form-facts.js captured [--task <id>] [--site <host>] [--owner <ref>]
 //   node scripts/form-facts.js check
 //
 // Two writers never lose each other's write: every load-change-write holds <file>.lock (a folder, made
@@ -25,7 +31,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DECLARATION_TOPIC_RE } = require('./declaration-words');
+const { DECLARATION_TOPIC_RE, NEARBY_DECLARATION_RE, NEVER_ROBOT_RE, PRIVATE_QUESTION_RE, CAPTURE_LOSS_RE } = require('./declaration-words');
 const SCHEMA = require('./form-facts-schema.json');
 
 const defaultFile = () => process.env.AGENT_FORM_FACTS || path.join(os.homedir(), 'knowledge-os', 'handover', 'form-facts.json');
@@ -105,6 +111,7 @@ function validateStore(store) {
   if (store.owners !== undefined && !isObj(store.owners)) out.push('"owners" is not an object');
   if (store.properties !== undefined && !isObj(store.properties)) out.push('"properties" is not an object');
   if (out.length) return out;
+  // "captured" (forms round 2) is a record, not facts: a bad entry is dropped on load (splitCaptured), never a failure here.
   const facts = (where, scope, obj) => {
     if (obj === undefined) return;
     if (!isObj(obj)) { out.push(`${where}: "facts" is not an object`); return; }
@@ -146,6 +153,8 @@ function loadStore(file = defaultFile()) {
   }
   let store;
   try { store = JSON.parse(raw); } catch (e) { throw refusal(`the facts file ${file} is not valid JSON: ${e.message}`); }
+  // A bad recorded answer is dropped, the rest kept, the facts untouched (review R1): the next write leaves it out.
+  if (isObj(store) && store.captured !== undefined) store.captured = splitCaptured(store.captured).kept;
   const problems = validateStore(store);
   if (problems.length) throw refusal(`the facts file ${file} fails its checks: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}`);
   return normalise(store);
@@ -262,6 +271,58 @@ function linesFor(store, opts = {}) {
   return { lines, used, expired, missing, problems, ownerDiffers, resolved: { owner: owner ? owner.key : null, properties: props.map(p => p.key) } };
 }
 
+// ── One fact by its key (forms round 2, 15 Nov 2026) ─────────────────────────────────────────
+// What a plan step's {{fact:<key>}} or {{fact:<key>@<house>}} reads. Without a house: the FIRST scope that
+// holds the key, in this order: the one house (only when the form names exactly one), the owner, general.
+// A form naming two or more houses must name the house for a key any of them holds. With a house: that
+// house (one of the form's own), then the owner, then general. Own keys only. Returns
+// { value, scope, ref, label, source, date, expired }, or { refused, code } with a plain reason. A key or a
+// value that reads as a declaration is refused (the store refuses them anyway: this is the belt).
+function resolveFact(store, { owner, properties = [], key, at, today = todayLondon(), allowExpired = false } = {}) {
+  const no = (code, refused) => ({ refused, code });
+  const k = String(key || '').trim();
+  if (!FACT_KEY_RE.test(k) || RESERVED_KEYS.has(k)) return no('key', `"${k}" is not a fact key (lower case, digits and hyphens)`);
+  const dec = declarationIn(k);
+  if (dec) return no('declaration', `"${dec}" is a declaration topic, and ${DECLARATION_HELP}`);
+  const props = [];
+  for (const ref of properties || []) {
+    const p = findProperty(store, ref);
+    if (!p) return no('property', `${ref} is not in the facts file`);
+    if (!props.some(x => x.key === p.key)) props.push(p);
+  }
+  let o = null;
+  if (owner) { o = findOwner(store, owner); if (!o) return no('owner', `${owner} is not in the facts file`); }
+  else {
+    const keys = [...new Set(props.map(p => p.owner).filter(Boolean))];
+    if (keys.length === 1 && props.every(p => p.owner === keys[0])) o = findOwner(store, keys[0]);
+  }
+  let house = null;
+  if (at !== undefined && at !== null && at !== '') {
+    const p = findProperty(store, at);
+    house = p && props.find(x => x.key === p.key);
+    if (!house) return no('at', `"${at}" is not one of the houses this form names`);
+  } else if (props.length === 1) house = props[0];
+  else if (props.length > 1) {
+    const holders = props.filter(p => own(p.facts, k));
+    if (holders.length) return no('ambiguous', `"${k}" is held for a house and this form names ${props.length} houses: name the house, as {{fact:${k}@<house>}}`);
+  }
+  const order = [];
+  if (house) order.push(['property', house.key, house.facts]);
+  if (o) order.push(['owner', o.key, o.facts]);
+  order.push(['general', null, ((store && store.general) || {}).facts]);
+  for (const [scope, ref, facts] of order) {
+    if (!own(facts, k) || !isObj(facts[k])) continue;
+    const f = facts[k];
+    const label = labelOf(scope, k, f);
+    const expired = isExpired(scope, k, f, today);
+    if (expired && !allowExpired) return no('expired', `"${label}" (${k}) is out of date: dated ${f.date}${f.until ? `, good until ${f.until}` : ''}`);
+    const decValue = declarationIn(label) || declarationInValue(f.value);
+    if (decValue) return no('declaration', `"${decValue}" is a declaration topic, and ${DECLARATION_HELP}`);
+    return { value: f.value, scope, ref, label, source: f.source, date: f.date, expired };
+  }
+  return no('unknown', `the fact ${k} is not on file`);
+}
+
 // ── Writing ───────────────────────────────────────────────────────────────────────────────────
 function applySetFact(store, args) {
   const { scope, ref, key } = args || {};
@@ -353,6 +414,130 @@ const withStore = (file, fn) => withLock(file, () => { const s = loadStore(file)
 const setFact = (args, file = defaultFile()) => withStore(file, s => applySetFact(s, args));
 const addOwner = (args, file = defaultFile()) => withStore(file, s => applyAddOwner(s, args));
 const addProperty = (args, file = defaultFile()) => withStore(file, s => applyAddProperty(s, args));
+
+// ── What Kevin answered in his own window (forms round 2, 15 Nov 2026; cut down by review R1) ────
+// A RECORD for the agent, never a fact and never read by a form. When the robot stops mid-form for a question
+// no fact answers, Kevin answers it in his "Your turn" window; agent-browser.js records that answer here, in
+// "captured", with a box the robot filled that he changed ("was": a stored fact is then wrong). After his window
+// the agent reads them (`node scripts/form-facts.js captured --task <id>`) and stores each real fact with `set`
+// and its source. Each entry: { site, path, owner, properties, task, date, question, kind, index, answer, was? },
+// index being the item's position on the page. Entries are appended, never merged (two "First name" boxes are
+// two entries); at most 500, oldest dropped. Never recorded, checked here as well as by the caller: a
+// declaration, a loss, anything on the never list, a private value (card, bank, password, code, identity number,
+// verification), a long number, a 4 to 8 digit number that is not a year, sum, count or postcode, an empty
+// question, or an answer over 200 characters. A bad entry in a hand-edited file is dropped on load, never a
+// reason the facts cannot be read.
+const CAPTURED_MAX = 500;
+const CAPTURED_ANSWER_MAX = 200;
+const SITE_RE = /^(?:[a-z0-9][a-z0-9.-]*|\[[0-9a-f:]+\])$/;
+const CAPTURED_KINDS = new Set(['text', 'number', 'date', 'email', 'tel', 'url', 'search', 'combobox', 'select', 'radio', 'checkbox']);
+// The questions a short number may answer: a year, a sum, a count, a postcode.
+const NUMBER_QUESTION_RE = /\b(year|built|purchased|sum|cost|value|rent|postcode|storeys|bedrooms|bathrooms|rooms|floors|people|tenants|occupants)\b/i;
+// The same list less rent, value and sum: what still makes a number fair game when the question also says account or reference.
+const NUMBER_COUNT_RE = /\b(year|built|purchased|cost|postcode|storeys|bedrooms|bathrooms|rooms|floors|people|tenants|occupants)\b/i;
+const squashSpace = t => String(t === undefined || t === null ? '' : t).replace(/\s+/g, ' ').trim();
+// Identity and payment wording the shared private list does not hold (review round 3), capture only.
+const CAPTURE_PRIVATE_RE = /\b(ni|national insurance|utr|taxpayer|tax reference|licen[cs]e|cv[cv]?\d?|\d[- ]digits?|digits on|expir\w*|mm ?\/ ?yy|name on the (?:card|account)|reference(?: number)?|nhs)\b/i;
+// Why this question and answer may never be recorded, or ''. Total: anything it cannot read is a refusal.
+function capturedRefusal(entry) {
+  try { return capturedRefusalOf(entry || {}); } catch (e) { return `it cannot be read (${String(e.message || e).slice(0, 80)})`; }
+}
+function capturedRefusalOf({ question, answer, options = [], was }) {
+  if (options !== undefined && options !== null && (!Array.isArray(options) || !options.every(o => typeof o === 'string' || (isObj(o) && typeof o.label === 'string')))) return 'its options are not a list of words';
+  for (const v of [question, answer, was]) if (v !== undefined && v !== null && typeof v !== 'string') return 'a question, answer or "was" that is not text';
+  options = options || [];
+  const q = squashSpace(question), a = squashSpace(answer);
+  if (!q) return 'it has no question';
+  if (!a) return 'it has no answer';
+  if (a.length > CAPTURED_ANSWER_MAX) return `the answer is longer than ${CAPTURED_ANSWER_MAX} characters`;
+  const words = [q].concat((options || []).map(o => (o && typeof o === 'object' ? o.label : o)), [a, was]).map(squashSpace).join(' | ');
+  const priv = words.match(PRIVATE_QUESTION_RE) || words.match(CAPTURE_PRIVATE_RE);
+  if (priv) return `"${priv[0]}" is a private detail`;
+  // A sum, rent or value is a number only when the question is not about an account or a reference.
+  const numberQuestion = NUMBER_QUESTION_RE.test(q) && !(/\b(account|reference)\b/i.test(q) && !NUMBER_COUNT_RE.test(q));
+  for (const v of [a, was]) {
+    const t = squashSpace(v);
+    if (t.replace(/\D/g, '').length >= 9) return 'the answer holds 9 or more digits (a card, account or reference number, perhaps)';
+    if (/^\d[\d -]*\d$/.test(t) && /^\d{4,8}$/.test(t.replace(/[ -]/g, '')) && !numberQuestion) return 'a 4 to 8 digit number that is not a year, sum, count or postcode (a code or an account number, perhaps)';
+  }
+  const hit = declarationIn(words) || (words.match(NEARBY_DECLARATION_RE) || words.match(NEVER_ROBOT_RE) || words.match(CAPTURE_LOSS_RE) || [''])[0];
+  if (hit) return `"${hit}" is a declaration, a loss or on the never list, which is Kevin's alone`;
+  return '';
+}
+const propsKey = list => [...new Set((list || []).map(String))].sort();
+
+const CAPTURED_FIELDS = new Set(['site', 'path', 'owner', 'properties', 'task', 'date', 'question', 'kind', 'index', 'answer', 'was', 'options']);
+// Total (review round 3): never throws; an entry not exactly the expected shape is a problem.
+function capturedProblems(where, c) {
+  try { return capturedProblemsOf(where, c); } catch (e) { return [`${where}: cannot be read (${String(e.message || e).slice(0, 80)})`]; }
+}
+function capturedProblemsOf(where, c) {
+  if (!isObj(c)) return [`${where}: not an entry`];
+  const out = [];
+  const extra = Object.keys(c).filter(k => !CAPTURED_FIELDS.has(k));
+  if (extra.length) out.push(`${where}: unexpected fields ${extra.slice(0, 3).join(', ')}`);
+  if (c.task !== undefined && c.task !== null && typeof c.task !== 'string') out.push(`${where}: "task" is not text`);
+  if (c.options !== undefined && (!Array.isArray(c.options) || !c.options.every(o => typeof o === 'string'))) out.push(`${where}: "options" is not a list of words`);
+  if (!SITE_RE.test(String(c.site || ''))) out.push(`${where}: no site (the page's host, lower case)`);
+  if (typeof c.path !== 'string' || !c.path.startsWith('/')) out.push(`${where}: no path`);
+  if (c.owner !== null && c.owner !== undefined && typeof c.owner !== 'string') out.push(`${where}: "owner" is not a key`);
+  if (!Array.isArray(c.properties) || !c.properties.every(p => typeof p === 'string')) out.push(`${where}: "properties" is not a list of keys`);
+  else if (!c.owner && !c.properties.length) out.push(`${where}: whose form it was is not known (no owner and no house)`);
+  if (typeof c.question !== 'string' || typeof c.answer !== 'string') out.push(`${where}: no question or answer`);
+  if (!CAPTURED_KINDS.has(c.kind)) out.push(`${where}: no kind`);
+  if (!Number.isInteger(c.index) || c.index < 0) out.push(`${where}: no index`);
+  if (!validDate(c.date)) out.push(`${where}: no date or a bad date (YYYY-MM-DD)`);
+  if (c.was !== undefined && typeof c.was !== 'string') out.push(`${where}: "was" is not text`);
+  const why = capturedRefusal(c);
+  if (why) out.push(`${where}: never recorded: ${why}`);
+  return out;
+}
+// The entries a store may hold, and how many were dropped (loadStore and check).
+function splitCaptured(list) {
+  if (!Array.isArray(list)) return { kept: [], dropped: list === undefined ? 0 : 1 };
+  const kept = list.filter((c, i) => !capturedProblems(`captured[${i}]`, c).length);
+  return { kept, dropped: list.length - kept.length };
+}
+
+function applyAddCaptured(store, e = {}) {
+  if (!isObj(e)) throw refusal('not an entry. Nothing was stored.');
+  const site = String(e.site || '').trim().toLowerCase();
+  if (!SITE_RE.test(site)) throw refusal(`"${e.site}" is not a site (the page's host, lower case). Nothing was stored.`);
+  const owner = e.owner ? String(e.owner) : null;
+  const properties = propsKey(e.properties);
+  if (!owner && !properties.length) throw refusal('whose form it was is not known (no owner and no house). Nothing was stored.');
+  const why = capturedRefusal(e);
+  if (why) throw refusal(`refused: ${why}. Nothing was stored.`);
+  const date = e.date || todayLondon();
+  if (!validDate(date) || isFuture(date)) throw refusal(`"${date}" is not today or earlier (YYYY-MM-DD). Nothing was stored.`);
+  const c = { site, path: String(e.path || '/'), owner, properties, task: e.task ? String(e.task) : null, date,
+    question: squashSpace(e.question), kind: String(e.kind || ''), index: Number(e.index), answer: squashSpace(e.answer) };
+  if (e.was !== undefined && e.was !== null && squashSpace(e.was)) c.was = squashSpace(e.was);
+  const bad = capturedProblems('the entry', c);
+  if (bad.length) throw refusal(`refused: ${bad[0]}. Nothing was stored.`);
+  // Appended, never merged: two boxes with the same question are two answers.
+  store.captured = (store.captured || []).concat([c]).slice(-CAPTURED_MAX);
+  return c;
+}
+const addCaptured = (args, file = defaultFile()) => withStore(file, s => applyAddCaptured(s, args));
+// Several answers under one lock and one write. A refused entry is listed and the rest still stored.
+function addCapturedMany(list, file = defaultFile()) {
+  return withStore(file, s => {
+    const stored = [], refused = [];
+    for (const e of list || []) {
+      try { stored.push(applyAddCaptured(s, e)); } catch (err) {
+        if (!err.refusal) throw err;
+        refused.push({ question: squashSpace(e && e.question).slice(0, 120), why: err.message });
+      }
+    }
+    return { stored, refused };
+  });
+}
+// How many recorded answers are on file for this owner or any of these houses (the dry run's count).
+function capturedOnFile(store, { owner, properties = [] } = {}) {
+  const props = new Set((properties || []).map(String));
+  return ((store && store.captured) || []).filter(c => (owner && c.owner === owner) || (c.properties || []).some(p => props.has(p))).length;
+}
 
 // Plan lines against stored lines: the same label, a different value. Labels are compared with any
 // "[house]" tag taken off. Two tagged lines are compared only when the tags name the same house; a plan
@@ -462,17 +647,30 @@ function cli(argv) {
     if (!r.written) process.exitCode = 1;
     return;
   }
+  if (cmd === 'captured') {
+    // The answers Kevin gave in his own window, with the answers: this is the private file.
+    const store = loadStore(file);
+    const site = str(a.site), owner = str(a.owner);
+    let ownerKey = null;
+    if (owner) { const o = findOwner(store, owner); if (!o) throw refusal(`owner "${owner}" is not in the facts file`); ownerKey = o.key; }
+    const taskId = str(a.task);
+    const list = (store.captured || []).filter(c => (!site || c.site === site.toLowerCase()) && (!ownerKey || c.owner === ownerKey) && (!taskId || c.task === taskId));
+    print({ file, captured: list });
+    return;
+  }
   if (cmd === 'check') {
     let store = null;
     const problems = [];
     try { store = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
       if (e.code === 'ENOENT') store = emptyStore(); else problems.push(`cannot be read: ${e.message}`);
     }
+    const split = store && isObj(store) ? splitCaptured(store.captured) : { kept: [], dropped: 0 };
+    if (store && isObj(store) && store.captured !== undefined) store.captured = split.kept;
     if (store) problems.push(...validateStore(store));
     const ok = store && isObj(store);
     const c = ok ? countFacts(store, todayLondon()) : { facts: 0, withoutSource: 0, expired: 0 };
     print({ file, owners: ok ? Object.keys(store.owners || {}).length : 0, properties: ok ? Object.keys(store.properties || {}).length : 0,
-      facts: c.facts, withoutSource: c.withoutSource, expired: c.expired, problems });
+      facts: c.facts, withoutSource: c.withoutSource, expired: c.expired, captured: ok && Array.isArray(store.captured) ? store.captured.length : 0, capturedDropped: split.dropped, problems });
     if (problems.length) process.exitCode = 1;
     return;
   }
@@ -487,5 +685,6 @@ if (require.main === module) {
   }
 }
 
-module.exports = { loadStore, validateStore, writeStore, findProperty, findOwner, linesFor, setFact, addProperty, addOwner, conflicts,
+module.exports = { loadStore, validateStore, writeStore, findProperty, findOwner, linesFor, resolveFact, setFact, addProperty, addOwner, conflicts,
+  addCaptured, addCapturedMany, capturedOnFile, capturedRefusal, CAPTURED_MAX,
   applySetFact, applyAddOwner, applyAddProperty, runImport, todayLondon, defaultFile, SCHEMA, DEFAULT_DAYS };

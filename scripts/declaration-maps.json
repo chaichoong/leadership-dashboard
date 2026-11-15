@@ -27,6 +27,11 @@
         ["radio", "Have you made any claims at the property to be insured?"],
         ["radio", "Have you made any claims at any other property?"]
       ],
+      "optional": [
+        { "after": "What is your occupation type?", "items": [
+          ["combobox", "What is your occupation? Start typing your job title"],
+          ["combobox", "What is your business type? Start typing your job industry"] ] }
+      ],
       "questions": [
         {"id": "insuranceRefused", "text": "Have you ever had any insurance refused or any renewal declined or any special terms imposed?", "name": "insuranceRefused", "yes": "#insuranceRefusedyes", "no": "#insuranceRefusedno", "yesValue": "yes", "noValue": "no"},
         {"id": "bankruptOrCcj", "text": "Have you or any persons to be insured ever been bankrupt, had any CCJ's or been convicted of any criminal convictions?", "name": "bankruptOrCcj", "yes": "#bankruptOrCcjyes", "no": "#bankruptOrCcjno", "yesValue": "yes", "noValue": "no", "his": "bankruptcy, CCJs and convictions in one question: always Kevin's own answer"},
