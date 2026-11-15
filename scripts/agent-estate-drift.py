@@ -301,6 +301,17 @@ RETIRED = [
     (r"kept open RESTS for 24 hours", "2026-11-14",
      "a hand-back carried out and kept open rests until the next look its carry-out named "
      "(complete --keep-open --until, at most 14 days), not 24 hours"),
+    # The RightSure declarations build and the two sites off the robot (Decisions/2026-11-15
+    # RightSure declarations answered by the robot under exact covers). A surface that still says
+    # the robot never uses his standing answers, or still routes work to either site's robot window,
+    # is stale.
+    (r"does not use them live yet", "2026-11-15",
+     "RightSure's Your Details page is mapped: the robot ticks the declarations Kevin covered there; "
+     "every other declarations page is still his whole"),
+    (r"sign in to Swinton Business", "2026-11-15",
+     "Swinton is off the robot: ask Swinton by email, never a sign-in window"),
+    (r"Everywhen Your turn window", "2026-11-15",
+     "Everywhen is off the robot: quote through RightSure via TopCashback, or a broker by email"),
 ]
 
 # A line that is describing the old rule, not stating it.
