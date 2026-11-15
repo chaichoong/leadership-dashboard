@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "maps": [
+    {
+      "site": "rightsure",
+      "host": "quote.rightsureforbusiness.co.uk",
+      "path": "/landlord/personal",
+      "text": "Your Details What is your title? Dr Miss Mrs Ms Mr Mx What is your first name? What is your last name? What is your date of birth? What is your gender? Male Female Cisgender Prefer Not To Say What is your postcode? Search Address Line 1: Address Line 2: Address Line 3: Town: What is your email address? What is your main telephone number? What is your occupation type? Employee Company Director Self Employed Unemployed Retired Houseperson Student Other Do you have a second occupation? Yes No Have you ever had any insurance refused or any renewal declined or any special terms imposed? Yes No Have you or any persons to be insured ever been bankrupt, had any CCJ's or been convicted of any criminal convictions? Yes No Claims Have you made any claims at the property to be insured? Yes No Have you made any claims at any other property? Yes No Back Next",
+      "tail": "Have you ever had any insurance refused or any renewal declined or any special terms imposed? Yes No Have you or any persons to be insured ever been bankrupt, had any CCJ's or been convicted of any criminal convictions? Yes No Claims Have you made any claims at the property to be insured? Yes No Have you made any claims at any other property? Yes No Back Next",
+      "items": [
+        ["select", "What is your title?"],
+        ["text", "What is your first name?"],
+        ["text", "What is your last name?"],
+        ["date", "What is your date of birth?"],
+        ["select", "What is your gender?"],
+        ["text", "What is your postcode?"],
+        ["text", "Address Line 1:"],
+        ["text", "Address Line 2:"],
+        ["text", "Address Line 3:"],
+        ["text", "Town:"],
+        ["text", "What is your email address?"],
+        ["text", "What is your main telephone number?"],
+        ["select", "What is your occupation type?"],
+        ["radio", "Do you have a second occupation?"],
+        ["radio", "Have you ever had any insurance refused or any renewal declined or any special terms imposed?"],
+        ["radio", "Have you or any persons to be insured ever been bankrupt, had any CCJ's or been convicted of any criminal convictions?"],
+        ["radio", "Have you made any claims at the property to be insured?"],
+        ["radio", "Have you made any claims at any other property?"]
+      ],
+      "questions": [
+        {"id": "insuranceRefused", "text": "Have you ever had any insurance refused or any renewal declined or any special terms imposed?", "name": "insuranceRefused", "yes": "#insuranceRefusedyes", "no": "#insuranceRefusedno", "yesValue": "yes", "noValue": "no"},
+        {"id": "bankruptOrCcj", "text": "Have you or any persons to be insured ever been bankrupt, had any CCJ's or been convicted of any criminal convictions?", "name": "bankruptOrCcj", "yes": "#bankruptOrCcjyes", "no": "#bankruptOrCcjno", "yesValue": "yes", "noValue": "no", "his": "bankruptcy, CCJs and convictions in one question: always Kevin's own answer"},
+        {"id": "hasClaims", "text": "Have you made any claims at the property to be insured?", "name": "hasClaims", "yes": "#hasClaimsyes", "no": "#hasClaimsno", "yesValue": "yes", "noValue": "no"},
+        {"id": "hasOtherPropertyClaims", "text": "Have you made any claims at any other property?", "name": "hasOtherPropertyClaims", "yes": "#hasOtherPropertyClaimsyes", "no": "#hasOtherPropertyClaimsno", "yesValue": "yes", "noValue": "no"}
+      ]
+    }
+  ]
+}
