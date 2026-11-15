@@ -72,7 +72,7 @@ Every Airtable read and write goes through /Users/kevinbrittain/Projects/leaders
 
 STEPS
 
-1. RUNDIR="$HOME/knowledge-os/logs/agent-dispatch/$(date +%Y%m%d-%H%M%S)"; mkdir -p "$RUNDIR". Then: python3 scripts/agent-dispatch.py queue > "$RUNDIR/queue.json". If queue itself exits non-zero, skip straight to step 7 with an empty actions list and an empty queueCounts object — verify fails a report whose queueCounts is empty, so a blind run can never read as healthy. If queue.json's unclassified list is non-empty, name those tasks in your closing log: they are states the loop cannot place and a human needs to look.
+1. RUNDIR="$HOME/knowledge-os/logs/agent-dispatch/$(date +%Y%m%d-%H%M%S)"; mkdir -p "$RUNDIR". Then: python3 scripts/agent-dispatch.py queue > "$RUNDIR/queue.json". The runner sets AGENT_RUN_QUEUE; `queue` also writes the run's own copy there, and `complete --keep-open` and a status filing compare with that copy, so never unset or change it. If queue itself exits non-zero, skip straight to step 7 with an empty actions list and an empty queueCounts object — verify fails a report whose queueCounts is empty, so a blind run can never read as healthy. If queue.json's unclassified list is non-empty, name those tasks in your closing log: they are states the loop cannot place and a human needs to look.
 
    RUNDIR holds THIS RUN'S OWN artefacts only — queue.json, report.json, and the finished deliverables at RUNDIR/TASKID.md. It is not a workspace. Step 4 dispatches up to five agents in parallel and each one gets its own directory underneath it, because a shared scratch directory is a race: two agents that both write notes.md, output.json or draft.txt silently overwrite each other, and the loser's work is simply gone with nothing raised.
 

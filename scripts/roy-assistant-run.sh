@@ -136,6 +136,8 @@ else
 fi
 
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
+# The run's own queue (review of PR 938): complete --keep-open and status filings compare with exactly this file.
+export AGENT_RUN_QUEUE="$RUNDIR/queue.json"
 "$CLAUDE" -p "You are a ROY'S ASSISTANT run of the agent dispatch engine. Roy Lavin, head of property, forwarded these requests to his assistant from info@agilelets.co.uk minutes ago: $IDS. Follow /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md.
 
 RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written moments ago. Do NOT re-run the queue subcommand.

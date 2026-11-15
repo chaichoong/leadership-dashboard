@@ -1727,55 +1727,65 @@ def rest_wake(t, rest):
 # `complete --keep-open` or a status filing) is baked into the new rest and sleeps up to 14 days.
 # So those two commands compare the live task with the queue snapshot the run was handed, BEFORE
 # their own write. The fields compared are the ones a run never writes itself: a reply or a fold
-# lands in the Description, a verdict in Approval Outcome and Approved At, a hand-over in the holder.
+# lands in the Description (a twin closed onto the task writes a dated UPDATE line there too,
+# carry_output_to_keeper), a verdict in Approval Outcome and Approved At, a hand-over in the holder.
 # Notes and Due Date are left out because the run writes them itself (annotate, EDITS APPLIED, the
-# send scripts' lines, `due`), and nothing tells those writes from another writer's without
-# reading words: a twin folded into Notes mid-run, or a due date moved by someone else mid-run, is
-# not seen here (it still wakes the NEXT rest's read, as any change does).
+# send scripts' lines, `due`). A due date someone else moves mid-run is therefore not refused here,
+# and is in the next rest's fingerprint: that one case is not caught.
 RUN_WINDOW_LABELS = ("Description", "Approval Outcome", "Approved At", "holder")
-# A run is capped at 45 minutes; a snapshot older than this is another run's.
+# THE RUN'S OWN QUEUE (review of PR 938, finding 2). Each runner exports the path of the queue.json it
+# hands its agent; `queue` also writes a copy there when the variable is set (a slot run's agent
+# writes its queue itself). Nothing else is ever guessed: picking a folder by name chose another run's
+# queue (folders are named by each runner) and refused a correct run for hours.
+RUN_QUEUE_ENV = "AGENT_RUN_QUEUE"
+# A run is capped at 45 minutes; a queue older than this belongs to a run the Mac's sleep suspended,
+# whose window is unknown, so it counts as no snapshot (the strict fallback).
 RUN_SNAPSHOT_MAX_HOURS = 3
-RUN_SNAPSHOT_SCAN = 60
 
 
 def run_snapshot(task_id, now=None):
-    """(the task's entry in the queue its run was handed, the snapshot's path) or (None, why not).
-    The newest queue.json under STATE_DIR's run folders, written within RUN_SNAPSHOT_MAX_HOURS, that
-    lists the task at all: the task must be in its worklist or reserve (handed out), not resting. A
-    queue that lists it resting means no run was handed it since. Unreadable snapshots are said on
-    stderr and skipped."""
+    """(the task's entry in the queue its run was handed, the queue's path) or (None, why not). Read
+    ONLY from the file AGENT_RUN_QUEUE names. No variable, an unreadable or stale file, or a queue that
+    does not hand the task out (it lists it resting, or not at all) is no snapshot, said in words."""
+    path = os.environ.get(RUN_QUEUE_ENV, "").strip()
+    if not path:
+        return None, f"{RUN_QUEUE_ENV} is not set, so this run has no queue of its own (a run by hand?)"
     now = now or datetime.now(timezone.utc)
     try:
-        dirs = sorted((d for d in os.listdir(STATE_DIR) if os.path.isdir(os.path.join(STATE_DIR, d))), reverse=True)
+        with open(path) as fh:
+            q = json.load(fh)
+        made = datetime.fromisoformat(str(q.get("generatedAt") or "").replace("Z", "+00:00"))
+    except (OSError, ValueError, AttributeError) as exc:
+        print(f"WARNING: the run's queue {path} could not be read ({str(exc)[:80]}); treated as no snapshot",
+              file=sys.stderr)
+        return None, f"the run's queue {path} could not be read ({str(exc)[:80]})"
+    if made.tzinfo is None or now - made > timedelta(hours=RUN_SNAPSHOT_MAX_HOURS):
+        return None, f"the run's queue {path} is more than {RUN_SNAPSHOT_MAX_HOURS} hours old"
+    for pool in ("worklist", "reserve"):
+        for entry in q.get(pool) or []:
+            if isinstance(entry, dict) and entry.get("id") == task_id:
+                return entry, path
+    if any(isinstance(e, dict) and e.get("id") == task_id for e in q.get("idleHandbacks") or []):
+        return None, f"the run's queue ({path}) lists it resting, so this run was not handed it"
+    return None, f"the run's queue ({path}) does not hand it out"
+
+
+def write_run_queue(q):
+    """When AGENT_RUN_QUEUE is set, the queue this command printed is also the run's own snapshot:
+    written there atomically. A failure is said on stderr and leaves the run with no snapshot (the
+    strict fallback), never a stopped queue."""
+    path = os.environ.get(RUN_QUEUE_ENV, "").strip()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(q, fh, indent=2)
+        os.replace(tmp, path)
     except OSError as exc:
-        return None, f"the run folders under {STATE_DIR} could not be listed ({str(exc)[:80]})"
-    for d in dirs[:RUN_SNAPSHOT_SCAN]:
-        path = os.path.join(STATE_DIR, d, "queue.json")
-        try:
-            # A cheap stat first: a live queue.json runs to megabytes, so only a file written within
-            # the window (by the wall clock) is parsed. Its own generatedAt then decides.
-            if time.time() - os.path.getmtime(path) > RUN_SNAPSHOT_MAX_HOURS * 3600:
-                continue
-        except OSError:
-            continue        # no queue.json in this folder: not a run folder
-        try:
-            with open(path) as fh:
-                q = json.load(fh)
-            made = datetime.fromisoformat(str(q.get("generatedAt") or "").replace("Z", "+00:00"))
-        except (OSError, ValueError, AttributeError) as exc:
-            print(f"WARNING: {path} could not be read as a queue snapshot ({str(exc)[:80]}); skipped",
-                  file=sys.stderr)
-            continue
-        if made.tzinfo is None or now - made > timedelta(hours=RUN_SNAPSHOT_MAX_HOURS):
-            continue
-        for pool in ("worklist", "reserve"):
-            for entry in q.get(pool) or []:
-                if isinstance(entry, dict) and entry.get("id") == task_id:
-                    return entry, path
-        if any(isinstance(e, dict) and e.get("id") == task_id for e in q.get("idleHandbacks") or []):
-            return None, f"the newest queue ({path}) lists it resting, so no run has been handed it since"
-    return None, (f"no queue written in the last {RUN_SNAPSHOT_MAX_HOURS} hours under {STATE_DIR} hands it "
-                  "to a run")
+        print(f"WARNING: the run's queue could not be written to {path} ({str(exc)[:120]}); "
+              "keep-open and status filings in this run compare with the last rest instead", file=sys.stderr)
 
 
 def run_window_problem(task_id, live_view, snapshot):
@@ -3125,6 +3135,10 @@ NOOP_INFO_RE = re.compile(
     r"|(?:this\s+is\s+)?(?:just\s+)?for\s+your\s+information\b"
     r"|(?:this\s+is\s+)?(?:for\s+)?information\s+only\b"
     r"|no\s+reply\s+(?:has\s+(?:come|arrived)\s+)?yet\b)", re.I)
+# A family line that goes on to name who acts is a real card, not a no-op (review of PR 938, finding
+# 11): "No reply yet, so the agent closes this chase…", "…approving this closes the old reminder." A
+# refused real card stops real work, which is worse than a worded no-op getting through.
+NOOP_ACTOR_RE = re.compile(r"\b(?:the\s+(?:agent|robot|task)|approving)\b", re.I)
 NOOP_HELP = (
     "       Kevin's ruling (14 Nov 2026): a card whose Approve runs nothing is refused. Two honest routes:\n"
     "         (a) if nothing has changed and nothing is owed, submit it as a STATUS ONLY update: it is\n"
@@ -3137,7 +3151,8 @@ def approve_line_noop(line):
     """The line itself when, taken whole, it says Approve runs nothing (NOOP_WHOLE_RE), or when it opens
     that way and goes on only to say it is information (NOOP_INFO_RE), or ''."""
     text = " ".join(str(line or "").split())
-    if not text or not (NOOP_WHOLE_RE.match(text) or NOOP_INFO_RE.match(text)):
+    if not text or not (NOOP_WHOLE_RE.match(text)
+                        or (NOOP_INFO_RE.match(text) and not NOOP_ACTOR_RE.search(text))):
         return ""
     return text[:80]
 
@@ -3490,12 +3505,22 @@ def carry_output_to_keeper(twin_id, twin_fields, keeper_id, stamp):
              f"at Level A. {label}, carried here so nothing on the folded card is lost:"
              + ("\n" + carried if carried else ""))
     keeper = get_task(keeper_id)
-    existing = str((keeper.get("fields", {}) or {}).get(AF["notes"]) or "").rstrip()
+    kf = keeper.get("fields", {}) or {}
+    existing = str(kf.get(AF["notes"]) or "").rstrip()
     if f"FOLDED {twin_id} " in existing:
         # A retry after the twin's own close failed: the block is already
         # there, and a second copy would only pad the keeper's Notes.
         return ""
-    patch_task(keeper_id, {AF["notes"]: (existing + "\n\n" + block).strip()[-90000:]})
+    # A FOLD IS NEWS ON THE KEEPER'S DESCRIPTION TOO (15 Nov 2026, review of PR 938, finding 1). A
+    # twin closed onto a task while a run works on it landed in Notes only, which the run's window
+    # cannot watch (the run writes Notes itself), so the next rest's fingerprint swallowed it and the
+    # task slept up to 14 days on a final notice. One dated line in the Description, in the same
+    # write, is what the window, the fingerprint and wokeByChange all see. The gate's own fold
+    # (create-agent-task.py fold_update) already appends its UPDATE block to the Description.
+    desc = str(kf.get(AF["description"]) or "").rstrip()
+    line = f"UPDATE {datetime.now(LONDON).date().isoformat()}: {twin_id} folded in: {' '.join(twin_name.split())}"
+    patch_task(keeper_id, {AF["notes"]: (existing + "\n\n" + block).strip()[-90000:],
+                           AF["description"]: (desc + "\n\n" + line).strip()[-80000:]})
     return block
 
 
@@ -5014,7 +5039,9 @@ def build_queue(args=None):
 
 
 def cmd_queue(args):
-    print(json.dumps(build_queue(), indent=2))
+    q = build_queue()
+    write_run_queue(q)
+    print(json.dumps(q, indent=2))
 
 
 # ─── WRITES ───────────────────────────────────────────────────────────
@@ -9271,9 +9298,8 @@ VERDICT_LABELS = {"Approval Outcome", "Approved At"}
 def kept_open_woke(task_id, t):
     """([labels of what woke the task by a change], a note for the refusal) before a keep-open writes.
     Exits when the task changed while the run worked (run_window_problem). With the run's queue
-    snapshot, the wake is what the queue told the run (its wokeByChange). With none (a run by hand,
-    or a queue from before this), it is read from the ledger's last rest against the task as it is
-    now, Notes left out: this run's own notes cannot be told from anyone else's, and are no wake."""
+    snapshot, the wake is what the queue told the run (its wokeByChange). With none, it is read from
+    the ledger's last rest against the task as it is now, Notes included."""
     snap, why = run_snapshot(task_id)
     window = run_window_problem(task_id, t, snap)
     if window:
@@ -9282,14 +9308,18 @@ def kept_open_woke(task_id, t):
         labels = list(((snap.get("wokeByChange") or {}).get("changed")) or [])
         # Kevin's own verdict alone is the instruction this carry-out acts on, not news it could bury.
         return ([] if set(labels) <= VERDICT_LABELS else labels), ""
+    # No snapshot (a run by hand, a run suspended past the age limit, a runner without the variable):
+    # every change since the last rest counts, Notes included (review of PR 938, finding 3). A note
+    # this run wrote itself then costs one --changed sentence, the safe direction: a twin folded into
+    # Notes is never let through unasked.
     woke = rest_wake(t, ledger_rest_events().get(task_id))
-    labels = [c for c in (woke or {}).get("changed", []) if c != "Notes"]
+    labels = list((woke or {}).get("changed", []))
     if set(labels) <= VERDICT_LABELS:
         labels = []
     print(f"INFO: no queue snapshot for {task_id} ({why}); its last rest was compared with the task as it is "
-          "now, Notes left out (this run's own notes cannot be told apart).", file=sys.stderr)
+          "now, Notes included.", file=sys.stderr)
     return labels, (f"\n       (No queue snapshot was found for it: {why}. Compared with its last rest instead, "
-                    "Notes left out.)")
+                    "Notes included, so a note you wrote yourself in this run counts too: say so in --changed.)")
 
 
 def cmd_complete(args):

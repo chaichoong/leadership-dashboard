@@ -107,6 +107,7 @@ if ! __PAUSE=$(/usr/bin/python3 "$REPO/scripts/allowance.py" check --job "$JOB")
   exit 0
 fi
 
+export AGENT_RUN_QUEUE="$HOME/knowledge-os/logs/agent-dispatch/run-queues/$JOB.json"; rm -f "$AGENT_RUN_QUEUE"   # the run's own queue: agent-dispatch.py queue writes it (review of PR 938)
 "$CLAUDE" -p "You are the $JOB slot run. Do this skill in full: $SKILL
 
 Rules for the whole run:

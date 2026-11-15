@@ -252,6 +252,8 @@ fi
 # verify owes exactly these, not the whole worklist (27 Sep 2026). Written here, never by the agent.
 printf '%s\n' $IDS > "$RUNDIR/owed-ids"
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
+# The run's own queue (review of PR 938): complete --keep-open and status filings compare with exactly this file.
+export AGENT_RUN_QUEUE="$RUNDIR/queue.json"
 "$CLAUDE" -p "You are a SIGN-IN PICKUP run of the agent dispatch engine. Kevin has just signed the robot browser into these sites: $LABEL. These tasks were waiting on exactly those sign-ins: $IDS. Follow /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md.
 
 RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written moments ago. Do NOT re-run the queue subcommand.

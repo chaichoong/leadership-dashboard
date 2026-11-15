@@ -105,14 +105,24 @@ def submit_status(i, nxt):
                  attach=None, plain_task="Check whether the council has replied about the bill.",
                  plain_approve="Nothing to approve. The update is listed under Handled without you."))
 SN = [0]
-def snapshot():
-    """The run's queue.json, written where a runner writes it (a run folder under the dispatch state)."""
+os.environ.pop("AGENT_RUN_QUEUE", None)
+def snapshot(name=None, export=True):
+    """The run's queue.json, written where a runner writes it, and exported as the run's own queue the
+    way every runner does (AGENT_RUN_QUEUE). name: the run folder's name, chosen by each runner."""
     q = m.build_queue()
     SN[0] += 1
-    d = os.path.join(STATE, "%06d-run" % SN[0]); os.makedirs(d)
-    with open(os.path.join(d, "queue.json"), "w") as fh:
+    d = os.path.join(STATE, name or ("%06d-run" % SN[0])); os.makedirs(d)
+    path = os.path.join(d, "queue.json")
+    with open(path, "w") as fh:
         json.dump(q, fh, default=str)
+    if export:
+        os.environ["AGENT_RUN_QUEUE"] = path
     return {t["id"]: t for t in q["worklist"] + q["reserve"]}
+def fold_twin(keeper, twin, words):
+    """Another agent closes a twin onto the keeper at Level A, mid-run (the real carry_output_to_keeper)."""
+    rec(twin, approved=False, desc=words)
+    F(twin)[AF["name"]] = "INBOUND (follow-up): Exampleton Council final notice"
+    return m.carry_output_to_keeper(twin, F(twin), keeper, "15 Nov 2026 10:00")
 LOOK = "[" + (TODAY - timedelta(days=5)).strftime("%d %b %Y") + " 09:00 — agent-dispatch] SUBMITTED (round 1) as Research with no new file"
 REPLY = "NEW MESSAGE " + day(1) + ": Exampleton Council replied on the same thread. FINAL NOTICE. Enforcement agents from the 24th."
 `;
@@ -188,17 +198,21 @@ print(json.dumps({"verdictWoke": verdict_woke, "verdictOk": verdict_ok, "refused
     expect(r.verdictOk).toBeNull();
   });
 
-  it('with no queue snapshot the wake is read from the last rest, Notes left out, and the refusal says so', () => {
+  it('with no queue snapshot the wake is read from the last rest, Notes included, and the refusal says so', () => {
     const r = py(`
 rec("recNoSnapAaaaaaaa"); rec("recOwnNoteAaaaaaa")
 complete("recNoSnapAaaaaaaa", until=day(2)); complete("recOwnNoteAaaaaaa", until=day(2))
 F("recNoSnapAaaaaaaa")[AF["description"]] += "\\n\\n" + REPLY
 SHIFT[0] = timedelta(days=3, hours=1)
 annotate("recOwnNoteAaaaaaa", "Checked the portal today: no reply.")
-print(json.dumps({"desc": complete("recNoSnapAaaaaaaa", until=day(8)), "ownNote": complete("recOwnNoteAaaaaaa", until=day(8))}))`);
+print(json.dumps({"desc": complete("recNoSnapAaaaaaaa", until=day(8)), "ownNote": complete("recOwnNoteAaaaaaa", until=day(8)),
+                  "ownNoteSaid": complete("recOwnNoteAaaaaaa", until=day(8), changed="Only my own note from this look; nothing new arrived.")}))`);
     expect(r.desc).toMatch(/\(Description changed\)/);
-    expect(r.desc).toMatch(/No queue snapshot was found for it: .*Compared with its last rest instead, Notes left out/);
-    expect(r.ownNote).toBeNull();
+    expect(r.desc).toMatch(/No queue snapshot was found for it: AGENT_RUN_QUEUE is not set.*Compared with its last rest instead, Notes included/);
+    // No snapshot: a Notes change counts like any other (review of PR 938, finding 3), so the run's own
+    // note costs one sentence, the safe direction.
+    expect(r.ownNote).toMatch(/\(Notes changed\)/);
+    expect(r.ownNoteSaid).toBeNull();
   });
 
   it("a reply that lands while the run works is refused before the keep-open writes; the run's own note is not", () => {
@@ -235,8 +249,7 @@ own = submit_status("recOwnStatAaaaaaa", day(7))
 F("recRaceStatAaaaaa")[AF["description"]] += "\\n\\n" + REPLY
 race = submit_status("recRaceStatAaaaaa", day(7))
 # no snapshot: a fresh state folder holds the ledger only
-os.rename(os.path.join(STATE, "000001-run"), os.path.join(STATE, "moved-away"))
-os.remove(os.path.join(STATE, "moved-away", "queue.json"))
+os.environ.pop("AGENT_RUN_QUEUE")   # no snapshot: a run by hand
 annotate("recNoSnapStatAaaa", "Checked the portal and both inboxes today: no reply.")
 nosnap = submit_status("recNoSnapStatAaaa", day(7))
 print(json.dumps({"own": own, "race": race, "nosnap": nosnap}))`);
@@ -264,6 +277,12 @@ real = [
   "Nothing is sent by post. The agent submits the form on the council's website.",
   "Nothing is bought. The agent withdraws the order request and tells the seller.",
   "Nothing changes on the plan. The agent confirms the £20 a month to the creditor in writing.",
+  # the five real cards the review of PR 938 wrote (finding 11): each goes on to name who acts
+  "Nothing happens. No reply yet, so the agent closes this chase and opens a fresh one for Monday.",
+  "No action needed. No reply has come yet, so the task closes and the agent starts the court claim draft.",
+  "Nothing else. It only lets you know the agent will now send the final chase letter by post.",
+  "Nothing changes: information only goes to the council, and the agent submits the form tonight.",
+  "Nothing further. For your information, approving this closes the old reminder.",
 ]
 family = [
   "Nothing happens. This only tells you no reply has come yet and the next check is on 2 November.",
@@ -487,6 +506,81 @@ print(json.dumps(c.owed_new_costs("recTaskInventedAa", out, "", [["Some other co
       expect(prompt, f).toMatch(/WOKEN BY A CHANGE: .*wokeByChange/);
       expect(prompt, f).toContain('--changed "<one sentence: what changed on the task and what you did about it>"');
       expect(prompt, f).not.toMatch(/wakes sooner by itself on Kevin's verdict, a wall, or a new holder/);
+    }
+  });
+});
+
+describe('the review of PR 938: a twin folded in mid-run, the run\'s own queue, the no-snapshot fallback', () => {
+  it('a twin closed onto the task while the run works is refused on both routes, and the fold is a dated Description line', () => {
+    const r = py(`
+rec("recKeepAaaaaaaaaa"); assert complete("recKeepAaaaaaaaaa", until=day(2)) is None
+rec("recStatAaaaaaaaaa", notes=LOOK, approved=False); assert submit_status("recStatAaaaaaaaaa", day(3)) is None
+SHIFT[0] = timedelta(days=4, hours=1)
+by = snapshot()
+assert "recKeepAaaaaaaaaa" in by and "recStatAaaaaaaaaa" in by
+fold_twin("recKeepAaaaaaaaaa", "recTwinAaaaaaaaaa", "INBOUND: Exampleton Council FINAL NOTICE. Enforcement agents from the 24th.")
+fold_twin("recStatAaaaaaaaaa", "recTwinBaaaaaaaaa", "INBOUND: Exampleton Council FINAL NOTICE (second copy).")
+keep = complete("recKeepAaaaaaaaaa", until=day(14), note="checked the portal, nothing new")
+stat = submit_status("recStatAaaaaaaaaa", day(10))
+# a hand run (no snapshot): the same fold refuses the keep-open, Notes and Description both changed
+rec("recHandAaaaaaaaaa"); complete("recHandAaaaaaaaaa", until=day(5))
+os.environ.pop("AGENT_RUN_QUEUE")
+fold_twin("recHandAaaaaaaaaa", "recTwinCaaaaaaaaa", "INBOUND: Exampleton Council FINAL NOTICE (third copy).")
+hand = complete("recHandAaaaaaaaaa", until=day(12))
+print(json.dumps({"keep": keep, "stat": stat, "hand": hand,
+                  "descLine": F("recKeepAaaaaaaaaa")[AF["description"]].split("\\n")[-1],
+                  "noteBlock": "FOLDED recTwinAaaaaaaaaa" in F("recKeepAaaaaaaaaa")[AF["notes"]]}))`);
+    expect(r.descLine).toMatch(/^UPDATE \d{4}-\d{2}-\d{2}: recTwinAaaaaaaaaa folded in: INBOUND \(follow-up\): Exampleton Council final notice$/);
+    expect(r.noteBlock).toBe(true);
+    expect(r.keep).toMatch(/the task changed while you were working \(Description changed/);
+    expect(r.stat).toMatch(/the task changed while you were working \(Description changed/);
+    expect(r.hand).toMatch(/it woke because something on it changed since its last rest \(Description, Notes changed\)/);
+  });
+
+  it('the snapshot is the file the runner exported, never a folder chosen by name; no variable is no snapshot; queue writes it', () => {
+    const r = py(`
+rec("recOrderAaaaaaaaa"); complete("recOrderAaaaaaaaa", until=day(2))
+SHIFT[0] = timedelta(days=3, hours=1)
+stamp = (TODAY + timedelta(days=3)).strftime("%Y%m%d")
+snapshot(name=stamp + "-run17", export=False)           # an earlier slot, its folder named by its runner
+F("recOrderAaaaaaaaa")[AF["description"]] += "\\n\\n" + REPLY
+SHIFT[0] = timedelta(days=3, hours=1, minutes=30)
+by = snapshot(name=stamp + "-173000")                    # this run's own queue, exported
+told = by["recOrderAaaaaaaaa"]["wokeByChange"]["changed"]
+chosen = m.run_snapshot("recOrderAaaaaaaaa")[1]
+ok = complete("recOrderAaaaaaaaa", until=day(10), note="raised the final notice as its own card",
+              changed="The council sent a final notice; I raised it as its own card for Kevin.")
+os.environ.pop("AGENT_RUN_QUEUE")
+none = m.run_snapshot("recOrderAaaaaaaaa")
+# the queue subcommand writes the run's own copy where the variable says
+target = os.path.join(STATE, "run-queues", "slot-x.json")
+os.environ["AGENT_RUN_QUEUE"] = target
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_queue(types.SimpleNamespace())
+written = json.load(open(target))
+print(json.dumps({"told": told, "chosen": os.path.basename(os.path.dirname(chosen)), "ok": ok, "none": none,
+                  "written": sorted(k for k in ("generatedAt", "worklist", "idleHandbacks") if k in written)}))`);
+    expect(r.told).toEqual(['Description']);
+    expect(r.chosen).toMatch(/-173000$/);
+    expect(r.ok).toBeNull();
+    expect(r.none[0]).toBeNull();
+    expect(r.none[1]).toMatch(/AGENT_RUN_QUEUE is not set/);
+    expect(r.written).toEqual(['generatedAt', 'idleHandbacks', 'worklist']);
+  });
+
+  it('every runner that hands a queue to an agent exports AGENT_RUN_QUEUE before it starts the agent', () => {
+    for (const f of ['scripts/handback-poll-run.sh', 'scripts/signin-pickup-run.sh', 'scripts/roy-assistant-run.sh', 'scripts/agent-slot-run.sh']) {
+      const lines = readFileSync(resolve(ROOT, f), 'utf8').split('\n');
+      const start = lines.findIndex(l => l.startsWith('"$CLAUDE" -p '));
+      const exp = lines.findIndex(l => /^export AGENT_RUN_QUEUE=/.test(l));
+      expect(exp, f).toBeGreaterThan(0);
+      expect(exp, f).toBeLessThan(start);
+      // RUN the export line through bash with the runner's own variables, and read what the agent inherits
+      const dir = mkdtempSync(resolve(tmpdir(), 'runq-'));
+      const script = resolve(dir, 'run.sh');
+      writeFileSync(script, `set -eu\nHOME="${dir}"; RUNDIR="${dir}/run"; JOB="invented-slot"\n${lines[exp]}\nprintf '%s' "$AGENT_RUN_QUEUE"\n`);
+      const got = execFileSync('bash', [script], { encoding: 'utf8' });
+      expect(got, f).toMatch(f.includes('agent-slot') ? /\/run-queues\/invented-slot\.json$/ : /\/run\/queue\.json$/);
     }
   });
 });

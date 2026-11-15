@@ -227,6 +227,8 @@ echo "===== handback-poll run $(date) — $REASON =====" >> "$LOG"
 # and the next tick is thirty minutes away.
 HANDBACK_MAX_MINUTES="${HANDBACK_MAX_MINUTES:-45}"
 
+# The run's own queue (review of PR 938): complete --keep-open and status filings compare with exactly this file.
+export AGENT_RUN_QUEUE="$RUNDIR/queue.json"
 "$CLAUDE" -p "You are a HAND-BACK-ONLY run of the agent dispatch engine, triggered because Kevin has just decided something and an agent owes him the action. Follow /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md, with these differences, which override it:
 
 RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written moments ago by the same command. Do NOT re-run the queue subcommand and do NOT write queue2.json.
