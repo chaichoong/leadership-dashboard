@@ -67,6 +67,8 @@ const ESTATE_SCRIPTS = [
   'scripts/merge_card.py',
   'scripts/merge-approved.py',
   'scripts/fixer-merge.py',
+  // 15 Nov 2026: the second reviewer fixer-merge.py asks before it merges
+  'scripts/fixer-review.py',
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',
   'scripts/signin_hold.py',

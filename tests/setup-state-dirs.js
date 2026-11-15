@@ -7,10 +7,12 @@
 // (Until 15 Nov 2026 the create gate's fold wrote there too; the rest fingerprint retired that.) agent-dispatch.py reads AGENT_DISPATCH_DIR at import; this sets it to a
 // fresh temp folder in every test file, so every Python child a test starts with the inherited
 // environment (`{ ...process.env }` or no env at all) writes there. A test that passes its own env
-// without process.env must set it itself. merge-approved.py's MERGE_APPROVED_DIR gets the same.
+// without process.env must set it itself. merge-approved.py's MERGE_APPROVED_DIR gets the same, and so
+// does fixer-review.py's FIXER_REVIEW_DIR (15 Nov 2026), whose records decide what the fixer may merge.
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
 process.env.AGENT_DISPATCH_DIR = mkdtempSync(join(tmpdir(), 'od-test-agent-dispatch-'));
 process.env.MERGE_APPROVED_DIR = mkdtempSync(join(tmpdir(), 'od-test-merge-approved-'));
+process.env.FIXER_REVIEW_DIR = mkdtempSync(join(tmpdir(), 'od-test-fixer-review-'));

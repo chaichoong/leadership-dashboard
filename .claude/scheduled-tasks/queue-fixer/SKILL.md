@@ -160,6 +160,10 @@ gh pr create --title "Queue fixer {date}: N findings" --body "..."
 
 Body must list, per finding: the ID, what was wrong, what you changed, and the test that now covers it. Include the count left in the queue.
 
+Before the merge, every finding in the PR must be closed `--outcome pending --pr <n>` (STEP 4,
+point 5). The second reviewer (STEP 5a) checks exactly the findings the ledger records against the
+PR, and it will not run on a PR that has none.
+
 Then MERGE IT YOURSELF, through the gate:
 
 ```
@@ -182,9 +186,43 @@ drain rate of zero and everything you write today is theatre."
   fixer opens the PR and a MERGE card comes to Kevin (`mergeCard` in its JSON). A JSON with a
   `mergeCard.error` exits 1: the card was not raised, so put it on the NEEDS YOU line yourself.
 - A red gate leaves the PR open. It never merges "probably fine".
+- A second AI reviewer tries to break each fix before anything merges or any MERGE card is
+  raised (Kevin, 22 Oct 2026). See STEP 5a.
 
 Do not merge with a bare `gh pr merge`. The gate is the point, and skipping it is how an
 unreviewed change to the approval loop reaches production.
+
+## STEP 5a — The second reviewer can send a fix back
+
+**Kevin's ruling, 22 Oct 2026** (card recWxof2DATkOQfcb): tests passing is not enough. On a green
+gate, `fixer-merge.py merge` runs `scripts/fixer-review.py` on the merge result before it merges or
+raises a MERGE card. It tries to break each fix with three checks:
+
+1. The test fails without the fix. This one is measured: your changed test files are run on the
+   code from before your PR. A brand-new test file that already passes there is refused outright,
+   because it does not prove the fix. A changed test file that passes there is flagged, and the
+   reviewer must say why (for example, the change repaired the test itself).
+2. The fix tackles the cause, not the symptom.
+3. The same bug is not somewhere else.
+
+Read `secondReview` in the merge JSON. If the JSON has no `secondReview`, the reviewer is not wired
+in yet: carry on as before.
+
+- **Passed.** The merge, or the MERGE card, went ahead as normal.
+- **Sent back** (`refusedBy` is `back-test` or `reviewer`, with a `sendBack` list of finding ids
+  and why). That was round 1. Fix each one on the same branch, commit, push, and run
+  `fixer-merge.py merge --pr <n>` again. That is round 2.
+- **Sent back again in round 2.** Take that finding's changes out of the branch, its code and its
+  test. Then run `python3 scripts/findings.py reopen <id> --force --note "<the reviewer's why>"`,
+  commit, push, and run `fixer-merge.py merge --pr <n>` a final time. That final round runs only
+  when every finding round 2 sent back is off the PR and the head has moved. Anything else is
+  refused with "two rounds used: take the failing findings out and reopen them". If the final
+  round still sends something back, leave the PR open for tomorrow and say so in the report.
+- **The reviewer could not run** (`refusedBy` is `cannot-run`: no token, the CLI missing, a
+  timeout, the allowance out, an answer it could not read). Nothing merges this morning. Leave the
+  PR open, do not retry, and put its `why` in the report word for word.
+
+The reviewer reads only. It never edits, commits or merges anything itself.
 
 ## STEP 5b — Tear the workspace down after the merge
 
@@ -204,7 +242,8 @@ From the MAIN checkout, never from inside the workspace:
 Run it unconditionally after a successful merge. It already REFUSES while anything
 would be lost — uncommitted files, commits that exist nowhere else, or a branch not
 yet merged into origin/main — so a refusal is information, not a problem to force
-past. If the merge did NOT happen (red gate, or a protected-path refusal), leave the
+past. If the merge did NOT happen (red gate, a protected-path refusal, or the second
+reviewer sent it back or could not run), leave the
 workspace exactly where it is: the PR is still open and the branch is still needed.
 
 ## STEP 6 — Release, always
@@ -217,7 +256,7 @@ Run this even when you fixed nothing, and even when a step failed. The lease fre
 
 ## STEP 7 — Report
 
-Do NOT DM Kevin (Slack contract, 21 Aug 2026). Return to daily-ops: how many findings you closed, how many you left, the PR link, and anything you rejected as not real. Phase 9 turns the PR into "Fix waiting for your review" on the BROKEN line. If you fixed nothing, say that plainly. Never claim a fix you did not verify.
+Do NOT DM Kevin (Slack contract, 21 Aug 2026). Return to daily-ops: how many findings you closed, how many you left, the PR link, and anything you rejected as not real. Add one line for the second reviewer: how many fixes it checked, how many it sent back and why (write 0 when it sent none back), or that it could not run, with its why word for word. Phase 9 turns the PR into "Fix waiting for your review" on the BROKEN line. If you fixed nothing, say that plainly. Never claim a fix you did not verify.
 
 ## Rules
 
