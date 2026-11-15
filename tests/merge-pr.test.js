@@ -691,10 +691,34 @@ if __name__ == "__main__":
 `;
 
 const DRIVER = `
-import io, contextlib, os, shutil, subprocess, tempfile
+import io, contextlib, os, shutil, subprocess, tempfile, socket, types
 cfg = json.loads(os.environ["FAKE_CFG"])
 destroyed = []
 server_pids = []
+# Loopback only: the local server and its nonce poll may connect, nothing else may (15 Nov 2026).
+_rc, _ga = socket.socket.connect, socket.getaddrinfo
+def _connect(self, addr):
+    if not (isinstance(addr, (str, bytes)) or (isinstance(addr, tuple) and str(addr[0]) in ("127.0.0.1", "::1", "localhost"))):
+        raise OSError("network call in a test: %r" % (addr,))
+    return _rc(self, addr)
+def _getaddrinfo(host, *a, **k):
+    if host is not None and str(host) not in ("127.0.0.1", "::1", "localhost"):
+        raise OSError("network call in a test: DNS for %r" % (host,))
+    return _ga(host, *a, **k)
+socket.socket.connect, socket.getaddrinfo = _connect, _getaddrinfo
+# The MERGE card merge-pr.py may re-read just before its merge call (--card): a fake merge_card
+# whose every read is recorded. None in cfg = a read that fails.
+card_reads = []
+if "card" in cfg:
+    fake_mc = types.ModuleType("merge_card")
+    fake_mc.APPROVED = ("Approved as-is", "Approved with minor edits")
+    def _get_card(task_id):
+        card_reads.append(task_id)
+        if cfg["card"] is None:
+            raise RuntimeError("Airtable GET -> HTTP 503 (invented)")
+        return dict(cfg["card"])
+    fake_mc.get_card = _get_card
+    sys.modules["merge_card"] = fake_mc
 
 def git(*args, cwd=None):
     return subprocess.run(["git", *args], cwd=cwd or cfg["repo"], capture_output=True, text=True)
@@ -757,7 +781,7 @@ for pid in server_pids:
         os.killpg(pid, 9)
     except OSError:
         pass
-print(json.dumps({"code": code, "result": json.loads(buf.getvalue()), "destroyed": destroyed, "serverAlive": alive}))
+print(json.dumps({"code": code, "result": json.loads(buf.getvalue()), "destroyed": destroyed, "serverAlive": alive, "cardReads": card_reads}))
 `;
 
 // A pid read from a file the stub may never have written. Only a positive
@@ -779,7 +803,7 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
                 local = null, local2 = null, live = null, argv = ['--pr', '5'], mergeConfirms = true, mergeExit = 0,
                 ff = false, moveMain = null, build = null, suitesCrash = false, interruptServerPoll = false,
                 patch = null, pullRef = false, headIsReal = false, env = {}, prMessage = null, viewLate = null,
-                mainMergedIn = false, mainMovesAgain = false, nodeModules = 'usable' } = {}) {
+                mainMergedIn = false, mainMovesAgain = false, nodeModules = 'usable', card = undefined } = {}) {
   const bin = stubs(view, { mergeConfirms, mergeExit, suites });
   const home = tmp('merge-pr-home-');
   const g = gitFixture({ ff, pullRef, prMessage, mainMergedIn, mainMovesAgain });
@@ -811,7 +835,8 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
   if (live) writeFileSync(join(tree, 'walk-live.json'), JSON.stringify(live));
   if (moveMain) g.moveMain(moveMain);           // main moves AFTER the tree was built
   // argv may be built from the fixture (a test that names the fixture's own head).
-  const cfg = { tree, repo: g.repo, scratch: g.root, argv: typeof argv === 'function' ? argv(g) : argv, build, suitesCrash, interruptServerPoll, patch };
+  const cfg = { tree, repo: g.repo, scratch: g.root, argv: typeof argv === 'function' ? argv(g) : argv, build, suitesCrash, interruptServerPoll, patch,
+                ...(card !== undefined ? { card } : {}) };
   const r = spawnSync('python3', ['-c', LOAD + DRIVER], {
     encoding: 'utf8', timeout: 90000,
     env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg), MERGE_PR_REF_WAIT: '0', ...env },
@@ -911,6 +936,54 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.result.head).toBe(r.g.head);
     expect(r.code).toBe(0);
     expect(r.result.merged).toBe(true);
+  });
+
+  // --card (15 Nov 2026 review R1): merge-approved.py asks merge-pr.py to re-read Kevin's MERGE card
+  // just before the merge call, so a verdict he changed during the 5 to 45 minute gate is followed.
+  // Optional and off: every session's own `merge-pr.py --pr N` must behave exactly as before.
+  const CARD = { id: 'recCardAaaaaaaaaa', pr: 5, status: 'Today', outcome: 'Approved as-is', approvedAt: '2026-11-06T08:30:00.000Z' };
+  const WITH_CARD = (g) => ['--pr', '5', '--expect-head', g.head, '--card', CARD.id, '--card-approved-at', CARD.approvedAt];
+
+  it('--card absent (every session\'s own merge): the card is never read, and the merge goes as before', () => {
+    const r = flow({ affected: NONE, argv: (g) => ['--pr', '5', '--expect-head', g.head], card: { ...CARD, outcome: 'Rejected' } });
+    expect(r.cardReads).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+    expect(r.result.cardCheck).toBeUndefined();
+  });
+
+  it('--card: still approved at that Approved At, it merges, and the card was read once, after the tests', () => {
+    const r = flow({ affected: NONE, argv: WITH_CARD, card: CARD });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+    expect(r.result.cardCheck).toBe('unchanged');
+    expect(r.cardReads).toEqual([CARD.id]);
+    expect(r.npx.map((c) => c.kind)).toEqual(['vitest', 'browser']);
+  });
+
+  for (const [label, card, kind, why] of [
+    ['rejected during the gate', { ...CARD, status: 'Completed', outcome: 'Rejected' }, 'changed', /its verdict is now Rejected, not an approval/],
+    ['his approval undone', { ...CARD, status: 'Approval', outcome: '', approvedAt: '' }, 'changed', /its verdict is now blank, not an approval/],
+    ['approved again (a new Approved At)', { ...CARD, approvedAt: '2026-11-06T09:45:00.000Z' }, 'changed', /its Approved At is now 2026-11-06T09:45:00\.000Z/],
+    ['a card that cannot be read', null, 'unreadable', /could not be read just before the merge, so nothing was merged: Airtable GET -> HTTP 503/],
+  ]) {
+    it(`--card, ${label}: the tests ran, then NOTHING merges, with its own reason in the JSON`, () => {
+      const r = flow({ affected: NONE, argv: WITH_CARD, card });
+      expect(r.code).toBe(1);
+      expect(r.result.merged).toBe(false);
+      expect(r.result.cardCheck).toBe(kind);
+      expect(r.result.why).toMatch(why);
+      expect(r.gh).not.toMatch(/pr merge/);
+      expect(r.npx.map((c) => c.kind)).toEqual(['vitest', 'browser']);
+      expect(r.log[3]).toBe('REFUSED');
+    });
+  }
+
+  it('--card without --card-approved-at is a bad argument (exit 2), never a merge with half a check', () => {
+    const r = flow({ affected: NONE, argv: ['--pr', '5', '--card', CARD.id], card: CARD });
+    expect(r.code).toBe(2);
+    expect(r.result.why).toMatch(/bad arguments: --card and --card-approved-at go together/);
+    expect(r.gh).toBe('');
   });
 
   it('vitest red: refused, no Playwright, no retry, no walk, no merge, tree removed', () => {

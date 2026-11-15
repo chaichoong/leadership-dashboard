@@ -76,7 +76,7 @@ def py(script, *args, timeout=300):
         return subprocess.CompletedProcess([script], FIND_RC[0], "20261106-merge-approved-%d" % len(ADDS) if FIND_RC[0] == 0 else "", "queue locked" if FIND_RC[0] else "")
     return subprocess.CompletedProcess([script], 0, "landed 1 finding(s) from PR #812" if script == "findings.py" else "", "")
 MERGE_RESULTS = []
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     MERGES.append([pr, head, dry_run])
     if dry_run:
         if DRY and DRY.pop(0) == "green":
@@ -394,11 +394,11 @@ print(json.dumps({"done": out["done"][0], "refresh": REFRESH["calls"], "back": s
 // EVERY OTHER FAILURE IS RETRIED BY THE ROBOT, NEVER SENT BACK (14 Nov 2026). Four failures used to
 // send the card back "the robot tries once more": his Approve re-ran exactly what had just failed.
 const ERRS = {
-  'run-broke': `ma.run_merge_pr = lambda pr, head, dry_run=False: (_ for _ in ()).throw(RuntimeError("worktree.sh exploded"))`,
+  'run-broke': `ma.run_merge_pr = lambda pr, head, dry_run=False, card=None: (_ for _ in ()).throw(RuntimeError("worktree.sh exploded"))`,
   'pr-unreadable': `def bad_state(pr): raise RuntimeError("gh cannot read PR #812: HTTP 502")\nma.pr_state = bad_state`,
   'pr-state': `GH["view"] = json.dumps({"state": "", "mergeCommit": None, "headRefOid": "${HEAD}"})`,
   'pr-state (MERGED, no commit)': `GH["view"] = json.dumps({"state": "MERGED", "mergeCommit": None, "headRefOid": "${HEAD}"})`,
-  'github-disagrees': `ma.run_merge_pr = lambda pr, head, dry_run=False: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": True, "why": "merged"}), "")`,
+  'github-disagrees': `ma.run_merge_pr = lambda pr, head, dry_run=False, card=None: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": True, "why": "merged"}), "")`,
 };
 
 describe('a failure that is not a red gate is retried by the robot on the red clock, never sent back (14 Nov 2026)', () => {
@@ -440,8 +440,9 @@ print(json.dumps({"steps": steps, "sentBack": sent_back(), "verdict": verdict_wr
       expect(a.slice(a.indexOf('--holds-merge-pr'), a.indexOf('--holds-merge-pr') + 2)).toEqual(['--holds-merge-pr', '812']);
       expect(r.rest).toMatchObject({ result: 'error', errKind: kind, errTries: 4, head: HEAD });
       expect(r.notes).toHaveLength(3);                                      // first try, the stop, and the new approval's first try
-      expect(r.notes[0]).toMatch(/Kevin's approval stands, so the card is not sent back .* \(try 1 of 4 for this failure\)/);
-      expect(r.notes[1]).toMatch(/failed 4 times this way, so the robot has stopped retrying \(20261106-merge-approved-1\)/);
+      // One count per approval across every kind (15 Nov 2026 review R3), and the words say so.
+      expect(r.notes[0]).toMatch(/Kevin's approval stands, so the card is not sent back .* \(try 1 of 4 since his approval, whatever failed\)/);
+      expect(r.notes[1]).toMatch(new RegExp(`failed 4 times \\(${kind}\\), so the robot has stopped retrying \\(20261106-merge-approved-1\\)`));
       expect(again.done).toMatchObject({ result: 'error', kind });
       expect(r.att.errTries).toBe(1);
       expect(r.sentBack).toEqual([]);
@@ -450,7 +451,9 @@ print(json.dumps({"steps": steps, "sentBack": sent_back(), "verdict": verdict_wr
     });
   }
 
-  it('a different kind of failure starts its own count; a stop finding that would not file is filed by the next run', () => {
+  // 15 Nov 2026 review R3: this used to say "a different kind of failure starts its own count", and two
+  // kinds taking turns then never reached the stop. Now every kind shares ONE count per approval.
+  it('two kinds of failure share ONE count per approval; the stop quotes both; a stop finding that would not file is filed by the next run', () => {
     const r = drive(`
 def bad_state(pr): raise RuntimeError("gh cannot read PR #812: HTTP 502")
 real_state = ma.pr_state
@@ -471,13 +474,16 @@ for h in (18.3, 24.4, 30.5):
 p1 = ma.plan(C(), att())[0]
 FIND_RC[0] = 0
 code, out = cmd_run()
-print(json.dumps({"two": two, "other": other, "p1": p1, "filed": out["done"][0], "code": code, "adds": len(ADDS)}))`);
+print(json.dumps({"two": two, "other": other, "p1": p1, "filed": out["done"][0], "code": code, "adds": len(ADDS), "last": ADDS[-1]}))`);
     expect(r.two).toMatchObject({ errKind: 'pr-unreadable', errTries: 2 });
-    expect(r.other).toMatchObject({ errKind: 'pr-state', errTries: 1 });
+    expect(r.other).toMatchObject({ errKind: 'pr-state', errTries: 3 });   // the count carries across kinds
     expect(r.p1).toBe('file-finding');
     expect(r.filed).toMatchObject({ action: 'file-finding', result: 'finding-filed' });
     expect(r.code).toBe(0);
-    expect(r.adds).toBe(2);
+    expect(r.adds).toBe(4);                                                // three refused, then filed once
+    const last = r.last;
+    expect(last[last.indexOf('--title') + 1]).toBe("PR #812's MERGE card: the merge run failed 4 times (pr-unreadable, pr-state); the robot stopped");
+    expect(last[last.indexOf('--detail') + 1]).toMatch(/pr-unreadable: PR #812 could not be read[\s\S]*\npr-state: PR #812 is unknown/);
   });
 
   it('exit code: a resting retry is 0; a refresh whose one write failed rests as moved (0) and changes nothing on the card', () => {

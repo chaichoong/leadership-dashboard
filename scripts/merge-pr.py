@@ -1238,6 +1238,31 @@ def do_merge(pr, facts, head, title=None):
     return out
 
 
+def card_verdict_moved(card_id, approved_at, pr):
+    """None while MERGE card CARD_ID still holds the approval the caller is acting on, else
+    (kind, why): kind "changed" (no longer an approval, a different Approved At, or another PR) or
+    "unreadable". Only scripts/merge-approved.py asks this (--card, 15 Nov 2026 review R1): Kevin
+    can take back an approval while the gate runs for 5 to 45 minutes, and the merge must follow
+    his CURRENT verdict. The card is read through merge_card's own reader, never a second client."""
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import merge_card
+        card = merge_card.get_card(card_id)
+    except Exception as e:  # noqa: BLE001 — not read is not "unchanged": nothing merges
+        return "unreadable", ("MERGE card %s could not be read just before the merge, so nothing was merged: %s"
+                              % (card_id, str(e)[:200]))
+    if card.get("pr") != pr:
+        what = "it names PR #%s" % card.get("pr")
+    elif card.get("outcome") not in merge_card.APPROVED:
+        what = "its verdict is now %s, not an approval" % (card.get("outcome") or "blank")
+    elif (card.get("approvedAt") or "") != approved_at:
+        what = "its Approved At is now %s" % (card.get("approvedAt") or "blank")
+    else:
+        return None
+    return "changed", "MERGE card %s changed while the gate ran (%s), so nothing was merged" % (card_id, what)
+
+
 def log_line(pr, head, status, why, flaky=None):
     try:
         path = os.path.join(os.path.expanduser("~"), "knowledge-os", "logs", "merge-gate.log")
@@ -1254,8 +1279,9 @@ def log_line(pr, head, status, why, flaky=None):
 
 # ─── THE RUN ──────────────────────────────────────────────────────────
 
-def gate(pr, dry_run, expect_head=""):
-    """Returns (result dict, exit code)."""
+def gate(pr, dry_run, expect_head="", card_id="", card_approved_at=""):
+    """Returns (result dict, exit code). CARD_ID (with CARD_APPROVED_AT) is optional and only
+    merge-approved.py passes it: the card is re-read just before the merge call."""
     res = {"pr": pr, "dryRun": dry_run, "testedTree": None, "base": None, "head": None,
            "vitest": None, "browser": None, "walk": None, "protectedPathsTouched": [],
            "merged": False, "why": "", "seconds": 0}
@@ -1448,6 +1474,16 @@ def gate(pr, dry_run, expect_head=""):
         if named:
             res["why"] = named_why(pr, named, "changed during the gate and now ")
             return res, 1
+    if card_id:
+        # The LAST look before the merge call (15 Nov 2026 review R1). What is left is the time this
+        # read takes plus gh pr merge's own call: a verdict changed inside that is merged before it
+        # was seen, and merge-approved.py says exactly that on the card.
+        progress("re-reading MERGE card %s just before the merge" % card_id)
+        moved = card_verdict_moved(card_id, card_approved_at, pr)
+        if moved:
+            res["cardCheck"], res["why"] = moved
+            return res, 1
+        res["cardCheck"] = "unchanged"
     progress("merging PR #%d" % pr)
     checked = (now if not no_roster else facts) or {}
     m = do_merge(pr, facts, head, title=checked.get("title"))
@@ -1482,8 +1518,16 @@ def main(argv=None):
     p.add_argument("--expect-head", default="",
                    help="refuse unless the PR head is this commit (scripts/merge-approved.py passes the "
                         "head Kevin approved on the MERGE card)")
+    p.add_argument("--card", default="",
+                   help="optional, with --card-approved-at: re-read this MERGE card just before the merge "
+                        "and refuse unless it is still approved at that Approved At (scripts/merge-approved.py "
+                        "only; off unless given)")
+    p.add_argument("--card-approved-at", default="",
+                   help="optional, with --card: the Approved At the caller is acting on")
     try:
         a = p.parse_args(argv)
+        if bool(a.card) != bool(a.card_approved_at):
+            raise ValueError("--card and --card-approved-at go together")
     except (ValueError, TypeError) as e:
         why = "bad arguments: %s (usage: merge-pr.py --pr N [--dry-run])" % (e or "a positive PR number is needed")
         print(json.dumps({"pr": None, "merged": False, "why": why}, indent=2))
@@ -1494,7 +1538,7 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, _interrupt)
     signal.signal(signal.SIGHUP, _interrupt)
     try:
-        res, code = gate(a.pr, a.dry_run, a.expect_head)
+        res, code = gate(a.pr, a.dry_run, a.expect_head, a.card, a.card_approved_at)
     except BaseException as e:
         why = "the gate itself broke: %s: %s" % (type(e).__name__, str(e)[:300])
         res, code = {"pr": a.pr, "dryRun": a.dry_run, "merged": False, "why": why}, 2

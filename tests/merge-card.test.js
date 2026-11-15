@@ -258,7 +258,7 @@ def py(script, *args, timeout=300):
     if script == "agent-dispatch.py" and args[0] == "annotate":
         NOTES.append(args[3])
     return subprocess.CompletedProcess([script], 0, "landed 1 finding(s) from PR #812" if script == "findings.py" else "", "")
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     MERGES.append([pr, head])
     GH["view"] = json.dumps({"state": "MERGED", "mergeCommit": {"oid": "abc123def4567890"}, "headRefOid": head})
     return subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": True, "why": "merged: green"}), "progress")
@@ -319,7 +319,7 @@ print(json.dumps({"res": res, "calls": CALLS, "merges": MERGES, "att": json.load
     const r = drive(`
 GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}", "title": "fix: retype", "url": "u", "files": [{"path": "scripts/agent-dispatch.py"}, {"path": "scripts/send-email.py"}]})
 CALLED = []
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     CALLED.append([pr, head, dry_run])
     return subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "head": head, "why": "DRY RUN, nothing merged: green"}), "")
 ma.run_merge_pr = merge_pr
@@ -346,7 +346,7 @@ print(json.dumps({"res": res, "called": CALLED, "patches": PATCHES, "notes": NOT
   it('a moved head that is red on the dry run keeps the OLD tested head, so nothing untested can merge', () => {
     const r = drive(`
 GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "head": head, "why": "the gate is RED"}), "")
 ma.run_merge_pr = merge_pr
 res = ma.merge_one(C(), {})
@@ -440,7 +440,7 @@ print(json.dumps({"recycled": recycled, "oldCode": old_code, "started": len(STAR
   it('a green refresh whose one write failed leaves the card on the OLD head and rests; a record from the old two-write refresh is still re-sent, never merged', () => {
     const r = drive(`
 GH["view"] = json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "${NEWHEAD}"})
-ma.run_merge_pr = lambda pr, head, dry_run=False: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "head": head, "why": "green"}), "")
+ma.run_merge_pr = lambda pr, head, dry_run=False, card=None: subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": False, "head": head, "why": "green"}), "")
 import findings as F_
 F_.current_state = lambda *a, **k: {}
 def bad_patch(task, fields): raise RuntimeError("Airtable 503")
@@ -458,7 +458,7 @@ print(json.dumps({"res": res, "att": att["812"], "plan": ma.plan(refreshed, lega
 
   it('red: the gate\'s last lines go on the card, his approval STANDS (no send-back), and nothing is completed or landed', () => {
     const r = drive(`
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     MERGES.append([pr, head])
     return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "the gate is RED: 2 tests failed", "vitest": {"ok": False, "tail": "2 failed"}}), "\\n".join("progress %d" % i for i in range(30)))
 ma.run_merge_pr = merge_pr
@@ -479,7 +479,7 @@ print(json.dumps({"res": res, "calls": CALLS, "notes": NOTES, "patches": PATCHES
 
   it('a merge that landed just before merge-pr.py was stopped is a merge, never "left open"', () => {
     const r = drive(`
-def merge_pr(pr, head, dry_run=False):
+def merge_pr(pr, head, dry_run=False, card=None):
     GH["view"] = json.dumps({"state": "MERGED", "mergeCommit": {"oid": "abc123def4567890"}, "headRefOid": head})
     return subprocess.CompletedProcess(["merge-pr.py"], 124, "", "stopped after 45 minutes")
 ma.run_merge_pr = merge_pr

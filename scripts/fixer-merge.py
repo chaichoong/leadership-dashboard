@@ -390,6 +390,34 @@ def merge_cards():
     return merge_card
 
 
+def gh_pr_state(pr):
+    """GitHub's state for PR (OPEN, CLOSED, MERGED), or raises with gh's words."""
+    r = sh(["gh", "pr", "view", str(pr), "--json", "state"])
+    if r.returncode != 0:
+        raise RuntimeError("cannot read PR #%d's state: %s" % (pr, (r.stderr or "").strip()[:200]))
+    return (json.loads(r.stdout or "{}") or {}).get("state") or ""
+
+
+def standing_card(merge_card, pr):
+    """(the card that answers for PR, or None; words saying why a closed card was kept, or "").
+    A card the ROBOT closed because the PR was closed unmerged is no decision, but only while GitHub
+    says the PR is OPEN now (15 Nov 2026 review N1): a PR still closed keeps it, or every fixer run
+    would raise a card the robot closes again. Which cards the robot closed comes from its own record
+    (merge_card.robot_closed_cards, review N5); a record or a state that cannot be read keeps the card
+    (the safe side) and says so. A card Kevin rejected always answers."""
+    closed, problem = merge_card.robot_closed_cards(pr)
+    old = merge_card.existing_card(pr, robot_closed=closed) if closed else merge_card.existing_card(pr)
+    if not old or old.get("status") != "Completed" or old.get("outcome") == "Rejected" or old.get("id") not in closed:
+        return old, problem
+    try:
+        state = gh_pr_state(pr)
+    except Exception as e:  # noqa: BLE001 — not read is not "open": the old card keeps blocking
+        return old, "the robot closed card %s, and PR #%d's state could not be read: %s" % (old["id"], pr, e)
+    if state != "OPEN":
+        return old, ""
+    return None, ""
+
+
 def raise_merge_card(pr, d, gate):
     """ONE card in Kevin's queue for a green protected PR (Kevin, 7 Oct 2026), never two:
     a card already raised for this PR, at any status, is returned instead. Returns a dict
@@ -398,7 +426,7 @@ def raise_merge_card(pr, d, gate):
     try:
         merge_card = merge_cards()
         import findings
-        old = merge_card.existing_card(pr)
+        old, kept = standing_card(merge_card, pr)
         title, url, files, gh_head = pr_facts(pr)
         # The head the gate tested. gh's head is only a fallback, and merge-pr.py --expect-head
         # re-gates whatever is approved, so a stale fallback can never merge untested code.
@@ -409,7 +437,7 @@ def raise_merge_card(pr, d, gate):
         if old and (old["status"] == "Completed" or old.get("head") == head):
             # A rejected or merged card is never raised again, and an open one for this very
             # head is already the card: approved twice, refused twice, still ONE card.
-            return {"task": old.get("id"), "already": True}
+            return {"task": old.get("id"), "already": True, **({"note": kept} if kept else {})}
         pending = [(r["id"], r.get("title", "")) for r in findings.current_state().values()
                    if r.get("status") == "pending" and str(r.get("pr", "")) == str(pr)]
         fields = merge_card.card_fields(pr, title, url, sorted(pending), files,
@@ -498,7 +526,9 @@ def cmd_merge(args):
     # A card that already stands for this PR's current head needs no second gate (review).
     if not d["mayAutoMerge"]:
         try:
-            old = merge_cards().existing_card(args.pr)
+            old, why = standing_card(merge_cards(), args.pr)
+            if why:
+                print("MERGE CARD CHECK for PR #%d: %s" % (args.pr, why), file=sys.stderr)
             now_head = pr_facts(args.pr)[3] if old else ""
         except Exception as e:  # noqa: BLE001 — cannot tell: run the gate, which says so too
             print("MERGE CARD CHECK FAILED for PR #%d: %s" % (args.pr, e), file=sys.stderr)

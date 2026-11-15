@@ -290,6 +290,31 @@ def refreshed_fields(output, plain):
             F["approvedAt"]: None, F["status"]: "Approval"}
 
 
+# The line merge-approved.py writes on a card it closed because its PR was closed on GitHub without
+# merging (14 Nov 2026). Words only: which cards the robot closed is read from its own record.
+CLOSED_MARK = "PR CLOSED, NOT MERGED:"
+
+
+def robot_closed_cards(pr, state_dir=None):
+    """(card ids the ROBOT closed because PR was closed unmerged, problem words or ""), read from
+    merge-approved.py's own record, attempts.json `tasks` on a closed-unmerged entry (15 Nov 2026
+    review N5): never from a Notes line, which a failed write or a trimmed Notes field loses. A record
+    that cannot be read gives no ids and says why, so every closed card keeps blocking (the safe side)."""
+    path = os.path.join(state_dir or os.environ.get("MERGE_APPROVED_DIR")
+                        or os.path.expanduser("~/knowledge-os/logs/merge-approved"), "attempts.json")
+    try:
+        with open(path) as fh:
+            att = json.load(fh)
+    except FileNotFoundError:
+        return set(), ""
+    except (OSError, ValueError) as e:
+        return set(), "%s unreadable (%s), so a card the robot closed is treated as standing" % (path, e)
+    entry = att.get(str(int(pr))) if isinstance(att, dict) else None
+    if not isinstance(entry, dict) or entry.get("result") != "closed-unmerged":
+        return set(), ""
+    return {t for t in (entry.get("tasks") or []) if isinstance(t, str)}, ""
+
+
 def cards_formula():
     return "LEFT({Task Name}, %d)='%s'" % (len(MERGE_PREFIX), MERGE_PREFIX)
 
@@ -301,14 +326,17 @@ def list_cards(read=None):
     return [c for c in (card_view(r) for r in read(cards_formula())) if c["pr"] is not None]
 
 
-def existing_card(pr, read=None):
+def existing_card(pr, read=None, robot_closed=()):
     """A card already raised for PR, at ANY status, or None. Any status, because a card Kevin
-    rejected must never come back as a second card for the same PR."""
+    rejected must never come back as a second card for the same PR. ROBOT_CLOSED (robot_closed_cards)
+    only orders the answer: a card the robot closed comes after any real decision."""
     read = read or read_tasks
     rows = read("FIND('%s%d ', {Task Name})=1" % (MERGE_PREFIX, int(pr)))
     hits = [card_view(r) for r in rows if pr_number((r.get("fields") or {}).get(F["name"])) == int(pr)]
-    # An open card first: it is the one to refresh; a closed one only stops a second card.
-    hits.sort(key=lambda c: c["status"] == "Completed")
+    # An open card first: it is the one to refresh; a closed one only stops a second card. A card
+    # the robot closed for a closed PR comes last, so any card that is a real decision answers first.
+    # A card Kevin rejected is always a decision, whatever the robot's record lists.
+    hits.sort(key=lambda c: (c["status"] == "Completed", c["id"] in robot_closed and c["outcome"] != "Rejected"))
     return hits[0] if hits else None
 
 
