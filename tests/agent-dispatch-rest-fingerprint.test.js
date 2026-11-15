@@ -468,10 +468,12 @@ print(json.dumps({
     const r = JSON.parse(out.trim().split('\n').pop());
     expect(r.err).toBeNull();
     expect(r.resting).toEqual({ recRestAaaaaaaaaa: '2026-11-20' });
-    expect(r.L1bucket).toEqual(['waitingReply', 'resting']);
-    expect(r.L1rows).toEqual([]);
-    expect(r.dueBucket).toEqual(['live', '']);
-    expect(r.dueRows).toEqual([]);
+    // Carried out 27 days ago: past the stuck clock, so it is on the Stuck list whatever the rest says
+    // (review of PR 936, finding 5; a short wait resting is in agent-dispatch-rest-wake.test.js).
+    expect(r.L1bucket).toEqual(['live', 'overdue']);
+    expect(r.L1rows).toEqual(['reply']);
+    expect(r.dueBucket).toEqual(['live', 'overdue']);
+    expect(r.dueRows).toEqual(['reply']);
     // no queue: the older ledger rule, with a fold skipped (it was "not waiting" before)
     expect(r.L2noQueue).toEqual(['live', 'overdue']);
     expect(r.L0noQueue).toEqual(['live', 'overdue']);

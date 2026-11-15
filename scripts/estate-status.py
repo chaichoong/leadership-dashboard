@@ -819,11 +819,25 @@ def blockers_summary(r):
         detail += " %s approved by you and being merged by the robot." % _plural(len(merging), "fix")
     if stopped:
         prs = sorted({(w.get("mergeCard") or {}).get("pr") for w in stopped} - {None})
-        # Walls are tasks, not merges: three tasks can wait on two stopped cards.
-        detail += (" %s waiting on %s you approved that stopped after failed test runs and need%s a fix (%s); "
-                   "the robot filed a stop finding for the daily robot fix."
+        # Walls are tasks, not merges: three tasks can wait on two stopped cards. Each card says what
+        # it stopped on and whether its stop finding is filed, from the sweep's mergeStop (read off
+        # merge-approved.py's attempts record), never more (review of PR 937, finding 16): a stop on
+        # an error kind ran no failing test, and a finding not yet filed is not "filed".
+        facts = {}
+        for w in stopped:
+            pr = (w.get("mergeCard") or {}).get("pr")
+            if pr is not None and pr not in facts:
+                facts[pr] = w.get("mergeStop") if isinstance(w.get("mergeStop"), dict) else {}
+        named = ["PR #%s%s" % (p, (": " + facts[p]["words"]) if facts.get(p, {}).get("words") else "") for p in prs]
+        unfiled = ["PR #%s" % p for p in prs if facts.get(p) and not facts[p].get("finding")]
+        unknown = [p for p in prs if not facts.get(p)]
+        detail += (" %s waiting on %s you approved that the robot stopped retrying and need%s a fix (%s)."
                    % (_plural(len(stopped), "task"), _plural(len(prs), "merge") if prs else "a merge",
-                      "s" if len(prs) <= 1 else "", ", ".join("PR #%s" % p for p in prs) or "PR not named"))
+                      "s" if len(prs) <= 1 else "", "; ".join(named) or "PR not named"))
+        if prs and not unfiled and not unknown:
+            detail += " The robot filed a stop finding for each, for the daily robot fix."
+        elif unfiled:
+            detail += " The stop finding for %s is not filed yet; the next merge run files it." % ", ".join(unfiled)
     if on_task:
         detail += " %s waiting on the task its fix was moved to." % _plural(len(on_task), "task")
     if dated:

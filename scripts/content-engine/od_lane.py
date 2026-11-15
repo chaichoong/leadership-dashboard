@@ -454,7 +454,9 @@ def _save(path, data):
 def od_lessons():
     try: text = open(watch.AGENT_FILE).read()
     except OSError: return ""
-    m = re.search(r"^## Lessons from Kevin \(Operations Director\)\s*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    # A section ends at the next heading OR a generated block's marker line: an empty section sitting
+    # just above the binding rules block used to return that block's marker as a lesson (15 Nov 2026).
+    m = re.search(r"^## Lessons from Kevin \(Operations Director\)[ \t]*\n(.*?)(?=^## |^<!-- |\Z)", text, re.S | re.M)
     body = (m.group(1) if m else "").strip()
     return ("\n\nLessons Kevin has given the Operations Director lane (apply every one):\n" + body) if body else ""
 

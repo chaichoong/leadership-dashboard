@@ -640,15 +640,27 @@ def _reply_wait(f, now, events, rest_until=None):
     is skipped, as the dispatcher's own ledger readers skip it. With no queue the older ledger rule
     decides, `status` counting as a rest event like `done`."""
     d = dispatcher()
+    if events is not None:
+        events = [e for e in events if e[0] != d.FOLD_EVENT]
+    # A LONG WAIT IS STUCK WHATEVER THE REST SAYS (15 Nov 2026, review of PR 936, finding 5). A rest
+    # only spaces out the looks; the total wait since the carry-out is still the stuck clock's, so a
+    # chase kept open and re-rested every fortnight for 60 days is on the Stuck list again, as it was
+    # before rests existed. Under the clock, a resting task is waiting and an ended one is due (live).
+    total = _total_reply_wait(f, now, events, d)
+    if total[0] == "overdue":
+        return total
     if rest_until:
         try:
             return "resting", datetime.strptime(rest_until[:10], "%Y-%m-%d").date()
         except ValueError:
             return "", None
-    if events is not None:
-        events = [e for e in events if e[0] != d.FOLD_EVENT]
-        if rest_until == "" and events and events[-1][0] in ("done", "status"):
-            return "", None
+    if events is not None and rest_until == "" and events and events[-1][0] in ("done", "status"):
+        return "", None
+    return total
+
+
+def _total_reply_wait(f, now, events, d):
+    """(reply_wait's answer, the day the wait began) by the ledger rule alone, a rest ignored."""
     if f.get("Approval Outcome") not in d.APPROVED:
         return "", None
     notes = str(f.get("Notes") or "")

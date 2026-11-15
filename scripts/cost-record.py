@@ -291,7 +291,8 @@ def owed_new_costs(task_id, output, notes, live_costs, ledger_rows):
             owed.append(f"'RECORD NEW COST: {body}' cannot be written: its amount, frequency, due day, first payment "
                         "or end is not a real value. Read the missing dates off the first payment in the bank "
                         "(cost-record.py payments --payee <who it is paid to>) and resubmit THIS task with the dated "
-                        "line; until that payment lands, complete --keep-open")
+                        "line; until that payment lands, complete --keep-open --until <YYYY-MM-DD: the day "
+                        "the payment is due, at most 14 days ahead>")
         else:
             owed.append(f"'RECORD NEW COST: {body}' was approved and is not in the Costs table: write it with "
                         f"cost-record.py new ... --task {task_id}")
