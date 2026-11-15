@@ -82,7 +82,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="operations" data-tabs="tasks,property-manager,operations,systemisation,skills,ai-brain">
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,property-manager,operations,systemisation,ai-brain">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
@@ -93,7 +93,6 @@
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('operations')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('operations')}"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('property-manager')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('property-manager')}"><span class="sidebar-icon">&#x1F3E0;</span><span class="sidebar-label">Property Manager</span><span class="sidebar-health-dot unknown" data-sidebar-health="property-manager" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('skills')}"><span class="sidebar-icon">&#x1F9E0;</span><span class="sidebar-label">Skills Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="skills" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ai-brain')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ai-brain')}"><span class="sidebar-icon">&#x1F4AD;</span><span class="sidebar-label">AI Brain</span><span class="sidebar-health-dot unknown" data-sidebar-health="ai-brain" title="No checks run yet"></span><span id="aiBrainSidebarBadge" title="Items waiting for your call" style="display:none;margin-left:6px;background:var(--accent);color:var(--accent-on);font-size:var(--fs-xs);font-weight:var(--fw-semibold);border-radius:var(--radius-full);padding:1px 7px;"></span></div>
                 </div>
             </div>
@@ -927,28 +926,7 @@
             </div>
         </div>
 
-        <!-- Tab: Skills Library -->
-        <div class="tab-panel" id="tab-skills">
-            <div class="section">
-                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
-                    <div>
-                        <h2 class="section-title" style="margin-bottom:2px">Skills Library</h2>
-                        <p style="color:var(--text-secondary);font-size:13px;margin:0">All Claude Code and Cowork skills available in your setup. <span id="skillsTotalCount" style="font-weight:600"></span></p>
-                    </div>
-                    <div style="display:flex;gap:8px">
-                        <button onclick="expandAllSkills()" class="skills-toolbar-btn" title="Expand all">Expand All</button>
-                        <button onclick="collapseAllSkills()" class="skills-toolbar-btn" title="Collapse all">Collapse All</button>
-                    </div>
-                </div>
-                <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">
-                    <input type="text" id="skillsSearchInput" class="skills-search-input" placeholder="Search skills by name, keyword, or category..." oninput="onSkillsSearch(event)" aria-label="Search skills">
-                    <button type="button" class="od-clear-filters" onclick="clearSkillsFilters()" title="Reset search, source and category filters back to default">Clear filters</button>
-                </div>
-                <div class="skills-source-bar" id="skillsSourceBar" style="display:flex;gap:6px;margin-bottom:12px"></div>
-                <div class="skills-filter-bar" id="skillsFilterBar"></div>
-                <div id="skillsLibraryContent"></div>
-            </div>
-        </div>
+        <!-- Tab: Skills Library (js/skills.js, js/skills-data.js) removed 15 Nov 2026. -->
     </div><!-- end #dashboard -->
 
     </div><!-- end main-content -->
@@ -989,8 +967,6 @@
     <script defer src="js/arrears.js?v=32"></script>
     <script defer src="js/fintable.js?v=18"></script>
     <script defer src="js/prospecting.js?v=11"></script>
-    <script defer src="js/skills-data.js?v=9"></script>
-    <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=20"></script>
     <script defer src="js/quick-task.js?v=4"></script>
     <script defer src="js/home.js?v=10"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->

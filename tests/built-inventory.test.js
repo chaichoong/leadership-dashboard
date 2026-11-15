@@ -72,7 +72,6 @@ w(os.path.join(REPO, "js", "automations-data.js"), r"""var AUTOMATIONS = { macJo
     { key: 'ghost-job', name: 'Ghost', when: 'x', status: 'on', what: 'Listed, never run.' },
     { key: 'old-job', name: 'Old', when: 'x', status: 'off', what: 'Switched off on purpose.' },
   ], workers: [ { name: 'w0', when: 'x', status: 'on', what: 'Worker zero.' } ] };""")
-w(os.path.join(REPO, "js", "skills-data.js"), "var SKILLS_LIBRARY = [ { id: 'sk00', command: 'anthropic-skills:pk00', instructions: 'mentions sk01 and sk02 in passing' } ];")
 for i in range(12):
     w(os.path.join(HOME, ".claude", "agents", "ag%02d.md" % i), '---\\nname: ag%02d\\ndescription: "Agent %d does \\\\"work\\\\"."\\n---\\nbody' % (i, i))
 w(os.path.join(HOME, ".claude", "agents", "ESTATE.md"), "# How the estate works")
@@ -179,11 +178,10 @@ out["chars"] = len(json.dumps(inv, separators=(",", ":")))
     expect(r.mac['parked-corrupt'][0]).toBe('unreadable');
     expect(r.missing.notLoaded).not.toContain('parked-corrupt');   // parked on purpose is not "not running as expected"
     expect(r.missing.workers).toContain('w1');
-    // The Skills Library lists sk00 by id and pk00 by command. sk01 is only
-    // MENTIONED in another entry's text, which does not count as listed.
-    expect(r.missing.skills).not.toContain('sk00');
-    expect(r.missing.skills).not.toContain('pk00');
-    expect(r.missing.skills).toContain('sk01');
+    // Skills are no longer compared with a hand-kept list: the Skills Library
+    // (js/skills-data.js) was removed on 15 Nov 2026, and without it every
+    // skill would read as "unlisted" on the AI Agents page.
+    expect(r.missing).not.toHaveProperty('skills');
   });
 
   it('fits well inside the Airtable field', () => {

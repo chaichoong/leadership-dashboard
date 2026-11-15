@@ -20,11 +20,11 @@ const tasksPage = read('os/tasks/index.html');
 // → AI Agents page (os/agents/) on 25 Aug 2026 — Systemisation keeps only
 // the SOP-building flow and a pointer tab.
 const agentsPage = read('os/agents/index.html');
-const skills = read('js/skills.js');
 const dashboard = read('js/dashboard.js');
 
 describe('every owner surface reads the register', () => {
-  for (const [name, src] of [['Tasks & Projects', tasksPage], ['AI Agents page', agentsPage], ['Skills Library', skills]]) {
+  // (The Skills Library, js/skills.js, was a third surface until it was removed on 15 Nov 2026.)
+  for (const [name, src] of [['Tasks & Projects', tasksPage], ['AI Agents page', agentsPage]]) {
     it(`${name} references the register table`, () => {
       expect(src).toContain(REGISTER);
     });
@@ -52,9 +52,9 @@ describe('every owner surface reads the register', () => {
 });
 
 describe('the role-agent deep link has both halves', () => {
-  it('the Skills Library (same window) uses the parent postMessage helper — the localStorage handoff raced a reloading iframe (24 Aug 2026)', () => {
-    expect(skills).toContain('deepLinkAgents({ agent: recId })');
-    expect(skills).not.toContain("localStorage.setItem('sys_open_role_agent'");
+  it('the same-window deep link uses the parent postMessage helper — the localStorage handoff raced a reloading iframe (24 Aug 2026)', () => {
+    // The Skills Library (js/skills.js) was the first sender; it was removed on
+    // 15 Nov 2026. The helper and its receiver stay for the shell and Systemisation.
     // sender in shared.js, receiver + boot handshake on the page
     const shared = read('js/shared.js');
     expect(shared).toContain('window.deepLinkAgents');

@@ -47,8 +47,6 @@ FILE_TO_PAGE = {
     'os/strategy/strategy.js': 'os-strategy',
     'os/strategy/strategy.css': 'os-strategy',
     'os/operations/index.html': 'operations',
-    'js/skills.js':             'skills',
-    'js/skills-data.js':        'skills',
     'os/systemisation/index.html': 'systemisation',
     # SOP files (sop-*.html) are deliberately NOT mapped: sopVer moves by hand
     # when the SOP is updated to match the page (see .claude/rules/frontend.md, Version Tracking).

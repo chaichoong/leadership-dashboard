@@ -83,62 +83,7 @@ test.describe('Clear filters', () => {
     });
   }
 
-  test('skills tab: clear button resets search, source and category', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', e => errors.push(e.message));
-
-    await loadDashboard(page, 'skills');
-    await page.evaluate(() => switchTab('skills'));
-    await page.waitForFunction(() => document.querySelectorAll('#skillsSourceBar .skills-source-pill').length > 0, { timeout: 10000 });
-
-    const btn = page.locator('#tab-skills button.od-clear-filters');
-    await expect(btn).toHaveCount(1);
-
-    // Search for something that matches nothing, pick a category pill, and move
-    // off the default "My Skills" source.
-    await page.evaluate(() => {
-      const input = document.getElementById('skillsSearchInput');
-      input.value = 'zzz-no-match';
-      onSkillsSearch({ target: input });
-      const pill = document.querySelector('.skills-filter-pill');
-      if (pill) pill.click();
-      const pills = document.querySelectorAll('#skillsSourceBar .skills-source-pill');
-      if (pills.length > 1) pills[pills.length - 1].click();   // "All"
-    });
-
-    await btn.click();
-    await page.waitForTimeout(400);
-
-    const state = await page.evaluate(() => ({
-      search: document.getElementById('skillsSearchInput').value,
-      activeCategoryPills: document.querySelectorAll('.skills-filter-pill.active').length,
-      activeSource: (document.querySelector('#skillsSourceBar .skills-source-pill.active') || {}).textContent || '',
-      cards: document.querySelectorAll('#skillsLibraryContent .skill-card, #skillsLibraryContent [data-skill-id]').length,
-    }));
-
-    expect(state.search).toBe('');
-    expect(state.activeCategoryPills).toBe(0);
-    expect(state.activeSource).toContain('My Skills');
-    expect(errors).toEqual([]);
-  });
-
-  // A client tenant has no custom/SOP skills, so skills-supabase.html starts them
-  // on the "All" source. Clearing filters must return them THERE, not to the
-  // empty "My Skills" list — otherwise the escape hatch is itself a dead end.
-  test('skills tab: client view clears back to All, not to an empty My Skills', async ({ page }) => {
-    await loadDashboard(page, 'skills');
-    await page.evaluate(() => switchTab('skills'));
-    await page.waitForFunction(() => document.querySelectorAll('#skillsSourceBar .skills-source-pill').length > 0, { timeout: 10000 });
-
-    const source = await page.evaluate(() => {
-      window.__skillsClientView = true;          // what skills-supabase.html sets for a client
-      clearSkillsFilters();
-      const active = document.querySelector('#skillsSourceBar .skills-source-pill.active');
-      return active ? active.textContent : '';
-    });
-
-    expect(source).toContain('All');
-  });
+  // The two Skills Library checks went on 15 Nov 2026 with the tab (js/skills.js).
 
   test('every filter bar in the shell has a clear control', async ({ page }) => {
     await loadDashboard(page, 'overview');

@@ -22,7 +22,9 @@ on:
     #  shell 1 Aug 2026, has no PAGE_REGISTRY entry, so it triggered a no-op run.
     #  crm-supabase.html and js/crm-walkthrough.js removed 15 Nov 2026: the CRM
     #  page went with the Supabase shadow build.
-    #  follow-up.html removed 15 Nov 2026: the Inbound Comms page is retired.)
+    #  follow-up.html removed 15 Nov 2026: the Inbound Comms page is retired.
+    #  js/skills.js and js/skills-data.js removed 15 Nov 2026: the Skills Library
+    #  tab is retired.)
     paths:
       - 'ai-brain.html'
       - 'compliance.html'
@@ -54,8 +56,6 @@ on:
       - 'js/prospecting.js'
       - 'js/reconciliation.js'
       - 'js/sitemap.js'
-      - 'js/skills-data.js'
-      - 'js/skills.js'
       - 'js/transactions.js'
       - 'js/wealth-ratios.js'
       - 'js/wealth.js'

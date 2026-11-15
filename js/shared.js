@@ -853,10 +853,6 @@
         if (tabId === 'prospecting') {
             if (typeof loadProspectingTab === 'function') loadProspectingTab();
         }
-        // Render Skills Library on switch
-        if (tabId === 'skills') {
-            if (typeof renderSkillsTab === 'function') renderSkillsTab();
-        }
         // Task Manager lazy-load
         if (tabId === 'tasks') lazyLoadFrame('tasksFrame', 'tasks');
         // (Launch Plan tab removed — content was duplicating Strategy OS.)

@@ -21,10 +21,12 @@ one exists, else from the source's own description.
 
 WHAT `missing` CAN AND CANNOT SAY. For Mac jobs it checks both ways: running
 but not on the automations list, and listed as running but not found, not
-loaded or not installed. For workers and skills it checks one way only
-(running but unlisted). It CANNOT see Airtable automations, workers whose code
-lives outside this repo, or plugin skills, so the hand-kept lists still carry
-things this does not. They are not redundant yet.
+loaded or not installed. For workers it checks one way only (running but
+unlisted). Skills are no longer checked against a list: the hand-kept Skills
+Library (js/skills-data.js) was removed on 15 Nov 2026. It CANNOT see
+Airtable automations, workers whose code lives outside this repo, or plugin
+skills, so the hand-kept lists still carry things this does not. They are not
+redundant yet.
 
 WHERE IT GOES. scripts/estate-status.py calls build() every ten minutes and
 writes the result as the Payload of one PRIVATE Estate Status row
@@ -419,19 +421,6 @@ def github_timers():
 
 
 # ─── the whole thing ──────────────────────────────────────────────────
-def skills_library_names():
-    """Skill slugs the Skills Library lists: its ids, and the last part of its commands."""
-    try:
-        with open(os.path.join(REPO, "js", "skills-data.js"), encoding="utf-8") as fh:
-            src = fh.read()
-    except OSError:
-        return set()
-    names = set(re.findall(r"\bid:\s*'([^']+)'", src))
-    for cmd in re.findall(r"\bcommand:\s*'([^']+)'", src):
-        names.add(cmd.split(":")[-1].lstrip("/"))
-    return names
-
-
 def build(now=None):
     now = now or datetime.now(timezone.utc)
     labels, named = automation_entries(automations_text())
@@ -447,12 +436,10 @@ def build(now=None):
     ]
     by = {g["id"]: g["items"] for g in groups}
     mac_keys = {j["k"] for j in by["mac-jobs"]}
-    library = skills_library_names()
     missing = {
         # running (or expected to run), but not on the hand-kept list
         "automations": sorted(j["k"] for j in by["mac-jobs"] if j["s"] == "on" and j["k"] not in labels),
         "workers": sorted(w["k"] for w in by["workers"] if w["k"] not in named),
-        "skills": sorted({s["k"] for s in by["skills"] if s["k"] not in library}),
         # on the hand-kept list as running, but nothing on this Mac runs it
         "listedNotFound": sorted(k for k, e in labels.items() if e["status"] == "on" and k not in mac_keys),
         # in the job schedule, but launchd has no job for it
