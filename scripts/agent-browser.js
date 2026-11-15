@@ -1500,6 +1500,126 @@ async function isoForDateBox(page, selector, value) {
   return isDate ? iso : null;
 }
 
+// A typed box that opens a list (react-bootstrap-typeahead on RightSure, 15 Nov 2026). 'readonly' ("What is the
+// number of storeys?"): a fill types nothing, the answer is the ONE option of that text in its list. 'typed'
+// (D3: "What is your occupation? Start typing your job title"): the value is typed, then the ONE option whose
+// aria-label (or whole text) is the value is clicked. null for anything else, a combobox without
+// aria-haspopup="listbox" included: the plain fill goes on as before. Decided from the element runSteps has
+// already found (assertNotCredential needs it there), with no wait of its own (review R4).
+async function comboboxKind(page, selector) {
+  const loc = page.locator(selector).first();
+  if (!(await loc.count().catch(() => 0))) return null;   // not there, or a selector this page cannot parse: the plain fill says why
+  return loc.evaluate(el => {
+    if (el.tagName !== 'INPUT' || String(el.getAttribute('role') || '').toLowerCase() !== 'combobox'
+      || String(el.getAttribute('aria-haspopup') || '').toLowerCase() !== 'listbox') return null;
+    return el.readOnly ? 'readonly' : 'typed';
+  }, null, { timeout: 2000 }).catch(() => null);   // gone in the meantime: the plain fill fails on its own terms
+}
+// Fills a combobox by its one option of VALUE (lineKey on both), the guard run on the option first, the box
+// read back after. The list is only ever the box's OWN (review R6): the one its aria-owns or aria-controls
+// names, else #<name>TypeAheadId, else the one [role=listbox] inside its own .rbt wrapper. None: the step fails.
+// No list, no option, two, a refusal or a read-back that fails: a typed box is cleared, Escape is pressed only
+// when its own list is open, and the step fails, so a half-typed answer is never left behind.
+async function fillCombobox(page, selector, value, kind) {
+  const typed = kind === 'typed';
+  const input = page.locator(selector).first();
+  const findList = () => input.evaluate(el => {
+    const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+    const shown = n => { const r = n.getBoundingClientRect(); const s = getComputedStyle(n); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+    const path = n => {
+      const parts = [];
+      for (let x = n; x && x.nodeType === 1 && x !== document.body; x = x.parentElement) {
+        let i = 1; for (let s = x.previousElementSibling; s; s = s.previousElementSibling) if (s.tagName === x.tagName) i++;
+        parts.unshift(`${x.tagName.toLowerCase()}:nth-of-type(${i})`);
+      }
+      return 'body > ' + parts.join(' > ');
+    };
+    let list = null;
+    for (const id of String(`${el.getAttribute('aria-owns') || ''} ${el.getAttribute('aria-controls') || ''}`).split(/\s+/).filter(Boolean)) {
+      const t = document.getElementById(id);
+      if (t && t.getAttribute('role') === 'listbox') { list = t; break; }
+    }
+    if (!list && el.name) { const t = document.getElementById(`${el.name}TypeAheadId`); if (t && t.getAttribute('role') === 'listbox') list = t; }
+    if (!list) {
+      // Only inside the box's own .rbt wrapper: never its parent or anything above (review round 3).
+      const own = el.closest('.rbt');
+      const lb = own ? Array.from(own.querySelectorAll('[role="listbox"]')) : [];
+      if (lb.length === 1) list = lb[0];
+    }
+    // The box's question, however it is labelled, for the declaration check.
+    const nameLabel = !el.id && el.name ? Array.from(document.querySelectorAll(`label[for="${CSS.escape(el.name)}"]`)) : [];
+    const question = clean([].concat(Array.from(el.labels || []), nameLabel.length === 1 ? nameLabel : []).map(l => l.textContent)
+      .concat([el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || ''],
+        String(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(i => (document.getElementById(i) || {}).textContent || '')).join(' '));
+    if (!list || !shown(list)) return { question, open: false, options: null };
+    return { question, open: true, options: Array.from(list.querySelectorAll('[role="option"]')).map(o => ({
+      label: clean(o.getAttribute('aria-label') || o.textContent), text: clean(o.textContent), target: path(o) })) };
+  });
+  const look = () => findList().catch(() => ({ question: '', open: false, options: null }));   // mid-redraw: no list this look
+  const fail = async (msg, refusedNow) => {
+    if (typed) {
+      await input.press('ControlOrMeta+a', { timeout: 5000 }).catch(() => {});   // best effort; the read below says if it stayed
+      await input.press('Delete', { timeout: 5000 }).catch(() => {});
+    }
+    if ((await look()).open) await page.keyboard.press('Escape').catch(() => {});
+    if (typed) {
+      const left = await input.inputValue({ timeout: 5000 }).catch(() => '');
+      if (left) msg += ` (and the box still holds "${String(left).slice(0, 40)}")`;
+    }
+    throw refusedNow || new Error(msg);
+  };
+  // A box that asks a declaration is never answered by a fill, however its list is built: held to the guard's
+  // declaration words and the declaration topics, as a select is. The value is read without occupation words
+  // ("Administrator" is a job, as form-facts.js reads it).
+  const first = await look();
+  // A box whose question cannot be read at this moment (a redraw, a missing label) is never filled: nothing on it
+  // was screened, so nothing is clicked or typed (review round 3).
+  if (!first.question) throw new Error(`refused: ${selector} has no question the robot can read, so it was not touched`);
+  const plainValue = String(value).replace(/\badministrat(?:ors?|ion)\b/gi, ' ');
+  if (declarationWords(first.question) || neverRobot(first.question) || DECLARATION_RE.test(first.question)
+    || declarationWords(plainValue) || neverRobot(plainValue)) {
+    throw new Error(`refused: "${`${first.question} | ${value}`.slice(0, 80)}" reads like a declaration, which is Kevin's`);
+  }
+  try {
+    await input.click({ timeout: 20000 });
+    if (typed) {
+      await input.fill('', { timeout: 20000 });
+      await input.pressSequentially(String(value), { delay: 25, timeout: 20000 });
+    }
+  } catch (e) { return fail(String(e.message || e)); }
+  const waitMs = typed ? 4000 : 3000;
+  let got = null;
+  for (const until = Date.now() + waitMs; Date.now() < until;) {
+    const l = await look();
+    if (l.open) { got = l; break; }
+    await page.waitForTimeout(100);
+  }
+  if (!got) return fail(`${selector} opened no list of its own in ${waitMs / 1000} s`);
+  if (typed) {
+    // The list as it stands once the typing has settled.
+    await page.waitForTimeout(150);
+    const again = await look();
+    if (again.open) got = again;
+  }
+  const want = lineKey(value);
+  const hits = (got.options || []).filter(o => lineKey(o.label) === want);
+  if (hits.length !== 1) {
+    return fail(`the list of ${selector} has ${hits.length ? `${hits.length} options` : 'no option'} reading "${String(value).slice(0, 60)}"`
+      + `${got.options.length ? ` (options: ${got.options.slice(0, 20).map(o => `"${o.label}"`).join(' | ')})` : ''}`);
+  }
+  const option = { do: 'click', selector: hits[0].target };
+  try {
+    const adobe = await adobeSignRefusal(page, option);
+    if (adobe) throw new Error(`refused: ${adobe}`);
+    await assertNotFinalAction(page, option);
+  } catch (e) { return fail(String(e.message || e), e); }
+  try { await page.locator(option.selector).first().click({ timeout: 20000 }); } catch (e) { return fail(String(e.message || e)); }
+  const now = await input.inputValue({ timeout: 20000 }).catch(() => null);   // unread: the check below fails it
+  if (String(now === null ? '' : now).replace(/\s+/g, ' ').trim() !== hits[0].text) {
+    return fail(`${selector} did not hold "${hits[0].text}" after its option was chosen (it holds "${String(now).slice(0, 40)}")`);
+  }
+}
+
 async function runSteps(page, steps, allowSubmit, confirm) {
   const done = [];
   let submitted = false;
@@ -1509,6 +1629,11 @@ async function runSteps(page, steps, allowSubmit, confirm) {
     if (s.do === 'submit' && !allowSubmit) {
       done.push({ do: 'submit', executed: false, reason: 'prepare mode stops here' });
       return { done, stoppedBeforeSubmit: true };
+    }
+    // The last line (forms round 2): a {{fact:...}} token is read before the browser opens, never typed, and no
+    // other "{{" survives {{today}} into a page (review round 3).
+    if ((s.do === 'fill' || s.do === 'select') && [s.value, s.label].some(v => String(fillTokens(v === undefined ? '' : v)).includes('{{'))) {
+      throw new Error(`refused: ${s.selector} would be given a {{fact:...}} or other {{...}} token as it stands; a fact is read before the window opens, never typed`);
     }
     switch (s.do) {
       case 'goto':
@@ -1525,6 +1650,8 @@ async function runSteps(page, steps, allowSubmit, confirm) {
           // one is turned round, always set whole (typed key by key it read back as 61115-02-20), and read back.
           // Only what is typed changes; the fact check read the cited line's own words.
           const v = String(fillTokens(s.value));
+          // A combobox with a list (forms round 2) takes its value by the one option of that text in its own list.
+          { const kind = await comboboxKind(page, s.selector); if (kind) { await fillCombobox(page, s.selector, v, kind); break; } }
           const iso = await isoForDateBox(page, s.selector, v);
           if (iso) {
             await page.fill(s.selector, iso, { timeout: 20000 });
@@ -1765,7 +1892,8 @@ const MOVES_ON_RE = /\b(continue|next)\b/i;
 const DECLARATION_RE = /\b(declare|declaration|confirm|agree|accept|true|correct|understand|terms|conditions|read|statement)\b/i;
 // Plain text near an answer carries help ("Not sure? Read our guide."), so it needs a whole
 // declaration phrase, not one word (review round 6).
-const NEARBY_DECLARATION_RE = /\b(i|we) (declare|confirm|agree|accept|understand|have read)\b|\bdeclar(e|ation)\b|\bconfirm that\b|\bagree (to|with)\b|\baccept the\b|\btrue and (correct|accurate|complete)\b|\bstatement of fact\b/i;
+// One copy, shared with form-facts.js (forms round 2): scripts/declaration-words.js.
+const { NEARBY_DECLARATION_RE, NEVER_ROBOT_RE, CAPTURE_LOSS_RE } = require('./declaration-words');
 // A text box asking for his name as a signature is his.
 const SIGNATURE_RE = /\b(sign|signature|signed|signing|e-?sign)\b/i;
 
@@ -2006,6 +2134,13 @@ async function assertNotFinalAction(page, s, ctx = {}) {
       const question = c => {
         const q = [];
         if (c.labels) for (const l of c.labels) q.push(l.textContent || '');
+        // A label naming the control's name, not an id (forms round 2, as snapshotForm reads it): more words
+        // for the guard to read, never fewer.
+        if (!c.id && c.name && !document.getElementById(c.name)) {
+          const n = CSS.escape(c.name);
+          const ls = document.querySelectorAll(`label[for="${n}"]`);
+          if (ls.length === 1 && document.querySelectorAll(`input[name="${n}"],select[name="${n}"],textarea[name="${n}"]`).length === 1) q.push(ls[0].textContent || '');
+        }
         const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend');
         if (lg) q.push(lg.textContent || '');
         for (const n of [c, c.closest('[role=radiogroup],[role=group]')].filter(Boolean)) {
@@ -2153,13 +2288,25 @@ const FILLING = 'The robot is filling this in for you: hands off until this bar 
 // the allowlist, the credential check) is never carried past.
 async function runHandover(page, plan, opts = {}) {
   const done = [];
+  // The boxes the plan's own steps filled since its last move (a goto, click, press or his step), handed to the
+  // carry-on so a box he changes there can be told from one the site filled (review round 3).
+  let pageFills = new Set();
   const onward = async () => {
-    const c = await carryOn(page, plan, opts);
+    const c = await carryOn(page, plan, Object.assign({}, opts, { pageFills: [...pageFills] }));
     return { done: done.concat(c.done), stuck: c.stuck, end: c.end || null };
   };
   for (let i = 0; i < plan.steps.length; i++) {
     const s = plan.steps[i];
     try {
+      // A {{fact:...}} the facts file could not supply (forms round 2): this step fails, and is carried past as a missing box is.
+      if (opts.factsMissing && opts.factsMissing.has(i)) throw new Error(`the fact ${opts.factsMissing.get(i)} is not on file`);
+      // Belt (review R5): a step still holding a token in ANY field (a selector, dialogText, url, say), or a
+      // malformed one, never runs.
+      if (malformedIn(s)) throw new Error(`the fact token "${malformedIn(s).slice(0, 60)}" is not on file`);
+      if (JSON.stringify(s).includes('{{fact:')) {
+        const m = JSON.stringify(s).match(/\{\{fact:([^{}@"]*)/);
+        throw new Error(`the fact ${(m ? m[1] : '').trim() || 'token'} is not on file`);
+      }
       if (s.do === 'kevin') {
         if (opts.skipKevin) continue;            // a dry run: his steps are skipped, and still seen by the step before
         if (s.goto) {
@@ -2170,6 +2317,7 @@ async function runHandover(page, plan, opts = {}) {
         const ok = await waitForKevin(page, s, opts.kevinMs || Math.min(Number(s.minutes) || 10, 20) * 60 * 1000, opts.onTick);
         if (!ok) throw new Error('not done in time: ' + s.say);
         done.push({ do: 'kevin', executed: true, say: s.say });
+        pageFills = new Set();
         await turnBanner(page, FILLING);
         continue;
       }
@@ -2177,6 +2325,7 @@ async function runHandover(page, plan, opts = {}) {
       if (s.do === 'goto') assertNotFinalUrl(s.url);
       const r = await runSteps(page, [s], false, null);
       done.push(...r.done);
+      if (['fill', 'select', 'check'].includes(s.do)) pageFills.add(s.selector); else pageFills = new Set();
       if (opts.onTick) opts.onTick();
       if (!opts.quiet) await turnBanner(page, FILLING);   // a new page drops the bar: put it back (not in a dry run's screenshot)
     } catch (e) {
@@ -2234,6 +2383,16 @@ async function waitForWindowClose(ctx, capMs, onTick) {
 // The planner never decides alone: it may answer only a radio, tick box, dropdown or text box the robot
 // read on the page, citing one whole fact line and giving that line's own words, and press only a
 // button worded as moving on, read again the moment before it is pressed.
+// FORMS ROUND 2 (15 Nov 2026). Three gaps closed, each narrow. (A) The checks accept a Yes or No whose
+// question IS the fact line's label word for word, a negated option ("Not Listed") only when the line's whole
+// value IS that option, and a read-only combobox, filled by clicking its one option of that exact text.
+// (B) A scripted step may read a fact by key ({{fact:<key>}}), resolved before the window opens. (C) What
+// Kevin answers in his own window, on a page that is not a declaration hand-over, to a question the robot
+// listed for him (or a box the robot filled that he changed) is RECORDED in the facts file's "captured" list,
+// written after his window closes: never a declaration, a loss, a never-list question, a password, card, bank
+// or identity detail. A record never answers anything: the agent files real facts from it with `set`. (D) A
+// mapped page may grow by a declared optional group (scripts/declaration-maps.json) and stay mapped, and a
+// typeahead combobox is filled by its one exact option. The declaration rules above are unchanged.
 const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
 const { DECLARATION_TOPIC_RE } = require('./declaration-words');   // shared with form-facts.js, which never stores one
 const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -2299,7 +2458,26 @@ function loadDeclarationMaps() {
     // Its questions, in order, are the radios among its items.
     const radios = m.items.filter(([k, t]) => k === 'radio' && qs.some(q => normWords(q.text) === normWords(t))).map(([, t]) => normWords(t));
     if (radios.join('\n') !== qs.map(q => normWords(q.text)).join('\n')) return bad('its questions are not radios in its items, in the same order');
-    maps.push({ site: m.site, host: m.host.toLowerCase(), path: m.path, tail: m.tail, text: m.text, items: m.items.map(([k, t]) => [k, t]), loopback: !!override,
+    // Forms round 2 D1: a declared group of questions the page inserts after one of its own non-declaration
+    // questions (RightSure's occupation and business type, once an occupation type is chosen). Every item in it is
+    // a typed or picked box whose words are no declaration and nothing on the never list; one bad part drops the map.
+    const optional = [];
+    if (m.optional !== undefined) {
+      if (!Array.isArray(m.optional)) return bad('"optional" must be a list of groups');
+      for (const g of m.optional) {
+        if (!g || typeof g !== 'object' || !nonEmpty(g.after) || !Array.isArray(g.items) || !g.items.length) return bad('an optional group needs "after" and "items"');
+        const afterHits = m.items.filter(([, t]) => normWords(t) === normWords(g.after));
+        if (afterHits.length !== 1 || qs.some(q => normWords(q.text) === normWords(g.after)) || declarationWords(g.after) || neverRobot(g.after)) {
+          return bad(`optional group: "${g.after}" is not one of the map's own non-declaration questions`);
+        }
+        for (const it of g.items) {
+          if (!Array.isArray(it) || it.length !== 2 || !it.every(nonEmpty) || !['text', 'select', 'combobox', 'number', 'date', 'email', 'tel'].includes(it[0])
+            || declarationWords(it[1]) || neverRobot(it[1])) return bad(`optional group after "${g.after}": ${JSON.stringify(it)} is not a plain non-declaration question`);
+        }
+        optional.push({ after: g.after, items: g.items.map(([k, t]) => [k, t]) });
+      }
+    }
+    maps.push({ optional, site: m.site, host: m.host.toLowerCase(), path: m.path, tail: m.tail, text: m.text, items: m.items.map(([k, t]) => [k, t]), loopback: !!override,
       questions: qs.map(q => ({ id: q.id, text: q.text, name: q.name, yes: q.yes, no: q.no, yesValue: q.yesValue, noValue: q.noValue, his: q.his ? String(q.his) : '' })) });
   });
   return { maps, problems };
@@ -2332,7 +2510,7 @@ function loadExactCovers(file = STANDING_FILE()) {
 
 // A question the robot never answers, whatever his covers say: crime, insolvency, motoring, "anything
 // else", material facts, and any declaration in the first person.
-const NEVER_ROBOT_RE = /\b(convict\w*|criminal|offen[cs]es?|charg(?:e|ed|es|ing)|prosecut\w*|investigat\w*|police|cautions?|insolven\w*|liquidat\w*|iva|individual voluntary arrangements?|debt relief|sequestrat\w*|arrangements? with (?:\w+ )?creditors|administrat(?:ion|ors?)|receiver\w*|disqualif\w*|struck off|strike off|motoring|anything else|material facts?)\b/i;
+// NEVER_ROBOT_RE: in scripts/declaration-words.js (forms round 2), read at the top of this file with NEARBY_DECLARATION_RE.
 // A question naming other people. On its own it is never the robot's; the only door is an exact cover
 // of those words (which every robot answer needs anyway), and the never list still comes first.
 const OTHER_PEOPLE_RE = /\b(any persons? to be insured|anyone|any other persons?|directors?|partners?|tenants?)\b/i;
@@ -2362,11 +2540,26 @@ const radioTargets = sel => [sel, `label[for="${sel.slice(1)}"] >> nth=0`];
 // the never list. OWNERWHY says why there is no owner, when the caller knows.
 const sameItems = (snap, map) => snap.items.length === map.items.length
   && snap.items.every((it, k) => it.kind === map.items[k][0] && normWords(it.question) === normWords(map.items[k][1]));
+// D1 (later in a visit only): the base items, with each declared optional group either wholly present, in order,
+// straight after its own question, or wholly absent. Half a group, a group elsewhere or anything extra: false.
+function sameItemsOrGroups(snap, map) {
+  const is = (it, [k, q]) => !!it && it.kind === k && normWords(it.question) === normWords(q);
+  let j = 0;
+  for (const base of map.items) {
+    if (!is(snap.items[j], base)) return false;
+    j++;
+    for (const g of (map.optional || []).filter(x => normWords(x.after) === normWords(base[1]))) {
+      if (g.items.every((gi, n) => is(snap.items[j + n], gi))) j += g.items.length;
+    }
+  }
+  return j === snap.items.length;
+}
 function mappedDeclarations(snap, url, { covers = [], ownerKey = null, maps, first = true, ownerWhy = '' } = {}) {
   if (!snap || !Array.isArray(snap.items)) return null;
   const map = mapForUrl(maps === undefined ? loadDeclarationMaps().maps : maps, url);
   if (!map) return null;
-  if (!sameItems(snap, map)) return null;
+  // At first sight the base list exactly; later in the visit a declared optional group may have appeared (D1).
+  if (!(sameItems(snap, map) || (!first && sameItemsOrGroups(snap, map)))) return null;
   if (first && normWords(snap.formText) !== normWords(map.text)) return null;
   const text = normWords(snap.formText), tail = normWords(map.tail);
   if (!tail || !text.endsWith(tail)) return null;
@@ -2535,9 +2728,20 @@ async function snapshotForm(page) {
       }
       return t;
     };
+    // A label whose for= names the control's NAME, not an id (react-bootstrap-typeahead on RightSure, 15 Nov
+    // 2026: the input has no id). Only when the control has no id, no element has that id, exactly one
+    // control has that name, and exactly one label names it.
+    const byNameLabel = c => {
+      if (c.id || !c.name || document.getElementById(c.name)) return null;
+      const n = CSS.escape(c.name);
+      if (document.querySelectorAll(`input[name="${n}"],select[name="${n}"],textarea[name="${n}"]`).length !== 1) return null;
+      const ls = document.querySelectorAll(`label[for="${n}"]`);
+      return ls.length === 1 ? ls[0] : null;
+    };
     const question = c => {
       const q = [];
       if (c.labels) for (const l of c.labels) q.push(l.textContent);
+      const nl = byNameLabel(c); if (nl) q.push(nl.textContent);
       const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend'); if (lg) q.push(lg.textContent);
       q.push(c.getAttribute('aria-label') || '', byId(c.getAttribute('aria-labelledby')), c.getAttribute('placeholder') || '');
       // A box with its own label is asked by that label; the words around it can hold the next question.
@@ -2574,7 +2778,13 @@ async function snapshotForm(page) {
         continue;
       }
       if (!shown(el)) continue;
-      const it = { kind: el.tagName === 'SELECT' ? 'select' : (el.tagName === 'TEXTAREA' ? 'text' : (type || 'text')),
+      // A typed input hidden from assistive tech is the page's own machinery (the typeahead's hint box), not a
+      // question. Only an <input> of a typed kind: a select, textarea, radio or tick box keeps its old reading.
+      if (el.tagName === 'INPUT' && ['text', 'search', 'tel', 'email', 'number', 'url', 'date'].includes(type || 'text') && el.getAttribute('aria-hidden') === 'true') continue;
+      // A typed box that opens a list ("combobox"): still a typed value for the planner, chosen from the list.
+      const combo = el.tagName === 'INPUT' && String(el.getAttribute('role') || '').toLowerCase() === 'combobox'
+        && String(el.getAttribute('aria-haspopup') || '').toLowerCase() === 'listbox';
+      const it = { kind: el.tagName === 'SELECT' ? 'select' : (el.tagName === 'TEXTAREA' ? 'text' : (combo ? 'combobox' : (type || 'text'))),
                    question: question(el), target: target(el), value: clean(el.value).slice(0, 120), required: !!el.required };
       if (el.tagName === 'SELECT') {
         it.options = Array.from(el.options).map(o => clean(o.label || o.textContent)).filter(Boolean).slice(0, 60);
@@ -2667,6 +2877,7 @@ const PLANNER_RULES = [
   'Answer only from FACTS. Every step names in "source" the ONE whole fact line it used, copied exactly. A Yes or No needs a fact line about that same thing.',
   'Use only the targets listed on the page items. To answer a radio question, click the target of the option you choose. Never click a button as a step: the only button you may name is "next".',
   'A typed value ("fill") must be copied exactly from the fact line you cite (dates as DD/MM/YYYY; TODAY is given).',
+  'A combobox takes a fill with the exact text of the option wanted.',
   'If no fact answers a question the page needs, put the question in "unknown" and do not guess. Skip optional questions no fact answers.',
   'Leave a question alone when its current value is already right.',
   'A fact line whose label ends with a tag in square brackets ("Year built [12 Test Lane]: 1930") is about that house only. Cite it only for a question about that house; if the page does not say which house it is asking about, put the question in "unknown".',
@@ -2726,6 +2937,31 @@ const stems = t => new Set(tokensOf(t).filter(w => w.length >= 5 && !COMMON_WORD
 // subject in its label with any "[house]" tag taken out: "House in multiple occupation (HMO): No" never
 // ticks HMO, and a "No" or a word inside an address never answers anything. Both checks only ever ADD to
 // the first, so a line refused before is refused still.
+// Forms round 2 (15 Nov 2026, the real RightSure property page): two narrow doors, each exact.
+//  - A1: a Yes or No whose subject is all short words ("Is the property sub-let?") shares no stem, so the
+//    subject also counts when the question IS the line's label word for word (exactLabel below).
+//  - A3: an option worded with a negation ("Not Listed") stays refused unless the line's whole value IS
+//    that option ("Listed building: Not listed") and its label shares the question's subject.
+// A select's hint in its label ("What is the dwelling type?Please select an option": RightSure) is taken
+// off for that comparison only; the snapshot still reports the question as the page shows it.
+const SELECT_HINT_RE = /\s*please\s+(?:select\s+an\s+option|choose\b[^?]*|enter\b[^?]*)\s*$/i;
+function bareQuestion(q) {
+  let s = String(q || '');
+  const i = s.indexOf('?');
+  if (i >= 0) s = s.slice(0, i + 1) + s.slice(i + 1).replace(SELECT_HINT_RE, '');
+  return s.replace(/\s*\?+\s*$/, '');
+}
+// A "Label: value" line's label, any "[house]" tag taken out; '' for a line with no colon.
+const lineLabel = text => { const i = String(text).indexOf(':'); return i < 0 ? '' : String(text).slice(0, i).replace(/\[[^\]]*\]/g, ' '); };
+// The question, bare, is the line's label, bare, word for word (lineKey on both). Never for a no-colon line,
+// and never for a line tagged with a house (review R3): "Sub-let [12 Test Lane]: No" is about that house only,
+// so it is matched by the stems rule or not at all.
+function exactLabel(question, text) {
+  const i = String(text).indexOf(':');
+  if (i < 0 || /\[[^\]]*\]/.test(String(text).slice(0, i))) return false;
+  const label = lineKey(bareQuestion(lineLabel(text)));
+  return !!label && label === lineKey(bareQuestion(question));
+}
 function pickInLine(label, line, question = '') {
   const words = tokensOf(label);
   if (!words.length) return false;
@@ -2735,11 +2971,19 @@ function pickInLine(label, line, question = '') {
   if (words.length === 1 && /^(yes|no)$/.test(words[0])) {
     const yn = new Set(tokensOf(text).filter(w => w === 'yes' || w === 'no'));
     const subject = stems(question);
-    if (!(yn.size === 1 && yn.has(words[0]) && [...stems(text)].some(w => subject.has(w)))) return false;
+    const sameLabel = exactLabel(question, text);   // A1: the one alternative to a shared stem
+    if (!(yn.size === 1 && yn.has(words[0]) && ([...stems(text)].some(w => subject.has(w)) || sameLabel))) return false;
     if (colon < 0) return true;
-    return inValue.has(words[0]) && [...stems(text.slice(0, colon).replace(/\[[^\]]*\]/g, ' '))].some(w => subject.has(w));
+    return inValue.has(words[0]) && ([...stems(text.slice(0, colon).replace(/\[[^\]]*\]/g, ' '))].some(w => subject.has(w)) || sameLabel);
   }
-  if (/\b(no|not|never|none|nil|free|without)\b/i.test(label)) return false;
+  if (/\b(no|not|never|none|nil|free|without)\b/i.test(label)) {
+    // Never pickable, as before, with one exception (A3): the whole value IS the whole option, the label
+    // shares the question's subject (a stem, or the exact label), and nothing in it is a declaration.
+    if (colon < 0 || lineKey(valueSide(text)) !== lineKey(label)) return false;
+    if (declarationWords(`${text} ${question}`) !== '') return false;
+    const subject = stems(question);
+    return [...stems(lineLabel(text))].some(w => subject.has(w)) || exactLabel(question, text);
+  }
   const picked = words.filter(w => w.length >= 3 || /^\d+$/.test(w));
   const said = normWords(text).replace(/\b(never|not|no|none)\b[^;.]*/g, ' ');
   const have = new Set(tokensOf(said));
@@ -2796,6 +3040,109 @@ function storedFactsFor(plan, { dryRun = false, today, file } = {}) {
     conflicts: clash, problems: r.problems, ownerDiffers: r.ownerDiffers || [], resolved: r.resolved };
 }
 
+// ── Plan steps read the facts file by key (forms round 2, 15 Nov 2026) ──
+// A scripted step typed a literal ("value": "1970") the facts file could neither supply nor contradict. Now a
+// step's "value" or "label" may say {{fact:<key>}} or {{fact:<key>@<house>}} (form-facts.js resolveFact), read
+// before any browser opens. The dry run refuses a token it cannot read (no "factsFor", an unknown or ambiguous
+// key, an out-of-date fact), naming the step and the fix. The live window runs what Kevin approved: an
+// out-of-date fact is typed as it stands (his card showed it), and a token that cannot be read at all fails
+// THAT step ("the fact <key> is not on file"), carried past as any missing box is. runSteps refuses any
+// fill or select still holding "{{fact:", so the token itself is never typed.
+// Well formed only (review round 3): lower-case "fact", a fact key, and optionally "@" and a ref key, no spaces.
+const FACT_TOKEN_RE = /\{\{fact:([a-z0-9][a-z0-9-]*)(?:@([A-Za-z0-9][A-Za-z0-9-]*))?\}\}/g;
+// Any "{{" or "}}" left once {{today}} and every well-formed {{fact:...}} are taken out: a malformed token.
+const malformedToken = v => typeof v === 'string' && /\{\{|\}\}/.test(v.replace(/\{\{today\}\}/g, ' ').replace(FACT_TOKEN_RE, ' '));
+// The first string field of a step (arrays included) holding a malformed token, or null.
+function malformedIn(step) {
+  const strings = [];
+  const walk = v => { if (typeof v === 'string') strings.push(v); else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') Object.values(v).forEach(walk); };
+  walk(step);
+  return strings.find(malformedToken) || null;
+}
+const FACT_TOKEN_FIELDS = new Set(['value', 'label']);
+const CAPTURED_HINT = 'Kevin answered questions in his own window before: run `node scripts/form-facts.js captured --task <id>` (or --owner), and store each '
+  + 'one that is a real fact with `node scripts/form-facts.js set ... --source "<where it came from>"`. A recorded answer never answers a form by itself.';
+const FACT_SET_HELP = 'node scripts/form-facts.js set --scope property|owner|general [--ref <ref>] --key <key> --value <v> --source <s>';
+function resolvePlanFacts(plan, { dryRun = false, today, file } = {}) {
+  const out = { plan, tokens: [], missing: new Map(), problems: [] };
+  const found = [];
+  (plan.steps || []).forEach((s, i) => {
+    // A malformed token ("{{ fact:x}}", "{{FACT:x}}", "{{fact:x}", "x{{fact:") is never read and never typed.
+    const bad = malformedIn(s);
+    if (bad) {
+      if (dryRun) die(`step ${i + 1}: "${bad.slice(0, 80)}" holds a malformed token. Write {{fact:<key>}} or {{fact:<key>@<house key>}} exactly (lower case, no spaces), or {{today}}.`);
+      if (!out.missing.has(i)) out.missing.set(i, `token "${bad.slice(0, 60)}"`);
+      return;
+    }
+    for (const [field, v] of Object.entries(s || {})) {
+      if (typeof v !== 'string' || !v.includes('{{fact:')) continue;
+      if (!FACT_TOKEN_FIELDS.has(field)) {
+        if (dryRun) die(`step ${i + 1}: "${field}" holds a {{fact:...}} token, and a token is read only in a step's "value" or "label". Take it out of "${field}".`);
+        // Live (review R5): never read there, so the step never runs; it fails as a missing fact does.
+        const m = v.match(/\{\{fact:([^{}@]*)/);
+        if (!out.missing.has(i)) out.missing.set(i, (m ? m[1] : '').trim() || field);
+        continue;
+      }
+      for (const m of v.matchAll(FACT_TOKEN_RE)) found.push({ i, field, token: m[0], key: m[1].trim(), at: m[2] === undefined ? undefined : m[2].trim() });
+    }
+  });
+  if (!found.length) return out;
+  const ff = require('./form-facts');
+  const fix = (t, why) => `step ${t.i + 1}: ${t.token} cannot be read: ${why}. Store the fact with \`${FACT_SET_HELP}\`, or write the step without the token.`;
+  let store = null;
+  if (!plan.factsFor) {
+    if (dryRun) die(`step ${found[0].i + 1}: ${found[0].token} reads the facts file, but the plan does not say whose form it is. Add "factsFor": {"owner": "<name>", "properties": ["<address>"]}.`);
+    out.problems.push('the plan has {{fact:...}} tokens but no "factsFor"');
+  } else {
+    try { store = ff.loadStore(file); } catch (e) {
+      if (dryRun) die(`the facts file cannot be read: ${e.message}`);
+      out.problems.push(String((e && e.message) || e).slice(0, 300));
+    }
+  }
+  const values = new Map();
+  for (const t of found) {
+    let r = store ? ff.resolveFact(store, { owner: plan.factsFor.owner, properties: plan.factsFor.properties || [], key: t.key, at: t.at, today, allowExpired: !dryRun })
+      : { refused: `the fact ${t.key} is not on file`, code: 'unknown' };
+    // The belt over resolveFact's own (which screens the key, the label and the value as the store does, so
+    // an occupation of "Administrator" still reads): a key on the declaration list, or a first-person
+    // declaration in the value, is never typed.
+    if (!r.refused && (declarationWords(t.key.replace(/-/g, ' ')) || NEARBY_DECLARATION_RE.test(r.value))) r = { refused: `"${t.key}" reads as a declaration, which is Kevin's`, code: 'declaration' };
+    if (r.refused) {
+      if (dryRun) die(fix(t, r.refused));
+      if (!out.missing.has(t.i)) out.missing.set(t.i, t.key);
+      continue;
+    }
+    values.set(`${t.i}|${t.token}`, r.value);
+    out.tokens.push({ step: t.i + 1, key: t.key, scope: r.scope, expired: r.expired });
+  }
+  // The steps with every readable token put in. A step with a token it could not read keeps its literal, and
+  // runHandover fails it before it reaches the page (runSteps would refuse the literal anyway).
+  const steps = (plan.steps || []).map((s, i) => {
+    if (out.missing.has(i)) return s;
+    const c = Object.assign({}, s);
+    for (const field of FACT_TOKEN_FIELDS) {
+      if (typeof c[field] === 'string' && c[field].includes('{{fact:')) c[field] = c[field].replace(FACT_TOKEN_RE, tok => values.get(`${i}|${tok}`));
+    }
+    return c;
+  });
+  out.plan = Object.assign({}, plan, { steps });
+  return out;
+}
+// A typed literal the facts file already holds, by the label of that fact (never its value): the agent can
+// swap it for a token. A hint for the dry run, never a refusal.
+function typedFacts(plan, used) {
+  const out = [];
+  (plan.steps || []).forEach((s, i) => {
+    if (!s || !['fill', 'select'].includes(s.do)) return;
+    const lit = s.do === 'select' && s.label !== undefined ? s.label : s.value;
+    if (typeof lit !== 'string' || lit.includes('{{')) return;
+    const k = lineKey(lit);
+    if (!k) return;
+    for (const label of new Set((used || []).filter(u => lineKey(u.value) === k).map(u => u.label))) out.push({ step: i + 1, label });
+  });
+  return out;
+}
+
 // The planner's steps, checked. Each must target an answer the robot read on the page (a radio
 // option, a tick box, a dropdown or a text box: never a button), cite one whole fact line, and give
 // words that are in that line. Anything else is a question for Kevin, never a guess.
@@ -2806,6 +3153,8 @@ function checkPlannerSteps(out, snap, facts) {
     if (it.kind === 'radio') for (const o of it.options || []) answers.set(o.target, { item: it, pick: o.label, kind: 'click' });
     else if (it.kind === 'checkbox') answers.set(it.target, { item: it, pick: it.option, kind: 'click' });
     else if (it.kind === 'select') answers.set(it.target, { item: it, kind: 'select' });
+    // A combobox is a typed value, checked by valueInLine as a text box is (runSteps then picks its one option).
+    else if (it.kind === 'combobox') answers.set(it.target, { item: it, kind: 'fill' });
     else answers.set(it.target, { item: it, kind: 'fill' });
   }
   const buttons = new Map(snap.buttons.map(b => [b.target, b]));
@@ -2819,6 +3168,9 @@ function checkPlannerSteps(out, snap, facts) {
     if (a.kind !== want || !line || !a.item.question) { unknown.push(q); continue; }
     if (a.kind === 'fill') {
       if (!valueInLine(s.value, line)) { unknown.push(q); continue; }
+      // A combobox answer is a pick from a list (review R2): the same checks as a select's, the Yes/No subject
+      // rule and the negation rule included, on top of the typed-value check.
+      if (a.item.kind === 'combobox' && !pickInLine(String(s.value), line, a.item.question)) { unknown.push(q); continue; }
       steps.push({ do: 'fill', selector: s.target, value: String(s.value), question: q, item: a.item });
       continue;
     }
@@ -2837,7 +3189,8 @@ function checkPlannerSteps(out, snap, facts) {
 
 // Errors that mean a box or button was not there (a plan step written for another state of the page):
 // the robot carries on past these. A refusal by the guard, the allowlist or the credential check never.
-const CARRY_PAST_RE = /Timeout \d+ms exceeded|waiting for (?:locator|selector)|resolved to 0 elements|element is not (?:visible|attached)/i;
+// A plan step whose {{fact:...}} the file could not supply (forms round 2) is carried past the same way.
+const CARRY_PAST_RE = /Timeout \d+ms exceeded|waiting for (?:locator|selector)|resolved to 0 elements|element is not (?:visible|attached)|^the fact .{1,80} is not on file$/i;
 const NEVER_PAST_RE = /^(refused|BROWSER REFUSED)|not on the allowlist|password|credential/i;
 
 // Goes on from the page the plan's steps left, page by page. Returns { done, stuck, end }: end is
@@ -2857,19 +3210,43 @@ async function carryOnPages(page, plan, opts, done) {
   const plan_ = opts.planner || planner();
   const maxPages = Math.min(Number(plan.carryOn.maxPages) || 15, CARRY_ON_MAX_PAGES);
   let lastSig = '', samePage = 0;
-  const his = async (p, questions, snapBefore, banner, notes) => {
+  // The targets the robot itself acted on in this run, so a value he changed can be told from one he gave.
+  // The boxes the robot itself filled on THIS page visit (review round 3): cleared when the page moves, so a later
+  // page reusing a selector is never read as one the robot filled. Seeded with the plan's own fills since its
+  // last move (runHandover's pageFills).
+  let pageFills = new Set(opts.pageFills || []);
+  const robotTargets = () => new Set(pageFills);
+  const his = async (p, questions, snapBefore, banner, notes, capture) => {
     // His turn, mid-form: he answers these and presses Next himself; the robot then carries on. A mapped
     // page brings its own BANNER, built so its first line can never be cut off, and its NOTES (lines that
     // are not questions), which a dry run lists apart so the card carries only real questions.
+    // CAPTURE (forms round 2, live only): this page is not a declaration hand-over, so what he answers on it
+    // is RECORDED for the agent (never answered from): { listed } the snapshot positions of the questions the
+    // robot handed him, { skip } a mapped page's declaration questions. Any failure in it is noted on the
+    // ledger line and never stops or delays his window.
     if (opts.skipKevin) {
       const stuck = { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + questions.join(' | ').slice(0, 400),
         unknown: notes ? questions.filter(x => !notes.has(x)) : questions };
       if (notes) stuck.notes = questions.filter(x => notes.has(x));
       return { done, stuck };
     }
+    const log = opts.captureLog;
+    const noted = e => { if (log) log.errors.push(String((e && e.message) || e).slice(0, 200)); };
+    let cap = null;
+    if (capture && log) {
+      try { cap = await captureStart(page, snapBefore, { skip: capture.skip, listed: capture.listed, robot: robotTargets() }); } catch (e) { noted(e); }
+    }
     await turnBanner(page, banner || `Your turn: ${questions.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${questions.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
-    const moved = await waitForPageMove(page, snapBefore, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick);
+    const poll = cap ? () => capturePoll(page, cap).catch(noted) : null;
+    const moved = await waitForPageMove(page, snapBefore, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick, poll);
     if (!moved) return { done, stuck: { step: `page ${p}`, do: 'kevin', error: 'not done in time: ' + questions.join(' | ').slice(0, 300) } };
+    if (cap) {
+      try {
+        let u = null;
+        if (!cap.off) { try { u = new URL(cap.url); } catch (e) { noted(new Error(`the page address could not be read, so nothing was kept: ${e.message}`)); } }
+        if (u) for (const c of captureEnd(cap)) log.pending.push(Object.assign(c, { site: u.hostname.toLowerCase(), path: u.pathname, carryOn: p }));
+      } catch (e) { noted(e); }
+    }
     done.push({ do: 'kevin', executed: true, say: questions.join(' | ').slice(0, 300), carryOn: p });
     await turnBanner(page, FILLING);
     lastSig = '';
@@ -2969,6 +3346,7 @@ async function carryOnPages(page, plan, opts, done) {
           await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers });
           const r = await runSteps(page, [s], false, null);
           done.push(...r.done.map(d => Object.assign(d, { carryOn: p })));
+          if (['fill', 'select', 'click', 'check'].includes(s.do)) pageFills.add(s.selector);
           await page.waitForTimeout(400);
         } catch (e) {
           const why = String(e.message || '');
@@ -2981,9 +3359,12 @@ async function carryOnPages(page, plan, opts, done) {
       const after = await snapOr(snap);
       if (after.readError || !mapped(after, false)) return wholePage(p, after, m, st);
       const fresh = after.items.some(i => !snap.items.some(j => j.question === i.question));
+      // D2: an answer that inserted questions (a declared optional group) earns the planner another round on
+      // them, even with questions already left for Kevin; never more than CARRY_ON_ROUNDS in all.
+      const grew = after.items.length > snap.items.length;
       snap = after;
       view = hide(after);
-      if (unknown.length || (!out.steps.length && !fresh)) break;
+      if ((unknown.length && !grew) || (!out.steps.length && !fresh)) break;
     }
     // His covered declarations, one by one, each by its exact No; the page and its address re-checked after every one.
     for (const q of m.questions) {
@@ -3022,9 +3403,12 @@ async function carryOnPages(page, plan, opts, done) {
     const said = alreadyLines(st);
     const asks = m.questions.filter(q => !q.decision.robot).map(q => `"${q.text}" (${q.decision.why})`).concat(unknown);
     const rest = said.concat(asks, ['press Next when the page is right']);
-    return his(p, (lead ? [lead] : []).concat(rest), after, mappedBanner(lead, rest), new Set((lead ? [lead] : []).concat(said, ['press Next when the page is right'])));
+    // What he answers on it may be kept, its mapped declaration questions never (forms round 2).
+    return his(p, (lead ? [lead] : []).concat(rest), after, mappedBanner(lead, rest), new Set((lead ? [lead] : []).concat(said, ['press Next when the page is right'])),
+      { skip: mappedTexts, listed: listedItems(after, unknown) });
   };
   for (let p = 1; p <= maxPages; p++) {
+    if (p > 1) pageFills = new Set();   // a new page visit: none of these boxes are the robot's yet
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(Number(opts.settleMs) || 1500);
     if (opts.onTick) opts.onTick();
@@ -3086,6 +3470,7 @@ async function carryOnPages(page, plan, opts, done) {
           await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers });
           const r = await runSteps(page, [s], false, null);
           done.push(...r.done.map(d => Object.assign(d, { carryOn: p })));
+          if (['fill', 'select', 'click', 'check'].includes(s.do)) pageFills.add(s.selector);
           await page.waitForTimeout(400);    // an answer can redraw the form
         } catch (e) {
           const why = String(e.message || '');
@@ -3101,7 +3486,7 @@ async function carryOnPages(page, plan, opts, done) {
       if (handed) break;
       const after = await snapshotForm(page);
       if (out.unknown.length) {
-        const r = await his(p, [...new Set(out.unknown)], after);
+        const r = await his(p, [...new Set(out.unknown)], after, undefined, undefined, { listed: listedItems(after, out.unknown) });
         if (r) return r;
         handed = true;
         break;
@@ -3116,7 +3501,7 @@ async function carryOnPages(page, plan, opts, done) {
     // The one button that moves on, worded as moving on; anything else ("Agree and continue", "Sign in",
     // "No") is his, by name. (A price with a Buy button already ended the robot's part above.)
     if (!MOVE_ON_RE.test(next.text.trim())) {
-      const r = await his(p, [`press "${next.text}"`], snap);
+      const r = await his(p, [`press "${next.text}"`], snap, undefined, undefined, {});
       if (r) return r;
       continue;
     }
@@ -3128,7 +3513,7 @@ async function carryOnPages(page, plan, opts, done) {
       // Its hidden words count too: "Continue" labelled "Accept and continue" is an agreement.
       if (!MOVE_ON_RE.test(nowText) || HARD_ACTION_RE.test(nowAria) || SOFT_PRESS_RE.test(nowAria) || declarationWords(nowAria)
           || declarationWords([nowSnap.formText].concat(nowSnap.items.map(i => i.question)).join(' | '))) {
-        const r = await his(p, [`press "${nowText || next.text}" (the page changed before the robot pressed it)`], nowSnap);
+        const r = await his(p, [`press "${nowText || next.text}" (the page changed before the robot pressed it)`], nowSnap, undefined, undefined, {});
         if (r) return r;
         continue;
       }
@@ -3139,7 +3524,7 @@ async function carryOnPages(page, plan, opts, done) {
     } catch (e) {
       const why = String(e.message || e);
       if (/^(refused|could not read|BROWSER REFUSED)/.test(why)) {
-        const r = await his(p, [`press "${next.text}" (${why.slice(0, 120)})`], snap);
+        const r = await his(p, [`press "${next.text}" (${why.slice(0, 120)})`], snap, undefined, undefined, {});
         if (r) return r;
         continue;
       }
@@ -3150,9 +3535,136 @@ async function carryOnPages(page, plan, opts, done) {
   return { done, stuck: { step: `page ${maxPages}`, do: 'carry-on', error: `${maxPages} pages and still no price` } };
 }
 
+// ── What Kevin answers in his own window is RECORDED (forms round 2, 15 Nov 2026; cut down by review R1) ──
+// A kept answer never answers anything by itself: it is a private record (form-facts.js "captured") the agent
+// reads after his window (`node scripts/form-facts.js captured --task <id>`) and files as a real fact with
+// `set` and its source. Only two things are recorded: an item the robot itself listed for him on that page,
+// and a box the robot filled in this run that he changed ("was": the robot's value; "corrected" on the ledger).
+//
+// The current answer of each given item, read in ONE read-only page.evaluate that never clicks or focuses
+// anything: a typed box's value (text, number, date, combobox), a dropdown's chosen option TEXT, a radio
+// group's ticked option LABEL, a tick box as "Yes" or "No". An item it cannot find or read gives nothing, and
+// a password box (or one whose name or autocomplete says card, password, code or token) is never read. The
+// result carries where the page stood, built as snapshotForm builds it (address, VISIBLE h1s), so a read of
+// the next page is never taken for this one, and a hidden h1 never makes this page look like another.
+async function readAnswers(page, snap) {
+  const items = (snap.items || []).map((i, k) => ({ index: i.index === undefined ? k : i.index, question: String(i.question || ''), kind: i.kind, target: i.target || null,
+    options: (i.options || (i.option ? [i.option] : [])).map(o => (typeof o === 'string' ? { label: o, target: null } : { label: o.label, target: o.target })) }));
+  const r = await page.evaluate(({ items: rows, secretSrc }) => {
+    const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+    const shown = el => {
+      if (!el || !el.getBoundingClientRect) return false;
+      const b = el.getBoundingClientRect(); const st = getComputedStyle(el);
+      return b.width > 0 && b.height > 0 && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) !== 0;
+    };
+    const one = sel => {
+      if (!sel) return null;
+      const m = /^(.*) >> nth=(\d+)$/.exec(sel);
+      try { return m ? (document.querySelectorAll(m[1])[Number(m[2])] || null) : document.querySelector(sel); } catch (e) { return null; }   // a target this page cannot parse: nothing to read
+    };
+    const control = el => (el && el.tagName === 'LABEL' ? el.control : el);
+    const secretName = new RegExp(secretSrc, 'i');
+    const secret = el => String(el.type || '').toLowerCase() === 'password'
+      || /\b(?:cc-|current-password|new-password|one-time-code)/i.test(String(el.getAttribute('autocomplete') || ''))
+      || secretName.test([el.getAttribute('name'), el.id, el.getAttribute('autocomplete'), el.getAttribute('aria-label')].filter(Boolean).join(' '));
+    const answers = [];
+    for (const it of rows) {
+      const base = { index: it.index, question: it.question, kind: it.kind, options: it.options.map(o => o.label) };
+      if (it.kind === 'radio') {
+        const ctls = it.options.map(o => control(one(o.target)));
+        if (ctls.some(c => c && secret(c))) continue;
+        const ticked = it.options.filter((o, n) => !!(ctls[n] && ctls[n].checked));
+        answers.push(Object.assign(base, { answer: ticked.length === 1 ? ticked[0].label : '' }));
+        continue;
+      }
+      const el = control(one(it.target));
+      if (!el || secret(el)) continue;
+      if (it.kind === 'checkbox') { answers.push(Object.assign(base, { answer: el.checked ? 'Yes' : 'No' })); continue; }
+      if (el.tagName === 'SELECT') {
+        const o = el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+        answers.push(Object.assign(base, { answer: o && o.value !== '' ? clean(o.label || o.textContent) : '' }));
+        continue;
+      }
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') answers.push(Object.assign(base, { answer: String(el.value || '') }));
+    }
+    return { url: location.href, headings: Array.from(document.querySelectorAll('h1')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 4), answers };
+  }, { items, secretSrc: SECRET_NAME_RE.source });
+  const out = r.answers;
+  out.page = { url: r.url, headings: r.headings };
+  return out;
+}
+
+// Never recorded, checked on the question, its options and the answer (form-facts.js checks again on write).
+function captureRefusal(a) {
+  const words = [a.question].concat(a.options || [], [a.answer, a.was || '']).join(' | ');
+  if (declarationWords(words) || neverRobot(words) || CAPTURE_LOSS_RE.test(words)) return 'a declaration, a loss, or on the never list';
+  // The credential guard's own words (a one-time code, a token, a security answer), over the private list.
+  if (SECRET_NAME_RE.test(String(a.question || '')) || /\bcodes?\b/i.test(String(a.question || ''))) return 'a credential or a code';
+  return require('./form-facts').capturedRefusal(a);
+}
+const SETTLED_KINDS = new Set(['select', 'radio', 'checkbox']);
+// The page as he was handed it. LISTED: the snapshot positions of the items the robot listed for him; ROBOT: the
+// targets the robot acted on in this run; SKIP: a mapped page's declaration questions (never read). Only listed
+// items and robot-filled boxes are watched. Nothing on the page is recorded when it is a pay page, or when any
+// item, or the form's text, holds a declaration, a never-list word or a loss ("loss or damage", "subsidence").
+async function captureStart(page, snap, { skip = new Set(), listed = new Set(), robot = new Set() } = {}) {
+  const cap = { sig: pageSignature(snap), off: '', listed, robotFilled: new Set(), first: new Map(), prev: new Map(), stable: new Map(), items: [] };
+  const all = (snap.items || []).map((i, index) => Object.assign({}, i, { index })).filter(i => !skip.has(normWords(i.question)));
+  if ((snap.prices.length && snap.buttons.some(x => BUY_RE.test(x.text))) || BUY_RE.test([snap.formText].concat(snap.headings || []).join(' | '))) cap.off = 'a payment page';
+  else if (all.some(i => declarationWords(itemWords(i)) || neverRobot(itemWords(i)) || CAPTURE_LOSS_RE.test(itemWords(i)))) cap.off = 'the page asks a declaration or a loss';
+  else if (CAPTURE_LOSS_RE.test(String(snap.formText || ''))) cap.off = 'the page asks about a loss';
+  if (cap.off) return cap;
+  const targetsOf = i => [i.target].concat((i.options || []).map(o => o && o.target)).filter(Boolean);
+  for (const i of all) if (targetsOf(i).some(t => robot.has(t))) cap.robotFilled.add(i.index);
+  cap.items = all.filter(i => listed.has(i.index) || cap.robotFilled.has(i.index));
+  cap.url = snap.url;
+  if (!cap.items.length) { cap.off = 'nothing on the page is watched'; return cap; }
+  for (const a of await readAnswers(page, { items: cap.items })) { cap.first.set(a.index, a); cap.prev.set(a.index, a.answer); cap.stable.set(a.index, a); }
+  return cap;
+}
+// A poll of this same page (a read of another page, or one that fails mid-move, is not one). A pick is taken at
+// once; a typed answer only when two polls in a row read it the same, so a half-typed "19" is never kept.
+async function capturePoll(page, cap) {
+  if (cap.off) return;
+  let r;
+  try { r = await readAnswers(page, { items: cap.items }); } catch (e) { return; }   // mid-navigation: the last settled read stands
+  if (pageSignature(r.page) !== cap.sig) return;
+  for (const a of r) {
+    if (SETTLED_KINDS.has(a.kind) || cap.prev.get(a.index) === a.answer) cap.stable.set(a.index, a);
+    cap.prev.set(a.index, a.answer);
+  }
+}
+// What to record: a listed item he answered, and a robot-filled box he changed (with "was").
+function captureEnd(cap) {
+  if (cap.off) return [];
+  const out = [];
+  for (const [index, now] of cap.stable) {
+    const before = cap.first.has(index) ? String(cap.first.get(index).answer).trim() : '';
+    const answer = String(now.answer).trim();
+    if (!answer || answer === before) continue;
+    const corrected = cap.robotFilled.has(index) && !!before;
+    if (!cap.listed.has(index) && !corrected) continue;
+    const e = { question: now.question, kind: now.kind, index, answer, options: now.options };
+    if (corrected) e.was = before;
+    if (captureRefusal(e)) continue;
+    out.push(e);
+  }
+  return out.sort((x, y) => x.index - y.index);
+}
+// The snapshot positions of the questions the robot handed him by name: each one that is exactly one item's question.
+function listedItems(snap, questions) {
+  const out = new Set();
+  for (const q of questions || []) {
+    const hits = (snap.items || []).map((i, k) => [i, k]).filter(([i]) => i.question && normWords(i.question) === normWords(q));
+    if (hits.length === 1) out.add(hits[0][1]);
+  }
+  return out;
+}
+
 // True once he has moved the page on (movedOn) and no password box is showing. BEFORE is the page as
 // the robot left it, taken after its own answers, so a follow-up the robot revealed is not his move.
-async function waitForPageMove(page, before, maxMs, onTick) {
+// ONPOLL (forms round 2) runs every 250 ms between those looks, inside the same 1.5 s, so the move is seen no later.
+async function waitForPageMove(page, before, maxMs, onTick, onPoll) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     if (page.isClosed()) return false;
@@ -3160,7 +3672,11 @@ async function waitForPageMove(page, before, maxMs, onTick) {
     try {
       if (movedOn(before, await snapshotForm(page)) && Number(await visiblePasswordFieldCount(page)) === 0) return true;
     } catch { /* mid-navigation: look again */ }
-    await new Promise(r => setTimeout(r, 1500));
+    const until = Date.now() + 1500;
+    while (Date.now() < until) {
+      if (onPoll && !page.isClosed()) await onPoll();
+      await new Promise(r => setTimeout(r, Math.max(0, Math.min(onPoll ? 250 : 1500, until - Date.now()))));
+    }
   }
   return false;
 }
@@ -4132,7 +4648,7 @@ async function main() {
   if (cmd === 'handover') {
     const task = arg(rest, 'task');
     if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
-    const plan = assertHandoverPlan(readPlan(arg(rest, 'plan') || handoverPlanPath(task)));
+    let plan = assertHandoverPlan(readPlan(arg(rest, 'plan') || handoverPlanPath(task)));
     const dryRun = rest.includes('--dry-run');
     // Estate fix 3 (Nov 2026): a form that carries on reads the stored facts for its house and owner
     // first, so Kevin is never asked again what he has already said. Refused in the dry run only: a card
@@ -4143,6 +4659,17 @@ async function main() {
         + 'to see what is already on file.');
     }
     const stored = storedFactsFor(plan, { dryRun });
+    // Forms round 2: every {{fact:...}} in the steps, read now, before any browser opens. `plan` from here on
+    // is the plan with them put in; `literal` is the plan as written, for the dry run's hint.
+    const literal = plan;
+    const factTokens = resolvePlanFacts(literal, { dryRun });
+    plan = factTokens.plan;
+    // Forms round 2 (cut down by review R1): what Kevin answers in his own window is RECORDED for the agent to
+    // file by hand, never read back as an answer. Recorded only when the plan says whose form it is and the facts
+    // file knows the owner or a house.
+    const whose = { owner: stored.resolved.owner || null, properties: stored.resolved.properties || [] };
+    const canKeep = !!(plan.factsFor && (whose.owner || whose.properties.length));
+    const captureLog = { pending: [], errors: [] };
     // A mapped declarations page (estate fix 3, Nov 2026): the maps and his exact covers, read once per
     // handover. Whose policy it is comes only from an owner the plan names AND the facts file holds, with
     // every house on the form on file under that same owner; otherwise nothing is robot-answered. A file
@@ -4179,6 +4706,17 @@ async function main() {
       // The labels of the stored lines it read ("Label" or "Label [house]"), never a value, source or date: the
       // agent checks a stuck question against these before it goes on a card.
       facts.held = [...new Set(stored.used.map(u => String(u.line).slice(0, String(u.line).length - `: ${u.value}`.length)))];
+      // Forms round 2: the tokens it read (key and scope, never a value), and each typed literal the file already
+      // holds, by that fact's label, so the agent can swap it for a token.
+      facts.tokens = factTokens.tokens.map(t => ({ step: t.step, key: t.key, scope: t.scope }));
+      facts.typed = typedFacts(literal, stored.used);
+      // His recorded answers for this owner or these houses that are on file, as a count, with what to do about them.
+      if (canKeep) {
+        let n = 0;
+        try { n = require('./form-facts').capturedOnFile(require('./form-facts').loadStore(), whose); } catch (e) { die(`the facts file cannot be read: ${e.message}`); }
+        facts.capturedOnFile = n;
+        if (n) facts.capturedHint = CAPTURED_HINT;
+      }
       const declarations = declarationsOf(res);
       const out = { mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length, facts, declarations,
         declarationsProblem: declarationsProblem.length ? declarationsProblem : null };
@@ -4219,7 +4757,8 @@ async function main() {
         // For a robot form card the log IS the guard against a second government form: no log, no window.
         if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
-        const r = await runHandover(page, plan, Object.assign({ onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined, storedFacts: stored.lines }, declOpts));
+        const r = await runHandover(page, plan, Object.assign({ onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined, storedFacts: stored.lines,
+          factsMissing: factTokens.missing, captureLog: canKeep ? captureLog : null }, declOpts));
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         r.url = page.url();                                         // before his window closes the page
         await turnBanner(page, r.stuck
@@ -4232,10 +4771,27 @@ async function main() {
     } finally {
       releaseSigninHold(dir);
     }
+    // His answers, written only now his window is closed: a slow or locked facts file never holds his window up.
+    // A failure is said on the ledger line, never thrown.
+    let keptCount = 0;
+    const corrected = captureLog.pending.filter(c => c.was !== undefined).map(c => ({ question: c.question }));
+    if (canKeep && captureLog.pending.length) {
+      const today = require('./form-facts').todayLondon();
+      try {
+        const w = require('./form-facts').addCapturedMany(captureLog.pending.map(c => ({ site: c.site, path: c.path, owner: whose.owner, properties: whose.properties,
+          task, date: today, question: c.question, kind: c.kind, index: c.index, answer: c.answer, options: c.options, was: c.was })));
+        keptCount = w.stored.length;
+        for (const x of w.refused) captureLog.errors.push(`not kept: "${x.question}" (${x.why})`);
+      } catch (e) { captureLog.errors.push(`his answers could not be kept: ${String(e.message || e).slice(0, 200)}`); }
+    }
     ledger(Object.assign({ cmd: 'handover', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot,
       declarations: declarationsOf(res) },
       stored.conflicts.length ? { factConflicts: stored.conflicts } : {}, stored.problems.length ? { factProblems: stored.problems } : {},
-      declarationsProblem.length ? { declarationsProblem } : {}));
+      declarationsProblem.length ? { declarationsProblem } : {},
+      factTokens.missing.size ? { factTokensMissing: [...factTokens.missing.keys()].map(i => i + 1) } : {},
+      factTokens.problems.length ? { factTokenProblems: factTokens.problems } : {},
+      canKeep ? { captured: keptCount } : {}, corrected.length ? { corrected } : {},
+      captureLog.errors.length ? { captureError: captureLog.errors.slice(0, 10) } : {}));
     console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
     if (res.stuck) process.exitCode = 3;
     return;
@@ -4415,4 +4971,5 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    movedOn, assertNotFinalAction, PLANNER_SCHEMA, isoFromUkDate, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
                    adobeSignRefusal, SIGN_WORDS_RE, isAdobeSigningPage, signBinding, runSignFlow, SIGN_DOORS,
                    agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus,
-                   runSign, runSignCheck, verifyApprovedCopy, hideSignToken };
+                   runSign, runSignCheck, verifyApprovedCopy, hideSignToken,
+                   bareQuestion, resolvePlanFacts, typedFacts, readAnswers, captureStart, capturePoll, captureEnd, captureRefusal, waitForPageMove };

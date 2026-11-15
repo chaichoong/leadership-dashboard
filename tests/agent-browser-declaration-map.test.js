@@ -208,6 +208,7 @@ function personal(v = '', hide = 'real') {
     ${box('email', 'What is your email address?')}${box('mainPhoneNumber', 'What is your main telephone number?')}
     ${v === 'declbefore' ? '<p class="help">We never share your details with the police.</p>' : ''}
     ${select('occupationType', 'What is your occupation type?', ['Employee', 'Company Director', 'Self Employed', 'Unemployed', 'Retired', 'Houseperson', 'Student', 'Other'])}
+    <div id="occupationExtra"></div>
     ${q('hasSecondOccupation', 'Do you have a second occupation?')}
     ${v === 'extraq' ? q('mainHome', 'Is the property your main home?') : ''}
     ${v === 'yousentence' ? "<p>In the questions below, 'you' means you and anyone living at the property</p>" : ''}
@@ -223,9 +224,38 @@ function personal(v = '', hide = 'real') {
   </div>
   <script>
     // What the page holds, sent on every change, so the test can see exactly which boxes were touched.
-    const state = () => { const o = {}; for (const el of document.querySelectorAll('#f input, #f select')) o[el.id] = el.type === 'radio' ? el.checked : el.value;
+    const state = () => { const o = {}; for (const el of document.querySelectorAll('#f input, #f select')) if (el.id || el.name) o[el.id || el.name] = el.type === 'radio' ? el.checked : el.value;
       fetch('/state', { method: 'POST', body: JSON.stringify(o), keepalive: true }).catch(() => {}); };
     document.addEventListener('input', state, true); document.addEventListener('change', state, true); state();
+    // Forms round 2 D4: choosing Employee inserts RightSure's two typeahead boxes straight after the occupation
+    // type (the live page does it for Employee, Self Employed and Company Director; here Employee only, so the
+    // fixtures' "Self Employed" pages stay as they were). Typing shows the options holding the typed text.
+    const TYPEAHEAD = { occupationName: ['What is your occupation?', 'Start typing your job title', ['Administration Assistant', 'Administrator', 'Admin Clerk']],
+      businessCategoryName: ['What is your business type?', 'Start typing your job industry', ['Property Letting', 'Property Management']] };
+    const typeahead = (name, [label, hint]) => '<div class="q"><label class="question-label" for="' + name + '">' + label + '</label><div class="rbt" style="position: relative;"><div style="display: flex; position: relative;">'
+      + '<input autocomplete="off" placeholder="' + hint + '" type="text" name="' + name + '" aria-autocomplete="both" aria-expanded="false" aria-haspopup="listbox" role="combobox" class="rbt-input-main form-control rbt-input" value="">'
+      + '<input aria-hidden="true" class="rbt-input-hint" readonly="" tabindex="-1" value="" style="pointer-events: none; position: absolute; left: 0; top: 0;"></div></div></div>';
+    document.getElementById('occupationType').addEventListener('change', e => {
+      const box = document.getElementById('occupationExtra');
+      if (e.target.value !== 'Employee') { box.innerHTML = ''; return; }
+      if (box.innerHTML) return;
+      box.innerHTML = Object.entries(TYPEAHEAD).map(([n, t]) => typeahead(n, t)).join('');
+      for (const [n, [, , opts]] of Object.entries(TYPEAHEAD)) {
+        const input = box.querySelector('[name="' + n + '"]');
+        input.addEventListener('input', () => {
+          const old = document.getElementById(n + 'TypeAheadId'); if (old) old.remove();
+          if (!input.value) return;
+          const m = document.createElement('div'); m.id = n + 'TypeAheadId'; m.setAttribute('role', 'listbox'); m.className = 'rbt-menu dropdown-menu show'; m.style.position = 'fixed';
+          const at = input.getBoundingClientRect(); m.style.top = at.bottom + 'px'; m.style.left = at.left + 'px'; m.style.background = '#fff';
+          for (const t of opts.filter(o => o.toLowerCase().includes(input.value.toLowerCase()))) {
+            const a = document.createElement('a'); a.setAttribute('aria-label', t); a.setAttribute('role', 'option'); a.className = 'dropdown-item'; a.href = '#'; a.textContent = t;
+            a.addEventListener('click', ev => { ev.preventDefault(); input.value = t; m.remove(); state(); });
+            m.appendChild(a);
+          }
+          document.body.appendChild(m);
+        });
+      }
+    });
     ${v === 'datereset' ? "document.getElementById('dateOfBirth').addEventListener('input', e => { e.target.value = ''; });" : ''}
     ${v === 'movetick' ? "document.getElementById('insuranceRefusedno').addEventListener('click', () => history.pushState({}, '', '/landlord/elsewhere'));" : ''}
     ${v === 'untick' ? "document.getElementById('insuranceRefusedno').addEventListener('click', e => e.preventDefault());" : ''}
@@ -233,7 +263,7 @@ function personal(v = '', hide = 'real') {
     // No <form> on the real page: Next sends the answers itself. "bounce" sends him back to this page once.
     document.getElementById('next').addEventListener('click', () => {
       const p = new URLSearchParams();
-      for (const el of document.querySelectorAll('#f input, #f select')) if (el.type !== 'radio' || el.checked) p.append(el.name, el.value);
+      for (const el of document.querySelectorAll('#f input, #f select')) if (el.name && (el.type !== 'radio' || el.checked)) p.append(el.name, el.value);
       location.href = (${JSON.stringify(v)} === 'bounce' ? '/landlord/personal?v=bounced&' : '/landlord/property?') + p.toString();
     });
     ${v === 'followup' ? `document.getElementById('hasClaimsno').addEventListener('click', () => { document.getElementById('followup').innerHTML = ${JSON.stringify(q('claimRefused', 'Has any insurer ever refused one of your claims?'))}; });` : ''}
@@ -287,12 +317,14 @@ module.exports = async (input) => {
   const p = input.page;
   const fact = re => input.facts.find(f => re.test(f)) || '';
   const val = f => f.split(': ').slice(1).join(': ');
-  const steps = [];
+  const steps = [], unknown = [];
   const fill = (it, re) => { const f = fact(re); if (f && !it.value) steps.push({ do: 'fill', target: it.target, value: val(f), question: it.question, source: f }); };
   const pick = (it, re) => { const f = fact(re); if (f && !it.value) steps.push({ do: 'select', target: it.target, value: val(f), question: it.question, source: f }); };
   for (const it of p.items) {
     const q = it.question;
-    if (/title/.test(q)) pick(it, /^Title:/);
+    if (it.kind === 'combobox' && /your occupation\?/.test(q)) { if (fact(/^Occupation:/)) fill(it, /^Occupation:/); else unknown.push(q); }
+    else if (it.kind === 'combobox' && /business type/.test(q)) { if (fact(/^Business type:/)) fill(it, /^Business type:/); else if (!it.value) unknown.push(q); }
+    else if (/title/.test(q)) pick(it, /^Title:/);
     else if (/first name/.test(q)) fill(it, /^First name:/);
     else if (/last name/.test(q)) fill(it, /^Last name:/);
     else if (/date of birth/.test(q)) fill(it, /^Date of birth:/);
@@ -302,7 +334,7 @@ module.exports = async (input) => {
     else if (/^Town/.test(q)) fill(it, /^Correspondence town:/);
     else if (/email/.test(q)) fill(it, /^Email address:/);
     else if (/telephone/.test(q)) fill(it, /^Phone number:/);
-    else if (/occupation type/.test(q)) pick(it, /^Occupation:/);
+    else if (/occupation type/.test(q)) pick(it, input.facts.some(f => /^Occupation type:/.test(f)) ? /^Occupation type:/ : /^Occupation:/);
     else if (it.kind === 'radio' && /second occupation/.test(q) && !it.options.some(o => o.checked)) {
       steps.push({ do: 'click', target: it.options.find(o => o.label === 'No').target, question: q, source: fact(/^Second occupation:/) });
     }
@@ -311,8 +343,8 @@ module.exports = async (input) => {
     steps.push({ do: 'click', target: '#bankruptOrCcjyes', question: 'convictions', source: fact(/^Second occupation:/) });
     steps.push({ do: 'click', target: '#hasClaimsyes', question: 'claims', source: fact(/^Second occupation:/) });
   }
-  const unknown = process.env.PLANNER_TRY === 'unknown2' ? ['What is your middle name?', 'How long have you been a landlord?']
-    : process.env.PLANNER_TRY === 'long' ? ['How would you describe the property? ' + 'It has a long and winding description. '.repeat(10)] : [];
+  if (process.env.PLANNER_TRY === 'unknown2') unknown.push('What is your middle name?', 'How long have you been a landlord?');
+  if (process.env.PLANNER_TRY === 'long') unknown.push('How would you describe the property? ' + 'It has a long and winding description. '.repeat(10));
   const next = p.buttons.find(x => x.text === 'Next');
   return { steps, next: next ? next.target : null, unknown: unknown.map(u => u.slice(0, 400)), done: 'no' };
 };
@@ -753,4 +785,78 @@ describe('a label target never lets through what the input target refused', () =
     expect(await pg.evaluate(() => document.getElementById('insuranceRefusedno').checked)).toBe(false);
     await pg.close();
   }, 30000);
+});
+
+// ── Forms round 2, part D (15 Nov 2026): RightSure inserts two questions once an occupation type is chosen ─
+describe('forms round 2 D1: a declared optional group keeps the page mapped later in the visit, never at first sight', () => {
+  const OPT = RS.optional[0];
+  const groupItems = (items = OPT.items) => items.map(([kind, question], k) => ({ kind, question, target: `[name="opt${k}"]`, value: '' }));
+  const after = ix(OPT.after);
+  const withGroup = (g = groupItems(), at = after + 1) => { const a = ITEMS(); a.splice(at, 0, ...g); return a; };
+  const covers = [cover(Q1), cover(Q3), cover(Q4)];
+  it('the base list passes at first sight and later; base plus the whole group passes later and FAILS at first sight', () => {
+    expect(decide(snapOf(), covers)).not.toBeNull();
+    expect(decide(snapOf(), covers, 'test-owner-a', snapOf().url, false)).not.toBeNull();
+    const s = snapOf({ items: withGroup() });
+    expect(decide(s, covers, 'test-owner-a', s.url, false)).not.toBeNull();
+    expect(decide(s, covers)).toBeNull();
+  });
+  it('half the group, the group elsewhere, the group plus one more, or a group item reworded: null', () => {
+    const cases = {
+      half: withGroup(groupItems().slice(0, 1)),
+      otherHalf: withGroup(groupItems().slice(1)),
+      elsewhere: withGroup(groupItems(), after),
+      atEnd: withGroup(groupItems(), ITEMS().length),
+      plusOne: withGroup(groupItems().concat([{ kind: 'text', question: 'What is your job start date?', target: '#x', value: '' }])),
+      reworded: withGroup(groupItems([OPT.items[0], ['combobox', 'What is your business sector? Start typing your job industry']])),
+      kindChanged: withGroup(groupItems([OPT.items[0], ['text', OPT.items[1][1]]])),
+      twice: withGroup(groupItems().concat(groupItems())),
+    };
+    for (const [name, items] of Object.entries(cases)) {
+      const s = snapOf({ items });
+      expect(decide(s, covers, 'test-owner-a', s.url, false), name).toBeNull();
+    }
+  });
+  it('the loader drops a map whose group is placed after a declaration or a question it does not hold, or holds a declaration', () => {
+    const f = join(tmp('od-maps-'), 'maps.json');
+    const one = optional => ({ ...RS, host: '127.0.0.1:4321', optional });
+    writeFileSync(f, JSON.stringify({ version: 1, maps: [
+      one([{ after: Q3.text, items: OPT.items }]),
+      one([{ after: 'What is your middle name?', items: OPT.items }]),
+      one([{ after: OPT.after, items: [OPT.items[0], ['combobox', 'Have you had any claims in your job?']] }]),
+      one([{ after: OPT.after, items: [['radio', 'Do you have a second job?']] }]),
+      one([{ after: OPT.after, items: [['combobox', 'Have you ever been in administration?']] }]),
+      one([{ after: OPT.after, items: OPT.items }]),
+    ] }));
+    const was = process.env.AGENT_DECLARATION_MAPS;
+    process.env.AGENT_DECLARATION_MAPS = f;
+    try {
+      const r = b.loadDeclarationMaps();
+      expect(r.maps).toHaveLength(1);
+      expect(r.maps[0].optional).toEqual([{ after: OPT.after, items: OPT.items }]);
+      expect(r.problems).toHaveLength(5);
+    } finally { if (was === undefined) delete process.env.AGENT_DECLARATION_MAPS; else process.env.AGENT_DECLARATION_MAPS = was; }
+  });
+});
+
+describe('forms round 2 D4: on the practice page, choosing Employee brings two boxes and the page stays the robot\'s', () => {
+  it('occupation type from a fact, the boxes appear, the next round picks "Administrator", business type is his, three Nos ticked, Next not pressed', async () => {
+    const store = JSON.parse(JSON.stringify(FACTS_STORE));
+    store.owners['test-owner-a'].facts['occupation-type'] = { ...fact('Employee'), label: 'Occupation type' };
+    store.owners['test-owner-a'].facts.occupation = fact('Administrator');
+    const { r, last, line } = await dryRun('/landlord/personal', { store });
+    await settle();
+    expect(r.code, r.err + r.out).toBe(3);
+    expect(last.stuck.unknown).toEqual([HIS_LINE, 'What is your business type? Start typing your job industry']);
+    expect(last.stuck.notes).toEqual([LEAD(3), CHECK_LINE]);
+    expect(last.declarations.answered.map(a => a.id)).toEqual(['insuranceRefused', 'hasClaims', 'hasOtherPropertyClaims']);
+    expect(last.declarations.his).toEqual([{ id: 'bankruptOrCcj', question: Q2.text, why: 'always your own answer' }]);
+    expect(lastState).toMatchObject({ occupationType: 'Employee', occupationName: 'Administrator', businessCategoryName: '', firstName: 'Testa',
+      insuranceRefusedno: true, hasClaimsno: true, hasOtherPropertyClaimsno: true, bankruptOrCcjyes: false, bankruptOrCcjno: false });
+    // The occupation was chosen in a later round than the occupation type, on the grown page.
+    const fills = line.steps.filter(s => s.carryOn && s.executed).map(s => s.selector);
+    expect(fills.indexOf('[name="occupationName"]')).toBeGreaterThan(fills.indexOf('#occupationType'));
+    expect(hits.some(u => u.startsWith('/landlord/property'))).toBe(false);
+    expect(line.steps.some(s => s.next)).toBe(false);
+  }, 120000);
 });

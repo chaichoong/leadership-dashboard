@@ -664,3 +664,543 @@ describe('review 2: the tighter checks open nothing', () => {
     expect(readdirSync(dirname(f)).filter(n => /\.lock/.test(n))).toEqual([]);
   });
 });
+
+// ── Forms round 2, part B (15 Nov 2026): plan steps read the facts file by key ─────────────────────
+describe('forms round 2 B: resolveFact', () => {
+  const at = (over = {}) => ff.resolveFact(storeOf(), Object.assign({ owner: 'test-owner', properties: [HOUSE], today: TODAY }, over));
+  it('takes the first scope that holds the key: the one house, then the owner, then general', () => {
+    expect(at({ key: 'storeys' })).toMatchObject({ value: '2', scope: 'property', ref: HOUSE, source: 'survey test', date: '2026-02-01', expired: false });
+    expect(at({ key: 'first-name' })).toMatchObject({ value: 'Testa', scope: 'owner', ref: 'test-owner' });
+    expect(at({ key: 'contact' })).toMatchObject({ value: 'email only', scope: 'general', ref: null });
+    const s = storeOf();
+    s.owners['test-owner'].facts.contact = { label: 'Contact', value: 'post', source: 'owner test', date: '2026-01-01' };
+    expect(ff.resolveFact(s, { owner: 'test-owner', properties: [HOUSE], key: 'contact', today: TODAY })).toMatchObject({ value: 'post', scope: 'owner' });
+  });
+  it('two houses: a key a house holds needs @<house>, which must be one of the form\'s own houses', () => {
+    const two = { properties: [HOUSE, HOUSE2] };
+    expect(at({ ...two, key: 'storeys' })).toMatchObject({ code: 'ambiguous', refused: expect.stringMatching(/name the house, as \{\{fact:storeys@<house>\}\}/) });
+    expect(at({ ...two, key: 'storeys', at: '7 Sample Road' })).toMatchObject({ value: '3', scope: 'property', ref: HOUSE2 });
+    expect(at({ ...two, key: 'year-built' })).toMatchObject({ code: 'ambiguous' });
+    expect(at({ ...two, key: 'first-name' })).toMatchObject({ value: 'Testa', scope: 'owner' });
+    expect(at({ key: 'storeys', at: '7 Sample Road' })).toMatchObject({ code: 'at', refused: expect.stringMatching(/not one of the houses this form names/) });
+    expect(at({ ...two, key: 'storeys', at: '7 Sample' })).toMatchObject({ code: 'at' });
+  });
+  it('refuses an unknown key, an out-of-date fact (unless allowed), a bad or reserved key, and a declaration', () => {
+    expect(at({ key: 'bedrooms' })).toEqual({ code: 'unknown', refused: 'the fact bedrooms is not on file' });
+    const s = storeOf();
+    s.properties[HOUSE].facts.storeys.until = '2026-03-01';
+    expect(ff.resolveFact(s, { properties: [HOUSE], key: 'storeys', today: TODAY })).toMatchObject({ code: 'expired', refused: expect.stringMatching(/Number of storeys" \(storeys\) is out of date/) });
+    expect(ff.resolveFact(s, { properties: [HOUSE], key: 'storeys', today: TODAY, allowExpired: true })).toMatchObject({ value: '2', expired: true });
+    for (const k of ['__proto__', 'constructor', 'Year Built', '']) expect(at({ key: k }).refused, k).toBeTruthy();
+    expect(at({ key: 'constructor' }).code).not.toBe(undefined);
+    expect(at({ key: 'claims-history' })).toMatchObject({ code: 'declaration' });
+    expect(at({ key: 'storeys', properties: ['99 Missing Street'] })).toMatchObject({ code: 'property' });
+  });
+});
+
+describe('forms round 2 B: the last line in runSteps', () => {
+  it('a fill or select still holding {{fact: is refused before the page is touched', async () => {
+    const ab = require_(join(SCRIPTS, 'agent-browser.js'));
+    const page = { url: () => 'about:blank' };
+    await expect(ab.runSteps(page, [{ do: 'fill', selector: '#x', value: '{{fact:storeys}}' }], false, null)).rejects.toThrow(/^refused: #x would be given a \{\{fact:\.\.\.\}\} or other \{\{\.\.\.\}\} token/);
+    await expect(ab.runSteps(page, [{ do: 'select', selector: '#x', label: 'about {{fact:storeys@a}}' }], false, null)).rejects.toThrow(/^refused/);
+  });
+});
+
+Object.assign(PAGES, {
+  // A page with a box no fact names, and a start date: each box sends what it holds, so the test sees what was typed.
+  '/t1': `<!doctype html><html><body><h1>About the property</h1><form action="/f2" method="get">
+    <div class="q"><label for="storeys">Number of storeys</label><input id="storeys" name="storeys"></div>
+    <div class="q"><label for="built">Year built</label><input id="built" name="built"></div>
+    <div class="q"><label for="start">Cover start date</label><input id="start" name="start"></div>
+    <button id="next1" type="submit">Next</button></form></body></html>`,
+  '/t2': `<!doctype html><html><body><h1>About the property</h1><form action="/f2" method="get">
+    <div class="q"><label for="ref">Your reference</label><input id="ref" name="ref"></div>
+    <button id="next1" type="submit">Next</button></form>
+    <script>
+      const send = () => fetch('/state?ref=' + encodeURIComponent(document.getElementById('ref').value), { keepalive: true }).catch(() => {});
+      document.addEventListener('input', send, true); send(); setInterval(send, 300);
+    </script></body></html>`,
+});
+
+describe('forms round 2 B: the handover reads {{fact:...}} before the browser opens', () => {
+  const TOKEN_PLAN = (steps, extra = {}) => ({ why: 'read the price and buy only if you want it', site: 'practice', label: 'Practice quote',
+    steps: [{ do: 'goto', url: `${base}/t1` }].concat(steps), carryOn: {}, ...FOR, ...extra });
+  const STEPS = [{ do: 'fill', selector: '#storeys', value: '{{fact:storeys}}' }, { do: 'fill', selector: '#built', value: '1930' },
+    { do: 'fill', selector: '#start', value: '{{today}}' }];
+  const today = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());
+
+  it('dry run: the token is typed, {{today}} beside it still works, and the JSON names key and scope, never a value', async () => {
+    const x = home('Changes requested', storeOf());
+    hits.length = 0;
+    const r = await dry(x, TASK1, TOKEN_PLAN(STEPS));
+    expect(r.code, r.err + r.out).toBe(0);
+    const last = lastJson(r);
+    expect(last.end).toBe('price');
+    expect(hits.some(u => u.startsWith(`/f2?storeys=2&built=1930&start=${encodeURIComponent(today)}`))).toBe(true);
+    expect(last.facts.tokens).toEqual([{ step: 2, key: 'storeys', scope: 'property' }]);
+    // The literal 1930 is a stored fact: a hint naming its label, never its value.
+    expect(last.facts.typed).toEqual([{ step: 3, label: 'Year built' }]);
+    expect(JSON.stringify(last.facts.tokens) + JSON.stringify(last.facts.typed)).not.toMatch(/1930|"2"/);
+  }, 120000);
+
+  it('two houses: the token needs @<house>, and with it reads that house', async () => {
+    const two = { factsFor: { owner: 'test-owner', properties: ['12 Test Lane', '7 Sample Road'] } };
+    const x = home('Changes requested', storeOf());
+    const bad = await dry(x, TASK1, TOKEN_PLAN(STEPS, two));
+    expect(bad.code).toBe(1);
+    expect(bad.err).toMatch(/step 2: \{\{fact:storeys\}\} cannot be read: "storeys" is held for a house and this form names 2 houses/);
+    hits.length = 0;
+    const ok = await dry(x, TASK2, TOKEN_PLAN([{ do: 'fill', selector: '#storeys', value: `{{fact:storeys@${HOUSE2}}}` }].concat(STEPS.slice(1)), two));
+    expect(lastJson(ok).facts.tokens).toEqual([{ step: 2, key: 'storeys', scope: 'property' }]);
+    expect(hits.some(u => u.startsWith('/f2?storeys=3&built=1930'))).toBe(true);
+  }, 120000);
+
+  it('dry run refusals: no factsFor, an unknown key, an out-of-date fact, a token outside value or label; each names the step, the token and the fix', async () => {
+    const s = storeOf();
+    s.properties[HOUSE].facts['year-built'].until = '2026-03-01';
+    const x = home('Changes requested', s);
+    const noFor = await dry(x, TASK1, { why: 'read the price', site: 'practice', steps: [{ do: 'goto', url: `${base}/t1` }, STEPS[0]] });
+    expect(noFor.code).toBe(1);
+    expect(noFor.err).toMatch(/step 2: \{\{fact:storeys\}\} reads the facts file, but the plan does not say whose form it is/);
+    const unknown = await dry(x, TASK1, TOKEN_PLAN([{ do: 'fill', selector: '#storeys', value: '{{fact:bedrooms}}' }]));
+    expect(unknown.code).toBe(1);
+    expect(unknown.err).toMatch(/step 2: \{\{fact:bedrooms\}\} cannot be read: the fact bedrooms is not on file\. Store the fact with `node scripts\/form-facts\.js set/);
+    const old = await dry(x, TASK1, TOKEN_PLAN([{ do: 'fill', selector: '#built', value: '{{fact:year-built}}' }]));
+    expect(old.code).toBe(1);
+    expect(old.err).toMatch(/step 2: \{\{fact:year-built\}\} cannot be read: "Year built" \(year-built\) is out of date/);
+    const sel = await dry(x, TASK1, TOKEN_PLAN([{ do: 'fill', selector: '#{{fact:storeys}}', value: '2' }]));
+    expect(sel.code).toBe(1);
+    expect(sel.err).toMatch(/step 2: "selector" holds a \{\{fact:\.\.\.\}\} token/);
+    // None of them opened a browser.
+    expect(existsSync(join(x.h, `${TASK1}.png`))).toBe(false);
+  }, 120000);
+
+  it('live (review R5): a token left in any other field (dialogText) never runs: the step fails as a missing fact and is carried past', async () => {
+    const x = home('Approved as-is', storeOf());
+    hits.length = 0;
+    writeFileSync(join(x.plans, TASK1 + '.json'), JSON.stringify(TOKEN_PLAN(STEPS.concat([{ do: 'click', selector: '#built', dialog: 'accept', dialogText: '{{fact:storeys}}' }]))));
+    const r = await run(x.env, ['handover', '--task', TASK1]);
+    const line = ledgerOf(x).find(l => l.cmd === 'handover');
+    expect(line.factTokensMissing, r.err + r.out).toEqual([5]);
+    expect(line.steps[4]).toMatchObject({ do: 'click', executed: false, carriedOnPast: true, error: 'the fact storeys is not on file' });
+    expect(line.steps.some(s => s.selector === '#built' && s.do === 'click' && s.executed)).toBe(false);
+  }, 120000);
+
+  const MALFORMED = ['{{ fact:year-built}}', '{{FACT:year-built}}', '{{fact:year-built}', 'x{{fact:'];
+  it('review round 3: a malformed token is refused by the dry run, naming the step and the text', async () => {
+    const x = home('Changes requested', storeOf());
+    for (const bad of MALFORMED) {
+      const r = await dry(x, TASK1, TOKEN_PLAN([{ do: 'fill', selector: '#built', value: bad }]));
+      expect(r.code, bad).toBe(1);
+      expect(r.err, bad).toContain(`step 2: "${bad}" holds a malformed token`);
+    }
+    // In a field that is never typed, too.
+    const sel = await dry(x, TASK1, TOKEN_PLAN([{ do: 'click', selector: '#built', dialog: 'accept', dialogText: '{{FACT:storeys}}' }]));
+    expect(sel.err).toContain('step 2: "{{FACT:storeys}}" holds a malformed token');
+  }, 120000);
+
+  it('review round 3: live, a step with a malformed token never runs and nothing of it is typed', async () => {
+    for (const bad of MALFORMED) {
+      const x = home('Approved as-is', storeOf());
+      x.env.AGENT_HANDOVER_KEVIN_MS = '2500';
+      hits.length = 0;
+      writeFileSync(join(x.plans, TASK1 + '.json'), JSON.stringify(TOKEN_PLAN([], { steps: [{ do: 'goto', url: `${base}/t2` }, { do: 'fill', selector: '#ref', value: bad }] })));
+      const r = await run(x.env, ['handover', '--task', TASK1]);
+      const line = ledgerOf(x).find(l => l.cmd === 'handover');
+      expect(line.factTokensMissing, bad + r.err).toEqual([2]);
+      expect(line.steps[1], bad).toMatchObject({ do: 'fill', executed: false, carriedOnPast: true });
+      expect(line.steps.some(s => s.selector === '#ref' && s.executed), bad).toBe(false);
+      expect(hits.filter(u => u.startsWith('/state?')).every(u => u === '/state?ref='), bad).toBe(true);
+    }
+  }, 240000);
+
+  it('review round 3: runSteps refuses any fill still holding "{{" after {{today}}', async () => {
+    const ab = require_(join(SCRIPTS, 'agent-browser.js'));
+    const page = { url: () => 'about:blank' };
+    for (const value of ['{{ fact:x}}', '{{FACT:x}}', 'a {{b}}', '{{todays}}']) {
+      await expect(ab.runSteps(page, [{ do: 'fill', selector: '#x', value }], false, null), value).rejects.toThrow(/^refused/);
+    }
+  });
+
+  it('live: an out-of-date fact is typed as it stands (his card showed it)', async () => {
+    const s = storeOf();
+    s.properties[HOUSE].facts.storeys.until = '2026-03-01';
+    const x = home('Approved as-is', s);
+    hits.length = 0;
+    writeFileSync(join(x.plans, TASK1 + '.json'), JSON.stringify(TOKEN_PLAN(STEPS)));
+    const r = await run(x.env, ['handover', '--task', TASK1]);
+    expect(r.code, r.err + r.out).toBe(0);
+    expect(hits.some(u => u.startsWith('/f2?storeys=2&built=1930'))).toBe(true);
+    expect(ledgerOf(x).find(l => l.cmd === 'handover')).not.toHaveProperty('factTokensMissing');
+  }, 120000);
+
+  it('live: a fact not on file fails that step, which is carried past; the box stays empty and the token is never typed', async () => {
+    const x = home('Approved as-is', storeOf());
+    x.env.AGENT_HANDOVER_KEVIN_MS = '2500';
+    hits.length = 0;
+    writeFileSync(join(x.plans, TASK1 + '.json'), JSON.stringify(TOKEN_PLAN([{ do: 'fill', selector: '#ref', value: '{{fact:reference}}' }],
+      { steps: [{ do: 'goto', url: `${base}/t2` }, { do: 'fill', selector: '#ref', value: '{{fact:reference}}' }] })));
+    const r = await run(x.env, ['handover', '--task', TASK1]);
+    const line = ledgerOf(x).find(l => l.cmd === 'handover');
+    expect(line.factTokensMissing, r.err + r.out).toEqual([2]);
+    expect(line.steps[1]).toMatchObject({ do: 'fill', executed: false, carriedOnPast: true, error: 'the fact reference is not on file' });
+    // The box was asked of him by name (no fact names it), and nothing was ever typed into it.
+    expect(line.steps.some(s => s.do === 'fill' && s.selector === '#ref' && s.executed)).toBe(false);
+    const sent = hits.filter(u => u.startsWith('/state?'));
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every(u => u === '/state?ref=')).toBe(true);
+    expect(hits.some(u => /fact/i.test(decodeURIComponent(u)))).toBe(false);
+  }, 120000);
+});
+
+// ── Forms round 2, part C (15 Nov 2026; cut down by review R1): what Kevin answers is RECORDED ───────
+// A record for the agent, never a fact line: nothing recorded ever answers a form by itself.
+describe('forms round 2 C: the record in the store', () => {
+  const entry = (over = {}) => Object.assign({ site: '127.0.0.1', path: '/c1', owner: 'test-owner', properties: [HOUSE], task: TASK1, date: TODAY,
+    question: 'Is the property sub-let?', kind: 'radio', index: 2, answer: 'No' }, over);
+  it('appends every entry with its place on the page, never merging two boxes that ask the same; at most 500, oldest dropped', () => {
+    const f = fileOf();
+    ff.addCaptured(entry({ question: 'First name', kind: 'text', index: 0, answer: 'Testa' }), f);
+    ff.addCaptured(entry({ question: 'First name', kind: 'text', index: 4, answer: 'Testb' }), f);
+    ff.addCaptured(entry({ site: 'LOCALHOST' }), f);
+    const s = ff.loadStore(f);
+    expect(s.captured.map(c => [c.site, c.path, c.question, c.kind, c.index, c.answer, c.task, c.date])).toEqual([
+      ['127.0.0.1', '/c1', 'First name', 'text', 0, 'Testa', TASK1, TODAY], ['127.0.0.1', '/c1', 'First name', 'text', 4, 'Testb', TASK1, TODAY],
+      ['localhost', '/c1', 'Is the property sub-let?', 'radio', 2, 'No', TASK1, TODAY]]);
+    const many = Array.from({ length: 520 }, (_, n) => entry({ question: `Question number ${n}`, index: n }));
+    expect(ff.addCapturedMany(many, f).stored).toHaveLength(520);
+    const after = ff.loadStore(f).captured;
+    expect(after).toHaveLength(ff.CAPTURED_MAX);
+    expect(after[0].question).toBe('Question number 20');
+    expect(after[after.length - 1].question).toBe('Question number 519');
+    expect(ff.loadStore(f).properties[HOUSE].facts.storeys.value).toBe('2');
+    // Nothing in the module turns a record into a fact line.
+    for (const k of ['capturedLinesFor', 'capturedLine', 'capturedFor']) expect(ff[k], k).toBeUndefined();
+  });
+
+  it('refuses, in the store itself, every declaration, loss, private value, code-like number, long or empty answer, and a form with no owner or house', () => {
+    const f = fileOf();
+    const before = readFileSync(f, 'utf8');
+    for (const over of [
+      { question: 'Have you had any claims in the last 5 years?' }, { question: 'Any criminal convictions?' }, { question: 'Is the property in administration?' },
+      { question: 'Do you agree to the terms?', answer: 'I declare this is true' }, { answer: 'No claims' },
+      { question: 'Have you suffered any loss or damage at the property in the last 5 years?' }, { question: 'Has the property suffered from subsidence, heave or landslip?' },
+      { question: 'Any rent arrears?' }, { question: 'Was the house ever flooded?' },
+      { question: 'Card number', answer: '0000 1111 2222 3333' }, { question: 'Choose a password', answer: 'test-pass' }, { question: 'Sort code', answer: '00-11-22' },
+      { question: 'Bank name', answer: 'Test Bank' }, { question: 'Account holder', answer: 'Testa' }, { question: 'Name of the holder', answer: 'x', options: ['Holder name'] },
+      { question: 'Building society roll number', answer: 'AB12' }, { question: 'Verification', answer: 'ok' }, { question: 'Enter the code sent to your phone', answer: 'abc' },
+      { question: 'Your one-time passcode', answer: 'abc' }, { question: 'Enter the 6-digit number', answer: 'abc' }, { question: 'Your security question', answer: 'x' },
+      { question: 'Your reference', answer: '00011122' }, { question: 'Your reference', answer: '1234' }, { question: 'Your reference', answer: '000011112222' },
+      { question: 'Name on the policy', answer: 'x'.repeat(201) }, { question: '' }, { answer: '' }, { owner: null, properties: [] }, { site: 'not a host' },
+      { question: 'Is it sub-let?', options: ['Yes', 'No, but a CCJ'] }, { question: 'Occupation', answer: 'Administrator' }, { kind: 'password' }, { index: -1 },
+    ]) expect(() => ff.addCaptured(entry(over), f), JSON.stringify(over)).toThrow();
+    expect(readFileSync(f, 'utf8')).toBe(before);
+    // A year, a count, a sum or a postcode may be a short number.
+    for (const [question, answer] of [['Year built', '1930'], ['Number of bedrooms', '4'], ['Buildings sum insured', '235000'], ['Monthly rent', '1250']]) {
+      expect(ff.capturedRefusal({ question, answer }), question).toBe('');
+    }
+  });
+
+  it('a bad recorded entry never makes the facts unreadable: it is dropped on load, facts and tokens still work, check exits 0 and counts it', () => {
+    const f = fileOf(storeOf({ captured: [entry(), entry({ question: 'Any claims?' }), 'not an entry'] }));
+    const s = ff.loadStore(f);
+    expect(s.captured).toHaveLength(1);
+    expect(s.properties[HOUSE].facts.storeys.value).toBe('2');
+    expect(ff.resolveFact(s, { owner: 'test-owner', properties: [HOUSE], key: 'storeys', today: TODAY })).toMatchObject({ value: '2' });
+    const c = spawnSync(process.execPath, [FF_CLI, 'check'], { env: { ...process.env, AGENT_FORM_FACTS: f }, encoding: 'utf8' });
+    expect(c.status, c.stderr).toBe(0);
+    expect(JSON.parse(c.stdout)).toMatchObject({ captured: 1, capturedDropped: 2, problems: [] });
+    // A bad FACT still fails.
+    const bad = storeOf(); delete bad.properties[HOUSE].facts.storeys.source;
+    expect(() => ff.loadStore(fileOf(bad))).toThrow(/storeys: no source/);
+  });
+
+  it('review round 3: no entry, however malformed, can throw out of loadStore, check, captured or addCaptured', () => {
+    const f = fileOf(storeOf({ captured: [entry(), entry({ options: 'x' }), { a: 1 }, null, entry({ index: 'two' }), entry({ question: 7 }), 'a string', entry({ extra: 1 }), entry({ task: 5 })] }));
+    const s = ff.loadStore(f);
+    expect(s.captured).toHaveLength(1);
+    const cli = (...args) => spawnSync(process.execPath, [FF_CLI, ...args], { env: { ...process.env, AGENT_FORM_FACTS: f }, encoding: 'utf8' });
+    const c = cli('check');
+    expect(c.status, c.stderr).toBe(0);
+    expect(JSON.parse(c.stdout)).toMatchObject({ captured: 1, capturedDropped: 8, problems: [] });
+    expect(cli('captured').status).toBe(0);
+    for (const bad of [entry({ options: 'x' }), { a: 1 }, null, 'a string', entry({ answer: 5 }), entry({ question: ['x'] })]) {
+      let threw = null;
+      try { ff.addCaptured(bad, f); } catch (e) { threw = e; }
+      expect(threw && threw.refusal, JSON.stringify(bad)).toBe(true);
+    }
+    writeFileSync(f, JSON.stringify(storeOf({ captured: 'not a list' })));
+    expect(ff.loadStore(f).captured).toEqual([]);
+    expect(JSON.parse(cli('check').stdout)).toMatchObject({ capturedDropped: 1, problems: [] });
+  });
+
+  it('review round 3: identity, tax, licence, card-back and reference questions are never kept, nor 9 or more digits; years, costs and counts still are', () => {
+    for (const [question, answer] of [['What is your NI number?', 'AB 12 34 56 C'], ["Driver's licence number", 'TESTA700101XY9ZZ'], ['Unique Taxpayer Reference (UTR)', '1234567890'],
+      ['CV2', '123'], ['Enter the 3 digits on the back', '123'], ['Expiration date (MM/YY)', '12/28'], ['Name on the account', 'Testa Example'],
+      ['Rent account reference', '12345678'], ['Your NHS number', 'x'], ['Phone number', '07700 900123'], ['Monthly rent', '123456789']]) {
+      expect(ff.capturedRefusal({ question, answer }), question).not.toBe('');
+    }
+    for (const [question, answer] of [['What year was the property built?', '1930'], ['What is the rebuild cost?', '156900'], ['Number of bedrooms', '5']]) {
+      expect(ff.capturedRefusal({ question, answer }), question).toBe('');
+    }
+  });
+
+  it('the CLI lists them with answers, by task, site or owner; capturedOnFile counts this owner or these houses', () => {
+    const f = fileOf(storeOf({ captured: [entry(), entry({ site: 'localhost', task: TASK2 }), entry({ owner: null, properties: [HOUSE2] })] }));
+    const cli = (...args) => spawnSync(process.execPath, [FF_CLI, ...args], { env: { ...process.env, AGENT_FORM_FACTS: f }, encoding: 'utf8' });
+    expect(JSON.parse(cli('captured').stdout).captured).toHaveLength(3);
+    expect(JSON.parse(cli('captured', '--task', TASK2).stdout).captured).toEqual([expect.objectContaining({ site: 'localhost', answer: 'No' })]);
+    expect(JSON.parse(cli('captured', '--site', 'localhost', '--owner', 'Testa Owner Ltd').stdout).captured).toHaveLength(1);
+    const s = ff.loadStore(f);
+    expect(ff.capturedOnFile(s, { owner: 'test-owner', properties: [HOUSE] })).toBe(2);
+    expect(ff.capturedOnFile(s, { owner: null, properties: [HOUSE2] })).toBe(1);
+    expect(ff.capturedOnFile(s, { owner: 'nobody', properties: [] })).toBe(0);
+  });
+});
+
+describe('forms round 2 C: what is read, and what may be recorded from a page', () => {
+  let browser;
+  beforeAll(async () => { browser = await require_('playwright').chromium.launch(); });
+  afterAll(async () => { if (browser) await browser.close(); });
+  const ab = () => require_(join(SCRIPTS, 'agent-browser.js'));
+  const PAGE = `<!doctype html><html><body><h1>About you</h1><h1 style="display:none">Hidden heading</h1><form>
+    <div class="q"><label for="town">Town</label><input id="town" value="Testtown"></div>
+    <div class="q"><label for="kind">What is the dwelling type?Please select an option</label><select id="kind"><option value=""></option><option>Terraced house</option><option selected>Flat</option></select></div>
+    <div class="q"><p>Is the property sub-let?</p><input type="radio" name="sl" id="sy"><label for="sy">Yes</label><input type="radio" name="sl" id="sn" checked><label for="sn">No</label></div>
+    <div class="q"><input type="checkbox" id="em" checked><label for="em">Email me</label></div>
+    <div class="q"><label for="built">Year built</label><input id="built" value=""></div>
+    <div class="q"><label for="pw">Choose a password</label><input id="pw" type="password" value="test-pass"></div>
+    <div class="q"><label for="cc">Card number</label><input id="cc" autocomplete="cc-number" value="0000"></div>
+  </form></body></html>`;
+
+  it('reads each answer in one read-only look, never a password or card box, with the page signature built as snapshotForm builds it (a hidden h1 aside)', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent(PAGE);
+    const snap = await ab().snapshotForm(pg);
+    const got = await ab().readAnswers(pg, snap);
+    expect(got.map(a => [a.index, a.question, a.answer])).toEqual([[0, 'Town', 'Testtown'], [1, 'What is the dwelling type?Please select an option', 'Flat'],
+      [2, 'Is the property sub-let?', 'No'], [3, 'Email me', 'Yes'], [4, 'Year built', '']]);
+    expect(JSON.stringify(got)).not.toMatch(/test-pass|0000/);
+    expect(got.page.headings).toEqual(snap.headings);
+    expect(got.page.headings).toEqual(['About you']);
+    expect(await pg.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await pg.close();
+  });
+
+  it('records only the items the robot listed and a robot-filled box he changed; a typed answer only once two polls agree', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent(PAGE);
+    const snap = await ab().snapshotForm(pg);
+    // Listed: the year (index 4). The robot filled the town (#town). The dwelling type is neither.
+    const cap = await ab().captureStart(pg, snap, { listed: new Set([4]), robot: new Set(['#town']) });
+    expect(cap.off).toBe('');
+    const set = (id, v) => pg.evaluate(([i, x]) => { document.getElementById(i).value = x; }, [id, v]);
+    await set('built', '19'); await set('town', 'Othertown'); await pg.selectOption('#kind', 'Terraced house');
+    await ab().capturePoll(pg, cap);
+    await set('built', '1930');
+    await ab().capturePoll(pg, cap);
+    // The town has read "Othertown" twice running (the first read counts); the year only once at "1930".
+    expect(ab().captureEnd(cap)).toEqual([{ question: 'Town', kind: 'text', index: 0, answer: 'Othertown', options: [], was: 'Testtown' }]);
+    await ab().capturePoll(pg, cap);
+    expect(ab().captureEnd(cap).map(e => [e.index, e.answer, e.was])).toEqual([[0, 'Othertown', 'Testtown'], [4, '1930', undefined]]);
+    await pg.close();
+  });
+
+  it('a page with one declaration or one loss records nothing, nor does a pay page; the credential words count too', async () => {
+    const pg = await browser.newPage();
+    const swap = h => PAGE.replace('<h1>About you</h1>', h);
+    await pg.setContent(swap('<h1>About you</h1><div class="q"><p>Have you had any claims?</p><input type="radio" name="c" id="c1"><label for="c1">Yes</label><input type="radio" name="c" id="c2"><label for="c2">No</label></div>'));
+    expect((await ab().captureStart(pg, await ab().snapshotForm(pg), { listed: new Set([0]) })).off).toMatch(/declaration/);
+    await pg.setContent(PAGE.replace('<form>', '<form><p>Tell us about any loss or damage at the property.</p>'));
+    expect((await ab().captureStart(pg, await ab().snapshotForm(pg), { listed: new Set([0]) })).off).toMatch(/loss/);
+    await pg.setContent(swap('<h1>Payment</h1>'));
+    expect((await ab().captureStart(pg, await ab().snapshotForm(pg), { listed: new Set([0]) })).off).toBe('a payment page');
+    for (const question of ['Enter the 6-digit code we sent you', 'Security answer', 'Your API token']) expect(ab().captureRefusal({ question, answer: 'abc' }), question).not.toBe('');
+    expect(ab().captureRefusal({ question: 'Town', answer: 'Othertown' })).toBe('');
+    await pg.close();
+  });
+});
+
+Object.assign(PAGES, (() => {
+  // Kevin, stood in: when the bar says Your turn he answers, waits a moment as a person would, and presses Next.
+  const kevin = act => `<script>setInterval(() => { const t = document.getElementById('od-your-turn');
+    if (t && /^Your turn/.test(t.textContent) && !window.__done) { window.__done = 1; setTimeout(() => { ${act}; setTimeout(() => document.getElementById('next1').click(), 1600); }, 300); } }, 200);</script>`;
+  const sublet = `<div class="q"><p>Is the property sub-let?</p><input type="radio" name="sublet" id="sy" value="yes"><label for="sy">Yes</label>
+    <input type="radio" name="sublet" id="sn" value="no"><label for="sn">No</label></div>`;
+  const dwelling = `<div class="q"><label for="dwelling">What is the dwelling type?<span>Please select an option</span></label><select id="dwelling" name="dwelling">
+    <option value=""></option><option>Terraced house</option><option>Semi-detached house</option></select></div>`;
+  const page = (inner, act) => `<!doctype html><html><body><h1>About the property</h1><form action="/f2" method="get">${inner}
+    <button id="next1" type="submit">Next</button></form>${kevin(act)}</body></html>`;
+  return {
+    '/c1': page(`<div class="q"><label for="storeys">Number of storeys</label><input id="storeys" name="storeys"></div>${dwelling}${sublet}`,
+      "document.getElementById('dwelling').value = 'Semi-detached house'; document.getElementById('sn').checked = true"),
+    '/c2': page(`<div class="q"><label for="ref">Your reference</label><input id="ref" name="ref"></div>
+      <div class="q"><p>Have you had any claims in the last 5 years?</p><input type="radio" name="cl" id="c1" value="y"><label for="c1">Yes</label><input type="radio" name="cl" id="c2" value="n"><label for="c2">No</label></div>`,
+      "document.getElementById('ref').value = 'REF-TEST'; document.getElementById('c2').checked = true"),
+    '/c3': page(`<div class="q"><label for="card">Card number</label><input id="card" name="card"></div>
+      <div class="q"><label for="pw">Choose a password</label><input id="pw" name="pw" type="password"></div>${sublet}`,
+      "document.getElementById('card').value = '0000 1111 2222 3333'; document.getElementById('pw').value = 'test-pass'; document.getElementById('sn').checked = true"),
+    '/c4': page(`<div class="q"><label for="beds">Number of bedrooms</label><input id="beds" name="beds"></div>${sublet}`,
+      "document.getElementById('beds').value = '4'; document.getElementById('sn').checked = true"),
+    // Review round 3: the robot fills #beds on one page; the next page's #beds is the SITE's (prefilled 9).
+    '/c6': `<!doctype html><html><body><h1>Rooms</h1><form action="/c7" method="get"><div class="q"><label for="beds">Number of bedrooms</label><input id="beds" name="beds"></div>
+      <button id="next1" type="submit">Next</button></form></body></html>`,
+    '/c7': page(`<div class="q"><label for="beds">Number of bedrooms</label><input id="beds" name="beds2" value="9"></div>${sublet}`.replace('<h1>About the property</h1>', ''),
+      "document.getElementById('beds').value = '2'; document.getElementById('sn').checked = true").replace('<h1>About the property</h1>', '<h1>More about the property</h1>'),
+    '/c5': page(`<div class="q"><label for="ref">Your reference</label><input id="ref" name="ref"></div>
+      <div class="q"><p>Has the property suffered any loss or damage in the last 5 years?</p><input type="radio" name="ld" id="l1" value="y"><label for="l1">Yes</label><input type="radio" name="ld" id="l2" value="n"><label for="l2">No</label></div>`,
+      "document.getElementById('ref').value = 'REF-TEST'; document.getElementById('l2').checked = true"),
+  };
+})());
+
+// The planner, stood in: an item is answered only from the fact line whose label IS its question (a hint and
+// the "?" aside); a radio by the first word of the line's value.
+const C_PLANNER = `
+module.exports = async (input) => {
+  const p = input.page;
+  if (p.prices.length) return { steps: [], next: null, unknown: [], done: 'price' };
+  const bare = t => String(t).split('?')[0].trim().toLowerCase();
+  const label = l => l.slice(0, l.indexOf(':'));
+  const val = l => l.slice(l.indexOf(':') + 1).trim();
+  const steps = [], unknown = [];
+  for (const it of p.items) {
+    const line = input.facts.find(f => f.includes(':') && bare(label(f)) === bare(it.question));
+    if (it.kind === 'radio') {
+      if (it.options.some(o => o.checked)) continue;
+      const o = line && it.options.find(o => o.label === val(line).split(/[ ,(]/)[0]);
+      if (o) steps.push({ do: 'click', target: o.target, question: it.question, source: line }); else unknown.push(it.question);
+      continue;
+    }
+    if (it.value) continue;
+    if (!line) { unknown.push(it.question); continue; }
+    steps.push({ do: it.kind === 'select' ? 'select' : 'fill', target: it.target, value: val(line), question: it.question, source: line });
+  }
+  const next = p.buttons.find(x => /^Next$/.test(x.text));
+  return { steps, next: unknown.length || !next ? null : next.target, unknown, done: 'no' };
+};
+`;
+
+describe('forms round 2 C: his answers in his own window are recorded for the agent, never reused', () => {
+  function cHome(outcome, store = storeOf()) {
+    const x = home(outcome, store);
+    writeFileSync(join(x.h, 'c-planner.js'), C_PLANNER);
+    x.env.AGENT_HANDOVER_PLANNER = join(x.h, 'c-planner.js');
+    return x;
+  }
+  const C_PLAN = (path, extra = {}) => ({ why: 'read the price and buy only if you want it', site: 'practice', label: 'Practice quote',
+    steps: [{ do: 'goto', url: `${base}${path}` }], carryOn: {}, factsFor: { owner: 'test-owner', properties: ['12 Test Lane'] }, ...extra });
+  const live = async (x, task, plan) => {
+    writeFileSync(join(x.plans, task + '.json'), JSON.stringify(plan));
+    const r = await run(x.env, ['handover', '--task', task]);
+    return { r, line: ledgerOf(x).filter(l => l.cmd === 'handover').pop() };
+  };
+  const kept = x => (JSON.parse(readFileSync(x.facts, 'utf8')).captured || []);
+
+  it('he answers the select and radio the robot listed: both recorded with site, path, kind, index, task and date; the next run still stops on them; once `set` stores them as facts, the run after answers them', async () => {
+    const x = cHome('Approved as-is');
+    hits.length = 0;
+    const first = await live(x, TASK1, C_PLAN('/c1'));
+    expect(first.r.code, first.r.err + first.r.out).toBe(0);
+    expect(hits.some(u => u.startsWith('/f2?storeys=2&dwelling=Semi-detached+house&sublet=no'))).toBe(true);
+    expect(first.line.captured).toBe(2);
+    expect(first.line).not.toHaveProperty('corrected');
+    expect(first.line).not.toHaveProperty('captureError');
+    const today = ff.todayLondon();
+    expect(kept(x).map(c => [c.site, c.path, c.owner, c.properties, c.question, c.kind, c.index, c.answer, c.task, c.date])).toEqual([
+      ['127.0.0.1', '/c1', 'test-owner', [HOUSE], 'What is the dwelling type?Please select an option', 'select', 1, 'Semi-detached house', TASK1, today],
+      ['127.0.0.1', '/c1', 'test-owner', [HOUSE], 'Is the property sub-let?', 'radio', 2, 'No', TASK1, today]]);
+    // The second run: nothing recorded answers anything; he is asked again.
+    const second = await live(x, TASK2, C_PLAN('/c1'));
+    expect(second.r.code, second.r.err + second.r.out).toBe(0);
+    expect(second.line.steps.filter(s => s.do === 'kevin')).toHaveLength(1);
+    expect(second.line.steps.filter(s => s.carryOn === 1 && s.executed && ['#dwelling', '#sn'].includes(s.selector))).toEqual([]);
+    // The agent files them as facts, with their source.
+    ff.setFact({ scope: 'property', ref: HOUSE, key: 'sub-let', value: 'No', source: `Kevin in his window, ${TASK1}`, date: today }, x.facts);
+    ff.setFact({ scope: 'property', ref: HOUSE, key: 'dwelling-type', label: 'What is the dwelling type', value: 'Semi-detached house', source: `Kevin in his window, ${TASK1}`, date: today }, x.facts);
+    hits.length = 0;
+    const third = await live(x, 'recFormFactsTest3', C_PLAN('/c1'));
+    expect(third.r.code, third.r.err + third.r.out).toBe(0);
+    expect(third.line.steps.filter(s => s.do === 'kevin')).toEqual([]);
+    expect(third.line.steps.filter(s => s.carryOn === 1 && s.executed).map(s => s.selector)).toEqual(['#storeys', '#dwelling', '#sn', '#next1']);
+    expect(hits.some(u => u.startsWith('/f2?storeys=2&dwelling=Semi-detached+house&sublet=no'))).toBe(true);
+  }, 240000);
+
+  it('the dry run prints how many records are on file, with what to do about them, never the answers, and never writes', async () => {
+    const s = storeOf({ captured: [
+      { site: '127.0.0.1', path: '/c1', owner: 'test-owner', properties: [HOUSE], task: TASK1, date: TODAY, question: 'Is the property sub-let?', kind: 'radio', index: 2, answer: 'No' }] });
+    const x = cHome('Changes requested', s);
+    const before = readFileSync(x.facts, 'utf8');
+    const out = lastJson(await dry(x, TASK1, C_PLAN('/c1')));
+    expect(out.facts.capturedOnFile).toBe(1);
+    expect(out.facts.capturedHint).toMatch(/node scripts\/form-facts\.js captured --task/);
+    expect(out.facts.capturedHint).toMatch(/set/);
+    // Still his: a record answers nothing.
+    expect(out.stuck.unknown).toEqual(['What is the dwelling type?Please select an option', 'Is the property sub-let?']);
+    expect(readFileSync(x.facts, 'utf8')).toBe(before);
+  }, 120000);
+
+  for (const [name, path, hit] of [['a declaration', '/c2', '/f2?ref=REF-TEST&cl=n'], ['a loss or damage question', '/c5', '/f2?ref=REF-TEST&ld=n']]) {
+    it(`a page holding ${name} records nothing, even its harmless box`, async () => {
+      const x = cHome('Approved as-is');
+      hits.length = 0;
+      const { r, line } = await live(x, TASK1, C_PLAN(path));
+      expect(r.code, r.err + r.out).toBe(0);
+      expect(hits.some(u => u.startsWith(hit))).toBe(true);
+      expect(line.captured).toBe(0);
+      expect(kept(x)).toEqual([]);
+    }, 120000);
+  }
+
+  it('a password box and a card number box are never recorded; the harmless listed answer beside them is', async () => {
+    const x = cHome('Approved as-is');
+    const { r, line } = await live(x, TASK1, C_PLAN('/c3'));
+    expect(r.code, r.err + r.out).toBe(0);
+    expect(line.captured).toBe(1);
+    expect(kept(x).map(c => [c.question, c.answer])).toEqual([['Is the property sub-let?', 'No']]);
+    expect(readFileSync(x.facts, 'utf8')).not.toMatch(/0000|test-pass|Card number|password/i);
+  }, 120000);
+
+  it('he changes a value the robot typed: it is recorded with "was", and "corrected" names the question on the ledger line', async () => {
+    const s = storeOf();
+    s.properties[HOUSE].facts.bedrooms = { value: '3', source: 'test survey', date: '2026-02-01' };
+    const x = cHome('Approved as-is', s);
+    hits.length = 0;
+    const { r, line } = await live(x, TASK1, C_PLAN('/c4'));
+    expect(r.code, r.err + r.out).toBe(0);
+    expect(hits.some(u => u.startsWith('/f2?beds=4&sublet=no'))).toBe(true);
+    expect(line.corrected).toEqual([{ question: 'Number of bedrooms' }]);
+    expect(kept(x).find(c => c.question === 'Number of bedrooms')).toMatchObject({ answer: '4', was: '3', kind: 'text', index: 0 });
+    expect(JSON.parse(readFileSync(x.facts, 'utf8')).properties[HOUSE].facts.bedrooms.value).toBe('3');
+  }, 120000);
+
+  it('review round 3: a box the robot filled on an EARLIER page is not "corrected" when a later page reuses its selector', async () => {
+    const s = storeOf();
+    s.properties[HOUSE].facts.bedrooms = { value: '3', source: 'test survey', date: '2026-02-01' };
+    const x = cHome('Approved as-is', s);
+    hits.length = 0;
+    const { r, line } = await live(x, TASK1, C_PLAN('/c6'));
+    expect(r.code, r.err + r.out).toBe(0);
+    expect(hits.some(u => u.startsWith('/c7?beds=3'))).toBe(true);
+    expect(hits.some(u => u.startsWith('/f2?beds2=2&sublet=no'))).toBe(true);
+    expect(line).not.toHaveProperty('corrected');
+    expect(kept(x).map(c => [c.question, c.answer, c.was])).toEqual([['Is the property sub-let?', 'No', undefined]]);
+  }, 120000);
+
+  it('a store that cannot be written leaves his window running to the end, and says so on the ledger line', async () => {
+    const x = cHome('Approved as-is');
+    const dir = join(x.h, 'ro');
+    mkdirSync(dir);
+    const f = join(dir, 'form-facts.json');
+    writeFileSync(f, readFileSync(x.facts, 'utf8'));
+    x.env.AGENT_FORM_FACTS = f;
+    fsCjs.chmodSync(dir, 0o500);
+    try {
+      const { r, line } = await live(x, TASK1, C_PLAN('/c1'));
+      expect(r.code, r.err + r.out).toBe(0);
+      expect(JSON.parse(r.out.trim().split('\n').pop())).toMatchObject({ handedOver: true, end: 'price' });
+      expect(line.captured).toBe(0);
+      expect(line.captureError[0]).toMatch(/his answers could not be kept/);
+    } finally { fsCjs.chmodSync(dir, 0o700); }
+  }, 120000);
+});

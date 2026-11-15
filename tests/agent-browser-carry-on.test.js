@@ -425,3 +425,284 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     expect(() => b.assertHandoverPlan({ why: 'buy if you want it', steps: [{ do: 'goto', url: 'https://x.example' }], carryOn: { facts: 'a: b' } })).not.toThrow();
   });
 });
+
+// ── Forms round 2, part A (15 Nov 2026): the planner answers what the facts file holds ──────────────
+// Measured on the real RightSure property page: the planner proposed 19 right steps and the checks refused
+// four the file answers. Each door below is narrow and exact; everything round it stays refused.
+describe('forms round 2 A: the page planner can answer what the file holds', () => {
+  const SUBLET = "Is the property sub-let: No (rooms let on ASTs in the owner's name)";
+  it('A1: a short-worded Yes/No question is answered by the line whose label IS the question, and by nothing near it', () => {
+    expect(b.pickInLine('No', SUBLET, 'Is the property sub-let?')).toBe(true);
+    expect(b.pickInLine('Yes', SUBLET, 'Is the property sub-let?')).toBe(false);
+    expect(b.pickInLine('No', SUBLET, 'Is the property let?')).toBe(false);
+    expect(b.pickInLine('No', SUBLET, 'Is the property sub-let to students?')).toBe(false);
+    // Review R3: a line tagged with a house never uses the exact-label door (it is about that house only).
+    expect(b.pickInLine('No', 'Is the property sub-let [12 Test Lane]: No', 'Is the property sub-let?')).toBe(false);
+    expect(b.pickInLine('No', 'Sub-let [12 Test Lane]: No', 'Sub-let?')).toBe(false);
+    // A second yes/no word in the line still refuses.
+    expect(b.pickInLine('No', 'Is the property sub-let: No, but yes in summer', 'Is the property sub-let?')).toBe(false);
+    // A line with no colon is read exactly as before: no label, so no exact-label door.
+    expect(b.pickInLine('No', 'Is the property sub-let No', 'Is the property sub-let?')).toBe(false);
+  });
+
+  it('A2: a select hint in the question ("?Please select an option") is not part of it for that comparison', () => {
+    expect(b.pickInLine('No', 'Is the property sub-let: No', 'Is the property sub-let?Please select an option')).toBe(true);
+    expect(b.pickInLine('No', 'Is the property sub-let: No', 'Is the property sub-let? Please choose one')).toBe(true);
+    expect(b.pickInLine('No', 'Is the property sub-let: No', 'Is the property sub-let? please enter Yes or No')).toBe(true);
+    // Only after the first "?" and only at the end.
+    expect(b.pickInLine('No', 'Is the property sub-let: No', 'Please select an option Is the property sub-let?')).toBe(false);
+    expect(b.pickInLine('No', 'Is the property sub-let: No', 'Is the property sub-let?Please select an option today')).toBe(false);
+  });
+
+  it('A3: an option worded with a negation is picked only when the whole value IS that option and the subject is shared', () => {
+    const q = 'Is the property to be insured listed?';
+    expect(b.pickInLine('Not Listed', 'Listed building: Not listed', q)).toBe(true);
+    expect(b.pickInLine('Not Listed', 'Listed building: Not listed, but in a conservation area', q)).toBe(false);
+    expect(b.pickInLine('Not Listed', 'Conservation area: Not listed', q)).toBe(false);
+    expect(b.pickInLine('Not Listed', 'Not listed', q)).toBe(false);          // no colon: refused as before
+    expect(b.pickInLine('English Grade 1', 'Listed building: Not listed', q)).toBe(false);
+    // The old refusals hold: "email only; never phone" never ticks Phone; a "No claims" option is never picked,
+    // and a page asking it never reaches the planner.
+    expect(b.pickInLine('Phone', 'Contact: email only; never phone, SMS or post')).toBe(false);
+    expect(b.pickInLine('No claims', 'Claims: No claims', 'Have you had any claims?')).toBe(false);
+    expect(b.declarationWords('Have you had any claims? No claims | One claim')).not.toBe('');
+  });
+
+  it('A3 through checkPlannerSteps: the select step on the listed question is kept, the conservation one is not', () => {
+    const snap = { items: [{ kind: 'select', question: 'Is the property to be insured listed?', target: '#listed', value: '', options: ['Not Listed', 'English Grade 1', 'English Grade 2'] },
+      { kind: 'radio', question: 'Is the property sub-let?', options: [{ label: 'Yes', target: '#sy' }, { label: 'No', target: '#sn' }] }], buttons: [], prices: [] };
+    const facts = ['Listed building: Not listed', SUBLET];
+    const r = b.checkPlannerSteps({ steps: [
+      { do: 'select', target: '#listed', value: 'Not Listed', question: 'listed', source: 'Listed building: Not listed' },
+      { do: 'click', target: '#sn', question: 'sub-let', source: SUBLET }], next: null, unknown: [], done: 'no' }, snap, facts);
+    expect(r.steps.map(s => s.selector)).toEqual(['#listed', '#sn']);
+    expect(r.unknown).toEqual([]);
+    const r2 = b.checkPlannerSteps({ steps: [{ do: 'select', target: '#listed', value: 'Not Listed', question: 'listed', source: 'Conservation area: Not listed' }],
+      next: null, unknown: [], done: 'no' }, snap, ['Conservation area: Not listed']);
+    expect(r2.steps).toEqual([]);
+  });
+});
+
+describe('forms round 2 A4: a combobox that is a read-only text box (react-bootstrap-typeahead)', () => {
+  let browser;
+  beforeAll(async () => { browser = await require_('playwright').chromium.launch(); });
+  afterAll(async () => { if (browser) await browser.close(); });
+  // RightSure's own markup for the storeys box (read 15 Nov 2026), with a small script standing in for the
+  // typeahead: a click opens the list, a click on an option sets the box and closes the list.
+  const STOREYS = (opts) => `<!doctype html><html><body><div class="q"><label class="question-label" for="numberOfStoreys">What is the number of storeys?</label>
+    <div class="rbt" tabindex="-1" style="position: relative;"><div style="display: flex; flex: 1 1 0%; position: relative;">
+      <input autocomplete="off" type="text" name="numberOfStoreys" readonly="" aria-autocomplete="both" aria-expanded="false" aria-haspopup="listbox" role="combobox" class="rbt-input-main form-control rbt-input" value="">
+      <input aria-hidden="true" class="rbt-input-hint" readonly="" tabindex="-1" value="" style="background-color: transparent; border-color: transparent; box-shadow: none; color: rgba(0, 0, 0, 0.54); left: 0px; pointer-events: none; position: absolute; top: 0px; width: 100%;">
+    </div></div></div>
+    <script>
+      const box = document.querySelector('.rbt-input-main');
+      box.addEventListener('click', () => {
+        if (document.querySelector('.rbt-menu')) return;
+        const m = document.createElement('div'); m.className = 'rbt-menu dropdown-menu show'; m.setAttribute('role', 'listbox');
+        for (const t of ${JSON.stringify(opts)}) { const a = document.createElement('a'); a.className = 'dropdown-item'; a.setAttribute('role', 'option'); a.href = '#'; a.textContent = t;
+          a.addEventListener('click', e => { e.preventDefault(); box.value = t; window.__picked = t; m.remove(); }); m.appendChild(a); }
+        box.setAttribute('aria-expanded', 'true');
+        document.querySelector('.rbt').appendChild(m);
+      });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') { const m = document.querySelector('.rbt-menu'); if (m) m.remove(); } });
+    </script></body></html>`;
+  async function pageWith(opts) { const pg = await browser.newPage(); await pg.setContent(STOREYS(opts)); return pg; }
+
+  it('the box takes its question from the label naming it, the hint box is no item, and it is a combobox', async () => {
+    const pg = await pageWith(['1', '2', '3']);
+    const items = (await b.snapshotForm(pg)).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'combobox', question: 'What is the number of storeys?', target: '[name="numberOfStoreys"]' });
+    // The planner's fill of it is checked as a typed value: the line's own words.
+    const out = b.checkPlannerSteps({ steps: [{ do: 'fill', target: items[0].target, value: '2', question: 'storeys', source: 'Number of storeys: 2' }], next: null, unknown: [], done: 'no' },
+      { items, buttons: [], prices: [] }, ['Number of storeys: 2']);
+    expect(out.steps).toMatchObject([{ do: 'fill', selector: '[name="numberOfStoreys"]', value: '2' }]);
+    await pg.close();
+  });
+
+  it('a fill of "2" picks the one option reading 2, and the box holds 2', async () => {
+    const pg = await pageWith(['1', '2', '3', '4 or more']);
+    await b.runSteps(pg, [{ do: 'fill', selector: '[name="numberOfStoreys"]', value: '2' }], false, null);
+    expect(await pg.inputValue('[name="numberOfStoreys"]')).toBe('2');
+    expect(await pg.evaluate(() => window.__picked)).toBe('2');
+    await pg.close();
+  });
+
+  it('a value with no exact option fails the step, closes the list and leaves the box empty', async () => {
+    const pg = await pageWith(['1', '2', '3']);
+    await expect(b.runSteps(pg, [{ do: 'fill', selector: '[name="numberOfStoreys"]', value: '7' }], false, null)).rejects.toThrow(/has no option reading "7"/);
+    expect(await pg.inputValue('[name="numberOfStoreys"]')).toBe('');
+    expect(await pg.locator('.rbt-menu').count()).toBe(0);
+    // Two options of the same text: never a guess.
+    const pg2 = await pageWith(['2', '2', '3']);
+    await expect(b.runSteps(pg2, [{ do: 'fill', selector: '[name="numberOfStoreys"]', value: '2' }], false, null)).rejects.toThrow(/has 2 options reading "2"/);
+    expect(await pg2.inputValue('[name="numberOfStoreys"]')).toBe('');
+    await pg.close(); await pg2.close();
+  });
+
+  it('an option worded as the final action is refused by the guard before it is clicked', async () => {
+    const pg = await pageWith(['1', 'Buy now']);
+    await expect(b.runSteps(pg, [{ do: 'fill', selector: '[name="numberOfStoreys"]', value: 'Buy now' }], false, null)).rejects.toThrow(/^refused: .*looks like the final action/);
+    expect(await pg.inputValue('[name="numberOfStoreys"]')).toBe('');
+    expect(await pg.evaluate(() => window.__picked || null)).toBeNull();
+    await pg.close();
+  });
+
+  it('a combobox whose question is a declaration is never answered by a fill, whatever its options say', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent(STOREYS(['Yes', 'No']).replace('What is the number of storeys?', 'Have you had any claims in the last 5 years?'));
+    await expect(b.runSteps(pg, [{ do: 'fill', selector: '[name="numberOfStoreys"]', value: 'No' }], false, null)).rejects.toThrow(/^refused: .*reads like a declaration/);
+    expect(await pg.inputValue('[name="numberOfStoreys"]')).toBe('');
+    expect(await pg.locator('.rbt-menu').count()).toBe(0);
+    await pg.close();
+  });
+
+  it('a combobox without aria-haspopup="listbox" is typed into as before', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent('<!doctype html><html><body><label for="town">Town</label><input id="town" type="text" role="combobox"></body></html>');
+    await b.runSteps(pg, [{ do: 'fill', selector: '#town', value: 'Testtown' }], false, null);
+    expect(await pg.inputValue('#town')).toBe('Testtown');
+    await pg.close();
+  });
+});
+
+// ── Forms round 2 review: R2 and R4 ──────────────────────────────────────────────────────────────────
+describe('forms round 2 R2: a combobox answer gets the checks a select pick gets', () => {
+  const snap = { items: [{ kind: 'combobox', question: 'Is the property sub-let?', target: '#sl', value: '' },
+    { kind: 'combobox', question: 'Is the property to be insured listed?', target: '#ls', value: '' }], buttons: [], prices: [] };
+  const step = (target, value, source) => b.checkPlannerSteps({ steps: [{ do: 'fill', target, value, question: 'q', source }], next: null, unknown: [], done: 'no' }, snap, [source]).steps;
+  it('the Yes/No subject rule: "Contact by phone: No" never answers the sub-let combobox; the sub-let line does', () => {
+    expect(step('#sl', 'No', 'Contact by phone: No')).toEqual([]);
+    expect(step('#sl', 'No', 'Is the property sub-let: No')).toHaveLength(1);
+  });
+  it('the negation rule: "Not Listed" only from a line whose whole value it is', () => {
+    expect(step('#ls', 'Not Listed', 'Listed building: Not listed, but in a conservation area')).toEqual([]);
+    expect(step('#ls', 'Not listed', 'Listed building: Not listed')).toHaveLength(1);
+  });
+});
+
+describe('forms round 2 R4: the aria-hidden filter drops only typed inputs', () => {
+  it('a hidden-from-assistive-tech select, textarea, radio and tick box are still items', async () => {
+    const browser = await require_('playwright').chromium.launch();
+    try {
+      const pg = await browser.newPage();
+      await pg.setContent(`<!doctype html><html><body>
+        <label for="s">Type</label><select id="s" aria-hidden="true"><option>A</option></select>
+        <label for="t">Notes</label><textarea id="t" aria-hidden="true"></textarea>
+        <p>Pick</p><input type="radio" name="r" id="r1" aria-hidden="true"><label for="r1">One</label>
+        <input type="checkbox" id="c" aria-hidden="true"><label for="c">Tick</label>
+        <label for="x">Hint</label><input id="x" type="text" aria-hidden="true"></body></html>`);
+      const kinds = (await b.snapshotForm(pg)).items.map(i => i.kind);
+      expect(kinds).toEqual(['select', 'text', 'radio', 'checkbox']);
+    } finally { await browser.close(); }
+  });
+  it('a fill that is not a combobox adds no wait of its own: a missing box fails in the guard\'s time, not twice', async () => {
+    const browser = await require_('playwright').chromium.launch();
+    try {
+      const pg = await browser.newPage();
+      await pg.setContent('<!doctype html><html><body><input id="a"></body></html>');
+      const t0 = Date.now();
+      await b.runSteps(pg, [{ do: 'fill', selector: '#a', value: 'x' }], false, null);
+      expect(Date.now() - t0).toBeLessThan(3000);
+      expect(await pg.inputValue('#a')).toBe('x');
+    } finally { await browser.close(); }
+  });
+});
+
+// ── Forms round 2 D3: a typeahead combobox (not read-only) needs an exact option ─────────────────────
+describe('forms round 2 D3: a typeahead combobox takes only its one exact option', () => {
+  let browser;
+  beforeAll(async () => { browser = await require_('playwright').chromium.launch(); });
+  afterAll(async () => { if (browser) await browser.close(); });
+  // RightSure's occupation box (read 15 Nov 2026), with a small script standing in for the typeahead: typing
+  // shows the options containing the typed text, each split by a <mark>, in a list named <name>TypeAheadId.
+  const OCC = (opts, { never = false } = {}) => `<!doctype html><html><body><div class="q"><label class="question-label" for="occupationName">What is your occupation?</label>
+    <div class="rbt" tabindex="-1" style="position: relative;"><div style="display: flex; position: relative;">
+      <input autocomplete="off" placeholder="Start typing your job title" type="text" name="occupationName" aria-autocomplete="both" aria-expanded="false" aria-haspopup="listbox" role="combobox" class="rbt-input-main form-control rbt-input" value="">
+      <input aria-hidden="true" class="rbt-input-hint" readonly="" tabindex="-1" value="" style="pointer-events: none; position: absolute; left: 0; top: 0;">
+    </div></div></div>
+    <div id="elsewhere" role="listbox" style="position: fixed; top: 0; right: 0;"><a role="option" aria-label="Administrator" href="#">Administrator</a></div>
+    <script>
+      const box = document.querySelector('.rbt-input-main');
+      const opts = ${JSON.stringify(opts)};
+      const draw = () => {
+        const old = document.getElementById('occupationNameTypeAheadId'); if (old) old.remove();
+        box.setAttribute('aria-expanded', 'false');
+        if (${never} || !box.value) return;
+        const m = document.createElement('div'); m.id = 'occupationNameTypeAheadId'; m.setAttribute('aria-label', 'menu-options');
+        m.className = 'rbt-menu dropdown-menu show'; m.setAttribute('role', 'listbox'); m.style.position = 'fixed';
+        for (const t of opts.filter(o => o.toLowerCase().includes(box.value.toLowerCase()))) {
+          const a = document.createElement('a'); a.setAttribute('aria-label', t); a.setAttribute('role', 'option'); a.className = 'dropdown-item'; a.href = '#';
+          const i = t.toLowerCase().indexOf(box.value.toLowerCase());
+          a.innerHTML = t.slice(0, i) + '<mark class="rbt-highlight-text">' + t.slice(i, i + box.value.length) + '</mark>' + t.slice(i + box.value.length);
+          a.addEventListener('click', e => { e.preventDefault(); box.value = t; window.__picked = t; m.remove(); });
+          m.appendChild(a);
+        }
+        box.setAttribute('aria-expanded', 'true');
+        document.body.appendChild(m);
+      };
+      box.addEventListener('input', draw);
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') { window.__escaped = (window.__escaped || 0) + 1; const m = document.getElementById('occupationNameTypeAheadId'); if (m) m.remove(); } });
+    </script></body></html>`;
+  const JOBS = ['Administration Assistant', 'Administrator', 'Admin Clerk', 'Systems Administrator'];
+  const fill = (pg, value) => b.runSteps(pg, [{ do: 'fill', selector: '[name="occupationName"]', value }], false, null);
+  async function pageWith(opts, o) { const pg = await browser.newPage(); await pg.setContent(OCC(opts, o)); return pg; }
+
+  it('"Administrator" from "Occupation: Administrator" is chosen from its own list and the box holds it', async () => {
+    const pg = await pageWith(JOBS);
+    const items = (await b.snapshotForm(pg)).items;
+    expect(items).toEqual([expect.objectContaining({ kind: 'combobox', question: 'What is your occupation? Start typing your job title', target: '[name="occupationName"]' })]);
+    const out = b.checkPlannerSteps({ steps: [{ do: 'fill', target: items[0].target, value: 'Administrator', question: 'q', source: 'Occupation: Administrator' }], next: null, unknown: [], done: 'no' },
+      { items, buttons: [], prices: [] }, ['Occupation: Administrator']);
+    expect(out.steps).toHaveLength(1);
+    await fill(pg, 'Administrator');
+    expect(await pg.inputValue('[name="occupationName"]')).toBe('Administrator');
+    expect(await pg.evaluate(() => window.__picked)).toBe('Administrator');
+    await pg.close();
+  });
+
+  it('"Admin" (no exact option) fails and the box ends empty', async () => {
+    const pg = await pageWith(JOBS);
+    await expect(fill(pg, 'Admin')).rejects.toThrow(/has no option reading "Admin"/);
+    expect(await pg.inputValue('[name="occupationName"]')).toBe('');
+    expect(await pg.evaluate(() => window.__picked || null)).toBeNull();
+    await pg.close();
+  });
+
+  it('two options with the same label fail, and the box ends empty', async () => {
+    const pg = await pageWith(['Administrator', 'Administrator']);
+    await expect(fill(pg, 'Administrator')).rejects.toThrow(/has 2 options reading "Administrator"/);
+    expect(await pg.inputValue('[name="occupationName"]')).toBe('');
+    await pg.close();
+  });
+
+  it('review round 3: a box whose question cannot be read is never clicked or typed into', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent(OCC(JOBS).replace('<label class="question-label" for="occupationName">What is your occupation?</label>', '').replace(' placeholder="Start typing your job title"', ''));
+    await expect(fill(pg, 'Administrator')).rejects.toThrow(/^refused: .*has no question the robot can read/);
+    expect(await pg.inputValue('[name="occupationName"]')).toBe('');
+    expect(await pg.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await pg.close();
+  });
+
+  it('review round 3: with no .rbt wrapper and no id link, a list beside the box is never used: the step fails', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent(`<!doctype html><html><body><div><label for="job">Job title</label>
+      <input id="job" name="job" type="text" role="combobox" aria-haspopup="listbox" autocomplete="off">
+      <div role="listbox" id="near"><a role="option" aria-label="Administrator" href="#">Administrator</a></div></div>
+      <script>document.querySelector('#near a').addEventListener('click', e => { e.preventDefault(); document.getElementById('job').value = 'Administrator'; window.__picked = 1; });</script></body></html>`);
+    await expect(b.runSteps(pg, [{ do: 'fill', selector: '#job', value: 'Administrator' }], false, null)).rejects.toThrow(/opened no list of its own/);
+    expect(await pg.inputValue('#job')).toBe('');
+    expect(await pg.evaluate(() => window.__picked || null)).toBeNull();
+    await pg.close();
+  });
+
+  it('its own list never appearing fails, the box ends empty, another list on the page is never used, and Escape is not pressed', async () => {
+    const pg = await pageWith(JOBS, { never: true });
+    await expect(fill(pg, 'Administrator')).rejects.toThrow(/opened no list of its own in 4 s/);
+    expect(await pg.inputValue('[name="occupationName"]')).toBe('');
+    expect(await pg.evaluate(() => window.__picked || null)).toBeNull();
+    expect(await pg.evaluate(() => window.__escaped || 0)).toBe(0);
+    await pg.close();
+  });
+});
