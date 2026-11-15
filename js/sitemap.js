@@ -10,7 +10,6 @@
         'cfv':         ['js/cfv.js'],
         'invoices':    ['js/invoices.js'],
         'pnl':         ['js/pnl.js'],
-        'comms':       ['follow-up.html'],
         'compliance':  ['compliance.html'],
         'kpi-library': ['js/kpi-library.js'],
         'fintable':    ['js/fintable.js'],

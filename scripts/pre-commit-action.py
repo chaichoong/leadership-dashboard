@@ -29,7 +29,6 @@ FILE_TO_PAGE = {
     'js/fintable.js':       'fintable',
     'js/prospecting.js':    'prospecting',
     'js/sitemap.js':        'sitemap',
-    'follow-up.html':       'comms',
     'compliance.html':      'compliance',
     'growth-plan.html':     'growth-plan',
     'publishing.html':      'publishing',

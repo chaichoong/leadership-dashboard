@@ -8,17 +8,18 @@
 //    and the agent would report a healthy board while nothing progressed;
 //  - the slot job's name colliding with a skill folder, which the one-routine
 //    guard (check-routines.py) reads as an illegal second Claude routine;
-//  - the wiring drifting apart: the dispatch roster, the follow-up pages'
-//    agent set, and the register row identity must all name the same rec ids
-//    or routed tasks fall off every surface with no error;
+//  - the wiring drifting apart: the dispatch roster and the register row
+//    identity must name the same rec ids or routed tasks fall off every
+//    surface with no error;
 //  - the runner growing a way to write tasks directly instead of through
 //    agent-dispatch.py, which would bypass the approval gate and the
 //    register's pause lever;
 //  - legacy Status=Approval rows (never raised by the loop) counting as
 //    "waiting on Kevin", hiding years-old stuck work behind his queue.
 //
-// Constants are compared against agent-dispatch.py and follow-up.html rather
-// than copied, so a rename there fails here.
+// Constants are compared against agent-dispatch.py rather than copied, so a
+// rename there fails here. (The Inbound Comms page, follow-up.html, was a
+// second home until it was removed on 15 Nov 2026.)
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
@@ -31,7 +32,6 @@ const script = readFileSync(path.join(root, 'scripts/task-manager.py'), 'utf8');
 const runner = readFileSync(path.join(root, 'scripts/task-manager-run.sh'), 'utf8');
 const skill = readFileSync(path.join(root, '.claude/scheduled-tasks/task-manager-board/SKILL.md'), 'utf8');
 const dispatch = readFileSync(path.join(root, 'scripts/agent-dispatch.py'), 'utf8');
-const followUp = readFileSync(path.join(root, 'follow-up.html'), 'utf8');
 const sched = JSON.parse(readFileSync(path.join(root, 'scripts/job-schedule.json'), 'utf8'));
 const triageSkill = readFileSync(path.join(root, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md'), 'utf8');
 const dailyOpsDoc = readFileSync(path.join(root, 'docs/daily-ops-routine.md'), 'utf8');
@@ -178,12 +178,6 @@ describe('the wiring names one identity everywhere', () => {
         // a derived alias — assert both halves of that shape.
         expect(dispatch).toContain(`"registerRow": "${TASKMGR_REGISTER_ROW}"`);
         expect(dispatch).toContain('TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]');
-    });
-
-    it('both follow-up pages count the Task Manager as agent-owned', () => {
-        for (const page of [followUp]) {
-            expect(page).toContain(`'${TASKMGR_TEAM_REC}'`);
-        }
     });
 
     it('script, skill and agent file agree on the register row and team rec', () => {

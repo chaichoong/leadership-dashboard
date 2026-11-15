@@ -24,7 +24,8 @@ const read = (p) => readFileSync(resolve(ROOT, p), 'utf8');
 const codeOnly = (src) => src.replace(/^\s*\/\/.*$/gm, '');
 
 // Every file that uploads an attachment.
-const UPLOADERS = ['js/shared.js', 'os/agents/index.html', 'follow-up.html', 'scripts/agent-dispatch.py'];
+// (follow-up.html left this list on 15 Nov 2026 when the Inbound Comms page was removed.)
+const UPLOADERS = ['js/shared.js', 'os/agents/index.html', 'scripts/agent-dispatch.py'];
 
 describe('Airtable attachment uploads use the accepted shape', () => {
   it('at least three uploaders exist (control — a moved call site must not empty this suite)', () => {
@@ -208,10 +209,8 @@ describe('the Attachments field is shared, and the surfaces say so', () => {
   const page = read('os/agents/index.html');
 
   it('the card does not claim a file came from the agent', () => {
-    // follow-up.html uploads the SENDER's own email attachments to the same
-    // field id on the same task, and Kevin's feedback files land there too.
-    // Verified: follow-up.html AIRTABLE_FIELDS.attachments === fldEbs9cscRr8elcw.
-    expect(read('follow-up.html')).toMatch(/attachments:\s*'fldEbs9cscRr8elcw'/);
+    // A task's Attachments field also holds the SENDER's own email attachments
+    // and Kevin's feedback files, so a file on the card is not always the agent's.
     expect(page).toMatch(/Came with the task: /);          // a sender file is named as such, in the trail
     expect(page).not.toMatch(/File from the agent|files from the agent/);
   });

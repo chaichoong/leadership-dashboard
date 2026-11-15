@@ -82,7 +82,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="operations" data-tabs="tasks,comms,property-manager,operations,systemisation,skills,ai-brain">
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,property-manager,operations,systemisation,skills,ai-brain">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
@@ -91,7 +91,6 @@
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('tasks')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('operations')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('operations')}"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('property-manager')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('property-manager')}"><span class="sidebar-icon">&#x1F3E0;</span><span class="sidebar-label">Property Manager</span><span class="sidebar-health-dot unknown" data-sidebar-health="property-manager" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('skills')}"><span class="sidebar-icon">&#x1F9E0;</span><span class="sidebar-label">Skills Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="skills" title="No checks run yet"></span></div>
@@ -741,16 +740,7 @@
         <h2 class="home-dash-divider" id="homeWealthDivider"><button type="button" class="home-fold-btn" data-home-fold="wealth" aria-expanded="true"><span class="home-chev" aria-hidden="true">▾</span>Your wealth</button></h2><p class="home-wealth-wait" id="homeWealthWait" hidden>Your wealth draws once your approvals and cash flow voids have loaded.</p><!-- Home tab: shown only in body.home-mode (css/home.css) -->
         <div class="tab-panel" id="tab-wealth"></div>
 
-        <!-- Tab 5: Inbound Comms -->
-        <div class="tab-panel" id="tab-comms">
-            <iframe class="tab-panel-iframe" id="commsFrame"
-                src=""
-                data-src="follow-up.html"
-                loading="lazy"
-                allowfullscreen
-                style="border:none">
-            </iframe>
-        </div>
+        <!-- Tab 5 (Inbound Comms, follow-up.html) removed 15 Nov 2026: Inbox Triage sorts the mail now. -->
 
 
         <!-- Tab: Operations (Tenants, Tenancies, Rental Units, Properties) -->

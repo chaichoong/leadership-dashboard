@@ -74,13 +74,6 @@ describe('roster wiring', () => {
     expect(out).toEqual({ inRole: true, agent: 'property-administration', dispatch: true,
                           rec: PROPERTY_TM, row: PROPERTY_ROW, scoreName: 'Property Administration' });
   });
-  it('both follow-up roster twins count its tasks as agent-owned', () => {
-    for (const f of ['follow-up.html']) {
-      const html = readFileSync(resolve(ROOT, f), 'utf8');
-      const block = html.match(/AI_AGENT_TEAM_MEMBER_RECS = new Set\(\[([\s\S]*?)\]\)/)[1];
-      expect(block, f).toContain(PROPERTY_TM);
-    }
-  });
 });
 
 describe('the routing floor (real property_match)', () => {

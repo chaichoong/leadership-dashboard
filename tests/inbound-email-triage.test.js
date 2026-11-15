@@ -1,11 +1,10 @@
 // The Inbound Comms Triage agent sorts Kevin's inbox every morning and turns
 // actionable email into agent-routed tasks. Regressions to fear:
 //
-//  - the skill's task shape drifting away from what the Inbound Comms page
-//    and the dispatch engine expect (a human assigned again, an approver
-//    other than Kevin creeping back in, a dedupe key format the page cannot
-//    see) — inbound mail would then double-task or fall off the agent queue
-//    with no error;
+//  - the skill's task shape drifting away from what the dispatch engine
+//    expects (a human assigned again, an approver other than Kevin creeping
+//    back in, a dedupe key format that misses an archived thread) — inbound
+//    mail would then double-task or fall off the agent queue with no error;
 //  - the triage plumbing growing a way to SEND or DELETE — this agent is
 //    triage-only by Kevin's ruling, enforced by a separate read/label-only
 //    key and worker-side SPAM/TRASH refusal;
@@ -17,8 +16,10 @@
 //    to run AFTER agent-dispatch so the tasks it creates sit a full day
 //    before any agent picks them up.
 //
-// Constants are compared against follow-up.html (the routing's source of
-// truth) rather than copied, so a rename there fails here.
+// Constants are compared against their live homes (KEVIN_APPROVER_USR in
+// scripts/agent-dispatch.py, TASK_FIELDS.approver in js/config.js) rather than
+// copied, so a rename there fails here. Until 15 Nov 2026 they were read from
+// the Inbound Comms page (follow-up.html), which was removed that day.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
@@ -30,20 +31,21 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const skill = readFileSync(path.join(root, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md'), 'utf8');
 const dailyOps = readFileSync(path.join(root, '.claude/scheduled-tasks/daily-ops/SKILL.md'), 'utf8');
 const dailyOpsDoc = readFileSync(path.join(root, 'docs/daily-ops-routine.md'), 'utf8');
-const followUp = readFileSync(path.join(root, 'follow-up.html'), 'utf8');
+const dispatch = readFileSync(path.join(root, 'scripts/agent-dispatch.py'), 'utf8');
+const config = readFileSync(path.join(root, 'js/config.js'), 'utf8');
 const worker = readFileSync(path.join(root, 'workers/drive-upload/worker.js'), 'utf8');
 const script = readFileSync(path.join(root, 'scripts/inbound-triage.py'), 'utf8');
 // The agents panel (Daily decisions) moved from os/systemisation to the
 // Leadership → AI Agents page on 25 Aug 2026.
 const agentsPage = readFileSync(path.join(root, 'os/agents/index.html'), 'utf8');
 
-function fromFollowUp(pattern, label) {
-    const m = followUp.match(pattern);
-    if (!m) throw new Error(`follow-up.html no longer defines ${label} — routing source of truth moved`);
+function fromSource(src, file, pattern, label) {
+    const m = src.match(pattern);
+    if (!m) throw new Error(`${file} no longer defines ${label}: its home moved`);
     return m[1];
 }
 
-describe('task shape matches the routing source of truth (follow-up.html)', () => {
+describe('task shape matches the routing rules', () => {
     it('routes to the AI CEO as Team Member, with no Assignee', () => {
         expect(skill).toContain('reciHUAEcEkbctnZ6');   // AI CEO Team Members row
         expect(skill).toContain('flduCtmQGpOA4eWaj');   // Team Member field
@@ -51,9 +53,11 @@ describe('task shape matches the routing source of truth (follow-up.html)', () =
     });
 
     it("Kevin is the only approver the skill ever writes (his ruling, 24 Aug 2026)", () => {
-        const mica = fromFollowUp(/AIRTABLE_ASSIGNEE_DEFAULT = '(usr\w+)'/, 'Mica collaborator id');
-        const kevin = fromFollowUp(/AIRTABLE_ASSIGNEE_KEVIN = '(usr\w+)'/, 'Kevin collaborator id');
-        const approver = fromFollowUp(/AIRTABLE_APPROVER_FIELD = '(fld\w+)'/, 'Approver field id');
+        // Mica's collaborator id, kept as a literal: no live file names it since
+        // the Inbound Comms page went, and nothing may route to her.
+        const mica = 'usrP7K5pmPSdVVgTN';
+        const kevin = fromSource(dispatch, 'scripts/agent-dispatch.py', /KEVIN_APPROVER_USR = "(usr\w+)"/, 'Kevin collaborator id');
+        const approver = fromSource(config, 'js/config.js', /approver:\s*'(fld\w+)'/, 'Approver field id');
         expect(skill).toContain(kevin);
         expect(skill).toContain(approver);
         // Nothing the triage agent creates routes to Mica's approval, and the
@@ -63,10 +67,8 @@ describe('task shape matches the routing source of truth (follow-up.html)', () =
     });
 
     it('creates the CURRENT #all/ dedupe key, matches both forms, one task per thread', () => {
-        // The page writes #all/ links (they survive archiving); its dedupe
-        // reads #all/ and legacy #inbox/. The skill must do the same or
-        // page-created and triage-created tasks stop seeing each other.
-        expect(followUp).toContain("'https://mail.google.com/mail/u/0/#all/' + email.threadId");
+        // #all/ links survive archiving; the dedupe reads #all/ and the
+        // legacy #inbox/ form, so tasks made before the switch still match.
         expect(skill).toContain('https://mail.google.com/mail/u/0/#all/{threadId}');
         expect(skill).toMatch(/FIND\("#all\/\{threadId\}"/);
         expect(skill).toMatch(/FIND\("#inbox\/\{threadId\}"/);
@@ -646,10 +648,8 @@ describe("the letter's own Deadline line is read in code, not judged", () => {
         expect(create).toMatch(/else:[\s\S]*hard_deadline_correction\(fields, date\.today\(\)\)/);
     });
 
-    it('the browser path keeps its own parser — two entry points, both stamped', () => {
-        expect(followUp).toMatch(/function parseDeadlineLine\(text\)/);
-        expect(followUp).toMatch(/hardDeadline\]: true/);
-    });
+    // 'the browser path keeps its own parser' went on 15 Nov 2026 with the Inbound
+    // Comms page (follow-up.html): the gate above is now the only entry point.
 
     it('the gate selftest covers the real date, none, missing, malformed and past', () => {
         const out = execFileSync('python3', [path.join(root, 'scripts/create-agent-task.py'), 'selftest'],

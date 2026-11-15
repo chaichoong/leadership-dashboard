@@ -16,7 +16,7 @@ The platform uses a **single design-token stylesheet** so every page — main sh
 **Every new HTML file MUST link `css/tokens.css` in its `<head>` BEFORE any other stylesheet or `<style>` block:**
 
 ```html
-<!-- Root level (follow-up.html, compliance.html, sop*.html) -->
+<!-- Root level (compliance.html, growth-plan.html, sop*.html) -->
 <link rel="stylesheet" href="css/tokens.css?v=1">
 
 <!-- os/*.html -->

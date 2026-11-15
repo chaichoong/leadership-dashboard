@@ -24,7 +24,7 @@ Determine from the user's request:
 - **Render function** — the function called after data loads (e.g. `renderCFVTab`, `renderInvoiceTab`)
 - **Data refresh function** — what to call when the user clicks Refresh (e.g. `loadDashboard`, `fetchInvoicesFromAirtable`)
 
-If the target is an **iframe page** (e.g. `os/*.html`, `follow-up.html`, `compliance.html`), the pattern differs slightly — see the iframe section below.
+If the target is an **iframe page** (e.g. `os/*.html`, `compliance.html`), the pattern differs slightly — see the iframe section below.
 
 ### 2. Read and analyse the page's code
 
@@ -189,7 +189,7 @@ After adding the health bar:
 
 ## Iframe page variant
 
-For standalone pages loaded via iframe (`os/*.html`, `follow-up.html`, `compliance.html`):
+For standalone pages loaded via iframe (`os/*.html`, `compliance.html`):
 
 1. Ensure `sync-bar.css` is in the `<head>` and `sync-bar.js` is loaded near the bottom (after the page's own scripts), both with cache-buster params matching `index.html`:
    ```html
