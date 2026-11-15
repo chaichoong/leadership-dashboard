@@ -435,4 +435,52 @@ describe('agent-dispatch exposes the outcome subcommand the gate depends on', ()
   it('agent-browser calls it by that exact name', () => {
     expect(read('scripts/agent-browser.js')).toMatch(/'agent-dispatch\.py'\), 'outcome'/);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 15 Nov 2026. Findings 20261013-agent-dispatch-857 and
+  // 20261111-agent-dispatch-1296: a robot asked to prove a file had reached
+  // iCloud, or to reinstall one launchd plist Kevin had approved, had no route
+  // to either, so both tasks sat for weeks behind "permission denied". The
+  // routes added are READS plus two narrow installer modes. What matters as
+  // much is what was NOT added: a bare `launchctl` would let a robot unload the
+  // estate, and a bare `--install` reloads every job, killing any that is
+  // running.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('the machine-state reads and the installer routes stay narrow', () => {
+    const tools = () => execFileSync('bash', ['-c',
+      `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; printf '%s\\n' "\${AGENT_ALLOWED_TOOLS[@]}"`,
+    ], { encoding: 'utf8' }).trim().split('\n');
+
+    it('the reads a robot needs to prove machine state are reachable', () => {
+      const out = tools();
+      for (const t of ['Bash(brctl status:*)', 'Bash(xattr -l:*)', 'Bash(stat:*)',
+        'Bash(launchctl list:*)']) {
+        expect(out, `${t} must be reachable by a headless agent`).toContain(t);
+      }
+    });
+
+    it('no entry hands a robot a binary that can unload the estate or install every job', () => {
+      const out = tools();
+      // Each of these would be a different capability from the one intended.
+      const forbidden = [
+        /^Bash\(launchctl:/,                     // load, unload, bootout, kickstart
+        /^Bash\(launchctl (unload|bootout|load|kickstart|remove)/,
+        /install-slot-jobs\.sh --install:/,      // reloads EVERY job, kills a running one
+        /install-slot-jobs\.sh --uninstall/,     // removes jobs
+        /install-slot-jobs\.sh:/,                // the bare script: any mode
+        /^Bash\(\*\)$/,                           // an unrestricted shell
+        /^Bash\((rm|mv|cp|chmod|sudo)[:( ]/,
+      ];
+      const bad = out.filter((t) => forbidden.some((re) => re.test(t)));
+      expect(bad, `these widen the robots' power beyond the fix: ${bad.join(', ')}`).toEqual([]);
+    });
+
+    it('every installer entry names a mode, and only the four approved ones', () => {
+      const entries = tools().filter((t) => t.includes('install-slot-jobs.sh'));
+      expect(entries.length, 'the installer routes vanished from the list').toBe(4);
+      const modes = entries.map((t) => (t.match(/install-slot-jobs\.sh ([^:]+):/) || [])[1]);
+      expect(modes.sort()).toEqual(
+        ['--dry-run', '--install --only', '--prune', '--prune-check'].sort());
+    });
+  });
 });

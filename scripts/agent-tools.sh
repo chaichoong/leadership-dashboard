@@ -103,6 +103,37 @@ AGENT_ALLOWED_TOOLS=(
   # which would run anything it is handed.
   "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py verify:*)"
   "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 scripts/agent-dispatch.py verify:*)"
+
+  # READING THIS MACHINE'S OWN STATE (finding 20261013-agent-dispatch-857, and the
+  # read half of 20261031-agent-dispatch-1149). A robot asked to prove a file had
+  # uploaded to iCloud, or that a launchd job was still loaded, had no route to the
+  # answer: brctl, xattr, stat, osadecompile and `launchctl list` were all refused
+  # for the agent AND the dispatcher, so a task that needed one read sat 32 days.
+  # All five are READS. The exact subcommand is named, never the bare binary:
+  # `launchctl` on its own would load, unload and bootout jobs, which is how a
+  # robot could unload the estate.
+  "Bash(brctl status:*)"
+  "Bash(brctl log:*)"
+  "Bash(xattr -l:*)"
+  "Bash(xattr -p:*)"
+  "Bash(stat:*)"
+  "Bash(osadecompile:*)"
+  "Bash(launchctl list:*)"
+  "Bash(launchctl print:*)"
+
+  # THE LAUNCHD INSTALLER, READ AND NARROW WRITES (finding 20261111-agent-dispatch-1296).
+  # Kevin approved reinstalling the prod-sweep-weekly plist with its Sunday back and
+  # the run was refused permission to run the installer or write LaunchAgents, so
+  # nothing changed and the slot kept firing seven days a week. The installer can only
+  # ever write a plist built from its own reviewed JOBS array, and `--only NAME` writes
+  # one job without unloading the others (a bare --install would reload every job,
+  # killing any that is running). --prune parks the plist of a job job-schedule.json
+  # marks retired and refuses to touch a live one. The two -check modes write nothing.
+  # Deliberately absent: a bare --install, and --uninstall.
+  "Bash(/bin/bash /Users/kevinbrittain/Projects/leadership-dashboard/scripts/install-slot-jobs.sh --dry-run:*)"
+  "Bash(/bin/bash /Users/kevinbrittain/Projects/leadership-dashboard/scripts/install-slot-jobs.sh --prune-check:*)"
+  "Bash(/bin/bash /Users/kevinbrittain/Projects/leadership-dashboard/scripts/install-slot-jobs.sh --prune:*)"
+  "Bash(/bin/bash /Users/kevinbrittain/Projects/leadership-dashboard/scripts/install-slot-jobs.sh --install --only:*)"
 )
 export AGENT_ALLOWED_TOOLS
 
