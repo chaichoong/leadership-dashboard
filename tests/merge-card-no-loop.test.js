@@ -35,8 +35,12 @@ const RED_TAIL = 'FAIL tests/sync-invariants/example-page.spec.js:486 the header
 // The merger with every outside call stubbed. NOW moves the clock; MERGE_RESULTS is the gate's
 // answer per run (red or green); every write lands in PATCHES, NOTES or ADDS.
 const drive = (prelude, dir = mkdtempSync(join(tmpdir(), 'od-ma-loop-'))) => run(`
-import importlib.util, json, sys, os, io, contextlib, argparse, subprocess
+import importlib.util, json, sys, os, io, contextlib, argparse, subprocess, urllib.request
+def _no_network(*a, **k): raise RuntimeError("network call in a test")
+urllib.request.urlopen = _no_network
 sys.path.insert(0, ${JSON.stringify(S(''))})
+import findings
+findings.current_state = lambda *a, **k: {}    # refresh_card's queue read, never the live queue
 spec = importlib.util.spec_from_file_location("ma", ${JSON.stringify(S('merge-approved.py'))})
 ma = importlib.util.module_from_spec(spec); spec.loader.exec_module(ma)
 ma.STATE_DIR = ${JSON.stringify(dir)}
@@ -81,13 +85,17 @@ def merge_pr(pr, head, dry_run=False):
     if MERGE_RESULTS and MERGE_RESULTS.pop(0) == "green":
         GH["view"] = json.dumps({"state": "MERGED", "mergeCommit": {"oid": "abc123def4567890"}, "headRefOid": head})
         return subprocess.CompletedProcess(["merge-pr.py"], 0, json.dumps({"merged": True, "why": "merged: green"}), "")
-    return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "the gate is RED"}), "${RED_TAIL}")
+    # A real red: merge-pr.py RAN vitest and it failed (its own field says so).
+    return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "the gate is RED", "vitest": {"ok": False, "tail": "2 failed"}}), "${RED_TAIL}")
 ma.sh, ma.py, ma.run_merge_pr = sh, py, merge_pr
+# The REAL refresh_card runs (review T2); REFRESH only counts it or makes its write fail.
 REFRESH = {"fail": False, "calls": 0}
+REAL_REFRESH = ma.refresh_card
 def refresh_card(card, head, res):
     REFRESH["calls"] += 1
     if REFRESH["fail"]:
         raise RuntimeError("Airtable 503")
+    return REAL_REFRESH(card, head, res)
 ma.refresh_card = refresh_card
 ma.merge_card.patch_card = lambda task, fields: PATCHES.append([task, fields])
 ma.merge_card.read_tasks = lambda *a, **k: [{"id": "ctl", "fields": {}}]
@@ -95,6 +103,13 @@ ma.time.sleep = lambda s: None
 C = lambda **k: dict(json.loads(${JSON.stringify(card())}), **k)
 CARDS = [C()]
 ma.merge_card.list_cards = lambda read=None: [dict(c) for c in CARDS]
+# The card re-read just before a real merge (review finding 2) reads CARDS as Airtable holds them NOW.
+def get_card(task):
+    for c in CARDS:
+        if c["id"] == task:
+            return dict(c)
+    raise RuntimeError("Airtable 404: no card %s" % task)
+ma.merge_card.get_card = get_card
 def cmd_run():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -465,7 +480,7 @@ print(json.dumps({"two": two, "other": other, "p1": p1, "filed": out["done"][0],
     expect(r.adds).toBe(2);
   });
 
-  it('exit code: a resting retry is 0; a refreshed card whose send-back did not write is 1', () => {
+  it('exit code: a resting retry is 0; a refresh whose one write failed rests as moved (0) and changes nothing on the card', () => {
     const r = drive(`
 ${ERRS['pr-unreadable']}
 c1, _ = cmd_run()
@@ -478,8 +493,9 @@ ma.merge_card.patch_card = bad_patch
 c2, out2 = cmd_run()
 print(json.dumps({"c1": c1, "c2": c2, "r2": out2["done"][0]}))`);
     expect(r.c1).toBe(0);
-    expect(r.r2).toMatchObject({ result: 'refreshed', backToKevin: false });
-    expect(r.c2).toBe(1);
+    expect(r.r2).toMatchObject({ result: 'moved' });       // the card still shows the old head: nothing to send back
+    expect(r.r2.why).toMatch(/Re-tested green, but the card could not be refreshed: Airtable 503/);
+    expect(r.c2).toBe(0);
   });
 
   it('the dispatcher\'s wall row says the robot is retrying, or has stopped, never "the robot is merging it"', () => {
