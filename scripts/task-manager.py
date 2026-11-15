@@ -393,6 +393,12 @@ def classify(f, activity_ids, now=None, lane=None):
     # stays ordinary board work (review of PR #794).
     if lane and lane in _load_dispatch().HELD_LANES:
         return "held", "dispatchLane", moved
+    # RESTING BY DISPATCH, RESTING HERE (finding 10, 15 Nov 2026). A task carried out and kept open
+    # with a dated next look, or with a status update filed, rests in dispatch until that date (or
+    # until anything on it changes). The board read it as stuck from its Approved At or Created Time
+    # and put it to the foreman three times a day. Listed on `resting` with the date it ends.
+    if lane == "resting":
+        return "resting", "dispatchRest", moved
     # Escalated inside the window. With an outcome it is DECIDED: Kevin has
     # answered the card and the foreman makes the move he named. Without one
     # the card is still his; escalating again would be the seven-times bug.
@@ -703,6 +709,18 @@ def task_view(rec, activity_ids, dispatch_ids, now, lanes=None):
     entry = lanes.get(rec["id"]) if lanes is not None else None
     lane = (entry[0] if entry else "") if lanes is not None else None
     bucket, src, moved = classify(f, activity_ids, now, lane=lane)
+    # A REST THAT HAS ENDED IS DUE, NOT STUCK (finding 10, 15 Nov 2026): the day it came due is its
+    # last movement, so it is dispatch's work for the stuck clock's length before the foreman's.
+    rest_due = ((entry[1] or {}).get("restDue") if entry else None) or None
+    if rest_due:
+        try:
+            due_dt = datetime.strptime(str(rest_due)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            due_dt = None
+        if due_dt and (moved is None or due_dt > moved):
+            moved, src = due_dt, "restDue"
+            if bucket == "stuck" and (now - due_dt) < timedelta(days=STUCK_DAYS):
+                bucket = "moving"
     # A stuck task dispatch already holds this slot is not the foreman's
     # to touch — set-subtract in code, never by eyeballing two JSON files.
     if bucket == "stuck" and rec["id"] in dispatch_ids:
@@ -742,6 +760,12 @@ def task_view(rec, activity_ids, dispatch_ids, now, lanes=None):
         # agent-dispatch.py's lane for it ('' none, None not read): the one answer both share.
         "dispatchLane": lane,
     }
+    if bucket == "resting":
+        detail = (entry[1] if entry else {}) or {}
+        view["restUntil"] = detail.get("restUntil") or None
+        view["restWhy"] = detail.get("restWhy") or ""
+    if rest_due:
+        view["restDue"] = str(rest_due)[:10]
     if bucket == "held":
         detail = (entry[1] if entry else {}) or {}
         view["heldWhy"] = held_why(lane, detail)
@@ -1305,7 +1329,7 @@ def cmd_board(dispatch_queue_path=None):
               % lanes_error, file=sys.stderr)
 
     buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [], "inFlight": [],
-               "withRoy": [], "escalated": [], "decided": [], "ownLane": [], "held": []}
+               "withRoy": [], "escalated": [], "decided": [], "ownLane": [], "held": [], "resting": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         status = r["fields"].get("Status", "?")
@@ -1358,6 +1382,10 @@ def cmd_board(dispatch_queue_path=None):
             "held": len(buckets["held"]),
             # Of those, waiting past the stuck clock: each needs a move this slot (verify).
             "heldPastStuckDays": sum(1 for v in buckets["held"] if v["pastClock"]),
+            # Resting in dispatch until a date (a keep-open's next look, a status update's NEXT CHECK).
+            "resting": len(buckets["resting"]),
+            # Of the worked tasks, those whose rest has ended: dispatch owes each a look.
+            "restDue": sum(1 for b in ("stuck", "moving", "inFlight") for v in buckets[b] if v.get("restDue")),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
             "ownerless": len(ownerless),
@@ -1381,6 +1409,9 @@ def cmd_board(dispatch_queue_path=None):
                   # Roy's lane by dispatch's rules: a hand-over to Roy places it (held_problems).
                   "royLane": v.get("royLane") or ""}
                  for v in buckets["held"]],
+        # Tasks resting in dispatch, each with the date its rest ends: never stuck, never a move.
+        "resting": [{"id": v["id"], "name": v["name"], "restUntil": v.get("restUntil"), "why": v.get("restWhy", "")}
+                    for v in buckets["resting"]],
         "stuck": buckets["stuck"],
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],

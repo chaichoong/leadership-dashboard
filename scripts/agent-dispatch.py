@@ -1493,11 +1493,15 @@ CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
 EDITS_APPLIED_MARK = "EDITS APPLIED:"
 
 
-def ledger_append(task_id, event):
+def ledger_append(task_id, event, fingerprint=None):
+    """One line on the carry-out ledger. A rest's own event (`done` from a keep-open, `status` from a
+    filed update) carries `fp`, the fingerprint of the task as the rest left it (rest_fingerprint)."""
     os.makedirs(STATE_DIR, exist_ok=True)
+    rec = {"task": task_id, "ts": now_iso(), "event": event}
+    if fingerprint:
+        rec["fp"] = fingerprint
     with open(INTENT_LEDGER, "a") as fh:
-        fh.write(json.dumps({"task": task_id, "ts": now_iso(),
-                             "event": event}) + "\n")
+        fh.write(json.dumps(rec) + "\n")
 
 
 IDLE_HOURS = 24
@@ -1506,16 +1510,14 @@ IDLE_HOURS = 24
 # every approved task kept open had an agent look at it every day: 57 tasks, 96% of looks repeats,
 # 37 of 40 sampled repeats changed nothing and none acted, and two tasks reached the Notes cap on
 # these lines alone. Now the carry-out names its next look (`--until YYYY-MM-DD`, after today and
-# at most KEPT_OPEN_MAX_DAYS ahead), the date is stamped by code into the CARRIED OUT line in the
-# same "rests until YYYY-MM-DD." form a filed status update uses, and the task rests until then
-# (kept_open_rest). A line from before this change carries no date: it rests
-# KEPT_OPEN_UNDATED_REST_DAYS from its event, so the agent's next look sets a real one.
+# at most KEPT_OPEN_MAX_DAYS ahead, never past the task's own due date while that is ahead), the
+# date is stamped by code into the CARRIED OUT line in the same "rests until YYYY-MM-DD." form a
+# filed status update uses, and the task rests until then (kept_open_rest).
 KEPT_OPEN_MAX_DAYS = 14
-KEPT_OPEN_UNDATED_REST_DAYS = 3
-# Written by the create gate's fold path (create-agent-task.py record_fold, 14 Nov 2026): a new item
-# was folded into the task. It ends a status-update rest at once (status_rest). It is NOT a step in
-# the task's own life, so ledger_last_events and open_intents skip it and every other rest reads
-# exactly as before; ledger_fold_times reads it on its own.
+# A fold event from the create gate (create-agent-task.py, 14 to 15 Nov 2026). Nothing writes it
+# since the rest fingerprint (15 Nov 2026): a fold changes the Description, which ends any rest by
+# itself. Old lines stay in the ledger, so every reader still skips it: it was never a step in the
+# task's own life.
 FOLD_EVENT = "folded"
 PARKED_NOTE_RE = re.compile(r"^\s*(?:PARKED|BLOCKED)\b", re.I)
 
@@ -1538,9 +1540,10 @@ def ledger_last_events():
     return state
 
 
-def ledger_fold_times():
-    """task id -> the newest time the create gate folded a new item into it (FOLD_EVENT)."""
-    folds = {}
+def ledger_rest_prints():
+    """task id -> the rest fingerprint (`fp`) on the SAME newest line ledger_last_events picks, or ''
+    when that line carries none (every rest begun before 15 Nov 2026, and every non-rest event)."""
+    prints = {}
     try:
         with open(INTENT_LEDGER) as fh:
             for line in fh:
@@ -1548,67 +1551,146 @@ def ledger_fold_times():
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(rec, dict) and rec.get("event") == FOLD_EVENT and rec.get("ts"):
-                    folds[rec.get("task")] = max(folds.get(rec.get("task"), ""), rec["ts"])
+                if not isinstance(rec, dict) or rec.get("event") == FOLD_EVENT:
+                    continue
+                prints[rec.get("task")] = str(rec.get("fp") or "")
     except FileNotFoundError:
         pass
-    return folds
+    return prints
 
 
-def kept_open_rest(t, ts, now=None, folded_at=""):
+def ledger_last_done(task_id):
+    """The ts of the newest `done` the ledger holds for this task, or '' (none, or no ledger)."""
+    best = ""
+    try:
+        with open(INTENT_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("task") == task_id and rec.get("event") == "done":
+                    best = max(best, str(rec.get("ts") or ""))
+    except FileNotFoundError:
+        pass
+    return best
+
+
+# A REST HOLDS ONLY WHILE THE TASK IS EXACTLY AS THE REST LEFT IT (15 Nov 2026, the review of PRs 925
+# and 926). Both rests used to wake on a short list of stamped signals (a ledger fold, a newer
+# verdict, a new holder), and the three ordinary ways a reply reaches an open task wrote none of
+# them: Inbox Triage's hand-appended `NEW MESSAGE <date>:` line, a twin closed onto the task as a
+# duplicate (its content copied into Notes), and a fold whose ledger write was lost. So a creditor's
+# final notice could sit on a resting task for up to 14 days. Now the event that starts a rest
+# carries a fingerprint of the task's material fields, taken right after the rest's own stamp is
+# written, and every read recomputes it from the live task: ANY difference ends the rest, whoever
+# wrote it and however. A false wake costs one agent look, the safe direction. A rest with no
+# fingerprint (every rest begun before this) ends at its next read, once; the next rest carries one.
+# One short hash per field, so a refusal can say WHAT changed.
+REST_PRINT_VERSION = "v1"
+REST_PRINT_FIELDS = (("description", "Description"), ("notes", "Notes"), ("dueDate", "Due Date"),
+                     ("outcome", "Approval Outcome"), ("approvedAt", "Approved At"),
+                     ("teamMemberIds", "holder"))
+
+
+def rest_view(rec):
+    """The fingerprinted fields of a raw task record (fields keyed by field id), in task_view's keys."""
+    f = (rec or {}).get("fields", {}) or {}
+    return {"description": f.get(AF["description"], ""), "notes": f.get(AF["notes"], ""),
+            "dueDate": f.get(AF["dueDate"], ""), "outcome": sel(f.get(AF["approvalOutcome"])),
+            "approvedAt": f.get(AF["approvedAt"], ""), "teamMemberIds": links(f.get(AF["teamMember"]))}
+
+
+def _print_part(key, value):
+    if key == "teamMemberIds":
+        text = ",".join(sorted(str(x) for x in (value or [])))
+    elif key == "dueDate":
+        text = str(value or "")[:10]
+    else:
+        # Line ends and trailing spaces are not material: a store that normalises them must never
+        # read as a change, or no rest would ever hold.
+        text = "\n".join(ln.rstrip() for ln in str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+                         .split("\n")).strip()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def rest_fingerprint(t):
+    """The fingerprint of a task view (task_view or rest_view): "v1|description=…|notes=…|…"."""
+    return "|".join([REST_PRINT_VERSION] + [f"{key}={_print_part(key, t.get(key))}" for key, _ in REST_PRINT_FIELDS])
+
+
+def rest_print_changes(t, fingerprint):
+    """[] when the live task matches the fingerprint a rest recorded, else the labels of what changed
+    (["no fingerprint"] for a rest begun before fingerprints, or one this code cannot read)."""
+    parts = str(fingerprint or "").split("|")
+    if not fingerprint or parts[0] != REST_PRINT_VERSION:
+        return ["no fingerprint"]
+    stored = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
+    changed = [label for key, label in REST_PRINT_FIELDS if stored.get(key) != _print_part(key, t.get(key))]
+    return changed
+
+
+def rest_due_cap(until_day, due_raw, start_day):
+    """A rest never runs past the task's own due date, when that date was still ahead as the rest began."""
+    try:
+        due = datetime.strptime(str(due_raw or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return until_day
+    return min(until_day, due) if due > start_day else until_day
+
+
+def kept_open_until(t, ts):
+    """The day a kept-open rest ends, from the task's newest own CARRIED OUT line: its stamped date,
+    never past KEPT_OPEN_MAX_DAYS from the event and never past a due date that was ahead. None for a
+    line with no readable date (a line from before the date was stamped: the next look sets one)."""
+    try:
+        start = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(LONDON).date()
+    except (AttributeError, ValueError):
+        return None
+    stamped = KEPT_OPEN_RE.findall(str(t.get("notes") or ""))
+    if not stamped:
+        return None
+    try:
+        until_day = datetime.strptime(stamped[-1][1], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return rest_due_cap(min(until_day, start + timedelta(days=KEPT_OPEN_MAX_DAYS)), t.get("dueDate"), start)
+
+
+def kept_open_rest(t, ts, now=None, fingerprint=None):
     """Why an approved task carried out and kept open is resting, or ''. The caller has checked the
     newest ledger event is the `done` that `complete --keep-open` wrote at `ts`, the task is still
-    approved and Kevin's verdict has not moved since. Clocks and stamped facts only, never words.
-    It rests until the next-look date stamped on the task's newest own CARRIED OUT line (never
-    past KEPT_OPEN_MAX_DAYS from the event, whatever the Notes say), or, on a line from before the
-    date was stamped, KEPT_OPEN_UNDATED_REST_DAYS from the event. It wakes at once when:
-      - any later step of its own lands in the ledger (a wall, a clear, a new intent): the newest
-        event is then no longer `done`, so this is never reached;
-      - the create gate folds a new item in after it (`folded_at`; in practice the gate refuses to
-        fold into a decided card, fold_into_a_decided_card, so a reply becomes its own new task);
-      - it is routed to another holder (the holder stamped on the line is no longer on it)."""
-    if folded_at and folded_at > ts:
+    approved and Kevin's verdict has not moved since. It rests until the next-look date stamped on
+    its newest own CARRIED OUT line (kept_open_until), and only while the task is exactly as the rest
+    left it (`fingerprint`, from that `done`): a reply appended, a twin folded in, a fold, a new or
+    removed holder, a new verdict, a due date moved or a note added each end it. Any later step of its
+    own in the ledger (a wall, a clear, a new intent) ends it too: the newest event is then no longer
+    `done`, so this is never reached."""
+    if rest_print_changes(t, fingerprint):
         return ""
-    try:
-        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
+    until_day = kept_open_until(t, ts)
+    if until_day is None:
         return ""
-    now = now or datetime.now(timezone.utc)
-    stamped = KEPT_OPEN_RE.findall(str(t.get("notes") or ""))
-    if stamped:
-        _day, until, holder = stamped[-1]
-        if holder and t.get("teamMemberIds") and holder not in t.get("teamMemberIds"):
-            return ""
-        try:
-            until_day = datetime.strptime(until, "%Y-%m-%d").date()
-        except ValueError:
-            until_day = None
-        if until_day:
-            until_day = min(until_day, when.astimezone(LONDON).date() + timedelta(days=KEPT_OPEN_MAX_DAYS))
-            if now.astimezone(LONDON).date() >= until_day:
-                return ""
-            return (f"carried out and kept open at {ts[:16]}; rests until {_day_text(until_day)}, "
-                    "or until Kevin's verdict changes, a wall opens or it changes hands")
-    end = when + timedelta(days=KEPT_OPEN_UNDATED_REST_DAYS)
-    if now >= end:
+    if (now or datetime.now(timezone.utc)).astimezone(LONDON).date() >= until_day:
         return ""
-    return (f"carried out and kept open at {ts[:16]} with no next-look date; rests until "
-            f"{_day_text(end.astimezone(LONDON).date())} ({KEPT_OPEN_UNDATED_REST_DAYS} days), when the agent "
-            "sets one, or until Kevin's verdict changes")
+    return (f"carried out and kept open at {ts[:16]}; rests until {_day_text(until_day)}, "
+            "or until anything on the task changes (a reply, a note, a verdict, a due date, its holder) "
+            "or a wall opens")
 
 
 def _day_text(d):
     return f"{d.day} {d.strftime('%b %Y')}"
 
 
-def idle_handback(t, last, now=None, folded_at=""):
+def idle_handback(t, last, now=None, fingerprint=None):
     """Why an APPROVED hand-back is resting rather than waiting on an agent, or ''.
 
     `last` is the newest ledger (event, ts) for the task. Two events rest it:
     "done" written by `complete --keep-open` (the approved action happened and
     the task stays open by Kevin's own words) and "parked" written by `block`
-    (a wall). A "done" rests until the next look the carry-out named
-    (kept_open_rest, 14 Nov 2026); a park rests as the wall rules below say.
+    (a wall). A "done" rests until the next look the carry-out named, and only
+    while the task is as that rest left it (`fingerprint`, kept_open_rest, 14 and
+    15 Nov 2026); a park rests as the wall rules below say.
     Both end early the moment Kevin's verdict moves: an Approved At newer than
     the event means he approved again, so the task is worked. A plain "done" on
     a task still Approved with no keep-open mark in its Notes is NOT rested —
@@ -1630,7 +1712,7 @@ def idle_handback(t, last, now=None, folded_at=""):
     if approved_at and approved_at > ts:
         return ""
     if event == "done":
-        return kept_open_rest(t, ts, now, folded_at)
+        return kept_open_rest(t, ts, now, fingerprint)
     # A PARKED TASK ON AN OPEN WALL RESTS UNTIL THE WALL CLEARS (Kevin, 7 Oct 2026). The day's
     # rest used to end on its own, so the poll handed the task back, the agent met the same wall
     # and parked it again: 235 parks and 264 dispatch actions on 39 blocked tasks in 14 days,
@@ -2446,17 +2528,21 @@ KEPT_OPEN_RE = re.compile(
     r"^\[(?P<day>\d{1,2} \w{3} \d{4}) — agent\] " + re.escape(CARRIED_OUT_MARK) + REST_UNTIL_TAIL, re.M)
 KEPT_OPEN_UNTIL_HELP = (
     "       Say when you will look again: the chase date, the date a reply is due, the hearing, the\n"
-    f"       renewal; after today and at most {KEPT_OPEN_MAX_DAYS} days ahead:\n"
+    f"       renewal; after today, at most {KEPT_OPEN_MAX_DAYS} days ahead, and never after the task's own\n"
+    "       due date while that date is still ahead:\n"
     "         python3 scripts/agent-dispatch.py complete TASKID --keep-open --until YYYY-MM-DD --note \"...\"\n"
     "       The task rests until then with no agent run (Kevin, 14 Nov 2026: no daily AI re-check). It\n"
-    "       wakes sooner by itself if Kevin's verdict changes, a wall opens or clears, or it changes hands.\n"
+    "       wakes sooner by itself the moment anything on it changes (a reply, a note, Kevin's verdict, its\n"
+    "       due date, its holder) or a wall opens or clears.\n"
     "       If something has changed (a reply, dates offered, a document arrived), raise it now as its own\n"
     "       card or task; if a chase is due, prepare it as a card. Never leave it in the note.")
 
 
-def next_look_problem(raw, label, max_days, today=None):
-    """(problem, date) for a next-look date an agent gave: after today (London) and at most
-    `max_days` ahead. Shared by a status update's NEXT CHECK and a keep-open's --until."""
+def next_look_problem(raw, label, max_days, today=None, due=None):
+    """(problem, date) for a next-look date an agent gave: after today (London), at most `max_days`
+    ahead, and never after the task's own due date while that date is still ahead (finding 6, 15 Nov
+    2026: a rest must not run through a court date or a pay-by). Shared by a status update's NEXT
+    CHECK and a keep-open's --until."""
     try:
         nxt = datetime.strptime(str(raw or "").strip(), "%Y-%m-%d").date()
     except ValueError:
@@ -2464,10 +2550,14 @@ def next_look_problem(raw, label, max_days, today=None):
     today = today or datetime.now(LONDON).date()
     if not today < nxt <= today + timedelta(days=max_days):
         return f"{label} {nxt.isoformat()} must be after today and at most {max_days} days ahead", None
+    try:
+        due_day = datetime.strptime(str(due or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        due_day = None
+    if due_day and due_day > today and nxt > due_day:
+        return (f"{label} {nxt.isoformat()} is after this task's own due date, {due_day.isoformat()}: "
+                f"pick {due_day.isoformat()} or earlier, so the task is looked at by its due date"), None
     return "", nxt
-# The dated block the create gate's fold appends to the Description (create-agent-task.py
-# build_update): "UPDATE 2026-11-14: new item folded in by the duplicate gate".
-STATUS_FOLD_BLOCK_RE = re.compile(r"^UPDATE (\d{4}-\d{2}-\d{2}): new item folded in by the duplicate gate", re.M)
 # Lines kept out of the record block under the filed line: a marker another reader acts on.
 STATUS_NOTE_MAX = 2000
 STATUS_ONLY_HELP = (
@@ -2479,7 +2569,9 @@ STATUS_ONLY_HELP = (
     "         TRACK RECORD: ... (as for any creditor or inbound item)\n"
     "         **Carrying this out will involve:** Nothing. Information only.\n"
     "       If something arrived, is due, is demanded or needs his decision, it is a card: write it\n"
-    "       as one and say in --plain-approve what Approve sets going.")
+    "       as one and say in --plain-approve what Approve sets going. If it was refused because Kevin's\n"
+    "       approval is waiting, carry the approval out instead. NEXT CHECK is never after the task's own\n"
+    "       due date while that date is ahead.")
 
 _TRIAGE_MOD = None
 
@@ -2540,24 +2632,66 @@ def _status_day(day):
         return None
 
 
+# The task's OWN keep-open carry-out line, dated or not: an agent's look at the task (day precision,
+# read as 00:00 London, the strict direction for a reply the same day).
+STATUS_CARRIED_LOOK_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4}) — agent\] " + re.escape(CARRIED_OUT_MARK), re.M)
+
+
 def status_last_look(task_rec):
-    """When this task was last looked at, as an aware datetime: the latest of its creation, Kevin's
-    verdict, and every card or status update agent-dispatch stamped on it. Every source is a stamp
-    code wrote, never an agent's word."""
-    tf = task_rec.get("fields", {}) or {}
+    """When an agent last looked at this task, as an aware datetime, or None: the latest card or
+    status update agent-dispatch stamped on it, or its own keep-open carry-out line. Every source is
+    a stamp code wrote, never an agent's word. Neither creation nor Kevin's verdict is a look
+    (findings 3 and 12, 15 Nov 2026): a brand-new task has never been looked at, and an approval of a
+    stale card is not a reading of the mail that arrived since that card."""
+    notes = str((task_rec.get("fields", {}) or {}).get(AF["notes"]) or "")
     marks = []
-    for iso in (task_rec.get("createdTime"), tf.get(AF["approvedAt"])):
-        try:
-            marks.append(datetime.fromisoformat(str(iso).replace("Z", "+00:00")))
-        except (TypeError, ValueError):
-            pass
-    for m in STATUS_SUBMIT_STAMP_RE.finditer(str(tf.get(AF["notes"]) or "")):
+    for m in STATUS_SUBMIT_STAMP_RE.finditer(notes):
         try:
             marks.append(datetime.strptime(f"{m.group('day')} {m.group('time') or '00:00'}",
                                            "%d %b %Y %H:%M").replace(tzinfo=LONDON))
         except ValueError:
             pass
+    for m in STATUS_CARRIED_LOOK_RE.finditer(notes):
+        try:
+            marks.append(datetime.strptime(m.group("day"), "%d %b %Y").replace(tzinfo=LONDON))
+        except ValueError:
+            pass
     return max(marks) if marks else None
+
+
+def approval_owed_problem(task_rec):
+    """Why this task is owed a carry-out of Kevin's approval, or '' (finding 5, 15 Nov 2026). Approved,
+    and the ledger holds no `done` at or after the approval: the approved action has not happened, so
+    a status update must not rest it."""
+    tf = task_rec.get("fields", {}) or {}
+    if sel(tf.get(AF["approvalOutcome"])) not in APPROVED:
+        return ""
+    approved = str(tf.get(AF["approvedAt"]) or "")
+    done = ledger_last_done(task_rec.get("id"))
+    if done and done >= approved:
+        return ""
+    return ("Kevin approved this task" + (f" at {approved[:16]}" if approved else "")
+            + " and the approved action has not been carried out since: carry it out (complete, or "
+            "complete --keep-open --until), a status update cannot rest it")
+
+
+def status_changed_problem(task_rec):
+    """Why the task is not as its last rest left it, or '' (findings 4 and 7, 15 Nov 2026). When the
+    task's newest ledger event began a rest with a fingerprint, the live task must still match it: a
+    fold, a reply appended, a twin folded in or a note added since then is something new, and a new
+    status update would only move the clock past it."""
+    tid = task_rec.get("id")
+    last = ledger_last_events().get(tid)
+    if not last or last[0] not in ("done", "status"):
+        return ""
+    fp = ledger_rest_prints().get(tid, "")
+    if not fp:
+        return ""
+    changed = rest_print_changes(rest_view(task_rec), fp)
+    if not changed:
+        return ""
+    return (f"the task has changed since it last rested ({', '.join(changed)} changed), so something new "
+            "has reached it: read it, and raise what changed as a card")
 
 
 def status_history_terms(body, task_rec):
@@ -2574,18 +2708,37 @@ def status_history_terms(body, task_rec):
     return emails, refs
 
 
+STATUS_ANGLE_ADDR_RE = re.compile(r"<\s*([\w.+-]+@[\w-]+(?:\.[\w-]+)+)\s*>")
+
+
+def status_sender(entry):
+    """The sender address of an email history entry, or '' when it cannot be read. The full From
+    header (`from`) when history_gmail gave one, the address in angle brackets first."""
+    raw = str(entry.get("from") if entry.get("from") is not None else str(entry.get("text") or "").split(": ", 1)[0])
+    m = STATUS_ANGLE_ADDR_RE.search(raw) or STATUS_ADDR_RE.search(raw)
+    return (m.group(1) if m.re is STATUS_ANGLE_ADDR_RE else m.group(0)).lower() if m else ""
+
+
 def status_reply_problem(body, task_rec):
     """Why "nothing has changed" cannot stand, or ''. The history is READ HERE, by the same
     `history` the TRACK RECORD is built from (the task board and Gmail), so an agent that leaves its
-    block out or pastes an old one changes nothing. A read that fails, could not search Gmail, or
-    has nothing to search for refuses the filing: an unread history is never "no reply"."""
+    block out or pastes an old one changes nothing. It FAILS CLOSED (finding 3, 15 Nov 2026): a read
+    that fails, a mailbox it could not search (it searches every mailbox the estate reads), nothing to
+    search for, no earlier look, an email whose sender or date cannot be read, or another task on the
+    same matter opened since the last look each refuse the filing. Only our own mailboxes are not
+    outside: a relay from Roy is news. An unread history is never "no reply"."""
     emails, refs = status_history_terms(body, task_rec)
     if not (emails or refs):
         return ("there is no address or reference on the task or in the output to search for a reply, "
                 "so \"nothing has changed\" cannot be checked: this is a card")
+    since = status_last_look(task_rec)
+    if since is None:
+        return ("no card or status update has been filed on this task before, so there is no earlier look "
+                "to compare with (creation is not a look): this is a card")
     try:
+        accounts = sorted(_triage().SEARCH_ACCOUNTS)
         result = history(emails=emails, refs=refs, days=STATUS_HISTORY_DAYS,
-                         exclude_task=task_rec.get("id"), gmail=True)
+                         exclude_task=task_rec.get("id"), gmail=True, gmail_accounts=accounts)
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never filed
         return f"the history could not be read to check for a reply ({str(exc)[:120]}), so this is a card"
     if not result.get("terms"):
@@ -2595,21 +2748,36 @@ def status_reply_problem(body, task_rec):
     if unread or "Gmail" not in (result.get("searched") or []):
         return (f"Gmail could not be searched for a reply ({(unread or ['not searched'])[0][:120]}), "
                 "so this is a card")
-    since = status_last_look(task_rec)
-    own = {a.lower() for a in OWN_ADDRESSES} | {ROY_EMAIL.lower()}
+    own = {a.lower() for a in OWN_ADDRESSES}
     for e in result.get("entries") or []:
-        if e.get("source") != "email":
+        source, raw = e.get("source"), str(e.get("date") or "")
+        if source == "task":
+            if not str(e.get("text") or "").startswith("task opened:"):
+                continue
+            try:
+                day = datetime.strptime(raw[:10], "%Y-%m-%d").date()
+            except ValueError:
+                return "another task on this matter carries no readable date, so this is a card"
+            if day >= since.date():
+                return (f"another task on this matter was opened {day.strftime('%d %b %Y')}, since this task was "
+                        "last looked at, so something has changed: this is a card")
             continue
-        addr = STATUS_ADDR_RE.search(str(e.get("text") or "").split(": ", 1)[0] or "")
-        if not addr or addr.group(0).lower() in own:
+        if source != "email":
             continue
         try:
-            when = datetime.strptime(str(e.get("date") or "")[:16], "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
+            when = datetime.strptime(raw[:16], "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
         except ValueError:
-            return f"an email from {addr.group(0)} carries no readable date, so this is a card"
-        if since is None or when >= since:
-            return (f"an email from {addr.group(0)} arrived {when.strftime('%d %b %Y %H:%M')}, after this task "
-                    "was last looked at, so something has changed: this is a card")
+            return "an email on this matter carries no readable date, so this is a card"
+        if when < since:
+            continue
+        addr = status_sender(e)
+        if not addr:
+            return (f"an email arrived {when.strftime('%d %b %Y %H:%M')}, after this task was last looked at, and "
+                    "its sender cannot be read, so this is a card")
+        if addr in own:
+            continue
+        return (f"an email from {addr} arrived {when.strftime('%d %b %Y %H:%M')}, after this task "
+                "was last looked at, so something has changed: this is a card")
     return ""
 
 
@@ -2641,12 +2809,19 @@ def status_only_problem(body, task_type, task_rec, today=None):
     tf = task_rec.get("fields", {}) or {}
     if sel(tf.get(AF["approvalOutcome"])) == "Changes requested":
         return "Kevin asked for changes on this task, and his request is owed a new card", ""
+    owed = approval_owed_problem(task_rec)
+    if owed:
+        return owed, ""
     nd = STATUS_NEXT_RE.search(body)
     if not nd:
         return "it has no NEXT CHECK: YYYY-MM-DD line saying when you look again", ""
-    problem, nxt = next_look_problem(nd.group("date"), "NEXT CHECK", STATUS_REST_MAX_DAYS, today)
+    problem, nxt = next_look_problem(nd.group("date"), "NEXT CHECK", STATUS_REST_MAX_DAYS, today,
+                                     due=tf.get(AF["dueDate"]))
     if problem:
         return problem, ""
+    changed = status_changed_problem(task_rec)
+    if changed:
+        return changed, ""
     ask = _triage().ask_signal("", status_own_words(body))
     if ask:
         return f"its own words carry an ask ({ask}), so this is a card, not a status update", ""
@@ -2679,74 +2854,73 @@ def status_filed_on(notes):
     return _status_day(found[-1][0]) if found else None
 
 
-def status_rest(t, last, now=None, folded_at=""):
-    """Why a task with a status update filed is resting, or ''. It rests from the `status` event
-    the filing writes until its NEXT CHECK. Clocks and stamped facts only, never words. It wakes at
-    once when:
-      - any later step of the task's own lands in the ledger (a wall, a clear, a carry-out intent,
-        a done): the newest event is then no longer `status`;
-      - the create gate folds a new item into it after the filing (`folded_at`, the FOLD_EVENT the
-        gate writes), or, the backstop for a gate that could not write the ledger, the dated UPDATE
-        block a fold appends to the Description is dated after the filing day;
-      - it is routed to another holder (the holder stamped on the filed line is no longer on it);
-      - Kevin's verdict moves (a newer Approved At) or he asks for changes."""
-    if not last or last[0] != "status" or not last[1]:
-        return ""
-    if t.get("outcome") == "Changes requested":
-        return ""
-    if str(t.get("approvedAt") or "") > last[1]:
-        return ""
-    if folded_at and folded_at > last[1]:
-        return ""
+def status_until(t, ts):
+    """The day a status rest ends: the NEXT CHECK stamped on the newest filed line, never more than
+    STATUS_REST_MAX_DAYS from the filing and never past a due date that was ahead. None when the task
+    carries no filed line or its date cannot be read."""
+    try:
+        start = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).astimezone(LONDON).date()
+    except ValueError:
+        return None
     filed = STATUS_FILED_RE.findall(str(t.get("notes") or ""))
     if not filed:
-        return ""
-    day, until, holder = filed[-1]
-    filed_day = _status_day(day)
-    folds = STATUS_FOLD_BLOCK_RE.findall(str(t.get("description") or ""))
-    if folds and filed_day and max(folds) > filed_day.isoformat():
-        return ""
-    if holder and t.get("teamMemberIds") and holder not in t.get("teamMemberIds"):
-        return ""
-    today = (now or datetime.now(timezone.utc)).astimezone(LONDON).date().isoformat()
-    if today >= until:
-        return ""
-    return (f"status update filed at {last[1][:16]} with nothing to approve; rests until {until}, "
-            "or until a new item is folded in, it changes hands or Kevin's verdict changes")
+        return None
+    try:
+        until_day = datetime.strptime(filed[-1][1], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return rest_due_cap(min(until_day, start + timedelta(days=STATUS_REST_MAX_DAYS)), t.get("dueDate"), start)
 
 
-# THE NO-OP CARD (backstop, 14 Nov 2026). An approve line that says Approve runs nothing is refused
-# at submit and escalate, with the two honest routes. It reads words, so it is kept narrow and was
-# back-tested read-only on the stored cards of the 60 days to 14 Nov 2026 (1,147 approve lines):
-# it opens with "Nothing happens / runs / changes", "Nothing is sent / paid / booked …", "Nothing
-# to do" or "No action", or says "this only tells you", AND no clause in it says Approve does
-# something (closes, sends, pays, books, records, writes, creates, merges, a route or option
-# chosen …) without a negation in front. "This task closes. Nothing is sent." passes: Approve
-# closes it. A refusal costs the agent one resubmit; a wrong accept costs Kevin a card.
-NOOP_LEAD_RE = re.compile(
-    r"^\W*(?:if\s+you\s+approve,?\s*)?(?:"
-    r"nothing(?:\s+(?:else|new|more|further))?\s+(?:happens|runs|changes|moves|is\s+done|will\s+happen)"
-    r"|nothing\s+(?:is|gets)\s+(?:sent|paid|posted|booked|bought|changed|done|signed)"
-    r"|nothing\s+(?:left\s+)?(?:to\s+(?:do|approve|decide)|for\s+you\s+to\s+(?:do|decide|approve))"
-    r"|no\s+action(?:\s+is)?(?:\s+(?:taken|needed|required))?"
-    r")\b", re.I)
-NOOP_TELLS_RE = re.compile(
-    r"\b(?:this|it|the\s+card|approving|approve)\s+(?:only|just|simply|merely)\s+"
-    r"(?:tells|informs|lets|shows|confirms\s+to)\s+you\b", re.I)
-NOOP_CLAUSE_SPLIT_RE = re.compile(r"[.;:!?,]+|\s[-–—]+\s|\bbut\b|\bthen\b", re.I)
-NOOP_NEGATION_RE = re.compile(
-    r"\b(?:no|not|nothing|never|none|nobody|without|cannot|won't|isn't|doesn't|already)\b", re.I)
-NOOP_ITSELF_RE = re.compile(r"\b(?:files|closes|filed|closed)\s+itself\b", re.I)
-NOOP_ACTION_RE = re.compile(
-    r"\b(?:clos(?:e|es|ed|ing)|sen(?:d|ds|t)|goes\s+(?:to|out|from)|(?<!by\s)post(?:s|ed)?|pa(?:y|ys|id)|"
-    r"book(?:s|ed)?|(?<!your\s)(?<!the\s)(?<!just\s)(?<!only\s)record(?:s|ed)?|(?:re)?writ(?:e|es|ten)|creat(?:e|es|ed)|"
-    r"rais(?:e|es|ed)|merg(?:e|es|ed)|delet(?:e|es|ed)|cancel(?:s|led)?|remov(?:e|es|ed)|"
-    r"archiv(?:e|es|ed)|mark(?:s|ed)|set(?:s)?\s+(?:to|for|a|the)|rests?\s+until|parks?\s+(?:it|this|the)|"
-    r"moves?\s+to|approv(?:e|es|ing)\s+the\s+plan|go(?:es)?\s+ahead|starts?|builds|built\s+(?:now|today)|"
-    r"fix(?:es|ed)|updat(?:e|es|ed)|chang(?:e|es)\s+(?:to|from)|switch(?:es|ed)?|appl(?:y|ies|ied)|"
-    r"filed\s+as|clear(?:s|ed)?\s+(?:out|up|away)|order(?:s|ed)?|bu(?:y|ys)|renew(?:s|ed)?|"
-    r"fil(?:e|es|ed)\s+(?:the|it|this|in|a)|(?:route|option)\s+[A-D]|hand(?:s|ed)?\s+(?:over|to|it)|"
-    r"pass(?:es|ed)?\s+to|emails?|texts?|replies|reply\s+goes)\b", re.I)
+def status_rest(t, last, now=None, fingerprint=None):
+    """Why a task with a status update filed is resting, or ''. It rests from the `status` event
+    the filing writes until its NEXT CHECK (status_until), and only while the task is exactly as the
+    filing left it (`fingerprint`, from that event, 15 Nov 2026): a reply appended, a fold, a twin
+    folded in, a note, a new verdict or Changes requested, a new or removed holder or a moved due
+    date each end it. Any later step of the task's own in the ledger ends it too: the newest event is
+    then no longer `status`."""
+    if not last or last[0] != "status" or not last[1]:
+        return ""
+    if rest_print_changes(t, fingerprint):
+        return ""
+    until_day = status_until(t, last[1])
+    if until_day is None:
+        return ""
+    if (now or datetime.now(timezone.utc)).astimezone(LONDON).date() >= until_day:
+        return ""
+    return (f"status update filed at {last[1][:16]} with nothing to approve; rests until {until_day.isoformat()}, "
+            "or until anything on the task changes (a reply, a note, a verdict, a due date, its holder)")
+
+
+def rest_state(t, last, fingerprint=None, now=None):
+    """The one answer on a task's rest, for every reader (build_queue, the Task Manager's board and
+    loop-health): {"state": "resting" | "due" | "", "until": ISO or "", "why": text}. "resting" while
+    a keep-open or status rest holds; "due" when the task's newest event began one of those rests and
+    it no longer holds (its date came, or the task changed); "" when no such rest was begun."""
+    if not last or last[0] not in ("done", "status") or not last[1]:
+        return {"state": "", "until": "", "why": ""}
+    if last[0] == "done":
+        why = idle_handback(t, last, now, fingerprint)
+        until = kept_open_until(t, last[1])
+    else:
+        why = status_rest(t, last, now, fingerprint)
+        until = status_until(t, last[1])
+    return {"state": "resting" if why else "due", "until": until.isoformat() if until else "", "why": why}
+
+
+# THE NO-OP CARD (backstop, 14 Nov 2026; shrunk 15 Nov 2026). An approve line that, taken WHOLE, says
+# Approve runs nothing is refused at submit and escalate, with the two honest routes. The first
+# version read clauses for an un-negated action word, and an independent review found it refused
+# eleven of fourteen real cards ("Nothing is paid today. The bill goes on the Friday payment list.",
+# the wording GUARDRAILS gives for a bill). A wrongly refused card stops real work, which is worse
+# than a no-op card getting through, so it now refuses only the closing form itself and trivially
+# close variants: "Nothing.", "Nothing happens.", "No action.", "Nothing. Information only.",
+# "Information only." and the like, with nothing else on the line. Any further clause passes.
+NOOP_WHOLE_RE = re.compile(
+    r"^\W*(?:if\s+you\s+approve\W*)?"
+    r"(?:(?:nothing(?:\s+(?:at\s+all|happens|runs|changes|further|else))?|no\s+action(?:\s+(?:is\s+)?(?:taken|needed|required))?)"
+    r"(?:\W+(?:(?:this\s+is\s+)?(?:for\s+)?information\s+only|for\s+information))?"
+    r"|(?:this\s+is\s+)?(?:for\s+)?information\s+only)\W*$", re.I)
 NOOP_HELP = (
     "       Kevin's ruling (14 Nov 2026): a card whose Approve runs nothing is refused. Two honest routes:\n"
     "         (a) if nothing has changed and nothing is owed, submit it as a STATUS ONLY update: it is\n"
@@ -2756,21 +2930,11 @@ NOOP_HELP = (
 
 
 def approve_line_noop(line):
-    """The words that say Approve runs nothing (a short quote), or '' when the line names something
-    Approve sets going or makes no such claim."""
+    """The line itself when, taken whole, it says Approve runs nothing (NOOP_WHOLE_RE), or ''."""
     text = " ".join(str(line or "").split())
-    if not text:
+    if not text or not NOOP_WHOLE_RE.match(text):
         return ""
-    hit = NOOP_LEAD_RE.match(text) or NOOP_TELLS_RE.search(text)
-    if not hit:
-        return ""
-    for c in (c.strip() for c in NOOP_CLAUSE_SPLIT_RE.split(text)):
-        if not c or NOOP_ITSELF_RE.search(c):
-            continue
-        a = NOOP_ACTION_RE.search(c)
-        if a and not NOOP_NEGATION_RE.search(c[:a.start()]):
-            return ""
-    return hit.group(0).strip()
+    return text[:80]
 
 
 def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
@@ -3258,11 +3422,16 @@ def file_status_update(args, output, level, notes_seen):
     own lines, and nothing else. Status, Due Date, Agent Output, Plain Summary, the owners and
     Kevin's verdict are not touched, so a card waiting stays as it is and an approved task kept
     open stays approved. The `status` ledger event rests the task until its NEXT CHECK."""
-    fresh = get_task(args.task).get("fields", {}) or {}
+    fresh_rec = get_task(args.task)
+    fresh = fresh_rec.get("fields", {}) or {}
     existing = str(fresh.get(AF["notes"]) or "")
     if not existing.strip() and str(notes_seen or "").strip():
         sys.exit(f"ERROR: the re-read of {args.task} came back with blank Notes after an earlier read "
                  "showed some. Stopped before writing, so nothing is lost. Retry the submit.")
+    # An approval that landed while this submit was in flight (finding 5, 15 Nov 2026).
+    owed = approval_owed_problem(dict(fresh_rec, id=args.task))
+    if owed:
+        sys.exit(f"ERROR: refusing to file {args.task} as a status update: {owed}.")
     status_now = sel(fresh.get(AF["status"])) or "open"
     holder = next(iter(links(fresh.get(AF["teamMember"]))), "")
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
@@ -3275,11 +3444,18 @@ def file_status_update(args, output, level, notes_seen):
             + (f" Holder: {holder}." if holder else ""))
     patch_task(args.task, {AF["notes"]: append_notes(existing, head + "\n" + status_record_block(body),
                                                      task_id=args.task)})
-    check = get_task(args.task).get("fields", {}) or {}
+    check_rec = dict(get_task(args.task), id=args.task)
+    check = check_rec.get("fields", {}) or {}
     if head not in str(check.get(AF["notes"]) or ""):
         sys.exit(f"ERROR: the status update on {args.task} left NO line in Notes after the write. Nothing "
                  "shows on Handled without you. Retry the submit.")
-    ledger_append(args.task, "status")
+    owed = approval_owed_problem(check_rec)
+    if owed:
+        # The line is on the task but no rest begins: the task stays awake and is carried out.
+        sys.exit(f"ERROR: {args.task} was approved while the status update was being written: {owed}. "
+                 "The update's line stands in Notes, and the task does NOT rest.")
+    # The rest holds only while the task is exactly as this read shows it (rest_fingerprint).
+    ledger_append(args.task, "status", fingerprint=rest_fingerprint(rest_view(check_rec)))
     print(json.dumps({"submitted": args.task, "handled": True, "card": False, "level": AUTONOMY_ACT,
                       "category": STATUS_CATEGORY, "carry": "status", "status": status_now,
                       "restsUntil": level["restUntil"]}))
@@ -4257,7 +4433,27 @@ def queue_lanes(ai_agents=None, role_roster=None, role_roster_error=""):
     probe = lane_context([], role_roster or {}, role_roster_error, standing, ai_agents)
     population = lane_population(open_tasks, probe)
     ctx = lane_context(population, role_roster or {}, role_roster_error, standing, ai_agents)
-    return {t["id"]: task_lane(t, ctx) for t in population}
+    lanes = {t["id"]: task_lane(t, ctx) for t in population}
+    # A REST IS ITS OWN LANE ON THE BOARD (finding 10, 15 Nov 2026). build_queue lists a task resting
+    # on a keep-open or a status update under idleHandbacks; the board read it as stuck work and put
+    # it to the foreman three times a day. Same rule, same read: `resting` with the date it ends, and
+    # a task whose rest has ended keeps its worked lane with `restDue` (the date it came due).
+    ledger, prints = ledger_last_events(), ledger_rest_prints()
+    for t in population:
+        lane, extra = lanes[t["id"]]
+        if lane not in REST_LANES:
+            continue
+        rest = rest_state(t, ledger.get(t["id"]), prints.get(t["id"], ""))
+        if rest["state"] == "resting":
+            lanes[t["id"]] = ("resting", {"restUntil": rest["until"], "restWhy": rest["why"], "restFrom": lane})
+        elif rest["state"] == "due":
+            # The day it came due: its rest's end, or today when the task changed before that day.
+            lanes[t["id"]] = (lane, dict(extra or {}, restDue=min(rest["until"] or today_london(), today_london())))
+    return lanes
+
+
+# The worked lanes build_queue applies a rest to (approved, changes requested, new work).
+REST_LANES = ("approvedHandbacks", "changesRequested", "newWork")
 
 
 def build_queue(args=None):
@@ -4404,12 +4600,15 @@ def build_queue(args=None):
     # carry-out kept open rests until the next look it named, not a day
     # (kept_open_rest), so it is no longer an AI look every day.
     ledger = ledger_last_events()
-    folds = ledger_fold_times()
+    prints = ledger_rest_prints()
     idle_hb = []
     for t in list(approved_hb):
-        why = idle_handback(t, ledger.get(t["id"]), folded_at=folds.get(t["id"], ""))
+        why = idle_handback(t, ledger.get(t["id"]), fingerprint=prints.get(t["id"], ""))
         if why:
             t["idleReason"] = why
+            rest = rest_state(t, ledger.get(t["id"]), prints.get(t["id"], ""))
+            if rest["state"] == "resting" and rest["until"]:
+                t["restUntil"] = rest["until"]
             idle_hb.append(t)
     # A wall on work he has NOT approved (a redo or new work) rests the same
     # day: before the blocker loop the agent's submit took it off the list;
@@ -4428,9 +4627,10 @@ def build_queue(args=None):
     for t in list(approved_hb) + list(changes_hb) + list(new_work) + list(deferred_hb):
         if t in idle_hb:
             continue
-        why = status_rest(t, ledger.get(t["id"]), folded_at=folds.get(t["id"], ""))
+        why = status_rest(t, ledger.get(t["id"]), fingerprint=prints.get(t["id"], ""))
         if why:
             t["idleReason"] = why
+            t["restUntil"] = rest_state(t, ledger.get(t["id"]), prints.get(t["id"], ""))["until"]
             idle_hb.append(t)
     if idle_hb:
         idle_ids = {t["id"] for t in idle_hb}
@@ -7897,9 +8097,14 @@ def _stamp_to_iso(day, time_):
     return d + (" " + time_ if time_ else "")
 
 
-def history_gmail(terms, days):
+def history_gmail(terms, days, accounts=None):
     """Dated email events for the terms through the triage worker's Gmail
-    listing. Returns (entries, note); the note says what was NOT searched."""
+    listing. Returns (entries, note); the note says what was NOT searched.
+    `accounts` names the mailboxes to search (the status-update reply check asks
+    for every mailbox the estate reads, 15 Nov 2026); left out, the worker's
+    triage mailbox, as the TRACK RECORD always has. Each entry carries the whole
+    From header in `from` (the text keeps 80 characters for the printed block),
+    so a long display name never hides the address."""
     import importlib.util
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inbound-triage.py")
     try:
@@ -7920,26 +8125,32 @@ def history_gmail(terms, days):
     if not q_parts:
         return [], "Gmail not searched (no terms)"
     q = "(" + " OR ".join(q_parts) + f") newer_than:{max(1, int(days))}d"
-    try:
-        msgs, truncated = it.worker_list(q=q, max_pages=3)
-    except SystemExit as e:
-        why = (getattr(it, "_last_fail", {}) or {}).get("message") or str(e)
-        return [], f"Gmail not searched ({str(why)[:80]})"
-    except Exception as e:                                   # noqa: BLE001
-        return [], f"Gmail not searched ({str(e)[:80]})"
-    out = []
-    for m in msgs:
-        h = m.get("headers") or {}
-        ts = int(m.get("internalDate") or 0) / 1000
-        date = datetime.fromtimestamp(ts, LONDON).strftime("%Y-%m-%d %H:%M") if ts else ""
-        sender = str(h.get("from") or "")[:80]
-        out.append({"date": date, "source": "email", "text": f"{sender}: {str(h.get('subject') or '')[:120]}", "id": m.get("id"),
-                    "link": f"https://mail.google.com/mail/u/0/#all/{m.get('id')}" if m.get("id") else ""})
-    note = "Gmail listing truncated (more than shown)" if truncated else ""
-    return out, note
+    out, notes = [], []
+    for account in (accounts or [None]):
+        where = f" in {account}" if account else ""
+        try:
+            msgs, truncated = it.worker_list(q=q, max_pages=3, account=account)
+        except SystemExit as e:
+            why = (getattr(it, "_last_fail", {}) or {}).get("message") or str(e)
+            notes.append(f"Gmail not searched{where} ({str(why)[:80]})")
+            continue
+        except Exception as e:                               # noqa: BLE001
+            notes.append(f"Gmail not searched{where} ({str(e)[:80]})")
+            continue
+        for m in msgs:
+            h = m.get("headers") or {}
+            ts = int(m.get("internalDate") or 0) / 1000
+            date = datetime.fromtimestamp(ts, LONDON).strftime("%Y-%m-%d %H:%M") if ts else ""
+            sender = str(h.get("from") or "")
+            out.append({"date": date, "source": "email", "text": f"{sender[:80]}: {str(h.get('subject') or '')[:120]}",
+                        "from": sender[:400], "account": account or "", "id": m.get("id"),
+                        "link": f"https://mail.google.com/mail/u/0/#all/{m.get('id')}" if m.get("id") else ""})
+        if truncated:
+            notes.append(f"Gmail listing truncated{where} (more than shown)")
+    return out, "; ".join(notes)
 
 
-def history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmail=True):
+def history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmail=True, gmail_accounts=None):
     terms = history_terms(emails, refs, properties)
     searched = ["tasks"] + (["Gmail"] if gmail else [])
     entries, notes = [], []
@@ -7948,7 +8159,7 @@ def history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmai
         for rec in query_tasks(formula, max_records=60):
             entries.extend(history_entries_from_task(rec, exclude_id=exclude_task))
         if gmail:
-            g, note = history_gmail(terms, days)
+            g, note = history_gmail(terms, days, gmail_accounts)
             entries.extend(g)
             if note:
                 notes.append(note)
@@ -8906,7 +9117,7 @@ def cmd_complete(args):
         # by code at the end of the line, and the task rests until then (kept_open_rest).
         if not until_raw:
             sys.exit(f"ERROR: refusing to keep {args.task} open with no next look.\n" + KEPT_OPEN_UNTIL_HELP)
-        problem, until = next_look_problem(until_raw, "--until", KEPT_OPEN_MAX_DAYS)
+        problem, until = next_look_problem(until_raw, "--until", KEPT_OPEN_MAX_DAYS, due=t.get("dueDate"))
         if problem:
             sys.exit(f"ERROR: refusing to keep {args.task} open: {problem}.\n" + KEPT_OPEN_UNTIL_HELP)
         holder = next(iter(t.get("teamMemberIds") or []), "")
@@ -8919,7 +9130,17 @@ def cmd_complete(args):
         # Through append_notes, never by hand: this line had no cap, so a full Notes field
         # refused the write and the carried-out work was never recorded (finding 20261102-phase-3-1166).
         patch_task(args.task, {AF["notes"]: append_notes(t["notes"] or "", mark, task_id=args.task)})
-        ledger_append(args.task, "done")
+        # The rest holds only while the task is exactly as it stands now, the line above included
+        # (rest_fingerprint, 15 Nov 2026). A re-read that fails still records the carry-out: the rest
+        # then has no fingerprint and ends at its next read, the safe direction, and says so.
+        try:
+            fp = rest_fingerprint(rest_view(get_task(args.task)))
+        except (Exception, SystemExit) as exc:          # noqa: BLE001 — reported, never silent
+            fp = ""
+            print(f"WARNING: {args.task} could not be re-read after the carry-out line was written "
+                  f"({str(exc)[:120]}), so its rest has no fingerprint and it wakes at its next read.",
+                  file=sys.stderr)
+        ledger_append(args.task, "done", fingerprint=fp)
         print(json.dumps({"carriedOut": args.task, "keptOpen": True,
                           "status": t["status"], "restsUntil": until.isoformat()}))
         return

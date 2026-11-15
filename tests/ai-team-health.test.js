@@ -601,7 +601,7 @@ for outcome in d.APPROVED:
     d.get_task = lambda i, o=outcome: {"id": i, "fields": {d.AF["notes"]: "older notes", d.AF["status"]: "Today",
                                                           d.AF["approvalOutcome"]: o, d.AF["teamMember"]: ["recAGENTxxxxxxx01"]}}
     d.patch_task = lambda i, f, W=W: W.append(f)
-    d.ledger_append = lambda t, e, L=L: L.append((e, datetime.now(timezone.utc)))
+    d.ledger_append = lambda t, e, *a, L=L, **k: L.append((e, datetime.now(timezone.utc)))
     with contextlib.redirect_stdout(io.StringIO()):
         d.cmd_complete(A(task="recWAITxxxxxxxx01", keep_open=True, note="chased the electrician", no_certificate="", evidence="",
                             until=(d.datetime.now(d.LONDON).date() + d.timedelta(days=2)).isoformat()))

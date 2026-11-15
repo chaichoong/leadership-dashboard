@@ -39,7 +39,7 @@ def _patch(i, fields):
     TASKS[i]["fields"].update(fields)
 m.get_task = _get
 m.patch_task = _patch
-m.ledger_append = lambda t, e: LEDGER.append([t, e])
+m.ledger_append = lambda t, e, *a, **k: LEDGER.append([t, e])
 SITES = {"www.topcashback.co.uk": {"label": "TopCashback", "login": True, "loginUrl": "https://www.topcashback.co.uk/logon/"},
          "namecheap.com": {"label": "Namecheap", "login": True},
          "gov.uk": {"label": "GOV.UK", "login": False}}
