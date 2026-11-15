@@ -2,10 +2,14 @@ name = "prospect-reply-watch"
 main = "worker.js"
 compatibility_date = "2026-08-01"
 
-# Every 2 minutes. No day-of-week component — see the Cloudflare cron
-# anti-pattern in CLAUDE.md (Sunday=1 there; never encode days in a cron).
+# If a timer is ever restored: no day-of-week component. See the Cloudflare cron
+# anti-pattern in .claude/rules/cloudflare-cron.md (Sunday=1 there; never encode days in a cron).
 [triggers]
-crons = ["*/2 * * * *"]
+# Timer removed 15 Nov 2026 (Kevin, brain Decisions/2026-11-15 Remove what Kevin does not use): prospecting
+# is parked to January 2027 and the Prospects table has had no change in 30 days. The Worker and its manual
+# POST /run stay. Was: crons = ["*/2 * * * *"]. Takes effect only on `npx --yes wrangler deploy` from
+# workers/prospect-reply-watch.
+crons = []
 
 # Secrets (set via `wrangler secret put`, values live in ~/.config/od/):
 #   GHL_API_KEY       — pit-… token ("SMS to Email Bridge" integration, OD sub-account)
