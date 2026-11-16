@@ -23,7 +23,7 @@
         // It replaced the Leadership Dashboard sidebar item; the 'overview' entry below is still the page it shows, and opens by link.
         { id: 'home',        name: 'My Dashboard',                   icon: '📊', pageVer: '1.17', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.158', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.87', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.88', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.199', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.46', sopFile: 'sop-cfvs.html',               sopVer: '1.46', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -37,7 +37,7 @@
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.35', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.82', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.83', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -52,16 +52,16 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.230', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.231', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.61', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.62', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // The 'crm' entry (crm-supabase.html) was removed on 15 Nov 2026 with the Supabase
         // shadow build (brain Decisions/2026-11-15 Remove what Kevin does not use). Git history has it.
         { id: 'publishing', name: 'Publishing',                     icon: '📅', pageVer: '1.21', sopFile: '',                            sopVer: '1.0', standalone: 'publishing.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.20', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
-        { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
+        { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.25', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.1', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];
