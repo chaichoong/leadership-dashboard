@@ -49,6 +49,11 @@ agent-dispatch.py (the same book the score, the Property Compliance page and
 the tenant chain read), and raises its tasks only through
 scripts/create-agent-task.py, the duplicate gate. Without --apply it writes
 nothing. Tested by tests/compliance-watch.test.js.
+
+TWO POLICIES ON ONE HOUSE (Kevin, 3 Nov 2026). The same daily pass raises one
+task for every house the book or the Costs table shows covered by two live
+landlord policies at once (insurance_doubles, judge_doubles), asking the agent
+to propose which to cancel. Tested by tests/certificate-watch-double-cover.test.js.
 """
 
 import json
@@ -959,6 +964,260 @@ def premium_rises(rows, keyed_tasks, today, limit=PREMIUM_RISE_LIMIT):
     return rises, not_checked
 
 
+# ── TWO LIVE POLICIES ON ONE HOUSE (Kevin, 3 Nov 2026) ───────────────────────
+#
+# Where a house carries two live policies, cancel the duplicate and keep the
+# cheapest, on EVERY house with a duplicate, not only the one in hand: "We really
+# need to get control of the insurance so that we're not getting duplications."
+# He named three houses. On 16 Nov 2026 the book still held two in-date landlord
+# policies on each of those three, a fortnight after he said it.
+#
+# A house is covered twice when EITHER record says so:
+#   * the compliance book holds two Landlord Insurance rows in date for it whose
+#     years of cover overlap; or
+#   * the Costs table pays two insurance costs for it at once.
+# The daily run raises ONE task for every such house with no open task, naming
+# each policy with its premium and each cost with its Expected Cost, and asks the
+# Property Administration agent to PROPOSE which to cancel (keep the cheapest).
+# Cancelling is Kevin's (Level C): nothing here cancels anything.
+#
+# What is NOT a second policy, each one a test:
+#   * a block policy. Since 31 Oct 2026 policies are grouped by owner onto one
+#     policy per group: the book files it as one row per house, and the cost is
+#     ONE row linking every house. One cost on six houses is one policy on each.
+#     It is a double only where the house's own old policy is also still live;
+#   * a renewal filed early: the renewed row is in date beside the old one until
+#     the old renewal date passes. Two year-long covers whose renewal dates are a
+#     year apart overlap by days, not months (DOUBLE_OVERLAP_DAYS);
+#   * per-apartment rows: rows are compared only with rows for the same unit (a
+#     block's apartments hold their own rows, as purchase_block says above);
+#   * an expired row, or one marked Expired by hand (how a cancelled policy reads);
+#   * a cost that is not live (the LEGACY Payment Status, CLAUDE.md, read through
+#     cost-record.py's is_active, the mirror of isCostActive in js/shared.js: In
+#     Payment or Overdue, Inactive unticked), and a cost past its End Date by more
+#     than cost-record.py's grace, which agent-dispatch.py's ended-costs task owns;
+#   * insurance that is not the landlord policy (a car, a claim, rent guarantee),
+#     by NOT_LANDLORD_INSURANCE_RE on the cost's name.
+# An insurance cost is one linked to the Chart of Accounts sub-category whose
+# name is exactly "Insurance": the load-bearing name the P&L groups by (js/pnl.js
+# PNL_SECTIONS, js/config.js CASHFLOW_COST_SUBCATS). Never a word in a cost name.
+DOUBLE_KEY = "CERTWATCH-DOUBLE %s"          # property id: one open task per house
+INSURANCE_SUBCATEGORY = "Insurance"
+SUBCAT_NAME_FIELD = "fldO4BTJhFv5EsN6i"      # js/config.js SUBCAT.name: Sub Category Name
+POLICY_YEAR_DAYS = 365
+DOUBLE_OVERLAP_DAYS = 30
+
+
+def covers_overlap(end_a, end_b, overlap_days=DOUBLE_OVERLAP_DAYS):
+    """True when two year-long covers ending on these dates overlap by more than
+    `overlap_days`. A cover with no end date (a cost with no End Date) runs on,
+    so it overlaps anything. A renewal ends a year after the policy it renews,
+    so its overlap is a few days at most."""
+    a, b = _day(end_a), _day(end_b)
+    if a is None or b is None:
+        return True
+    return abs((a - b).days) < POLICY_YEAR_DAYS - overlap_days
+
+
+def _overlapping(items, end_key):
+    """The items whose cover overlaps at least one other item's."""
+    return [a for i, a in enumerate(items)
+            if any(covers_overlap(a.get(end_key), b.get(end_key)) for j, b in enumerate(items) if j != i)]
+
+
+def _first_line(text, limit=160):
+    for line in str(text or "").splitlines():
+        if line.strip():
+            return " ".join(line.split())[:limit]
+    return ""
+
+
+def insurance_doubles(pages, policies, costs, insurance_sub_ids, today,
+                      ended_grace_days=5):
+    """(doubles, counts): the active houses carrying two live landlord policies.
+
+    pages:    the book's pages ({"id", "short", "name", "active"}).
+    policies: Landlord Insurance book rows, {"id", "propertyIds", "unitIds",
+              "status", "renewalDate", "notes"}.
+    costs:    Costs rows, {"id", "name", "expected", "frequency", "payStatus",
+              "active", "propertyIds", "subCategoryIds", "endDate"}, or None when
+              the cost side was not read (only the book is then judged).
+    insurance_sub_ids: the record ids of the sub-category named "Insurance".
+    ended_grace_days: cost-record.py ENDED_GRACE_DAYS.
+
+    Each double lists EVERY in-date policy row and live insurance cost on the
+    house, so the agent sees the whole of its cover, and says which record shows
+    the double. `counts` states the populations, and lists what could not be
+    judged (an undated row, a live insurance cost with no house), never drops it."""
+    today = _day(today)
+    names = {p.get("id"): str(p.get("short") or p.get("name") or p.get("id")) for p in pages or []}
+    active = {p.get("id") for p in pages or [] if p.get("active")}
+    sub_ids = set(insurance_sub_ids or ())
+    in_force, undated = {}, 0
+    for r in policies or []:
+        renewal = _day(r.get("renewalDate"))
+        if str(r.get("status") or "").strip().lower() == "expired":
+            continue
+        if renewal is None:
+            undated += 1
+            continue
+        if renewal < today:
+            continue
+        for pid in r.get("propertyIds") or []:
+            if pid in active:
+                in_force.setdefault(pid, []).append(r)
+    live, no_house, ended, not_landlord = {}, [], [], []
+    for c in costs or []:
+        if not (set(c.get("subCategoryIds") or []) & sub_ids) or not c.get("active"):
+            continue
+        if NOT_LANDLORD_INSURANCE_RE.search(str(c.get("name") or "")):
+            not_landlord.append(str(c.get("name") or c.get("id")))
+            continue
+        end = _day(c.get("endDate"))
+        if end is not None and (today - end).days > ended_grace_days:
+            ended.append(c.get("id"))
+            continue
+        houses = [pid for pid in c.get("propertyIds") or [] if pid in active]
+        if not c.get("propertyIds"):
+            no_house.append(str(c.get("name") or c.get("id")))
+        for pid in houses:
+            live.setdefault(pid, []).append(c)
+    book_double = set()
+    for pid, rows in in_force.items():
+        by_unit = {}
+        for r in rows:
+            by_unit.setdefault(tuple(sorted(r.get("unitIds") or [])), []).append(r)
+        if any(len(_overlapping(group, "renewalDate")) >= 2 for group in by_unit.values()):
+            book_double.add(pid)
+    cost_double = {pid for pid, mine in live.items() if len(_overlapping(mine, "endDate")) >= 2}
+    doubles = []
+    for pid in sorted(book_double | cost_double, key=lambda x: (names.get(x, x), x)):
+        rows = sorted(in_force.get(pid, []), key=lambda r: (str(r.get("renewalDate")), str(r.get("id"))))
+        mine = sorted(live.get(pid, []), key=lambda c: (str(c.get("name")), str(c.get("id"))))
+        doubles.append({
+            "propertyId": pid, "property": names.get(pid, pid), "key": DOUBLE_KEY % pid,
+            "bookDouble": pid in book_double, "costDouble": pid in cost_double,
+            "policies": [{"id": r.get("id"), "renewalDate": str(r.get("renewalDate"))[:10],
+                          "units": list(r.get("unitIds") or []),
+                          "premium": parse_premium(r.get("notes")), "note": _first_line(r.get("notes"))}
+                         for r in rows],
+            "costs": [{"id": c.get("id"), "name": str(c.get("name") or ""), "expected": c.get("expected"),
+                       "frequency": str(c.get("frequency") or ""), "payStatus": str(c.get("payStatus") or ""),
+                       "endDate": str(c.get("endDate") or "")[:10]} for c in mine]})
+    counts = {"insuredHouses": len(set(in_force) | set(live)),
+              "policiesInForce": len({r.get("id") for rows in in_force.values() for r in rows}),
+              "undatedPolicies": undated,
+              "costsRead": costs is not None,
+              "liveInsuranceCosts": len({c.get("id") for mine in live.values() for c in mine}),
+              "liveInsuranceCostsNoHouse": no_house,
+              "endedCostsLeftToEndedCheck": ended,
+              "notLandlordInsurance": not_landlord}
+    return doubles, counts
+
+
+def judge_doubles(doubles, open_tasks, keyed_tasks, today, days=CLOSED_COOL_OFF_DAYS):
+    """(covered, held_back, found): which doubled houses an OPEN task already
+    carries (its Description holds the house's key, so a daily run never raises a
+    second task while one is open), which had their task CLOSED in the last
+    `days` days with the book unchanged (held back, listed with the day it comes
+    back, so a cancellation awaiting the insurer's confirmation is not re-raised
+    the next morning), and which have no task. Pure."""
+    today = _day(today)
+    covered, held_back, found = [], [], []
+    for d in doubles or []:
+        key = d.get("key") or DOUBLE_KEY % d["propertyId"]
+        own = next((t for t in open_tasks or [] if key in str(t.get("description") or "")), None)
+        if own:
+            covered.append({"property": d["property"], "task": own.get("id")})
+            continue
+        last = None
+        for t in keyed_tasks or []:
+            if key in str(t.get("description") or "") and str(t.get("status") or "") in ("Completed", "Cancelled"):
+                when = closed_on(t)
+                if when and (today - when).days <= days and (last is None or when > last[0]):
+                    last = (when, t)
+        if last:
+            held_back.append({"property": d["property"], "closedTask": last[1].get("id"),
+                              "comesBack": (last[0] + timedelta(days=days + 1)).isoformat()})
+            continue
+        found.append(d)
+    return covered, held_back, found
+
+
+def _money(value):
+    try:
+        return "£%.2f" % float(value)
+    except (TypeError, ValueError):
+        return "blank"
+
+
+def double_task_fields(found, today, no_house=()):
+    """The create payload for the doubled houses with no task: ONE task, every
+    house in it, each house's key on its own line (field ids, for
+    create-agent-task.py)."""
+    where = found[0]["property"] if len(found) == 1 else "%d houses" % len(found)
+    name = ("INSURANCE: two live policies on %s - keep the cheapest" % where)[:100]
+    blocks = []
+    for d in found:
+        lines = ["%s:" % d["property"]]
+        why = []
+        if d["bookDouble"]:
+            why.append("the compliance book holds two policies in date whose years of cover overlap")
+        if d["costDouble"]:
+            why.append("the Costs table pays two insurance costs at once")
+        lines.append("- Why it reads as two: %s." % "; and ".join(why))
+        if d["policies"]:
+            lines.append("- Compliance book, landlord policies in date:")
+            for p in d["policies"]:
+                prem = ("premium %s/yr from its Notes" % _money(p["premium"])) if p["premium"] is not None \
+                    else "premium not recorded in its Notes"
+                unit = (" (unit %s)" % ", ".join(p["units"])) if p["units"] else ""
+                note = (': "%s"' % p["note"]) if p["note"] else ""
+                lines.append("  - row %s%s, renews %s, %s%s" % (p["id"], unit, p["renewalDate"], prem, note))
+        else:
+            lines.append("- Compliance book: no landlord policy in date for this house.")
+        if d["costs"]:
+            lines.append("- Costs in payment (sub-category Insurance):")
+            for c in d["costs"]:
+                lines.append("  - cost %s: %s, Expected Cost %s %s, Payment Status %s, End Date %s"
+                             % (c["id"], c["name"], _money(c["expected"]), c["frequency"] or "(no frequency)",
+                                c["payStatus"] or "blank", c["endDate"] or "none"))
+        else:
+            lines.append("- Costs: no live insurance cost linked to this house.")
+        blocks.append("\n".join(lines))
+    unplaced = ""
+    if no_house:
+        unplaced = ("\n\nLive insurance costs linked to no house, which this check cannot place: %s. If one "
+                    "of them pays for a policy above, say so on the card." % "; ".join(no_house))
+    desc = (
+        "PROPERTY INSURANCE, raised by the daily certificate watch (scripts/certificate_watch.py): %s "
+        "carr%s two live landlord insurance policies at once. Kevin, 3 Nov 2026: cancel the duplicate "
+        "and keep the cheapest, on every house with a duplicate, not only the one in hand, so that we "
+        "are not paying twice.\n\n%s%s\n\n"
+        "What to do:\n"
+        "1. For each house, check that both are live landlord buildings cover for THAT house. A block "
+        "policy is one policy for every house on it: compare its share for this house, never its total. "
+        "A policy already cancelled whose book row or cost was never updated is a stale record, not a "
+        "second policy: get the insurer's written confirmation and say so.\n"
+        "2. Put ONE card to Kevin covering every house above: which policy to keep (the cheapest for "
+        "that house, checked against the schedules), which to cancel, what cancelling costs or "
+        "refunds, and the day its cover ends. Insurer admin goes by email with the policy details.\n"
+        "3. Cancelling is Kevin's (Level C). Nothing is cancelled, and no cancellation goes to an "
+        "insurer, until he approves that card.\n"
+        "4. Once a cancellation is confirmed in writing, two records change or this check raises the "
+        "house again %d days after this task closes: the cancelled policy's row in the compliance book "
+        "reads Status Expired (your certificate write path cannot set it, so name the row on the card), "
+        "and its cost goes Inactive through scripts/cost-record.py on a line "
+        "RECORD CHANGE: <cost id> Payment Status = Inactive.\n\n%s"
+        % ("1 house" if len(found) == 1 else "%d houses" % len(found), "ies" if len(found) == 1 else "y",
+           "\n\n".join(blocks), unplaced, CLOSED_COOL_OFF_DAYS,
+           "\n".join(d.get("key") or DOUBLE_KEY % d["propertyId"] for d in found)))
+    return {TF["name"]: name, TF["status"]: "Today", TF["due"]: today,
+            TF["team"]: [PROPERTY_ADMIN_REC], TF["priority"]: "High",
+            TF["estimate"]: "1 hr", TF["desc"]: desc,
+            TF["properties"]: [d["propertyId"] for d in found]}
+
+
 # Write-side Task field ids (js/config.js TASK_FIELDS; the same ids
 # scripts/create-agent-task.py F and agent-dispatch.py REVIEW_TASK_FIELDS use).
 TF = {"name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "due": "fld7XP8w8kbxfETV4",
@@ -1075,7 +1334,7 @@ def premium_task_fields(rise, where, today):
 
 
 def watch_summary(found, raised, still, held_back, insurance_raised, premium_unchecked, paused=False,
-                  dry_run=False, missed_total=None):
+                  dry_run=False, missed_total=None, doubles=None):
     """The run's last line. The job's Estate Status row prints the last thing a
     failing job said, cut to its LAST 220 characters (estate-status.py
     plain_tail), so the line is kept within that, with the count of items with no
@@ -1088,6 +1347,10 @@ def watch_summary(found, raised, still, held_back, insurance_raised, premium_unc
     pass and a critical finding was filed against a mechanism that does not
     exist (20261110-phase-2-1263 — the watch had found 50 missed items and 41
     were carried by an open task). A count states the population it came out of.
+
+    `doubles` ({"houses", "insured", "raised", "notChecked"}) adds the
+    double-cover check: houses covered twice out of the houses insured, and a
+    Costs read that failed, which comes before the parts that can wait.
     """
     of_total = "" if missed_total is None else " of %d" % missed_total
     line = ("COMPLIANCE: %d%s required item%s with no in-date certificate had no open task; "
@@ -1097,9 +1360,16 @@ def watch_summary(found, raised, still, held_back, insurance_raised, premium_unc
     parts = []
     if paused:
         parts.append(" (agent paused, none raised)")
+    if doubles and doubles.get("notChecked"):
+        parts.append("; double cover: Costs NOT CHECKED")
     if held_back:
         parts.append("; %d held back after a recent close" % held_back)
     parts.append("; insurance: %d %s" % (insurance_raised, "would be raised" if dry_run else "raised"))
+    if doubles is not None:
+        part = "; covered twice: %d of %d insured houses" % (doubles.get("houses") or 0, doubles.get("insured") or 0)
+        if doubles.get("raised"):
+            part += ", %d %s" % (doubles["raised"], "would be raised" if dry_run else "raised")
+        parts.append(part)
     if premium_unchecked:
         parts.append("; premium not recorded on %d" % premium_unchecked)
     for part in parts:
@@ -1306,6 +1576,71 @@ def read_book(ad):
             "patterns": property_keys(props)}
 
 
+def _select(value):
+    return value.get("name", "") if isinstance(value, dict) else str(value or "")
+
+
+def insurance_cost_rows(ad):
+    """(costs, insurance sub-category ids): every cost, shaped for
+    insurance_doubles, and the id of the sub-category named "Insurance". The
+    field ids and the live rule are cost-record.py's own (through
+    agent-dispatch.py's loader), so this read and that door can never disagree.
+    Raises RuntimeError naming the broken read: a zero here is never a clean
+    result."""
+    cr = ad._cost_record()
+    subs = ad.query_records(cr.T_SUBCATEGORIES, fields=[SUBCAT_NAME_FIELD])
+    if not subs:
+        raise RuntimeError("the Chart of Accounts sub-category read returned no rows (49 on 16 Nov 2026)")
+    ids = {r.get("id") for r in subs
+           if str((r.get("fields") or {}).get(SUBCAT_NAME_FIELD) or "").strip() == INSURANCE_SUBCATEGORY}
+    if len(ids) != 1:
+        raise RuntimeError("%d of %d sub-categories are named %r (exactly 1 expected): it was renamed, or the "
+                           "read is broken" % (len(ids), len(subs), INSURANCE_SUBCATEGORY))
+    rows = ad.query_records(cr.T_COSTS, fields=[cr.COST_NAME, cr.COST_EXPECTED, cr.COST_FREQUENCY,
+                                                cr.COST_PAY_STATUS, cr.COST_INACTIVE, cr.COST_PROPERTY,
+                                                cr.COST_SUBCAT, cr.COST_END])
+    costs = []
+    for r in rows:
+        f = r.get("fields") or {}
+        costs.append({"id": r.get("id"), "name": " ".join(str(f.get(cr.COST_NAME) or "").split()),
+                      "expected": f.get(cr.COST_EXPECTED), "frequency": _select(f.get(cr.COST_FREQUENCY)),
+                      "payStatus": _select(f.get(cr.COST_PAY_STATUS)), "active": bool(cr.is_active(f)),
+                      "propertyIds": ad.links(f.get(cr.COST_PROPERTY)),
+                      "subCategoryIds": ad.links(f.get(cr.COST_SUBCAT)),
+                      "endDate": str(f.get(cr.COST_END) or "")[:10]})
+    if not any(c["active"] for c in costs):
+        raise RuntimeError("%d costs read and none is live (80 In Payment and 21 Overdue on 16 Nov 2026): the "
+                           "read or the live rule is broken" % len(costs))
+    return costs, ids
+
+
+def double_cover_check(ad, pages, certs, ins_rows, today):
+    """(doubles, counts, not_checked): insurance_doubles over today's book and
+    Costs. The cost side is read only while the book holds a landlord policy in
+    force (with none, every house is already a missed item and there is nothing
+    to compare a cost with); once read, it must find a live insurance cost on a
+    house, or it is NOT CHECKED and only the book is judged, said in the run's
+    last line and its exit code."""
+    notes = {r.get("id"): str((r.get("fields") or {}).get(ad.CERT_FIELDS["notes"]) or "") for r in ins_rows or []}
+    policies = [dict(c, notes=notes.get(c.get("id"), "")) for c in certs or []
+                if c.get("type") == "Landlord Insurance"]
+    doubles, counts = insurance_doubles(pages, policies, None, (), today)
+    if not counts["policiesInForce"]:
+        counts["costsNotRead"] = "the book holds no landlord policy in force"
+        return doubles, counts, ""
+    try:
+        costs, sub_ids = insurance_cost_rows(ad)
+    except RuntimeError as exc:
+        return doubles, dict(counts, costsNotChecked=str(exc)), "Costs: %s" % exc
+    with_costs, counts2 = insurance_doubles(pages, policies, costs, sub_ids, today,
+                                            ended_grace_days=ad._cost_record().ENDED_GRACE_DAYS)
+    if not counts2["liveInsuranceCosts"]:
+        why = ("control failed: the book holds %d landlord policies in force and the Costs table pays no live "
+               "insurance cost on any house (10 on 16 Nov 2026)" % counts2["policiesInForce"])
+        return doubles, dict(counts2, costsNotChecked=why), "Costs: %s" % why
+    return with_costs, counts2, ""
+
+
 def cmd_daily(apply):
     ad = _dispatch()
     today = ad.today_london()
@@ -1384,6 +1719,24 @@ def cmd_daily(apply):
         raised.append(dict(row, order=n, property=item["property"], propertyId=item["propertyId"],
                            type=item["type"], state=item["label"], units=len(item["units"])))
 
+    # 3. Two live landlord policies on one house (Kevin, 3 Nov 2026): ONE task
+    #    for every doubled house with no open task. Last, so the tasks raised
+    #    above are already on the board it reads.
+    doubles, dcounts, dbl_not_checked = double_cover_check(ad, pages, certs, ins_rows, today)
+    dcovered, dheld, dfound = judge_doubles(doubles, open_tasks, keyed, today)
+    dbl_row = None
+    if dfound:
+        dbl_row = raise_task(double_task_fields(dfound, today, dcounts.get("liveInsuranceCostsNoHouse") or ()),
+                             "double cover")
+    if dbl_not_checked:
+        failures.append({"what": "double cover", "ok": False, "why": dbl_not_checked[:300]})
+    double_out = dict(dcounts, houses=len(doubles), covered=dcovered, heldBackAfterClose=dheld,
+                      withNoTask=[{"property": d["property"], "bookDouble": d["bookDouble"],
+                                   "costDouble": d["costDouble"], "policies": d["policies"], "costs": d["costs"]}
+                                  for d in dfound],
+                      task=dbl_row)
+    dbl_raised = len(dfound) if (dbl_row and dbl_row["ok"]) else 0
+
     ok_raised = [r for r in raised if r["ok"]]
     print(json.dumps({
         "today": today, "apply": apply, "agentPaused": paused,
@@ -1393,14 +1746,19 @@ def cmd_daily(apply):
         "missedItems": len(items), "covered": len(covered), "heldBackAfterClose": held_back,
         "missedWithNoTask": len(found), "missed": raised,
         "insurance": raised_ins, "premiumNotChecked": premium_unchecked,
+        "doubleCover": double_out,
         "failures": failures}, indent=1))
     still = len(found) - (len(ok_raised) if apply else 0)
     print(watch_summary(len(found), len(ok_raised), still, len(held_back),
                         len([r for r in raised_ins if r["ok"]]), premium_unchecked, paused,
-                        dry_run=not apply, missed_total=len(items)))
+                        dry_run=not apply, missed_total=len(items),
+                        doubles={"houses": len(doubles), "insured": dcounts["insuredHouses"],
+                                 "raised": dbl_raised, "notChecked": bool(dbl_not_checked)}))
     # Non-zero whenever a required item had no task this morning, even once it is
     # raised: that a task had gone missing is the thing worth seeing on the board.
-    return 1 if (found or failures or any(not r["ok"] for r in raised_ins)) else 0
+    # The same for a house covered twice, and for a double-cover check that could
+    # not read the Costs table.
+    return 1 if (found or failures or any(not r["ok"] for r in raised_ins) or dfound) else 0
 
 
 # ── selftest and a JSON door for the vitest suite ────────────────────────────
@@ -1509,6 +1867,40 @@ def selftest():
     check("an unfiled payment for another property does not",
           purchase_block("pB", "EICR", [], [pay()], T) == "")
 
+    pg = [{"id": "pA", "short": "A", "active": True}, {"id": "pB", "short": "B", "active": True}]
+    pol = lambda **kw: dict({"id": "r1", "propertyIds": ["pA"], "unitIds": [], "status": "Active",  # noqa: E731
+                             "renewalDate": "2027-07-16", "notes": "premium £200/yr"}, **kw)
+    cost = lambda **kw: dict({"id": "k1", "name": "Insurer - pA", "expected": 15, "frequency": "Monthly",  # noqa: E731
+                              "payStatus": "In Payment", "active": True, "propertyIds": ["pA"],
+                              "subCategoryIds": ["sIns"], "endDate": "2027-06-30"}, **kw)
+    dbl = lambda ps, cs=None: [d["propertyId"] for d in insurance_doubles(pg, ps, cs, ["sIns"], T)[0]]  # noqa: E731
+    check("two in-date policies on one house are a double",
+          dbl([pol(), pol(id="r2", renewalDate="2027-10-04")]) == ["pA"])
+    check("a renewal filed early (a year apart) is not a double",
+          dbl([pol(renewalDate="2026-10-27"), pol(id="r2", renewalDate="2027-10-26")]) == [])
+    check("a row marked Expired is not a second policy",
+          dbl([pol(), pol(id="r2", renewalDate="2027-10-04", status="Expired")]) == [])
+    check("two apartments' own rows are not a double",
+          dbl([pol(unitIds=["u1"]), pol(id="r2", unitIds=["u2"], renewalDate="2027-10-04")]) == [])
+    check("one block cost on two houses is one policy on each",
+          dbl([], [cost(propertyIds=["pA", "pB"])]) == [])
+    check("a block cost plus the house's old policy still live is a double on that house only",
+          dbl([], [cost(propertyIds=["pA", "pB"]), cost(id="k2", name="Old - pA")]) == ["pA"])
+    check("an Inactive cost is not live",
+          dbl([], [cost(), cost(id="k2", active=False)]) == [])
+    check("a car insurance cost is not a landlord policy",
+          dbl([], [cost(), cost(id="k2", name="Car insurance - pA")]) == [])
+    check("a cost outside the Insurance sub-category is not an insurance cost",
+          dbl([], [cost(), cost(id="k2", subCategoryIds=["sOther"])]) == [])
+    open_t = [{"id": "t1", "description": "x " + DOUBLE_KEY % "pA", "status": "Today"}]
+    found_d = insurance_doubles(pg, [pol(), pol(id="r2", renewalDate="2027-10-04")], None, [], T)[0]
+    check("an open task carrying the house's key covers it",
+          judge_doubles(found_d, open_t, open_t, T)[2] == [])
+    closed_t = [dict(open_t[0], status="Completed", completed="2026-09-25")]
+    check("a task closed inside 14 days holds it back", len(judge_doubles(found_d, [], closed_t, T)[1]) == 1)
+    check("a task closed longer ago lets it come back",
+          len(judge_doubles(found_d, [], [dict(closed_t[0], completed="2026-09-01")], T)[2]) == 1)
+
     failed = [label for label, ok in checks if not ok]
     for label, ok in checks:
         print("%s %s" % ("ok  " if ok else "FAIL", label))
@@ -1553,6 +1945,8 @@ def main(argv):
               "parse_premium": parse_premium, "insurance_actions": _insurance_with_keys,
               "premium_rises": premium_rises, "missed_task_fields": missed_task_fields,
               "insurance_task_fields": insurance_task_fields,
+              "insurance_doubles": insurance_doubles, "judge_doubles": judge_doubles,
+              "double_task_fields": double_task_fields,
               "watch_summary": watch_summary}.get(call.get("fn"))
         if not fn:
             sys.exit("unknown function %r" % call.get("fn"))
