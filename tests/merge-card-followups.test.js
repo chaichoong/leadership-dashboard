@@ -1075,6 +1075,22 @@ print(json.dumps({"done": out["done"][0], "done2": out2["done"][0], "notes": NOT
     expect(r.merges).toEqual([]);
   });
 
+  // Safety review of PR 949 (16 Nov 2026): a waiting card whose body no longer passes as a MERGE card,
+  // but still names a head, was sent to "retest" every poll: a full dry run each time, nothing recorded.
+  it('a waiting card that is no longer a valid MERGE card is never re-tested, however often the poll runs', () => {
+    const r = drive(`
+CARDS[:] = [C(status="Approval", outcome="", approvedAt="", fields={"fld30Yw8SWYVp049g": ["recSomeoneElseAaa"]})]
+gh(812).update(headRefOid="${NEWHEAD}")
+DRY[:] = ["green", "green", "green"]
+outs = []
+for h in (0, 0.5, 1.0):
+    at(h); _, o = cmd_run(); outs.append(o["done"][0]["action"])
+print(json.dumps({"actions": outs, "dry": [m for m in MERGES if m[2] == "dry"], "real": real_merges()}))`);
+    expect(r.actions).toEqual(['skip', 'skip', 'skip']);
+    expect(r.dry).toEqual([]);
+    expect(r.real).toEqual([]);
+  });
+
   it('safety: a waiting card that reaches the merge step with the PR back at its own head merges nothing', () => {
     const r = drive(`
 CARDS[:] = [C(status="Approval", outcome="", approvedAt="")]       # Airtable holds it waiting, too

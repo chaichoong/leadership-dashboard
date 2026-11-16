@@ -434,9 +434,11 @@ def plan(card, attempts, now=None):
         return "note-edit", "an edit was asked for"
     moved = bool(live_head and card["head"] and not live_head.startswith(card["head"]))
     if outcome not in merge_card.APPROVED:
-        if moved and live_state == "OPEN":
+        if moved and live_state == "OPEN" and not merge_card.card_body_problem(card):
             # The card in his queue shows code the PR no longer has (review R11): its Approve would merge
             # nothing. The new head is tested now, on the moved clock, and the card refreshed if it can be.
+            # Only a card that is still the MERGE card fixer-merge.py raised (safety review of PR 949): a
+            # card whose body no longer passes would be re-tested every poll and never refreshed.
             return moved_rest(card, last, live_head, now) or (
                 "retest", "the PR moved while the card waits for Kevin; the robot tests the new code")
         return "skip", "waiting for Kevin"
