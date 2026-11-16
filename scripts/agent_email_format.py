@@ -233,9 +233,16 @@ KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
 # internal gate line "SPEND: up to £1,188 … taken from the rent" after Roy's signature. The send
 # path stripped the Carrying-this-out line and nothing else, so the only way out was to redraft a
 # card Kevin had already approved, and the email sat unsent for 28 days. A SPEND line is the
-# approval box's, exactly like CARRY_OUT_MARKER, so it is stripped in the same place and by the
-# same rule: only when it CLOSES the text (at most CARRY_OUT_TAIL_MAX characters follow it). A
-# SPEND line in the middle of a long email is the email's own words and stays.
+# approval box's, exactly like CARRY_OUT_MARKER, so it is taken off in the same place.
+#
+# ONLY THE LAST BLOCK, AND ONLY IF IT OPENS WITH THE MARKER (review round 1). The first version
+# cut at the first SPEND line with CARRY_OUT_TAIL_MAX characters or fewer after it, which in a
+# SHORT email silently dropped the real closing paragraph and the signature and sent a stub:
+# exactly the cut Kevin ruled against on 7 Oct 2026. A declaration is written as its own block
+# under the email, so that is the only thing removed: the final blank-line-separated block, and
+# only when its FIRST line is the marker. A SPEND line anywhere else, or sharing a block with
+# the email's own words, is left exactly where it is. Leaving it is the safe direction: the send
+# is refused or the agent redrafts, and nothing Kevin approved is cut short.
 #
 # NOT KEVIN ONLY. Finding 20261109-agent-dispatch-1251 asks for the same treatment of a trailing
 # KEVIN ONLY payment block, and it is deliberately NOT given it: Kevin ruled on 7 Oct 2026
@@ -248,16 +255,21 @@ INTERNAL_DECLARATION_RE = re.compile(r"^[ \t>*_#]*\**SPEND[ \t]*:", re.M)
 
 
 def strip_internal_declarations(body):
-    """Remove a trailing SPEND declaration block from a body.
+    """Remove the body's final block when that block OPENS with a SPEND declaration.
 
-    Cuts at the FIRST such marker that closes the text, so a block of several lines goes
-    whole. Anything earlier, with a real email after it, is left alone.
+    Nothing else is ever cut: a SPEND line that shares a block with the email's own words, or
+    that sits anywhere above the last block, stays where it is.
     """
-    text = body or ""
-    for m in INTERNAL_DECLARATION_RE.finditer(text):
-        if len(text[m.end():].strip()) <= CARRY_OUT_TAIL_MAX:
-            return text[:m.start()].rstrip().rstrip("*-— \t").strip()
-    return text.strip()
+    text = (body or "").rstrip()
+    blocks = re.split(r"\n[ \t]*\n", text)
+    if len(blocks) < 2:
+        return text.strip()
+    last = blocks[-1].lstrip("\n")
+    first_line = (last.splitlines() or [""])[0]
+    if not INTERNAL_DECLARATION_RE.match(first_line):
+        return text.strip()
+    kept = "\n\n".join(blocks[:-1])
+    return kept.rstrip().rstrip("*-— \t").strip()
 
 
 def clean_email_body(body):
@@ -508,8 +520,9 @@ def parse_output(output):
     # recipient. Stripped before the empty-body check, so an output that is
     # nothing BUT the marker is refused rather than sent as a blank email.
     body = strip_carry_out_line(body)
-    # The SPEND and KEVIN ONLY declarations go the same way, and AFTER the carry-out strip, so
-    # a declaration written under the closing line is reached once that line has gone.
+    # A SPEND declaration written as the body's own last block goes the same way, and AFTER the
+    # carry-out strip, so a declaration under the closing line is reached once that line has
+    # gone. A KEVIN ONLY line is NOT stripped: it is refused below, by Kevin's 7 Oct 2026 ruling.
     body = strip_internal_declarations(body)
     # WHAT IS LEFT MUST BE ONE EMAIL (7 Oct 2026, finding 20261007-agent-dispatch-780). Notes for Kevin
     # under a second separator, a notes heading or a tier-1 banner went out in sent emails. Which side

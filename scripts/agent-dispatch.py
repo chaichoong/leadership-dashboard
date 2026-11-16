@@ -2091,24 +2091,24 @@ def coverage_parse(text):
 # says "we cover Lancashire and the North West". FY8 (Lytham St Annes) IS in Lancashire, but
 # area_covers knew only districts, area letters and town names, so the check refused DD Fire
 # Alarms for a Duckworth certificate and the reply sat written-but-unsent for 34 days.
-# Only the areas this portfolio actually sits in, and only names that cannot mean anywhere
-# else: a county or region, never a town (a town is already read out of the address itself).
-POSTCODE_REGIONS = {
-    "BB": ("LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "BL": ("LANCASHIRE", "GREATER MANCHESTER", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "FY": ("LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "LA": ("LANCASHIRE", "CUMBRIA", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "PR": ("LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "WN": ("GREATER MANCHESTER", "LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "OL": ("GREATER MANCHESTER", "LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "M": ("GREATER MANCHESTER", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "SK": ("GREATER MANCHESTER", "CHESHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "L": ("MERSEYSIDE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "WA": ("CHESHIRE", "MERSEYSIDE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "CH": ("CHESHIRE", "MERSEYSIDE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "CW": ("CHESHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-    "CA": ("CUMBRIA", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
-}
+#
+# REVIEW ROUND 1 CUT THIS DOWN, and the cut is the point. The first version mapped whole
+# postcode AREAS to COUNTIES, and several areas cross a county and even a country line: SK17 is
+# Derbyshire, CH5 to CH8 is Flintshire in Wales, OL14 is West Yorkshire, and LA2 and LA6 reach
+# into North Yorkshire. A contractor who covers "Cheshire" would then have passed for a property
+# outside their area, which is worse than the wall this fixes. Kevin's rule is double and treble
+# check, so the lookup must never widen anyone's area.
+#
+# What is left is the smallest thing that clears the wall: ONE name, "the North West", for only
+# the postcode areas that lie WHOLLY inside North West England. No county name is mapped at all,
+# and the four areas that cross a boundary (CH, LA, OL, SK) are not mapped at all. Anything not
+# listed falls through to the district, area-letter and town checks below, and is REFUSED unless
+# one of those matches. That is the safe direction: a refusal costs one reply, a wrong pass
+# writes to a tradesperson about a house they do not cover.
+POSTCODE_REGION_NAMES = ("NORTH WEST", "NORTHWEST", "NORTH-WEST", "THE NORTH WEST",
+                         "NORTH WEST ENGLAND", "NORTH WEST OF ENGLAND")
+POSTCODE_REGION_AREAS = ("BB", "BL", "CA", "CW", "FY", "L", "M", "PR", "WA", "WN")
+POSTCODE_REGIONS = {area: POSTCODE_REGION_NAMES for area in POSTCODE_REGION_AREAS}
 
 
 def area_covers(areas, address):
@@ -7002,22 +7002,36 @@ def quote_names_date(quote, new_due):
 DUE_CARD_PAST_DAYS = 30      # a correction, never a rewrite of history
 
 
-def card_names_exact_date(text, day):
-    """True when `text` names `day` as a full date: 2026-11-05, 5/11, 5/11/26, 5 Nov 2026,
-    5 November 2026 or November 5 2026. A bare month is never enough on a card."""
+# A date written straight after "from" is the date being moved AWAY from, never the new one.
+# Review round 1: "Move recX from 2 November to 2026-11-16" named both dates, so the card would
+# equally have authorised a move back to 2 November.
+_FROM_BEFORE_RE = re.compile(r"\bfrom\b[\s\S]{0,14}$", re.I)
+
+
+def _date_spans(text, day):
+    """Every (start, end) in `text` that writes `day` as a FULL date: 2026-11-05, 5/11, 5/11/26,
+    5 Nov 2026, 5 November 2026 or November 5 2026. A bare month is never one."""
     text = str(text or "")
-    if day.isoformat() in text:
-        return True
-    for d, m in re.findall(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b", text):
-        if (int(d), int(m)) == (day.day, day.month):
-            return True
+    spans = []
+    for m in re.finditer(re.escape(day.isoformat()), text):
+        spans.append(m.span())
+    for m in re.finditer(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b", text):
+        if (int(m.group(1)), int(m.group(2))) == (day.day, day.month):
+            spans.append(m.span())
     for m in _MONTH_WORD.finditer(text):
         if _MONTH_NUM[m.group(1).lower()] != day.month:
             continue
-        around = text[max(0, m.start() - 12):m.end() + 12]
-        if re.search(r"\b%d(?:st|nd|rd|th)?\b" % day.day, around):
-            return True
-    return False
+        lo, hi = max(0, m.start() - 12), min(len(text), m.end() + 12)
+        d = re.search(r"\b%d(?:st|nd|rd|th)?\b" % day.day, text[lo:hi])
+        if d:
+            spans.append((min(m.start(), lo + d.start()), max(m.end(), lo + d.end())))
+    return spans
+
+
+def card_names_exact_date(text, day):
+    """True when `text` names `day` as a full date that is NOT the one being moved away from."""
+    text = str(text or "")
+    return any(not _FROM_BEFORE_RE.search(text[:s]) for s, _ in _date_spans(text, day))
 
 
 def due_card_problem(card, target_task, new_due):
@@ -7037,9 +7051,18 @@ def due_card_problem(card, target_task, new_due):
     if target_task not in out:
         return (f"the card {(card or {}).get('id')} does not name {target_task}: a card moves only "
                 "the tasks its own approved words name")
-    if not card_names_exact_date(out, new_due):
-        return (f"the card {(card or {}).get('id')} does not name {new_due.isoformat()}: quote the "
-                "exact date on the card, not the month")
+    # THE TASK AND THE DATE MUST BELONG TOGETHER (review round 1). The first version asked only
+    # that the id appeared somewhere on the card and the date appeared somewhere on the card.
+    # These cards rule on a dozen tasks at once, so that let ANY task the card names move to ANY
+    # date the card names. Kevin's ruling is per task, so the evidence is read per task: one LINE
+    # of his approved card must carry this task's id and this date, and a date written after
+    # "from" on that line is the date being moved away from, not the new one.
+    if not any(target_task in line and card_names_exact_date(line, new_due)
+               for line in out.splitlines()):
+        return (f"the card {(card or {}).get('id')} does not put {target_task} and "
+                f"{new_due.isoformat()} on the same line: a card that names several tasks moves "
+                "each one only to the date written beside it, and a date after 'from' is the one "
+                "being moved away from")
     return ""
 
 

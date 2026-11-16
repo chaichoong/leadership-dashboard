@@ -691,7 +691,13 @@ function buildRawEmail({ to, subject, text, cc, from, attachment }) {
 // or null. The real file guards (allowlisted directory, extension, size on
 // disk) live in scripts/send-email.py, the only caller — this is the
 // worker-side floor so a direct call cannot send arbitrary content shapes.
-const ATTACH_MIME_ALLOWED = ['application/pdf', 'image/png', 'image/jpeg'];
+// .docx added 16 Nov 2026 (finding 20261014-agent-dispatch-862, review round 1). Widening the
+// extension list in send-email.py alone would have refused the approved Word form here instead,
+// one step later: an allowlist with two floors has to be raised on both. Kept identical to
+// ATTACH_MIME in scripts/send-email.py (tests/queue-fixer-2026-11-16.test.js checks they agree).
+// NOTE: a worker change is live only after `npx --yes wrangler deploy` from workers/drive-upload.
+const ATTACH_MIME_ALLOWED = ['application/pdf', 'image/png', 'image/jpeg',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
 const ATTACH_B64_MAX = 7 * 1024 * 1024; // ~5MB file, base64-encoded
 function attachmentProblem(a) {
     if (!a || typeof a !== 'object') return 'attachment must be an object';

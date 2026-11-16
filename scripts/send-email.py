@@ -565,27 +565,55 @@ def cmd_preview(args):
 ATTACH_DIR = os.path.realpath(os.path.expanduser(
     os.environ.get("SEND_EMAIL_ATTACH_DIR")
     or "~/knowledge-os/attachments"))
-# THE AGENT'S OWN RUN FOLDER IS A SECOND ROOT (16 Nov 2026, findings
+# THIS TASK'S OWN RUN FOLDER IS A SECOND ROOT (16 Nov 2026, findings
 # 20261030-agent-dispatch-1143 and 20261113-agent-dispatch-1301). Two approved emails could not
 # be sent for 17 and 4 days because their ATTACH header named the file where the agent had
 # written it, under the dispatcher's run folders, and the only way out was to redraft and
-# re-approve a card Kevin had already read — changing his approved text to move a file. The
-# injection this guard exists to stop ("ATTACH: ~/.config/od/...") is refused exactly as before:
-# both roots are folders agents write their own working files into, and nothing else is allowed.
-# The run scratch IS cleaned between the draft and the carry-out, so a file that has gone is
-# still refused below by the isfile check, with the message that says to use ATTACH_DIR.
+# re-approve a card Kevin had already read — changing his approved text to move a file.
+#
+# NARROWED IN REVIEW ROUND 1, and the narrowing is the point. The first version allowed the
+# WHOLE dispatcher state folder, which also holds the inbound-triage, Roy and sign-in run
+# folders and the ledgers: an injected ATTACH header could then have mailed out any PDF, image
+# or Word file sitting in another lane's working folder. Now the file must sit under the run
+# folder belonging to THE TASK BEING SENT (…/agent-dispatch/<run>/<task id>/…), so an ATTACH
+# header can only ever reach a file this task's own agent wrote. Everything else — the private
+# config folder above all — is refused exactly as before.
+#
+# This does NOT replace writing attachments to ATTACH_DIR at draft time, and must not be read as
+# doing so: the run scratch is still cleaned between the draft and the carry-out, so a file that
+# has gone is still refused by the isfile check below, which says to use the attachments
+# directory. This only stops an approved card being redrafted to move a file that is still there.
 ATTACH_RUN_ROOT = os.path.realpath(os.path.expanduser(
     os.environ.get("AGENT_DISPATCH_DIR") or "~/knowledge-os/logs/agent-dispatch"))
+TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 
-def attach_roots():
+def attach_roots(task_id=None):
     """The directories an ATTACH file may be read from, read LIVE.
 
     A function, not a constant: the selftest below reassigns ATTACH_DIR to a temp directory to
     exercise the real guards, and a tuple frozen at import would have kept pointing at the real
-    attachments folder and refused every one of its own cases.
+    attachments folder and refused every one of its own cases. Without a real task id the run
+    folder is not offered at all, so nothing can widen the guard by passing a blank.
     """
-    return (ATTACH_DIR, ATTACH_RUN_ROOT)
+    roots = [ATTACH_DIR]
+    if task_id and TASK_ID_RE.match(str(task_id)):
+        roots.append(os.path.join(ATTACH_RUN_ROOT, str(task_id)))
+    return tuple(roots)
+
+
+def under_attach_root(real, task_id=None):
+    """True when `real` may be read: directly under the attachments directory, or inside THIS
+    task's own folder within a dispatcher run folder (…/agent-dispatch/<run>/<task id>/…)."""
+    if real.startswith(ATTACH_DIR + os.sep):
+        return True
+    if not (task_id and TASK_ID_RE.match(str(task_id))):
+        return False
+    if not real.startswith(ATTACH_RUN_ROOT + os.sep):
+        return False
+    # The task id must be one of the path's own directory names, never part of a file name.
+    rest = real[len(ATTACH_RUN_ROOT) + 1:]
+    return str(task_id) in os.path.dirname(rest).split(os.sep)
 # .docx added 16 Nov 2026 (finding 20261014-agent-dispatch-862): an approved email to Roy
 # attached a police form as a fillable Word file, the gate allowed only PDF and images, and
 # sending it as a PDF would have changed what Kevin approved and taken the fillable form away.
@@ -623,11 +651,13 @@ def load_attachment(attach, task_id):
     """Path from the approved ATTACH header → worker payload dict, or refuse."""
     import base64
     real = os.path.realpath(os.path.expanduser(attach))
-    if not any(real.startswith(root + os.sep) for root in attach_roots()):
+    if not under_attach_root(real, task_id):
         sys.exit(f"REFUSED: task {task_id} ATTACH is outside the attachments "
-                 f"directory ({ATTACH_DIR}) and the dispatcher's run folders "
-                 f"({ATTACH_RUN_ROOT}). Files are only ever sent from there — "
-                 "put the file in the attachments directory and reference that path.")
+                 f"directory ({ATTACH_DIR}) and outside this task's own run folder "
+                 f"({os.path.join(ATTACH_RUN_ROOT, str(task_id))}). Files are only ever "
+                 "sent from there — write the file to the attachments directory at draft "
+                 "time and reference that path, because run folders are cleaned between "
+                 "the draft and the carry-out.")
     name = os.path.basename(real)
     ext = os.path.splitext(name)[1].lower()
     if name.startswith(".") or ext not in ATTACH_EXTENSIONS:

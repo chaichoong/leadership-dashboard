@@ -12,6 +12,7 @@
 //  instead: Kevin ruled on 7 Oct 2026 that what is his is refused, never cut.)
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -73,23 +74,34 @@ print(json.dumps({"covers": ad.area_covers(json.loads(sys.argv[1]), sys.argv[2])
 `, JSON.stringify(areas), address).covers;
   }
 
-  it('a contractor covering Lancashire covers an FY8 address', () => {
-    // The wall: "DD Fire Alarms covers Lancashire / North West" against an FY8 property, which
-    // IS in Lancashire. The reply and quote email sat written-but-unsent for 34 days.
+  it('a contractor covering the North West covers an FY8 address', () => {
+    // The wall: a fire-alarm firm "covers Lancashire / North West" against an FY8 property.
+    // The reply and quote email sat written-but-unsent for 34 days.
     expect(covers(['LANCASHIRE', 'NORTH WEST'], '12 Example Parade, Example Town FY8 1AA')).toBe(true);
-  });
-
-  it('a contractor covering only the North West covers a PR and an M address', () => {
     expect(covers(['NORTH WEST'], '3 Example Row, Example Town PR4 2BB')).toBe(true);
     expect(covers(['NORTH WEST'], '7 Example Street, Example City M14 5CC')).toBe(true);
   });
 
-  it('a contractor covering Lancashire does NOT cover a Kent address', () => {
-    expect(covers(['LANCASHIRE'], '9 Example Lane, Example Village ME13 7DD')).toBe(false);
+  it('a contractor covering the North West does NOT cover a Kent address', () => {
+    expect(covers(['NORTH WEST'], '9 Example Lane, Example Village ME13 7DD')).toBe(false);
   });
 
-  it('a contractor covering Cheshire does NOT cover an FY address', () => {
+  it('no COUNTY name is mapped at all: a county can be read two ways, a region cannot', () => {
+    // Review round 1: the first version mapped whole areas to counties, and several areas cross
+    // a county line, so "Cheshire" would have passed for a property outside the contractor's
+    // area. No county name is mapped now, so each of these falls through and refuses.
+    expect(covers(['LANCASHIRE'], '12 Example Parade, Example Town FY8 1AA')).toBe(false);
     expect(covers(['CHESHIRE'], '12 Example Parade, Example Town FY8 1AA')).toBe(false);
+    expect(covers(['GREATER MANCHESTER'], '7 Example Street, Example City M14 5CC')).toBe(false);
+  });
+
+  it('the four postcode areas that cross a boundary are not mapped: CH, LA, OL, SK', () => {
+    // CH5-CH8 is Flintshire in Wales, LA2 and LA6 reach into North Yorkshire, OL14 is West
+    // Yorkshire, SK17 is Derbyshire. A refusal costs one reply; a wrong pass writes to a
+    // tradesperson about a house they do not cover.
+    for (const pc of ['CH7 1AA', 'LA6 2BB', 'OL14 5CC', 'SK17 9DD']) {
+      expect(covers(['NORTH WEST'], `1 Example Street, Example Town ${pc}`)).toBe(false);
+    }
   });
 });
 
@@ -97,6 +109,9 @@ describe('the send gate and the files an approved email names (findings 862, 114
   // The run root is read from AGENT_DISPATCH_DIR, the same variable the dispatcher itself uses,
   // so the test names the folder rather than trusting whatever this machine happens to have.
   const RUN_DIR = resolve(ROOT, 'tests');
+  const TASK = 'recExampleTask777';
+  const OTHER = 'recExampleOther99';
+
   function gate() {
     const src = `
 import json, os, sys, importlib.util
@@ -104,18 +119,34 @@ sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
 spec = importlib.util.spec_from_file_location("send_email", os.path.join(${JSON.stringify(SCRIPTS)}, "send-email.py"))
 se = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(se)
-print(json.dumps({
+run = se.ATTACH_RUN_ROOT
+task, other = sys.argv[1], sys.argv[2]
+out = {
     "exts": sorted(se.ATTACH_EXTENSIONS),
     "mimeKeys": sorted(se.ATTACH_MIME),
-    "roots": sorted(se.attach_roots()),
-    "runRoot": se.ATTACH_RUN_ROOT,
-}))
-# The roots are read LIVE, so the selftest's own temp directory is honoured: a tuple frozen at
-# import refused every case of send-email.py's selftest (caught by the full suite, 16 Nov 2026).
+    "mimeValues": sorted(set(se.ATTACH_MIME.values())),   # .jpg and .jpeg share one
+    "runRoot": run,
+    # the file this task's own agent wrote, in its own run folder
+    "ownRunFile": se.under_attach_root(os.path.join(run, "20261113-1346", task, "doc.pdf"), task),
+    # another lane's run folder, and the dispatcher's own ledgers: never readable
+    "otherTaskFile": se.under_attach_root(os.path.join(run, "20261113-1346", other, "doc.pdf"), task),
+    "ledgerFile": se.under_attach_root(os.path.join(run, "ledger", "doc.pdf"), task),
+    "runRootFile": se.under_attach_root(os.path.join(run, "doc.pdf"), task),
+    # the task id as part of a FILE name, not a directory, proves nothing
+    "taskNamedFile": se.under_attach_root(os.path.join(run, "20261113-1346", task + ".pdf"), task),
+    # no task id, or one that is not a record id, never opens the run root
+    "noTaskId": se.under_attach_root(os.path.join(run, "20261113-1346", task, "doc.pdf"), ""),
+    "badTaskId": se.under_attach_root(os.path.join(run, "20261113-1346", "..", "doc.pdf"), "selftest"),
+    "privateConfig": se.under_attach_root(os.path.expanduser("~/.config/od/secret.pdf"), task),
+    "insideAttachDir": se.under_attach_root(os.path.join(se.ATTACH_DIR, "pages.pdf"), task),
+}
+# The roots are read LIVE, so send-email.py's own selftest, which reassigns ATTACH_DIR to a temp
+# directory, is honoured: a tuple frozen at import refused every one of its cases (16 Nov 2026).
 se.ATTACH_DIR = "/tmp/example-moved-attachments"
-assert "/tmp/example-moved-attachments" in se.attach_roots(), "attach_roots() must re-read ATTACH_DIR"
+out["liveRoots"] = "/tmp/example-moved-attachments" in se.attach_roots(task)
+print(json.dumps(out))
 `;
-    return JSON.parse(execFileSync('python3', ['-c', src], {
+    return JSON.parse(execFileSync('python3', ['-c', src, TASK, OTHER], {
       encoding: 'utf8',
       env: { ...process.env, AGENT_DISPATCH_DIR: RUN_DIR },
     }).trim());
@@ -132,20 +163,44 @@ assert "/tmp/example-moved-attachments" in se.attach_roots(), "attach_roots() mu
     expect(g.mimeKeys).toEqual(g.exts);
   });
 
-  it('the dispatcher run folder is a second permitted root', () => {
-    // Two approved emails could not be sent because their ATTACH header named the file where
-    // the agent wrote it, and the only way out was to redraft a card Kevin had already read.
+  it('the WORKER floor allows exactly the same MIME types: an allowlist has two floors', () => {
+    // Review round 1: widening send-email.py alone would have refused the approved .docx one
+    // step later, at workers/drive-upload, with the email still unsent.
+    const worker = readFileSync(resolve(ROOT, 'workers/drive-upload/worker.js'), 'utf8');
+    const m = worker.match(/const ATTACH_MIME_ALLOWED = \[([\s\S]*?)\];/);
+    expect(m).toBeTruthy();
+    const allowed = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+    expect(allowed).toEqual(gate().mimeValues);
+  });
+
+  it("only THIS task's own run folder is readable, never another lane's and never the ledgers", () => {
+    // Review round 1: the first version allowed the whole dispatcher state folder, which also
+    // holds the inbound-triage, Roy and sign-in run folders and the ledgers, so an injected
+    // ATTACH header could have mailed out any file sitting in any of them.
     const g = gate();
     expect(g.runRoot).toBe(RUN_DIR);
-    expect(g.roots).toContain(RUN_DIR);
-    expect(g.roots.length).toBe(2);
+    expect(g.ownRunFile).toBe(true);
+    expect(g.insideAttachDir).toBe(true);
+    for (const k of ['otherTaskFile', 'ledgerFile', 'runRootFile', 'taskNamedFile',
+      'noTaskId', 'badTaskId', 'privateConfig']) {
+      expect(`${k}=${g[k]}`).toBe(`${k}=false`);
+    }
+  });
+
+  it('the roots are read live, so send-email.py\'s own selftest still passes', () => {
+    expect(gate().liveRoots).toBe(true);
+  });
+
+  it('send-email.py passes its own selftest', () => {
+    const out = execFileSync('python3', [resolve(SCRIPTS, 'send-email.py'), 'selftest'], { encoding: 'utf8' });
+    expect(out).toMatch(/selftest OK/);
   });
 });
 
 describe('his words live on the card, not on the task they move (findings 915 and 1246)', () => {
   // The card is a real Tasks record shape: fields keyed by field id, plus createdTime.
   const CARD = 'recExampleCard01';
-  const TARGET = 'recExampleTask77';
+  const TARGET = 'recExampleTask777';
 
   function check(cardOverrides, target, date, fieldOverrides, todayStr) {
     return py(`${LOAD_DISPATCH}
@@ -195,12 +250,33 @@ print(json.dumps({
 
   it('a card that names another task moves nothing', () => {
     const r = check(card('Move recExampleOther99 to 2026-11-16.'), TARGET, '2026-11-16', OPEN, '2026-11-10');
-    expect(r.card).toMatch(/does not name recExampleTask77/);
+    expect(r.card).toMatch(/does not name recExampleTask777/);
+  });
+
+  it('on a multi-task card, a task moves only to the date written BESIDE it', () => {
+    // Review round 1: the first version asked only that the id appeared somewhere and the date
+    // appeared somewhere, so on a card ruling on a dozen tasks any task could take any date.
+    const multi = card([
+      `Move recExampleOther99 from 1 November to 2026-11-16.`,
+      `Move ${TARGET} from 2 November to 2026-12-01.`,
+      `Close recExampleThird55 on 2026-11-20.`,
+    ].join('\n'));
+    expect(check(multi, TARGET, '2026-12-01', OPEN, '2026-11-10').card).toBe('');
+    // 16 Nov and 20 Nov belong to the other two tasks, not to this one.
+    expect(check(multi, TARGET, '2026-11-16', OPEN, '2026-11-10').card).toMatch(/same line/);
+    expect(check(multi, TARGET, '2026-11-20', OPEN, '2026-11-10').card).toMatch(/same line/);
+  });
+
+  it('the date it is moving FROM is not a date it may move TO', () => {
+    // "Move X from 2 November to 2026-11-16" names two dates. Only one is Kevin's ruling.
+    const c = card(`Move ${TARGET} from 2 November 2026 to 2026-11-16.`);
+    expect(check(c, TARGET, '2026-11-16', OPEN, '2026-11-10').card).toBe('');
+    expect(check(c, TARGET, '2026-11-02', OPEN, '2026-11-10').card).toMatch(/same line/);
   });
 
   it('a card that names only the month moves nothing: the exact date is required', () => {
     const r = check(card(`Move ${TARGET} some time in November.`), TARGET, '2026-11-16', OPEN, '2026-11-10');
-    expect(r.card).toMatch(/does not name 2026-11-16/);
+    expect(r.card).toMatch(/same line/);
   });
 
   it('a card with no approval marks moves nothing, however it reads', () => {
@@ -261,6 +337,25 @@ except EmailFormatError as e:
     const r = parse(`${HEAD}${BODY}\n\n**Carrying this out will involve:** sending this email.\n\nSPEND: £40.00 for the parts.`);
     expect(r.ok).toBe(true);
     expect(r.mail.body).toBe(BODY);
+  });
+
+  it('a SPEND line in the MIDDLE of a short email never cuts the paragraph after it', () => {
+    // Review round 1: the first version cut at the first SPEND line with 400 characters or
+    // fewer after it, so in a short email it dropped the real closing paragraph and the
+    // signature and sent a stub. That is the cut Kevin ruled against on 7 Oct 2026.
+    const body = 'Hello,\n\nSPEND: £40.00 for the parts.\n\nPlease confirm the start date in writing.\n\nRoy, Example Lets';
+    const r = parse(HEAD + body);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body).toBe(body);
+    expect(r.mail.body).toMatch(/Please confirm the start date/);
+    expect(r.mail.body).toMatch(/Roy, Example Lets$/);
+  });
+
+  it('a SPEND line sharing a block with the email\'s own words is left alone', () => {
+    const body = 'Hello,\n\nPlease go ahead.\n\nRoy, Example Lets\nSPEND: £40.00 for the parts.';
+    const r = parse(HEAD + body);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body).toMatch(/Roy, Example Lets/);
   });
 
   it('a KEVIN ONLY line with a whole email after it is still REFUSED, never cut', () => {
