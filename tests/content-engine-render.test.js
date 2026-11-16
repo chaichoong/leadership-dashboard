@@ -87,7 +87,7 @@ print(json.dumps(render.summary_rival(${JSON.stringify(key)}, ${day}, ${JSON.str
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")');
     expect(src).toContain('def intro_window(segments, duration=None)');   // replaced intro_insert_seconds: the gap, not the caption end (10 Sep 2026)
-    expect(src).toContain('insert_intro(captioned, at, paths["full"])');
+    expect(src).toContain('insert_intro(captioned, at, paths["full"], intro)');   // the measured local jingle (PR 957 review)
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned');
     expect(src).toMatch(/keep on \(\?:watching\|listening\)/);
   });

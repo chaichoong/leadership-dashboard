@@ -1261,9 +1261,10 @@ def run(dry_run=False, limit=3):
                 if unposted: note_refusal(entry, "session text is in its copy", save)
                 continue
             # The last stop before anything is posted: a record holding another episode's files publishes nothing
-            # (16 Nov 2026, crossed records; the same check refuses the card in approval.output_gate).
+            # (16 Nov 2026, crossed records; the same check refuses the card in approval.output_gate). The day's
+            # Learnings and Short records are read too: their clips go to the socials and the Short (PR 953 review, F4).
             import qa
-            crossed = qa.crossed_record(day, full["fields"], ledger)
+            crossed = qa.crossed_records(day, recs, ledger)
             if crossed:
                 print("episode %d: NOT published: the record holds another episode's files: %s" % (day, "; ".join(crossed)), file=sys.stderr)
                 if unposted: note_refusal(entry, "its record holds another episode's files", save)

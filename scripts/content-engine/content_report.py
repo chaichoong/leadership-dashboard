@@ -98,9 +98,30 @@ def teaser_only_days(ledger, out, gaps, carded):
 NOT_RENDERED = "not rendered yet"
 
 
-def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_only, no_card, failed):
+CARD_DUE_HOURS = 24      # the night that renders an episode writes its copy and raises its card in the same run
+
+
+def no_card_words(rendered, now=None):
+    """Why a rendered episode has no card. 'Not raised yet' only while its render is recent: the night that renders it
+    raises its card. Past that, saying 'not raised yet' sounds like a card is on its way when nothing is moving (review
+    of PR 953, F1: 2156 and 2186 rendered on 4 and 15 Nov, and their records hold no video, so approval.pending never
+    picks them up). This report reads no Airtable record, so it says where to look, not what is missing."""
+    try:
+        t = dt.datetime.fromisoformat(str(rendered).replace("Z", "+00:00"))
+        t = t if t.tzinfo else t.astimezone()
+    except ValueError:
+        return "rendered, its card is not raised yet"
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if (now - t).total_seconds() < CARD_DUE_HOURS * 3600: return "rendered, its card is not raised yet"
+    days = max(1, (now.astimezone(LONDON).date() - t.astimezone(LONDON).date()).days)
+    return ("rendered on %s and still no card after %d day(s): the card step raises one on its next run once the "
+            "episode's own record holds the video, the thumbnail and the YouTube copy, so its record is the place to look "
+            "(NOT CHECKED here: this report reads no record)" % (t.astimezone(LONDON).strftime("%-d %b"), days))
+
+
+def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_only, no_card, failed, no_card_at=None, now=None):
     """In plain words, why a day is not going out. Every state a day can sit in is named: a reason that falls through
-    to a wrong one is how 2062 hid for three days."""
+    to a wrong one is how 2062 hid for three days. `no_card_at` maps a rendered day with no card to when it rendered."""
     sb = {s["day"]: s for s in sent_back}
     if day in sb:
         s = sb[day]; what = "rejected" if s.get("rejected") else "sent back"
@@ -110,7 +131,7 @@ def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_o
     if day in qa_blocked: return "it failed its output check"
     if day in qa_waiting: return "its card waits for the files to be readable"
     if day in teaser_only: return "the engine has found only its teaser, no full episode"
-    if day in no_card: return "rendered, its card is not raised yet"
+    if day in no_card: return no_card_words((no_card_at or {}).get(day), now)
     if day in failed: return "its render failed"
     return NOT_RENDERED
 
@@ -211,13 +232,15 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     rendered_days = {v.get("episode") for v in ledger.values() if v.get("status") == "rendered" and v.get("role") == "episode" and v.get("episode")}   # the long clip, not a teaser
     carded = {int(d) for d in approvals}
     no_card = sorted(d for d in rendered_days if d not in carded and d not in on_youtube and d not in gaps)
+    no_card_at = {d: max([v.get("rendered") for v in ledger.values() if v.get("episode") == d and v.get("role") == "episode"
+                          and v.get("status") == "rendered" and v.get("rendered")] or [None]) for d in no_card}
     def why_not_out(d):
         if d in refused: return "the publisher could not publish it: " + refused[d]
         if d in dead:
             return "its YouTube post is %s, with no link yet" % ((youtube_post(episodes[str(d)]) or {}).get("status") or "not confirmed")
         return blocker_why(d, sent_back, holds, waiting_cards, {int(x) for x in blocked},
                            {int(x) for x, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
-                           teaser_only, no_card, set(failed) | set(retrying))
+                           teaser_only, no_card, set(failed) | set(retrying), no_card_at=no_card_at, now=now)
     behind = left_behind(ledger, approvals, linked | booked, cursor, gaps, ready, set(holds) | set(refused) | dead, why_not_out,
                          min([watch.start_day() or 0] + sorted(dead)), dead)
     try:
@@ -832,6 +855,11 @@ def _selftest():
     assert [s["day"] for s in gp["sentBack"]] == [1841], "a published day drops out of the sent-back list"
     assert why58({"2058": {"task": "t"}}) == {"day": 2058, "why": "its card waits for your approval"}
     assert why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "rendered, its card is not raised yet"}
+    # rendered last night: the card is coming; rendered 12 days ago with none: say where to look (PR 953 review, F1)
+    assert why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered", "rendered": "2026-09-16T02:10:00+01:00"}, "y": {"episode": 2059}})["why"] \
+        == "rendered, its card is not raised yet"
+    stale = why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered", "rendered": "2026-09-04T02:10:00+01:00"}, "y": {"episode": 2059}})["why"]
+    assert stale.startswith("rendered on 4 Sep and still no card after 12 day(s): the card step raises one"), stale
     assert why58({"2058": {"qa_waiting": {"at": "x"}}}) == {"day": 2058, "why": "its card waits for the files to be readable"}
     assert why58({"2058": {"qa_blocked": {"failures": ["no Learnings clip"]}}}) == {"day": 2058, "why": "it failed its output check"}
     assert why58({}, {"x": {"day": 2058, "status": "failed"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "its render failed"}

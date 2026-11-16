@@ -214,18 +214,21 @@ for seed in ({"lfmd_at_keep": {"full": 207.0, "master": 200.0}},
                  (e.get("lfmd_searched") or {}).get("finder") == render.finder_code()])
 res = out_`).res;
     const HEARD = 'so the latest word I say is rest';
-    expect(r[0]).toEqual([[200, 280.9], 'operator', { full: 207, master: 200, window: [200, 280.9], heard: HEARD }, false, null, true]);
-    expect(r[1]).toEqual([[200, 280.9], 'operator', { full: 207, master: 200, window: [200, 280.9], heard: HEARD }, false, null, true]);
+    // The fourth value is whether his time is still on the entry. This harness stops the render right after the clip is
+    // decided, which is a render that FAILED: his time stays for the retry (review of PR 948, F2), where until 16 Nov
+    // 2026 it was popped before the render began and the retry re-cut with the detector.
+    expect(r[0]).toEqual([[200, 280.9], 'operator', { full: 207, master: 200, window: [200, 280.9], heard: HEARD }, true, null, true]);
+    expect(r[1]).toEqual([[200, 280.9], 'operator', { full: 207, master: 200, window: [200, 280.9], heard: HEARD }, true, null, true]);
     expect(r[2]).toEqual([[150, 250], 'operator', null, false, null, true]);   // CONTROL: the kept window as before
     expect(r[3]).toEqual([null, 'detector', null, false, null, true]);         // the detector hears nothing; the search is recorded
     // a time past the end of the recording finds nothing and moves nothing, never a failed render
-    expect(r[4]).toEqual([null, 'detector', null, false, 900, true]);
+    expect(r[4]).toEqual([null, 'detector', null, true, 900, true]);
     // 2132: no Learnings words near his time, so the clip already found stands, and the ledger says his time found none
-    expect(r[5]).toEqual([[150, 250], 'operator', null, false, 107, true]);
+    expect(r[5]).toEqual([[150, 250], 'operator', null, true, 107, true]);
     // 2096: "about" 3 s after the line, so the clip starts on the line itself
-    expect(r[6]).toEqual([[200, 280.9], 'operator', { full: 205, master: 198, window: [200, 280.9], heard: HEARD }, false, null, true]);
+    expect(r[6]).toEqual([[200, 280.9], 'operator', { full: 205, master: 198, window: [200, 280.9], heard: HEARD }, true, null, true]);
     // M1: nothing heard near his time and no other clip: NO clip is cut at his time alone (the first PR 948 build cut one)
-    expect(r[7]).toEqual([null, 'detector', null, false, 107, true]);
+    expect(r[7]).toEqual([null, 'detector', null, true, 107, true]);
   });
 
   it('the Learnings rebuild takes his time off the sent-back card, and its receipt speaks the full episode\'s clock', () => {
