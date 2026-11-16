@@ -129,7 +129,8 @@ def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None, p
                     + ". That answer cannot be changed afterwards, so send the card back if any of these is in the episode.")     # the output gate's checks (qa.py, 10 Sep 2026): proof, not a promise
     # The output gate's own words when it found no Learnings line: what it searched, and where the talk ends (qa.py
     # no_learnings_check, review of PR 948). One line at the top, so the card goes to Kevin as normal and says so.
-    looked = next((p[len("- Learnings section: "):] for p in (proof_lines or []) if p.startswith("- Learnings section: NO LEARNINGS LINE FOUND")), "")
+    # "NO LEARNINGS LINE FOUND" (nothing heard) and "NO LEARNINGS CLIP CUT" (heard, but no clip after the automatic retry)
+    looked = next((p[len("- Learnings section: "):] for p in (proof_lines or []) if p.startswith("- Learnings section: NO LEARNINGS ")), "")
     no_lfmd = [] if f.get("Reframed Video URL") else [
         ("CHECK BEFORE YOU APPROVE: %s. If you said it, send the card back with the time it starts." % looked.rstrip(".")) if looked else
         "CHECK BEFORE YOU APPROVE: this episode has NO Learnings from my diary clip (no diary section was found in the transcript). If you said it, send the card back."]

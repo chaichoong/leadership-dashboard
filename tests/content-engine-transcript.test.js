@@ -126,7 +126,6 @@ const EP_SILENT = 'Welcome back. Today I talk about why rest days matter for eve
 const TEASER = 'In this episode you will hear why rest days matter and how I plan them around the running streak every single week.';
 const PLAIN = Array(30).fill('just some words here now');
 const SAID_CAPTIONS = ['So the latest in my', 'diary is that you should', 'rest more than you think', ...PLAIN];
-const LEARNINGS = ['Learnings clip (captions)', 'Learnings clip (clean, for Shorts)', 'Learnings caption file'];
 
 describe('the day folder keeps the episode transcript, whatever renders after it', () => {
   it('BACK-TEST: the teaser renders after the episode and does not replace its transcript', () => {
@@ -180,32 +179,37 @@ res = gate(led)`);
     expect(r.res.passed.find(([n]) => n === 'Learnings section')[1]).toMatch(/^NO LEARNINGS LINE FOUND/);
   });
 
-  it('BACK-TEST: the episode said the diary line and no clip was cut, so the card is refused (the teaser used to hide it)', () => {
+  it('BACK-TEST: the episode said the diary line and no clip was cut, so the card waits for the automatic retry (the teaser used to hide it)', () => {
     const r = py(`
 led, folder, uploads = two_clip_day(${J(EP_SAID)}, ${J(PLAIN)}, ${J(TEASER)})
+render.REDO_LFMD_FILE = os.path.join(tempfile.mkdtemp(), "redo_lfmd")
 res = dict(gate(led), window=led[EP_KEY].get("lfmd_window"))`);
     expect(r.res.window).toBe(null);
     expect(r.res.ok).toBe(false);
-    expect(r.res.failures.map(([n]) => n)).toEqual(LEARNINGS);
-    expect(r.res.failures[0][1]).toContain('diary phrase found in the transcript');
+    // 16 Nov 2026: held for one automatic Learnings rebuild, not refused until a person rebuilds it
+    expect(r.res.failures.map(([n]) => n)).toEqual(['Learnings re-search']);
+    expect(r.res.failures[0][1]).toContain("the episode's transcript has the diary line");
   });
 
   it('BACK-TEST: a day stored before the fix (the file holds the teaser) is read from the episode captions', () => {
     const r = py(`
 led, folder, uploads = two_clip_day(${J(EP_SAID)}, ${J(SAID_CAPTIONS)}, ${J(TEASER)})
 open(os.path.join(folder, "Ep%d_transcript.txt" % DAY), "w").write(${J(TEASER)})      # the 26 stored files, as they are
+render.REDO_LFMD_FILE = os.path.join(tempfile.mkdtemp(), "redo_lfmd")
 res = gate(led)`);
     expect(r.res.ok).toBe(false);
-    expect(r.res.failures.map(([n]) => n)).toEqual(LEARNINGS);
-    expect(r.res.failures[0][1]).toContain('diary phrase found in the captions');
+    expect(r.res.failures.map(([n]) => n)).toEqual(['Learnings re-search']);
+    expect(r.res.failures[0][1]).toContain('the captions say');
   });
 
   it('BACK-TEST: a transcript the Drive folder does not show yet no longer reads as "he did not say it"', () => {
     const r = py(`
 led, folder, uploads = two_clip_day(${J(EP_SAID)}, ${J(SAID_CAPTIONS)}, ${J(TEASER)})
 os.remove(os.path.join(folder, "Ep%d_transcript.txt" % DAY))
+render.REDO_LFMD_FILE = os.path.join(tempfile.mkdtemp(), "redo_lfmd")
 res = gate(led)`);
     expect(r.res.ok).toBe(false);
-    expect(r.res.failures[0]).toEqual(['Learnings clip (captions)', '0 s; diary phrase found in the captions']);
+    expect(r.res.failures.map(([n]) => n)).toEqual(['Learnings re-search']);
+    expect(r.res.failures[0][1]).toContain('the captions say');
   });
 });

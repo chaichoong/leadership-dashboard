@@ -232,10 +232,14 @@ describe('the output gate reads the talk the way the cutter does', () => {
     expect(r.passed.find(([n]) => n === 'Learnings section')[1]).toMatch(/^NO LEARNINGS LINE FOUND/);
   });
 
-  it('BACK-TEST: the diary line with a noise note inside it, and no clip, is refused (the note used to hide it)', () => {
-    const r = py(`res = gate_for(None, 520.8, transcript="So the latest in my\\n[BLANK_AUDIO]\\ndiary is that you should rest.")`).res;
+  it('BACK-TEST: the diary line with a noise note inside it, and no clip, is held for the automatic retry (the note used to hide it)', () => {
+    // 16 Nov 2026: a line heard with no clip is no longer a refusal that waits for a person; the card waits for one
+    // automatic Learnings rebuild (qa.heard_no_clip_check), and then goes to Kevin with the line on top
+    const r = py(`render.REDO_LFMD_FILE = os.path.join(tempfile.mkdtemp(), "redo_lfmd")
+res = gate_for(None, 520.8, transcript="So the latest in my\\n[BLANK_AUDIO]\\ndiary is that you should rest.")`).res;
     expect(r.ok).toBe(false);
-    expect(r.failures[0]).toEqual(['Learnings clip (captions)', '0 s; diary phrase found in the transcript']);
+    expect(r.failures.map(([n]) => n)).toEqual(['Learnings re-search']);
+    expect(r.failures[0][1]).toContain("the episode's transcript has the diary line");
   });
 });
 
