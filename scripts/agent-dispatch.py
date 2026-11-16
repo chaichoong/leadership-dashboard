@@ -6078,6 +6078,432 @@ def sibling_problem(lead, sib, book, coverage_text=""):
     return ""
 
 
+# ─── RULES THE ROBOTS KEPT BREAKING ARE REFUSALS AT SUBMIT (Kevin, "Do it now", 16 Nov 2026) ───
+#
+# The estate review of 13 Nov 2026 sorted every lesson in the agents' files: 21 of 32 testable lessons
+# had been broken again after they were written down. A rule only code can hold is a refusal in code.
+# Each check below was back-tested read-only on the 1,862 stored Agent Outputs (16 Nov 2026) before it
+# was built, and narrowed until it refused no real, correct card in that set: a wrongly refused card
+# stops real work. Every refusal says what it found and what to write instead. Read with the call sites
+# in cmd_submit, after the bought-twice gate.
+
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
+CHECK_NEG_RE = re.compile(r"\b(?:not|never|no|nothing|none|won't|isn't|without|instead of|rather than|already)\b", re.I)
+
+
+def _approve_text(output, plain_approve):
+    """The words that say what Approve sets going: the closing line and the --plain-approve line."""
+    return carry_out_tail(output) + "\n" + str(plain_approve or "")
+
+
+def _sentences(text):
+    return [s.strip() for s in SENTENCE_SPLIT_RE.split(str(text or "")) if s.strip()]
+
+
+# 1. THE PAID CHECK (inbound-comms-response lesson of 3 Sep 2026, broken twice in the review and again on
+# 29 and 31 Oct). "Before any invoice or bill reaches Kevin, search Transactions for the payee and the
+# amount. If it is paid, close the task and name the transaction." A card that puts a bill on his Friday
+# list (a MARK FOR PAYMENT block, or a PAY: task's own card) is refused when the bank already shows an
+# outgoing payment of that amount to that payee since PAID_CHECK_DAYS_BEFORE days before the task was
+# made, and otherwise carries the agent's own `PAID CHECK:` line, because the bank is not the only
+# place a bill gets paid (a letting agent takes it from the rent). Back-test: 17 MARK FOR PAYMENT cards
+# and 3 PAY: tasks; the bank match fired on none of them at the moment they were submitted (three
+# matched later, each landing the day after Kevin approved and paid), and for 10 of the 16 cards with
+# a readable amount it found the real payment after approval, so it reads the right thing. Any window
+# from 7 to 60 days gave the same answer. A PAY: email (a question to the supplier) is not a card that
+# lists a bill and is not checked: its PAID CHECK line would go out in the email.
+PAYMENT_CARD_RE = re.compile(r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*MARK FOR PAYMENT\b", re.I | re.M)  # payment-run.py
+PAID_CHECK_RE = re.compile(r"^[ \t*_\-•]*PAID CHECK[ \t*_]*:[ \t*_]*(?P<body>\S.{8,})$", re.I | re.M)
+PAY_MONEY_RE = re.compile(r"£\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?GBP\b", re.I)
+PAYEE_STOP = {"ltd", "limited", "the", "and", "services", "service", "solutions", "group", "company", "plc",
+              "llp", "account", "name", "council", "properties", "property", "invoice", "payment", "pay", "for",
+              "from", "with", "inbound", "follow", "forwards", "labour", "gbp", "due", "trading", "direct",
+              "debit", "faster", "bill", "transfer", "card", "fees", "fee", "online", "bank", "giro", "credit"}
+PAID_CHECK_DAYS_BEFORE = 14
+
+
+def _card_line(text, label):
+    """The value after `LABEL:` on its own line, markdown emphasis stripped (payment-run.py card_field)."""
+    match = re.search(r"^[ \t*_\-•]*%s[ \t*_]*:[ \t*_]*(.+?)[ \t*_]*$" % re.escape(label), text or "", re.I | re.M)
+    return match.group(1).strip() if match else ""
+
+
+def payee_words(text):
+    return {w for w in re.findall(r"[a-z][a-z'&]{3,}", str(text or "").lower()) if w not in PAYEE_STOP}
+
+
+def payment_card(name, output, task_type):
+    """{"amount": float|None, "payee": text} for a card that lists a bill to pay, or None."""
+    head = PAYMENT_CARD_RE.search(output or "")
+    if head:
+        card, heading = output[head.start():], output[head.end():].split("\n", 1)[0]
+        money = PAY_MONEY_RE.search(_card_line(card, "AMOUNT")) or PAY_MONEY_RE.search(heading)
+        payee = _card_line(card, "PAYEE") or heading
+    elif (str(name or "").upper().startswith("PAY:") and task_type != "Correspondence"
+          and not re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I)
+          and not no_action_declared(carry_out_tail(output))):
+        money, payee = PAY_MONEY_RE.search(name), name
+    else:
+        return None
+    amount = float((money.group(1) or money.group(2)).replace(",", "")) if money else None
+    return {"amount": amount or None, "payee": payee}
+
+
+def fetch_bank_lines(since_iso):
+    """Every bank line dated after since_iso: id, date, signed amount, bank text, tenancy links."""
+    rows = query_records(TRANSACTIONS_TABLE, formula="IS_AFTER({**Date}, '" + since_iso + "')",
+                         fields=[TX_FIELDS["date"], TX_FIELDS["amount"], TX_FIELDS["name"], TX_TENANCY_FIELD])
+    return [{"id": r.get("id"), "date": str((r.get("fields") or {}).get(TX_FIELDS["date"]) or "")[:10],
+             "amount": float((r.get("fields") or {}).get(TX_FIELDS["amount"]) or 0),
+             "name": str((r.get("fields") or {}).get(TX_FIELDS["name"]) or ""),
+             "tenancyIds": links((r.get("fields") or {}).get(TX_TENANCY_FIELD))} for r in rows]
+
+
+def paid_check_problem(task_rec, output, task_type):
+    """Why a bill card must not reach Kevin as it stands, or ''."""
+    tf = (task_rec or {}).get("fields", {}) or {}
+    card = payment_card(tf.get(AF["name"], ""), output, task_type)
+    if not card:
+        return ""
+    lines = PAID_CHECK_RE.findall(output or "")
+    add_line = ("add one line to the card: PAID CHECK: none found (searched <where you looked: the bank, "
+                "Gmail, the other tasks on this payee> from <date> to <date>)")
+    if not card["amount"]:
+        if lines:
+            print(f"NOT CHECKED: the bill card on {task_rec.get('id')} has no amount code can read, so code did "
+                  "not search the bank; the agent's PAID CHECK line is all there is.", file=sys.stderr)
+            return ""
+        return ("it lists a bill to pay and code cannot read its amount, so the bank was NOT CHECKED by code. "
+                "Search Transactions and Gmail for the payee yourself; if it is paid, close the task naming the "
+                f"payment; if not, {add_line}")
+    try:
+        made = datetime.fromisoformat(str(task_rec.get("createdTime") or "").replace("Z", "+00:00")).date()
+    except ValueError:
+        made = datetime.now(LONDON).date()
+    since = (min(made, datetime.now(LONDON).date()) - timedelta(days=PAID_CHECK_DAYS_BEFORE)).isoformat()
+    try:
+        bank = fetch_bank_lines(since)
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
+        return (f"the bank lines could not be read to check whether £{card['amount']:,.2f} is already paid "
+                f"({str(exc)[:120]}): NOT CHECKED. Try again; a bill is never listed on a read that failed")
+    if not bank:
+        return (f"the bank read returned no lines at all since {since}, so whether £{card['amount']:,.2f} is "
+                "already paid is NOT CHECKED (the feed or the read is broken). Try again; if it persists, record "
+                "a TOOL wall")
+    words = payee_words(card["payee"])
+    hits = [b for b in bank if b["amount"] < 0 and abs(abs(b["amount"]) - card["amount"]) < 0.005
+            and words & payee_words(b["name"])]
+    if hits:
+        named = set(re.findall(r"rec[A-Za-z0-9]{14}", " ".join(lines)))
+        if all(h["id"] in named for h in hits) and any("not this bill" in ln.lower() for ln in lines):
+            return ""
+        shown = "; ".join(f"{h['date']} £{abs(h['amount']):,.2f} \"{h['name'][:60]}\" ({h['id']})" for h in hits[:5])
+        return (f"the bank already shows a payment that matches this bill (£{card['amount']:,.2f}, payee words "
+                f"{', '.join(sorted(words)[:4])}): {shown}. If it is this bill, it is paid: do not list it, close the "
+                "task naming the transaction. If it is a different payment, say so on the card: PAID CHECK: not "
+                "this bill: <each transaction id above> (<why it is a different payment>)")
+    if not lines:
+        return (f"it lists a bill to pay (£{card['amount']:,.2f}) with no PAID CHECK line. Code searched the bank "
+                f"from {since} and found no payment of that amount to that payee; you check the rest (Gmail, the "
+                f"letting agent's statement, other tasks on this payee), then {add_line}")
+    return ""
+
+
+# 2. NEVER RENEW, BUY FRESH THROUGH TOPCASHBACK (inbound-comms-response 30 Sep 2026, property-
+# administration 25 Sep 2026; broken three times on Property Administration cards). On a task in the
+# insurance lane (insurance, premium finance or credit in its name), a closing line or approve line that
+# renews the policy, accepts or signs the renewal, or signs its finance agreement is refused unless the
+# card carries the TopCashback comparison (`TOPCASHBACK QUOTE: <insurer> £<net>` lines) or the reason
+# there is none (`NO TOPCASHBACK QUOTE: <why>`). Back-test: 84 insurance-lane outputs, one refused, a
+# renewal Kevin approved whose card already said in words why no TopCashback quote could be reached;
+# with the line it passes. Asking an insurer to CONFIRM a renewal date is not accepting it.
+INSURANCE_LANE_RE = re.compile(r"insurance|premium\s+(?:finance|credit)|close\s+brothers", re.I)
+RENEWAL_ACCEPT_RE = re.compile(
+    r"\brenew(?:s|ing)?\s+(?:the|this|your|our|its|their)\s+(?:\w+\s+){0,2}(?:policy|policies|cover|insurance)\b"
+    r"|\b(?:accept|accepts|accepting|take|takes|taking|proceed with|proceeds with|go ahead with|goes ahead with"
+    r"|sign|signs|signing|agree to|agrees to|keep|keeps)\b[^.\n;]{0,40}\brenewal\b"
+    r"|\b(?:telling|tells|asking|asks|instructing|instructs)\s+(?!not\b)\w+(?:\s+(?!not\b)\w+)?\s+to\s+renew\b", re.I)
+FINANCE_SIGN_RE = re.compile(r"\bsigns?\b[^.\n;]{0,50}\b(?:credit|finance)\s+agreement\b", re.I)
+# Read anywhere in the output, the closing line included: on an email card any other line would be
+# sent to the insurer, and the closing line never is (the send path takes it off).
+TOPCASHBACK_LINE_RE = re.compile(r"\b(?:TOPCASHBACK QUOTE[ \t*_]*:[^\n]*£\s?\d|NO TOPCASHBACK QUOTE[ \t*_]*:"
+                                 r"[ \t*_]*\S[^\n]{9,})", re.I)
+
+
+def renewal_problem(name, output, plain_approve):
+    if not INSURANCE_LANE_RE.search(str(name or "")) or TOPCASHBACK_LINE_RE.search(output or ""):
+        return ""
+    for s in _sentences(_approve_text(output, plain_approve)):
+        hit = RENEWAL_ACCEPT_RE.search(s) or (FINANCE_SIGN_RE.search(s) if re.search(r"renew", s, re.I) else None)
+        if hit and not CHECK_NEG_RE.search(s[:hit.end()]):
+            return (f"what Approve sets going renews an insurance policy or signs its renewal (\"{s[:160]}\"). "
+                    "Kevin's rule (30 Sep 2026): never renew an existing policy; buy a new one from a fresh quote "
+                    "through TopCashback. Get the TopCashback quotes and put each on the card as TOPCASHBACK QUOTE: "
+                    "<insurer> £<net cost after cashback>, or, if none can be reached, say why: NO TOPCASHBACK QUOTE: "
+                    "<why>. On an email card write it in the closing line, which is never sent")
+    return ""
+
+
+# 3. A BOOKED VISIT TELLS THE TENANTS (inbound-comms-response 29 Oct 2026, after a tenant reported a
+# contractor arriving unannounced; the 22 Oct fire alarm test went ahead with no notice). An email on a
+# property task that books or confirms a contractor visit on a named day is refused unless the submit
+# says how the tenants are told: --tenant-notice "<visit date>: <who is told and how>", or
+# "none needed: <why>" (an empty house). Inside 24 hours the notice is a ClickSend text. A flag, not a
+# line, because a line in an email would be sent to the contractor. Back-test: 35 emails on property
+# tasks name a booking-shaped date; the narrow booking words below fire on 5, one already carrying a
+# notice, one the 22 Oct incident itself, one an empty house (passes with "none needed").
+VISIT_DAY = (r"(?:(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\.?,?\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?"
+             r"(?:\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?"
+             r"|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)")
+VISIT_BOOK_RE = re.compile(r"\b(?:please book(?: us| it| him| her| them)?(?: in)?|book us in|i confirm|we confirm"
+                           r"|(?:is|are) booked(?: in)?(?: for| to)?|booked (?:in )?for)\b[^.\n]{0,100}?" + VISIT_DAY, re.I)
+PROPERTY_TASK_RE = re.compile(r"^\s*(?:COMPLIANCE|MAINTENANCE|INSURANCE|PROPERTY)\b", re.I)
+
+
+def tenant_notice_problem(name, output, task_type, notice):
+    if not (PROPERTY_TASK_RE.search(str(name or "")) or property_match(str(name or ""))):
+        return ""
+    try:
+        mail = parse_email_output(output or "")
+    except EmailFormatError:
+        mail = None
+    body = (mail or {}).get("body") or ""
+    hit = next((s for s in _sentences(body) if VISIT_BOOK_RE.search(s) and not re.search(r"\bcancel", s, re.I)), "")
+    if not hit:
+        return ""
+    notice = " ".join(str(notice or "").split())
+    how = ("--tenant-notice \"<visit date>: <who is told and how, e.g. every tenant by text and email from "
+           "info@ on 18 Nov>\", or --tenant-notice \"none needed: <why, e.g. the house is empty>\"")
+    if not notice:
+        return (f"it books a contractor visit (\"{hit[:140]}\") and does not say how the tenants are told. Kevin's "
+                f"rule (29 Oct 2026): every tenant in the house gets a text and an email at least 24 hours before; "
+                f"inside 24 hours, a ClickSend text. Add {how}")
+    if re.match(r"none needed\s*:\s*\S.{5,}", notice, re.I):
+        return ""
+    when = None
+    for fmt_re, fmt in ((r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"), (r"\b(\d{1,2} [A-Za-z]{3})[a-z]* (\d{4})\b", None)):
+        m_ = re.search(fmt_re, notice)
+        if m_:
+            try:
+                when = (datetime.strptime(m_.group(1), fmt).date() if fmt
+                        else datetime.strptime(f"{m_.group(1)} {m_.group(2)}", "%d %b %Y").date())
+            except ValueError:
+                when = None
+            break
+    if when is None:
+        return f"its --tenant-notice names no visit date (YYYY-MM-DD or 12 Nov 2026). Write {how}"
+    if when <= datetime.now(LONDON).date() + timedelta(days=1) and not re.search(r"\btext|clicksend", notice, re.I):
+        return ("the visit is within 24 hours, so the tenants are told by a ClickSend text (Kevin, 29 Oct 2026): "
+                "say so in --tenant-notice")
+    return ""
+
+
+# 4. CHECK THE BANK AGAIN BEFORE A LATE-RENT CARD (cash-flow-voids 30 Oct 2026: a chase reached Kevin
+# for rent he had already seen arrive). A RENT LATE: card is refused when the bank lines matched to the
+# tenancy for the owed cycle (from EARLY_RENT_DAYS before its due day, net of money out) add up to the rent. It
+# cannot see money the feed has not brought in yet (the 30 Oct incident was exactly that, so a
+# send-time check is still owed in the send scripts), but it stops a card for rent that landed
+# between the morning rent check and the agent's submit. Back-test: 10 keyed RENT LATE cards, none
+# refused (nothing had landed for the owed cycle when each was submitted).
+RENT_KEY_RE = re.compile(r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):\d")
+RENT_FIELD = "fldDMyfZLFMeONPq8"               # Tenancies: monthly rent (rent-check.py TY["rent"])
+TX_TENANCY_FIELD = "fldPmAMmxwqs4SdPa"         # Transactions: Tenancy link (rent-check.py TX["tenancy"])
+EARLY_RENT_DAYS = 5                            # rent-check.py EARLY_PAY_DAYS
+RENT_SLACK = 1.00                              # rent-check.py SHORT_SLACK
+RENT_CYCLE_DAYS = 30                           # one monthly cycle, near enough (rent-check.py next_due)
+
+
+def rent_paid_problem(name, notes, description):
+    if not str(name or "").startswith("RENT LATE: "):
+        return ""
+    key = RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")
+    if not key:
+        return ""
+    tenancy, owed = key.group(1), datetime.strptime(key.group(2), "%Y-%m-%d").date()
+    try:
+        rows = query_records(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'", fields=[RENT_FIELD])
+        rent = float(((rows[0].get("fields") or {}).get(RENT_FIELD) or 0) if rows else 0)
+        bank = fetch_bank_lines((owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat())
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
+        return (f"the bank could not be read again for this tenancy ({str(exc)[:120]}): NOT CHECKED. Try again; "
+                "a late-rent card goes only on a fresh read")
+    # The owed cycle's money, as rent-check.py's cycle_money counts it: every line matched to the tenancy
+    # from EARLY_RENT_DAYS before the due day to that point before the next one (a month on, near enough),
+    # money out included, so a payment that bounced back nets to nothing.
+    hi = (owed + timedelta(days=RENT_CYCLE_DAYS - EARLY_RENT_DAYS)).isoformat()
+    cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] < hi]
+    paid = [b for b in cycle if b["amount"] > 0]
+    total = sum(b["amount"] for b in cycle)
+    if not rent:
+        print(f"NOT CHECKED: tenancy {tenancy} has no rent on its record, so the paid-again check on {name[:60]} "
+              "could not compare a total.", file=sys.stderr)
+        return ""
+    if total < rent - RENT_SLACK:
+        return ""
+    shown = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in paid[:4])
+    return (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: {shown}, "
+            f"£{total:,.2f} against rent of £{rent:,.2f}. Do not chase it (Kevin, 30 Oct 2026): file the task as "
+            "information only, naming the payment, with the closing line **Carrying this out will involve:** "
+            "Nothing. Information only")
+
+
+# 5. A COST THAT CHANGES IS WRITTEN ON THE SAME CARD (creditor-management 3 Oct 2026; BINDING "FIXED COSTS
+# STAY TRUE", 14 Oct 2026). A creditor or FIXED COST card whose closing line or approve line says the
+# cost record changes (a cost added, changed, ended, marked inactive) carries the exact RECORD NEW COST /
+# RECORD CHANGE line cost-record.py writes, or says why none is owed: NO COST CHANGE: <why>. Back-test:
+# 355 creditor and fixed-cost outputs, 24 say the cost record changes, 14 carry the line; the 10 left
+# narrowed to 6 once a TASK: line and "already in your costs" are read as no change, every one of
+# them a real cost change written before the 14 Oct rule, none since.
+COST_BOOK_RE = re.compile(r"\b(?:cost list|costs list|cost record|costs record|costs table|cost line|fixed costs?"
+                          r"|your costs)\b", re.I)
+COST_CHANGE_RE = re.compile(r"\b(?:changes?|changed|is added|are added|added|marked inactive|is closed|ends?|ended"
+                            r"|new (?:monthly |yearly )?(?:cost|line)|goes to|moves? to|updated?|rises?|drops?)\b", re.I)
+# A RECORD line stands on its own line, the shape cost-record.py writes from; the reason none is owed
+# may sit anywhere, the closing line included (on an email card any other line would be sent).
+COST_LINE_RE = re.compile(r"^[ \t*_\-•]*(?:RECORD NEW COST|RECORD CHANGE)[ \t*_]*:\s*\S|\bNO COST CHANGE[ \t*_]*:\s*\S",
+                          re.I | re.M)
+
+
+def cost_line_problem(creditor, name, output, plain_approve):
+    if not (creditor or str(name or "").upper().startswith("FIXED COST")) or COST_LINE_RE.search(output or ""):
+        return ""
+    for s in _sentences(_approve_text(output, plain_approve)):
+        if s.upper().startswith("TASK:"):
+            continue
+        if COST_BOOK_RE.search(s) and COST_CHANGE_RE.search(s) and not CHECK_NEG_RE.search(s):
+            return (f"it says the cost record changes (\"{s[:160]}\") with no line to write it. Every report reads "
+                    "the Costs table, so the change goes on the same card as the line cost-record.py writes: "
+                    "RECORD NEW COST: <name> | <amount> | <frequency> | due <day> | first <YYYY-MM-DD> | ends "
+                    "<YYYY-MM-DD> (or | no end date), or RECORD CHANGE: <cost id> <field> = <value>. If no cost "
+                    "changes after all, say why: NO COST CHANGE: <why> (on an email card, in the closing line)")
+    return ""
+
+
+# 6. BEDROOMS ARE NOT ROOMS LET (property-administration 4 Sep 2026, broken six times). An email on a
+# property task that states a bedroom count for a house is compared with that house's "No. of Bedrooms"
+# on the Properties table; a different number is refused, naming both. The count is matched to the house
+# named nearest before it (an email can quote two houses), a block is never judged (its flats differ),
+# and a figure in quotation marks or after "Unit"/"Flat" is not a statement. Back-test: 35 emails state
+# a count; one is refused ("three-bedroom shared house let as three rooms" at a house of two bedrooms,
+# the lesson's exact mistake).
+WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                "nine": 9, "ten": 10}
+BEDROOM_RE = re.compile(r"(?<!unit )(?<!flat )(?<!apartment )(?<!room )(?<!no\. )(?<!number )"
+                        r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]*(?:bed(?:room)?s?|bedroomed)\b",
+                        re.I)
+
+
+def bedroom_problem(name, output):
+    try:
+        mail = parse_email_output(output or "")
+    except EmailFormatError:
+        return ""
+    body = (mail or {}).get("body") or ""
+    if not BEDROOM_RE.search(body):
+        return ""
+    props = [p for p in fetch_properties() if str(p.get("short") or "").strip()]
+
+    def named(text):
+        out = []
+        for p in props:
+            for mm in re.finditer(r"(?<![0-9A-Za-z])" + re.escape(str(p["short"]).strip()), text, re.I):
+                out.append((mm.start(), p))
+        return [p for _, p in sorted(out, key=lambda x: x[0])]
+    in_body = {p["id"]: p for p in named(body)}
+    task_p = task_property_id(name, props)
+    for mm in BEDROOM_RE.finditer(body):
+        seg = body[body.rfind("\n", 0, mm.start()) + 1:mm.start()]
+        if seg.count('"') % 2 or seg.count("“") > seg.count("”"):
+            continue
+        before = named(body[max(0, mm.start() - 250):mm.start()])
+        house = (before[-1] if before else next(iter(in_body.values())) if len(in_body) == 1
+                 else next((p for p in props if p["id"] == task_p), None) if not in_body else None)
+        if not house or house.get("kind") == "Block" or house.get("bedrooms") in (None, ""):
+            continue
+        said = int(WORD_NUMBERS.get(mm.group(1).lower(), mm.group(1)))
+        if said != int(house["bedrooms"]):
+            return (f"its email says {said} bedroom(s) at {house['short']} (\"{body[max(0, mm.start() - 40):mm.end() + 20].strip()}\"), "
+                    f"but the Properties table says {int(house['bedrooms'])} (No. of Bedrooms). Bedrooms are not rooms "
+                    "let (Kevin, 4 Sep 2026): use the table's number, or correct the table first if it is wrong")
+    return ""
+
+
+# 7. NO LICENCE WITHOUT IN-DATE GAS AND ELECTRICAL CERTIFICATES (property-administration 24 Sep 2026).
+# A card on a licence task (selective, HMO or landlord licence in its name, not a certificate task) that
+# pays a licence fee or puts an application in now (a SPEND line over £0, a MARK FOR PAYMENT block, or
+# a closing line that pays or submits) is refused unless the book holds an in-date EICR for the house,
+# and an in-date gas safety certificate where the house has gas (required, or one ever filed). Saying
+# the fee comes "once the certificates are done" is not paying it. Back-test: 9 licence tasks, one
+# refused (a licence fee for a house with neither certificate, before the rule was written).
+LICENCE_TASK_RE = re.compile(r"selective\s+licen[cs]|hmo\s+licen[cs]|landlord\s+licen[cs]|additional\s+licen[cs]"
+                             r"|licen[cs]ing", re.I)
+CERT_TASK_RE = re.compile(r"\b(?:eicr|gsc|gas|electrical|epc|fire|cp12)\b", re.I)
+SPEND_AMOUNT_RE = re.compile(r"^\s*SPEND\s*:\s*£?\s*([0-9][0-9,]*(?:\.\d+)?)", re.I | re.M)
+LICENCE_ACT_RE = re.compile(r"\b(?:pay|pays|paying)\b[^.\n;]{0,40}\blicen[cs]e\b|\b(?:submit|submits|submitting|send"
+                            r"|sends|sending|lodge|lodges|file|files|filing|make|makes)\b[^.\n;]{0,30}\b(?:licen[cs]e\s+)?"
+                            r"application\b|\bapply\b[^.\n;]{0,20}\bfor\b[^.\n;]{0,20}\blicen[cs]e\b"
+                            r"|\bapplication\b[^.\n;]{0,20}\b(?:goes in|is submitted|is sent)\b", re.I)
+LICENCE_LATER_RE = re.compile(r"\b(?:once|after|until|when|then|later|separately|not|no|never|nothing|before)\b", re.I)
+
+
+def licence_cert_problem(name, output, plain_approve):
+    name = str(name or "")
+    if not LICENCE_TASK_RE.search(name) or CERT_TASK_RE.search(name) \
+            or re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I):
+        return ""
+    spend = SPEND_AMOUNT_RE.search(output or "")
+    acts = (spend and float(spend.group(1).replace(",", "")) > 0) or PAYMENT_CARD_RE.search(output or "")
+    if not acts:
+        for s in _sentences(_approve_text(output, plain_approve)):
+            hit = LICENCE_ACT_RE.search(s)
+            if hit and not LICENCE_LATER_RE.search(s[:hit.start()]):
+                acts = True
+                break
+    if not acts:
+        return ""
+    props = fetch_properties()
+    pid = task_property_id(name, props)
+    if not pid:
+        return ""
+    house = next(p for p in props if p["id"] == pid)
+    certs, today = fetch_certificates(), today_london()
+    gas = "GSC" in house["required"] or any(c["type"] == "GSC" and pid in c["propertyIds"] for c in certs)
+    missing = [t for t in (["EICR"] + (["GSC"] if gas else []))
+               if not any(c["type"] == t and pid in c["propertyIds"] and c["status"] != "Expired"
+                          and c["renewalDate"] and c["renewalDate"] >= today for c in certs)]
+    if not missing:
+        return ""
+    return (f"it pays a licence fee or puts a licence application in for {house['short']}, and the book holds no "
+            f"in-date {' or '.join(missing)} for it. Kevin's rule (24 Sep 2026): no licence application or fee "
+            "until the house holds an in-date gas safety certificate and EICR. Get the certificates first (and file "
+            "them), and say so on the card")
+
+
+# 8. A HOUSE ROB JACKSON'S AGENCY MANAGES IS NOT OURS TO CERTIFY (property-administration 19 Oct 2026).
+# "Rob Jackson arranges all compliance for the houses he manages. We only ask him yearly for the latest
+# gas certificate, and the EICR when due. We arrange the insurance." A quote request or a PASS TO ROY
+# booking for a certificate at such a house is refused: ask the managing agent for the copy. Narrowed
+# to the agency the ruling names: the code check proposed every house with a managing agent, and the
+# back-test found the one such purchase in the set was a Duckworth EPC quote Kevin approved (we arrange
+# Duckworth's certificates). 16 purchases back-tested, none refused.
+MANAGER_ARRANGES_COMPLIANCE = ("Roc Immo",)   # Properties "Agent/Landlord": Rob Jackson's agency
+
+
+def managed_compliance_problem(name, output, mail_subject):
+    if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX) or certificate_type(name) in ("", "INSURANCE"):
+        return ""
+    if not (re.search(r"^\s*PASS TO ROY:", output or "", re.I | re.M) or "quote" in str(mail_subject or "").lower()):
+        return ""
+    props = fetch_properties()
+    pid = task_property_id(name, props)
+    house = next((p for p in props if p["id"] == pid), None)
+    if not house or house.get("manager") not in MANAGER_ARRANGES_COMPLIANCE:
+        return ""
+    return (f"{house['short']} is managed by {house['manager']}, who arranges all its compliance (Kevin, 19 Oct "
+            "2026). Do not buy the certificate: ask the managing agent for the latest copy (the gas certificate "
+            "yearly, the EICR when due) and file it. We arrange only the insurance")
+
+
 def cmd_submit_group(args):
     """`submit`, with --siblings: a property group submitted once on its lead."""
     siblings = [i.strip() for i in (getattr(args, "siblings", None) or "").split(",") if i.strip()]
@@ -6291,7 +6717,8 @@ def cmd_submit(args):
     # THE REPORT GATE (Kevin, 7 Sep 2026): a report on an inbound item shows
     # the five questions were asked and names its trigger, or it is refused.
     # Read early so a report with nothing to decide can file itself below.
-    tf_early = (get_task(args.task).get("fields", {}) or {})
+    rec_early = get_task(args.task) or {}
+    tf_early = (rec_early.get("fields", {}) or {})
     held = held_card_problem(tf_early)
     if held:
         sys.exit(f"ERROR: refusing to submit {args.task}: {held}.")
@@ -6342,6 +6769,7 @@ def cmd_submit(args):
     # output IS a purchase step on a COMPLIANCE task. A check that cannot run
     # warns and lets the card through: Kevin still sees it, and the daily
     # paid-but-not-filed check is the backstop.
+    _subject = ""
     try:
         try:
             _subject = (parse_email_output(output) or {}).get("subject") or ""
@@ -6358,6 +6786,30 @@ def cmd_submit(args):
             f"ERROR: refusing to submit {args.task}: {bought}\n"
             "       Check with: python3 scripts/agent-dispatch.py certificate-gaps "
             "--property <rec> --type <type>")
+
+    # THE RULES THE ROBOTS KEPT BREAKING (16 Nov 2026), each a refusal that says what it found and what
+    # to write instead. The bank and the book are read only when the output is the shape a rule is about.
+    _name = tf_early.get(AF["name"], "") or ""
+    _creditor_agent = ALL_AGENTS.get(args.agent, {}).get("agent") == "creditor-management"
+    # A STATUS ONLY update is judged by its own gate below (it carries nothing to carry out), and a
+    # report that files itself with the Nothing line acts on nothing.
+    _acts = not status_only_line(output) and not no_action_declared(carry_out_tail(output))
+    rules = (lambda: paid_check_problem(rec_early, output, args.type),
+             lambda: renewal_problem(_name, output, plain_approve),
+             lambda: tenant_notice_problem(_name, output, args.type, getattr(args, "tenant_notice", None)),
+             lambda: rent_paid_problem(_name, tf_early.get(AF["notes"]), tf_early.get(AF["description"])),
+             lambda: cost_line_problem(_creditor_agent, _name, output, plain_approve),
+             lambda: bedroom_problem(_name, output),
+             lambda: licence_cert_problem(_name, output, plain_approve),
+             lambda: managed_compliance_problem(_name, output, _subject))
+    for rule in rules if _acts else ():
+        try:
+            problem = rule()
+        except (Exception, SystemExit) as exc:               # noqa: BLE001 — refused, never passed
+            problem = (f"a submit check could not run ({type(exc).__name__}: {str(exc)[:160]}), so it is NOT "
+                       "CHECKED. Try again; if it fails again, record a TOOL wall")
+        if problem:
+            sys.exit(f"ERROR: refusing to submit {args.task}: {problem}.")
 
     # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
     # the card, from this round, or the submit is refused.
@@ -6678,6 +7130,9 @@ def cmd_submit(args):
     stamps = ([superseded_stamp(n) for n in dropped]
               + [attached_stamp(n, f"with this submission (round {round_no})") for n in uploaded]
               + [submitted_stamp(round_no, args.type, round_files)])
+    tenant_notice = " ".join(str(getattr(args, "tenant_notice", "") or "").split())
+    if tenant_notice:
+        stamps.append(note_line("agent-dispatch", f"TENANT NOTICE (round {round_no}): {tenant_notice[:300]}"))
     # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
     if is_sourcing(output):
         stamps.append(note_line("agent-dispatch", f"{SOURCING_SUBMITTED_MARK} (round {round_no}): "
@@ -13647,6 +14102,7 @@ PROPERTY_FIELDS = {
     "required":   "flduFyaQBD4duhR3l",   # Certificates Required (multi)
     "active":     "fldBUeSJQZZSnFrFW",   # Active? (from Business), lookup
     "units":      "fldLoWcv40Ag5sHRF",   # Units (link to Rental Units)
+    "bedrooms":   "fldeXUMcC6O4AcvRG",   # No. of Bedrooms (the bedroom check at submit, 16 Nov 2026)
 }
 CERT_FIELDS = {
     "type":        "fld00ZuxT8uKagM0b",
@@ -13739,6 +14195,7 @@ def property_view(rec):
         "postcode": f.get(PROPERTY_FIELDS["postcode"], ""),
         "required": required,
         "units": links(f.get(PROPERTY_FIELDS["units"])),
+        "bedrooms": f.get(PROPERTY_FIELDS["bedrooms"]),
         "active": bool(active[0]) if isinstance(active, list) and active else bool(active),
     }
 
@@ -14836,6 +15293,10 @@ def main():
                    help="property work only: the sibling ids the queue grouped under this "
                         "lead (same certificate type and postcode district); refused "
                         "before any write if one does not belong (17 Sep 2026)")
+    s.add_argument("--tenant-notice", default="", metavar="TEXT",
+                   help="REQUIRED when an email books or confirms a contractor visit at a house: '<visit date "
+                        "YYYY-MM-DD>: <who is told and how>' (inside 24 hours a ClickSend text), or 'none needed: "
+                        "<why>'. Stamped on the task's Notes, never put in the email.")
     s.add_argument("--coverage", metavar="PATH",
                    help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
                         "covers ... (source: url) lines; refused without it (7 Sep 2026)")
