@@ -229,6 +229,35 @@ def no_learnings_check(ep, srt_path, day, today=None):
             "episode's transcript and its full captions, and nothing sounds like 'learnings from my diary'; %s%s" % (span, late))
 
 
+def heard_no_clip_check(ep, day, heard, today=None):
+    """(name, ok, hard, detail) when the diary line, or words that sound like it, are heard in the episode's transcript
+    or captions but no Learnings clip was cut.
+
+    No hold waits for a person (16 Nov 2026, the rule PR 948 applied to the no-line case). Until then this refused
+    the card until someone rebuilt the clip by hand: 2138 was blocked from 12 Nov, read 47 times, with no card. Now
+    the pipeline retries once: the approval run puts the day on the night's Learnings rebuild list
+    (render.queue_research), which transcribes the recording again and searches it with today's clip finder, and
+    records that it did (lfmd_retried). The card waits for that, at most RESEARCH_WAIT_DAYS, as a wait, never a
+    block. A clip found goes up with the card. None found: the card goes to Kevin as normal, its top line saying what
+    was heard, that no clip could be cut and where the engine looked (approval.build_card reads this detail), so he
+    can send it back with the time. A retry by today's finder stands until the finder changes."""
+    import render
+    tried = ep.get("lfmd_retried") if isinstance(ep.get("lfmd_retried"), dict) else {}
+    late = ""
+    if tried.get("finder") != render.finder_code():
+        queued = render.research_queued(day)
+        age = ((today or dt.date.today()) - queued).days if queued else None
+        if age is None or age <= RESEARCH_WAIT_DAYS:
+            return (RESEARCH_CHECK, False, "wait",
+                    "no Learnings clip was cut, but %s; tonight's Learnings rebuild transcribes the recording again and "
+                    "searches it with today's clip finder%s, and the card goes up after it"
+                    % (heard, " (queued %s)" % queued.isoformat() if queued else ""))
+        late = "; the automatic retry queued on %s has not run" % queued.isoformat()
+    return ("Learnings section", True, False,
+            "NO LEARNINGS CLIP CUT: %s, but the clip finder (its exact and loose routes) found no start it could cut, in this "
+            "episode's transcript and full captions or on the automatic retry with today's finder%s" % (heard, late))
+
+
 def summary_search(ep, ledger):
     """The card line for a long episode with no Summary clip: where the engine looked and what it found there.
 
@@ -366,12 +395,19 @@ def checks(day, ledger=None, files=None):
     near_miss = None
     if not (in_transcript or window):
         # 2060 (17 Sep 2026): the Learnings line was mis-heard, no clip was cut, and the card went up saying "no diary
-        # phrase spoken (by design)". A near miss now REFUSES the card, so a Learnings section is never lost silently.
+        # phrase spoken (by design)". A near miss is never lost silently: it gets the automatic retry below.
         m = render.DIARY_NEAR_MISS_RE.search(cap_text)
         if m: near_miss = cap_text[max(0, m.start() - 30):m.end() + 30]
-    if near_miss:
-        add("Learnings section", False, True, "no clip was cut, but the captions say '...%s...': that sounds like the diary section. Rebuild it (render.py redo --day %d --only lfmd) before this card goes up" % (near_miss.strip(), day))
-    elif said or window:
+    if (near_miss or said) and not (window or d_l > 15):
+        # Heard, or nearly heard, but no clip was cut. Until 16 Nov 2026 this was a hard refusal that waited for a person
+        # to rebuild the clip by hand, and 2138 sat behind it from 12 Nov with no card. Now one automatic retry, then the
+        # card goes to Kevin as normal with the line on top (heard_no_clip_check).
+        spoken_line = render.lfmd_start(render.spoken(cap_text))
+        heard = ("the captions say '...%s...', which sounds like the diary line" % near_miss.strip() if near_miss
+                 else "the captions say '%s'" % " ".join(spoken_line.group(0).split()) if spoken_line
+                 else "the episode's transcript has the diary line")
+        add(*heard_no_clip_check(ep, day, heard))
+    elif said or window or near_miss:
         heard = "found in the transcript" if in_transcript else "found in the captions" if said else "not found in the transcript or the captions"
         add("Learnings clip (captions)", d_l > 15, True, "%.0f s; diary phrase %s" % (d_l, heard))
         add("Learnings clip (clean, for Shorts)", d_ly > 15 and abs(d_ly - d_l) < 1.5, True, "%.0f s" % d_ly)
@@ -473,9 +509,18 @@ def selftest():
     names = [n for n, _ in passed]; assert "jingle in the full episode" in names and "Learnings clip (clean, for Shorts)" in names and "teaser title" in names and "horizon level" in names
     # no jingle: full == podcast length
     f2 = dict(files, full=mk("full2.mp4", 40), full_yt=mk("full2y.mp4", 40)); ok, fails, _ = gate(9, led, f2); assert not ok and any("jingle" in n for n, _ in fails), fails
-    # diary phrase spoken but no clip
+    # diary phrase spoken but no clip: one automatic retry the pipeline owns (a wait, never a block), then the card with
+    # its line on top. Until 16 Nov 2026 a hard refusal that waited for a person (2138, blocked from 12 Nov, no card).
+    import render
+    real_redo = render.REDO_LFMD_FILE; render.REDO_LFMD_FILE = os.path.join(tmp, "redo_lfmd")      # never the live list
     f3 = dict(files, lfmd="/nonexistent", lfmd_yt="/nonexistent"); led3 = {"a full.insv": dict(led["a full.insv"], lfmd_window=None)}
-    ok, fails, _ = gate(9, led3, f3); assert not ok and any("Learnings clip" in n for n, _ in fails), fails
+    ok, fails, _ = gate(9, led3, f3); assert not ok and is_wait(fails) and [n for n, _ in fails] == [RESEARCH_CHECK], fails
+    retried = {"a full.insv": dict(led3["a full.insv"], lfmd_retried={"finder": render.finder_code(), "found": False})}
+    ok, _, passed = gate(9, retried, f3)
+    assert ok and any(n == "Learnings section" and d.startswith("NO LEARNINGS CLIP CUT: the episode's transcript has the diary line") for n, d in passed), passed
+    stale = {"a full.insv": dict(led3["a full.insv"], episode=2138, lfmd_retried={"finder": "older", "found": False})}
+    render.queue_research(2138, today=dt.date.today() - dt.timedelta(days=RESEARCH_WAIT_DAYS + 3))
+    ok, _, passed = gate(2138, stale, f3); assert ok and any("automatic retry queued on" in d and "has not run" in d for n, d in passed), passed
     # no phrase, no clip: the card goes up, its line saying no Learnings line was found (was a silent "by design" pass)
     open(files["transcript"], "w").write("no such section today"); ok, fails, passed = gate(9, led3, f3); assert ok and any(d.startswith("NO LEARNINGS LINE FOUND") for n, d in passed)
     # 2060 (17 Sep 2026): a mis-heard Learnings line in the captions, no clip cut -> the card is REFUSED, never "by design"
@@ -483,7 +528,9 @@ def selftest():
     open(miss_srt, "w").write("1\n00:00:01,000 --> 00:00:02,000\nSo I suppose the learning from\n\n2\n00:00:02,000 --> 00:00:03,000\na diet today is that problems\n\n"
                               + "".join("%d\n00:00:%02d,000 --> 00:00:%02d,500\nword\n\n" % (i, i, i) for i in range(3, 9)))
     ok, fails, _ = gate(9, led3, dict(f3, full_srt=miss_srt))
-    assert not ok and any(n == "Learnings section" and "sounds like the diary section" in d for n, d in fails), fails
+    assert not ok and [n for n, _ in fails] == [RESEARCH_CHECK] and "sounds like the diary line" in fails[0][1], fails
+    ok, _, passed = gate(9, {"a full.insv": dict(led3["a full.insv"], lfmd_retried={"finder": render.finder_code()})}, dict(f3, full_srt=miss_srt))
+    assert ok and any(d.startswith("NO LEARNINGS CLIP CUT: the captions say '...So I suppose the learning from a diet today") for n, d in passed), passed
     # leaning horizon and a generic teaser title
     led4 = {"a full.insv": dict(led["a full.insv"], horizon={"1": 40.0, "10": 22.0}), "a sum.insv": {"episode": 9, "role": "teaser", "title": GENERIC_TITLE}}
     ok, fails, _ = gate(9, led4, files); assert not ok and {n for n, _ in fails} >= {"horizon level", "teaser title"}, fails
@@ -538,7 +585,8 @@ def selftest():
     assert any(n == "jingle position" and "pause detector" in d for n, _, _, d in checks(9, led14, files))
     assert not any(n == "jingle position" for n, _, _, _ in checks(9, led, files)), "no recorded cut, no claim about one"
     _selftest_no_learnings(files, led, tmp)
-    shutil.rmtree(tmp); print(json.dumps({"checks": 22, "failed": []}))
+    render.REDO_LFMD_FILE = real_redo
+    shutil.rmtree(tmp); print(json.dumps({"checks": 26, "failed": []}))
 
 
 def _selftest_no_learnings(files, led, tmp):

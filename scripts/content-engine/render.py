@@ -1258,6 +1258,9 @@ def redo_lfmd(day, window=None):
         window = lfmd_window(segs)
         # today's finder has searched this episode's words: the output gate's one automatic re-search is done
         e["lfmd_searched"] = {"finder": finder_code(), "found": bool(window), "at": dt.datetime.now().isoformat(timespec="seconds")}
+        # and the gate's one automatic retry for a line heard with no clip is done (qa.heard_no_clip_check). Unlike
+        # lfmd_searched, a full re-render leaves this alone: the same finder on the same words gives the same answer.
+        e["lfmd_retried"] = dict(e["lfmd_searched"])
         if note_at:
             placed, heard = place_from_note(segs, note_at["master"])
             if placed:
