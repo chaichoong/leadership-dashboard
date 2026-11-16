@@ -8,7 +8,8 @@
 //     signed off by Roy, so you can't write it as if Roy is in the third person").
 //   - A tenant mail-out never shows its recipients each other (30 Sep 2026).
 //
-// Back-tested read-only on 16 Nov 2026 against 1,316 distinct stored outputs and run-folder drafts: 50
+// Back-tested read-only on 16 Nov 2026 against 1,074 distinct outputs (530 stored Correspondence outputs
+// and 544 run-folder drafts; 832 of them passed origin/main's gate): 50
 // newly refused (29 em dashes, 15 Roy in the third person, 5 placeholders, 1 em dash in a posted
 // letter), none of them correct copy. Three shapes the first draft refused were the other side's words
 // and are pinned below as passes: a subject tag ("[SMS]", "[EXTERNAL]", "[Quote Ref: ...]"), a details
