@@ -901,14 +901,35 @@ def signoff_problem(body):
 QUOTED_START_RE = re.compile(
     r"^[ \t]*(?:On .{3,200}wrote:[ \t]*$|-{2,}[ \t]*(?:Original|Forwarded) [Mm]essage|From: .+|>|_{3,}[ \t]*$)",
     re.M)
+# A "From:" line starts a quoted message only when it reads like a mail header: it carries an address
+# ("From: Sam <sam@example.com>") or the header block goes on below it ("Sent:", "Date:", "To:",
+# "Subject:", "Cc:"). A details line such as "From: 1 December 2026" is the sender's own words, and so is
+# a ">" that is a comparison ("> 50 rooms", "> £500"). Read as a quote, either cut the body early and
+# everything below it went unread (review of PR 951, F6).
+QUOTED_HEADER_NEXT_RE = re.compile(r"^[ \t>*]*(?:Sent|Date|To|Subject|Cc):", re.I)
+
+
+def _is_quote_start(text, m):
+    line = m.group(0).strip()
+    if line.startswith("From:"):
+        if "@" in line or "<" in line:
+            return True
+        after = [ln for ln in text[m.end():].splitlines() if ln.strip()]
+        return bool(after) and bool(QUOTED_HEADER_NEXT_RE.match(after[0]))
+    if line.startswith(">"):
+        rest = text[m.end():m.end() + 40].split("\n", 1)[0]
+        return not re.match(r"[ \t]*[\d£$=]", rest)
+    return True
 
 
 def own_words(body):
     """The body above the first quoted message (a "On ... wrote:" line, an Original or Forwarded
-    message marker, a quoted "From:" line, a "> " line or Outlook's line of underscores)."""
+    message marker, a quoted "From:" header, a "> " quoted line or Outlook's line of underscores)."""
     text = body or ""
-    m = QUOTED_START_RE.search(text)
-    return text[:m.start()] if m else text
+    for m in QUOTED_START_RE.finditer(text):
+        if _is_quote_start(text, m):
+            return text[:m.start()]
+    return text
 
 
 # A square-bracket token that is not a link's text ("[the form](https://...)"), or an angle-bracket
@@ -916,57 +937,126 @@ def own_words(body):
 # email has no use for either: every one measured is a value the agent never found, or a note for
 # Kevin ("[ EMAIL TO THE COUNCIL - this is what will be sent ]") sitting inside what is sent.
 PLACEHOLDER_SQUARE_RE = re.compile(r"\[[^\[\]\n]*[A-Za-z£$][^\[\]\n]*\](?!\()")
-PLACEHOLDER_ANGLE_RE = re.compile(r"<(?![^<>\n]*(?:@|://|mailto:|www\.))[^<>\n]*[A-Za-z][^<>\n]*>")
+# Angle brackets hugging their words, as a template's are ("<home address>"): "< 100 and > 50" is a sum.
+PLACEHOLDER_ANGLE_RE = re.compile(r"<(?![^<>\n]*(?:@|://|mailto:|www\.))(?=\S)[^<>\n]*[A-Za-z][^<>\n]*(?<=\S)>")
 # Capitals only, whole words: "XXX" and longer, "TBC", "TBA", "INSERT". "Xxx" in a name, "tbc" in a
 # web address and "insert" in a sentence ("insert the key") are the email's own words. A masked card
-# number is written "XXXX1234" or "**** 1234"; only "XXXX 1234" would be read, and an agent's email
-# has no reason to carry either.
-PLACEHOLDER_MARK_RE = re.compile(r"(?<![A-Za-z0-9])(?:X{3,}|TBC|TBA|INSERT)(?![A-Za-z0-9])")
+# number ("XXXX-1234", "XXXX 1234") is a number already found, not a gap.
+PLACEHOLDER_MARK_RE = re.compile(r"(?<![A-Za-z0-9])(?:X{3,}(?![ \t-]?\d)|TBC|TBA|INSERT)(?![A-Za-z0-9])")
+# Three more template shapes the review found passing (F5): "{amount}", "(insert address)", "£X".
+PLACEHOLDER_CURLY_RE = re.compile(r"\{\{?[ \t]*[A-Za-z_][^{}\n]{0,60}\}\}?")
+PLACEHOLDER_INSERT_RE = re.compile(r"\((?:insert|INSERT|Insert)\b[^()\n]{0,80}\)")
+PLACEHOLDER_POUND_RE = re.compile(r"£[ \t]?[Xx]+(?:[.,][Xx]+)?(?![A-Za-z0-9])")
+# What a square bracket holds that is not a gap: "[sic]" (the writer's own quotation mark), one word
+# carrying a digit (a reference already found: "[AB-123456]", "[HMO/2026/0042]") and a link or address
+# Outlook writes in brackets ("[mailto:sam@example.com]", "[https://...]").
+SQUARE_NOT_A_GAP_RE = re.compile(r"\[(?:sic|SIC|Sic)\]|\[[^\s\[\]]*\d[^\s\[\]]*\]|\[[^\[\]\n]*(?:@|://|mailto:)[^\[\]\n]*\]")
+URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
+BARE_DOMAIN_ANGLE_RE = re.compile(r"<[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:/\S*)?>")
 EM_DASH = "—"
+# The same dash written another way: the HTML entity copied from a web page, its number, and the
+# horizontal bar (U+2015), which reads as an em dash to everyone who receives it.
+EM_DASH_LIKE_RE = re.compile("—|―|&mdash;|&#8212;|&#x2014;", re.I)
 REPLY_SUBJECT_RE = re.compile(r"^\s*(?:re|fwd?)\s*:", re.I)
+
+# Each placeholder shape with the way through its refusal names (every refusal names one: a check
+# that refuses correct work with no way past is worse than the gap it closes).
+_PLACEHOLDER_SHAPES = (
+    (PLACEHOLDER_SQUARE_RE, "if it is real text, write it without square brackets, or as a link: [text](https://...)"),
+    (PLACEHOLDER_ANGLE_RE, "if it is real text, write it without angle brackets"),
+    (PLACEHOLDER_MARK_RE, "if the date or detail really is still to be agreed, say so in words (\"to be confirmed by "
+                          "the council\"); a masked card number is written **** 1234"),
+    (PLACEHOLDER_CURLY_RE, "if it is real text, write it without curly brackets"),
+    (PLACEHOLDER_INSERT_RE, "write the value itself in place of the bracket"),
+    (PLACEHOLDER_POUND_RE, "write the amount in figures"),
+)
+
+
+def _not_a_gap(text, m):
+    """True when a placeholder-shaped match is the email's own text, never a gap."""
+    s, e = m.span()
+    if any(u.start() <= s < u.end() for u in URL_RE.finditer(text)):
+        return True                                    # "?filter[status]=open" inside a web link
+    token = m.group(0)
+    if token.startswith("[") and SQUARE_NOT_A_GAP_RE.fullmatch(token):
+        return True
+    if token.startswith("<") and BARE_DOMAIN_ANGLE_RE.fullmatch(token):
+        return True                                    # "<agilelets.co.uk>"
+    return False
 
 
 def placeholder_problem(text, where="the email"):
     """Why `text` still carries a placeholder, or ""."""
-    for rx in (PLACEHOLDER_SQUARE_RE, PLACEHOLDER_ANGLE_RE, PLACEHOLDER_MARK_RE):
-        m = rx.search(text or "")
-        if m:
+    text = text or ""
+    for rx, way in _PLACEHOLDER_SHAPES:
+        for m in rx.finditer(text):
+            if _not_a_gap(text, m):
+                continue
             return ("%s still carries a placeholder (%r). Kevin's ruling, 27 Aug 2026: no placeholders, "
-                    "ever. Find the reference number, address or amount before the card reaches him, or "
-                    "say plainly in the card above the headers what could not be found." % (where, m.group(0)[:80]))
+                    "ever. If it is a value you have not found, find it (the reference number, address or "
+                    "amount) before the card reaches him, or say plainly in the card above the headers what "
+                    "could not be found; %s." % (where, m.group(0)[:80], way))
     return ""
 
 
 def em_dash_problem(text, where="the email"):
     """Why `text` carries an em dash, or ""."""
-    i = (text or "").find(EM_DASH)
-    if i < 0:
+    m = EM_DASH_LIKE_RE.search(text or "")
+    if not m:
         return ""
+    i = m.start()
     near = " ".join(text[max(0, i - 30):i + 30].split())
     return ("%s carries an em dash (near %r). Kevin's house style bans the em dash in anything that "
             "goes out (4 Sep 2026): use a comma, a full stop or a hyphen." % (where, near))
 
 
 ROY_SIGNATURE_RE = re.compile(r"^Roy Lavin\b")
-ROY_NAMED_RE = re.compile(r"\bRoy\b")
+# Signed with his first name alone (review of PR 951, F4): "Roy" on its own line, or "Thanks, Roy".
+ROY_SHORT_SIGNATURE_RE = re.compile(
+    r"^(?:(?:yours sincerely|yours faithfully|kind regards|best wishes|many thanks|best regards|with thanks|"
+    r"regards|thanks|thank you|cheers|best)[,.]?[ \t]+)?Roy[.,!]?$", re.I)
+# The name of someone else, or a street: "Roy Example" (a surname that is not Lavin), "12 Roy Road".
+ROY_NAMED_RE = re.compile(
+    r"\bRoy\b(?!['’]?s?[ \t]+(?:Road|Street|Avenue|Close|Lane|Drive|Way|Court|Place|Terrace|Crescent|Gardens|Grove)\b)"
+    r"(?![ \t]+(?!Lavin\b)[A-Z][a-z]+(?:[ \t]|[,.;:)]|$))")
 # Roy saying who he is, in the first person, is not Roy in the third person ("Hi Anthony, Roy here.").
 ROY_SELF_RE = re.compile(r"\b(?:Roy(?: Lavin)? here|this is Roy(?: Lavin)?|I am Roy(?: Lavin)?|I'm Roy(?: Lavin)?"
                          r"|my name is Roy(?: Lavin)?)\b", re.I)
 # A details line ("- Managing agent: Roy Lavin, Agile Lets, c/o ...") states a fact a council or insurer asked
 # for; it does not speak of Roy in the third person. Found in the back-test, in a reply to a council officer.
-ROY_FIELD_LINE_RE = re.compile(r"^[ \t]*(?:[-*•][ \t]*)?[A-Za-z][A-Za-z '&/()-]{0,40}:[ \t]+[^\n]*$", re.M)
+# Only the NAME is set aside, and only in such a line's value: "Note: Roy will meet you" and "Roy will call
+# you to confirm: please..." still speak of him (review of PR 951, F4).
+ROY_FIELD_LINE_RE = re.compile(
+    r"^([ \t]*(?:[-*•][ \t]*)?[A-Za-z][A-Za-z'&/()-]*(?:[ \t]+[A-Za-z][A-Za-z'&/()-]*){0,4}[ \t]*:[ \t]+)([^\n]*)$", re.M)
+ROY_AS_VALUE_RE = re.compile(r"\bRoy(?: Lavin)?(?=[ \t]*(?:$|[,;()/-]|\b(?:on|at|via|of|and|or|for)\b))")
+# Words in quotation marks are someone else's ('You wrote that "Roy said Monday works"').
+QUOTED_WORDS_RE = re.compile(r"\"[^\"\n]{1,200}\"|“[^”\n]{1,200}”")
+
+
+def _roy_names_out_of_details(text):
+    def one(m):
+        key, value = m.group(1), m.group(2)
+        if "roy" in key.lower():
+            return m.group(0)
+        return key + ROY_AS_VALUE_RE.sub("", value)
+    return ROY_FIELD_LINE_RE.sub(one, text)
 
 
 def roy_third_person_problem(body):
-    """Why a body signed Roy Lavin names Roy above its sign-off, or ""."""
+    """Why a body signed by Roy names Roy above its sign-off, or ""."""
     words = own_words(body)
     lines = words.splitlines()
-    sig = None
+    tail = closing_block(words)
+    sig, signed = None, ""
     for i in range(len(lines) - 1, -1, -1):
-        if ROY_SIGNATURE_RE.match(lines[i].strip()):
-            sig = i
+        line = lines[i].strip()
+        if ROY_SIGNATURE_RE.match(line):
+            sig, signed = i, "Roy Lavin"
             break
-    if sig is None or not any(ROY_SIGNATURE_RE.match(ln) for ln in closing_block(words)):
+        if ROY_SHORT_SIGNATURE_RE.match(line) and line in tail:
+            sig, signed = i, "Roy"
+            break
+    if sig is None or (signed == "Roy Lavin" and not any(ROY_SIGNATURE_RE.match(ln) for ln in tail)):
         return ""
     above = "\n".join(lines[:sig])
     last = None
@@ -977,14 +1067,15 @@ def roy_third_person_problem(body):
     # The quote is cut from the SAME text the match was found in: cut from the text before the details
     # lines came out, a details line above the sentence shifted it onto words with no Roy in them
     # (review of PR 951, 16 Nov 2026).
-    read = ROY_SELF_RE.sub(" ", ROY_FIELD_LINE_RE.sub("", above.replace("’", "'")))
+    read = QUOTED_WORDS_RE.sub(" ", ROY_SELF_RE.sub(" ", _roy_names_out_of_details(above.replace("’", "'"))))
     m = ROY_NAMED_RE.search(read)
     if not m:
         return ""
-    return ("this email is signed Roy Lavin but names Roy above the sign-off (%r). Kevin's ruling, "
+    return ("this email is signed %s but names Roy above the sign-off (%r). Kevin's ruling, "
             "22 Oct 2026: mail signed by Roy is written as Roy, in the first person (\"I will\", "
-            "\"my mobile\", \"I am copied in\"), never \"Roy will\" or \"Roy has asked\"."
-            % " ".join(read[max(0, m.start() - 30):m.end() + 30].split()))
+            "\"my mobile\", \"I am copied in\"), never \"Roy will\" or \"Roy has asked\". If this Roy is "
+            "someone else, give their surname; a details line naming him (\"Managing agent: Roy Lavin\") "
+            "is not read." % (signed, " ".join(read[max(0, m.start() - 30):m.end() + 30].split())))
 
 
 # The tenant-finding chain's email cards (scripts/tenant-leads.py PREFIXES): each goes to many people
@@ -1006,6 +1097,30 @@ def mailout_recipients_problem(task_name, parsed):
     return ""
 
 
+# Where `inbound-triage.py attachments` saves what other people sent (GUARDRAILS "Email attachments"). A
+# document there is someone else's words as received: an insurer's "[approx.]", a solicitor's "[sic]". The
+# agent cannot edit it, so it is not read, as the quoted reply under an email is not read (review of PR 951,
+# F7: 15 of 16 bracket hits in 482 local PDFs were in that folder, every one the sender's own text).
+INBOUND_ATTACHMENTS = "~/knowledge-os/attachments/inbound"
+AS_RECEIVED_WAY = ("If this is someone else's document, unchanged, use the copy `python3 scripts/inbound-triage.py "
+                   "attachments` saved under %s: a document as received is not read" % INBOUND_ATTACHMENTS)
+# The tenancy pack's own title and footer lines (scripts/make-tenancy-pack.js) carry an em dash the agent
+# cannot change, so a posted pack document is read for placeholders only (review of PR 951, F7).
+PACK_FOOTER_MARKS = (" — proof of residency — Agile Lets Limited", " — authority to act — ",
+                     " — not valid until signed by ")
+
+
+def as_received(document):
+    """True when the file sits in the inbound attachments folder: someone else's document, as received."""
+    import os
+    path = os.path.realpath(os.path.expanduser(str(document or "")))
+    root = os.path.realpath(os.path.expanduser(INBOUND_ATTACHMENTS))
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
 def letter_text(document):
     """The text of a PDF this card will post, or None when there is no such file to read here (the
     submit gate's own file check refuses a missing file). Raises EmailFormatError when the file is
@@ -1019,7 +1134,9 @@ def letter_text(document):
         return "\n".join((page.extract_text() or "") for page in pypdf.PdfReader(path).pages)
     except Exception as exc:  # any read failure becomes a refusal that names it, never a pass
         raise EmailFormatError("could not read the text of %s to check it for placeholders and em dashes "
-                               "(%s: %s)" % (os.path.basename(path), type(exc).__name__, str(exc)[:120]))
+                               "(%s: %s). If it is ours, make the PDF again; %s."
+                               % (os.path.basename(path), type(exc).__name__, str(exc)[:120],
+                                  AS_RECEIVED_WAY[0].lower() + AS_RECEIVED_WAY[1:]))
 
 
 def expected_sender(subject, body):
@@ -1549,23 +1666,35 @@ def validate_submission_any(output, task_name=None):
     placeholder. The summary under a POST or SIGN card is for Kevin and is not
     read. An em dash is not refused in a document for signature: the tenancy
     pack's code-made title lines carry one, and the agent cannot change them.
+    A PDF attached to an email is read like a document for signature (review
+    of PR 951, F3: the letter of authority that taught the rule passed when
+    emailed). A document in the inbound folder is someone else's, as received,
+    and is not read (AS_RECEIVED_WAY names that way through every refusal).
     """
     kind = detect_kind(output)
     if kind == "signkevin":
         return parse_sign_as_kevin_output(output)
     if kind == "post":
         parsed = parse_post_output(output)
-        text = letter_text(parsed["document"])
+        text = None if as_received(parsed["document"]) else letter_text(parsed["document"])
         if text is not None:
-            bad = placeholder_problem(text, "the letter") or em_dash_problem(text, "the letter")
+            bad = placeholder_problem(text, "the letter")
+            if not bad and not any(mark in text for mark in PACK_FOOTER_MARKS):
+                bad = em_dash_problem(text, "the letter")
             if bad:
-                raise EmailFormatError(bad)
+                raise EmailFormatError("%s %s." % (bad, AS_RECEIVED_WAY))
         return parsed
     if kind == "sign":
         parsed = parse_sign_output(output)
-        text = letter_text(parsed["document"])
+        text = None if as_received(parsed["document"]) else letter_text(parsed["document"])
         bad = placeholder_problem(text, "the document") if text is not None else ""
         if bad:
-            raise EmailFormatError(bad)
+            raise EmailFormatError("%s %s." % (bad, AS_RECEIVED_WAY))
         return parsed
-    return validate_submission(output, task_name=task_name)
+    parsed = validate_submission(output, task_name=task_name)
+    attach = parsed.get("attach")
+    text = None if (not attach or as_received(attach)) else letter_text(attach)
+    bad = placeholder_problem(text, "the attached document") if text is not None else ""
+    if bad:
+        raise EmailFormatError("%s %s." % (bad, AS_RECEIVED_WAY))
+    return parsed

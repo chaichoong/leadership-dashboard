@@ -1025,6 +1025,38 @@ def _overlapping(items, end_key):
             if any(covers_overlap(a.get(end_key), b.get(end_key)) for j, b in enumerate(items) if j != i)]
 
 
+def _cost_window(c):
+    """(first, last) payment days of a cost; either may be None (not known). The first payment is the cost's
+    Due Date (cost-record.py COST_DUE_DATE); with none, the cover is taken as the year before its End Date,
+    the same year-long reading covers_overlap gives two book rows."""
+    last = _day(c.get("endDate"))
+    first = _day(c.get("firstDate"))
+    if first is None and last is not None:
+        first = last - timedelta(days=POLICY_YEAR_DAYS)
+    return first, last
+
+
+def costs_overlap(a, b, overlap_days=DOUBLE_OVERLAP_DAYS):
+    """True when two live insurance costs are paid over the same stretch for more than `overlap_days`.
+
+    A correctly recorded renewal is not a double (review of PR 951, F10): the old cost's End Date is its
+    last payment and the new cost's Due Date its first, so their windows meet and do not overlap, whether
+    the new one has no End Date yet or runs ten instalments. A cost with neither date known still overlaps
+    everything, as before: an unknown is never read as clear."""
+    a_first, a_last = _cost_window(a)
+    b_first, b_last = _cost_window(b)
+    start = max([d for d in (a_first, b_first) if d is not None], default=None)
+    end = min([d for d in (a_last, b_last) if d is not None], default=None)
+    if start is None or end is None:
+        return True
+    return (end - start).days > overlap_days
+
+
+def _overlapping_costs(items):
+    """The costs whose payments overlap at least one other cost's."""
+    return [a for i, a in enumerate(items) if any(costs_overlap(a, b) for j, b in enumerate(items) if j != i)]
+
+
 def _first_line(text, limit=160):
     for line in str(text or "").splitlines():
         if line.strip():
@@ -1040,7 +1072,7 @@ def insurance_doubles(pages, policies, costs, insurance_sub_ids, today,
     policies: Landlord Insurance book rows, {"id", "propertyIds", "unitIds",
               "status", "renewalDate", "notes"}.
     costs:    Costs rows, {"id", "name", "expected", "frequency", "payStatus",
-              "active", "propertyIds", "subCategoryIds", "endDate"}, or None when
+              "active", "propertyIds", "subCategoryIds", "endDate", "firstDate"}, or None when
               the cost side was not read (only the book is then judged).
     insurance_sub_ids: the record ids of the sub-category named "Insurance".
     ended_grace_days: cost-record.py ENDED_GRACE_DAYS.
@@ -1089,7 +1121,7 @@ def insurance_doubles(pages, policies, costs, insurance_sub_ids, today,
             by_unit.setdefault(tuple(sorted(r.get("unitIds") or [])), []).append(r)
         if any(len(_overlapping(group, "renewalDate")) >= 2 for group in by_unit.values()):
             book_double.add(pid)
-    cost_double = {pid for pid, mine in live.items() if len(_overlapping(mine, "endDate")) >= 2}
+    cost_double = {pid for pid, mine in live.items() if len(_overlapping_costs(mine)) >= 2}
     doubles = []
     for pid in sorted(book_double | cost_double, key=lambda x: (names.get(x, x), x)):
         rows = sorted(in_force.get(pid, []), key=lambda r: (str(r.get("renewalDate")), str(r.get("id"))))
@@ -1103,6 +1135,7 @@ def insurance_doubles(pages, policies, costs, insurance_sub_ids, today,
                          for r in rows],
             "costs": [{"id": c.get("id"), "name": str(c.get("name") or ""), "expected": c.get("expected"),
                        "frequency": str(c.get("frequency") or ""), "payStatus": str(c.get("payStatus") or ""),
+                       "firstDate": str(c.get("firstDate") or "")[:10],
                        "endDate": str(c.get("endDate") or "")[:10]} for c in mine]})
     counts = {"insuredHouses": len(set(in_force) | set(live)),
               "policiesInForce": len({r.get("id") for rows in in_force.values() for r in rows}),
@@ -1361,7 +1394,8 @@ def watch_summary(found, raised, still, held_back, insurance_raised, premium_unc
     if paused:
         parts.append(" (agent paused, none raised)")
     if doubles and doubles.get("notChecked"):
-        parts.append("; double cover: Costs NOT CHECKED")
+        # "whole": the check itself could not run, not only its Costs read (review of PR 951, F12).
+        parts.append("; double cover NOT CHECKED" if doubles.get("whole") else "; double cover: Costs NOT CHECKED")
     if held_back:
         parts.append("; %d held back after a recent close" % held_back)
     parts.append("; insurance: %d %s" % (insurance_raised, "would be raised" if dry_run else "raised"))
@@ -1598,7 +1632,7 @@ def insurance_cost_rows(ad):
                            "read is broken" % (len(ids), len(subs), INSURANCE_SUBCATEGORY))
     rows = ad.query_records(cr.T_COSTS, fields=[cr.COST_NAME, cr.COST_EXPECTED, cr.COST_FREQUENCY,
                                                 cr.COST_PAY_STATUS, cr.COST_INACTIVE, cr.COST_PROPERTY,
-                                                cr.COST_SUBCAT, cr.COST_END])
+                                                cr.COST_SUBCAT, cr.COST_END, cr.COST_DUE_DATE])
     costs = []
     for r in rows:
         f = r.get("fields") or {}
@@ -1607,7 +1641,8 @@ def insurance_cost_rows(ad):
                       "payStatus": _select(f.get(cr.COST_PAY_STATUS)), "active": bool(cr.is_active(f)),
                       "propertyIds": ad.links(f.get(cr.COST_PROPERTY)),
                       "subCategoryIds": ad.links(f.get(cr.COST_SUBCAT)),
-                      "endDate": str(f.get(cr.COST_END) or "")[:10]})
+                      "endDate": str(f.get(cr.COST_END) or "")[:10],
+                      "firstDate": str(f.get(cr.COST_DUE_DATE) or "")[:10]})
     if not any(c["active"] for c in costs):
         raise RuntimeError("%d costs read and none is live (80 In Payment and 21 Overdue on 16 Nov 2026): the "
                            "read or the live rule is broken" % len(costs))
@@ -1630,8 +1665,10 @@ def double_cover_check(ad, pages, certs, ins_rows, today):
         return doubles, counts, ""
     try:
         costs, sub_ids = insurance_cost_rows(ad)
-    except RuntimeError as exc:
-        return doubles, dict(counts, costsNotChecked=str(exc)), "Costs: %s" % exc
+    except Exception as exc:                          # noqa: BLE001 — NOT CHECKED, said in the last line
+        # A timeout or a dropped connection is not a RuntimeError: the book side still stands (F12).
+        why = str(exc) if isinstance(exc, RuntimeError) else "%s: %s" % (type(exc).__name__, str(exc)[:200])
+        return doubles, dict(counts, costsNotChecked=why), "Costs: %s" % why
     with_costs, counts2 = insurance_doubles(pages, policies, costs, sub_ids, today,
                                             ended_grace_days=ad._cost_record().ENDED_GRACE_DAYS)
     if not counts2["liveInsuranceCosts"]:
@@ -1722,12 +1759,28 @@ def cmd_daily(apply):
     # 3. Two live landlord policies on one house (Kevin, 3 Nov 2026): ONE task
     #    for every doubled house with no open task. Last, so the tasks raised
     #    above are already on the board it reads.
-    doubles, dcounts, dbl_not_checked = double_cover_check(ad, pages, certs, ins_rows, today)
-    dcovered, dheld, dfound = judge_doubles(doubles, open_tasks, keyed, today)
+    #    Any failure here (a timeout or a dropped connection reading Costs is not
+    #    a RuntimeError) is reported as NOT CHECKED, never a crash: steps 1 and 2
+    #    have already raised their tasks, and a crash would lose the run's JSON and
+    #    last line (review of PR 951, F12).
     dbl_row = None
+    doubles, dcovered, dheld, dfound = [], [], [], []
+    try:
+        doubles, dcounts, dbl_not_checked = double_cover_check(ad, pages, certs, ins_rows, today)
+        dcovered, dheld, dfound = judge_doubles(doubles, open_tasks, keyed, today)
+    except Exception as exc:                          # noqa: BLE001 — reported, never swallowed
+        why = "the double-cover check could not run: %s: %s" % (type(exc).__name__, str(exc)[:200])
+        doubles, dcovered, dheld, dfound = [], [], [], []
+        dcounts = {"insuredHouses": 0, "costsNotChecked": why}
+        dbl_not_checked = why
     if dfound:
-        dbl_row = raise_task(double_task_fields(dfound, today, dcounts.get("liveInsuranceCostsNoHouse") or ()),
-                             "double cover")
+        try:
+            dbl_row = raise_task(double_task_fields(dfound, today, dcounts.get("liveInsuranceCostsNoHouse") or ()),
+                                 "double cover")
+        except Exception as exc:                      # noqa: BLE001 — reported, never swallowed
+            dbl_row = {"what": "double cover", "ok": False,
+                       "why": "raising the task failed: %s: %s" % (type(exc).__name__, str(exc)[:200])}
+            failures.append(dbl_row)
     if dbl_not_checked:
         failures.append({"what": "double cover", "ok": False, "why": dbl_not_checked[:300]})
     double_out = dict(dcounts, houses=len(doubles), covered=dcovered, heldBackAfterClose=dheld,
@@ -1753,7 +1806,8 @@ def cmd_daily(apply):
                         len([r for r in raised_ins if r["ok"]]), premium_unchecked, paused,
                         dry_run=not apply, missed_total=len(items),
                         doubles={"houses": len(doubles), "insured": dcounts["insuredHouses"],
-                                 "raised": dbl_raised, "notChecked": bool(dbl_not_checked)}))
+                                 "raised": dbl_raised, "notChecked": bool(dbl_not_checked),
+                                 "whole": bool(dbl_not_checked) and not dbl_not_checked.startswith("Costs:")}))
     # Non-zero whenever a required item had no task this morning, even once it is
     # raised: that a task had gone missing is the thing worth seeing on the board.
     # The same for a house covered twice, and for a double-cover check that could

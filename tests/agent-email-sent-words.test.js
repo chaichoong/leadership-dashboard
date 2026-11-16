@@ -35,8 +35,11 @@ socket.create_connection = _no_network
 socket.socket.connect = _no_network
 urllib.request.urlopen = _no_network
 sys.path.insert(0, sys.argv[1])
+import agent_email_format
 from agent_email_format import validate_submission_any, EmailFormatError
 args = json.loads(sys.argv[2])
+if args.get("inbound"):
+    agent_email_format.INBOUND_ATTACHMENTS = args["inbound"]
 try:
     validate_submission_any(args["output"], **({"task_name": args["task"]} if args.get("task") is not None else {}))
     print(json.dumps({"ok": True}))
@@ -44,8 +47,8 @@ except EmailFormatError as e:
     print(json.dumps({"ok": False, "error": str(e)}))
 `;
 
-function check(output, task) {
-  const raw = execFileSync('python3', ['-c', PY, SCRIPTS, JSON.stringify({ output, task })], { encoding: 'utf8' });
+function check(output, task, inbound) {
+  const raw = execFileSync('python3', ['-c', PY, SCRIPTS, JSON.stringify({ output, task, inbound })], { encoding: 'utf8' });
   return JSON.parse(raw.trim());
 }
 
@@ -309,5 +312,144 @@ describe('a letter we post, and a document going out for signature, are read too
     withPdf('Tenancy agreement Sam Example — 9 Example Road, Exampletown', (pdf) => {
       expect(check(SIGN(pdf))).toEqual({ ok: true });
     });
+  });
+});
+
+// Review of PR 951 (16 Nov 2026), the "can follow" list. Each closed gap has a case that fails on the code
+// before (back-tested on origin/main's copy) and a control; each false refusal it removes is pinned as a pass.
+describe('an email\'s PDF attachment is read too (review of PR 951, F3)', () => {
+  function inFolder(sub, text, fn) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'aef-attach-'));
+    try {
+      const folder = path.join(dir, sub);
+      execFileSync('mkdir', ['-p', folder]);
+      const pdf = path.join(folder, 'document.pdf');
+      execFileSync('python3', ['-c', PDF_PY, pdf, text]);
+      return fn(pdf, path.join(dir, 'inbound'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const EMAIL = (pdf) => KEVIN('Dear Sir or Madam,\n\nPlease find the signed letter attached.',
+    `TO: accounts@example-lender.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: Letter of authority\nATTACH: ${pdf}`);
+
+  it('refuses an attached PDF still carrying a placeholder, naming the way through', () => {
+    inFolder('ours', "Letter of authority. Address: [Kevin's home address - confirm before approving]", (pdf, inbound) => {
+      const r = check(EMAIL(pdf), undefined, inbound);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/^the attached document still carries a placeholder/);
+      expect(r.error).toMatch(/inbound-triage\.py attachments/);
+    });
+  });
+
+  it('passes a clean attachment, and someone else\'s document as received (the inbound folder)', () => {
+    inFolder('ours', 'Letter of authority for account 4455 6677. Signed, A Example.', (pdf, inbound) => {
+      expect(check(EMAIL(pdf), undefined, inbound)).toEqual({ ok: true });
+    });
+    // An insurer's own words: "[approx.]" is theirs. Control: the same file outside the folder is read.
+    inFolder('inbound/18c0ffee00000001', 'Rebuild cost [approx.] 250,000 GBP.', (pdf, inbound) => {
+      expect(check(EMAIL(pdf), undefined, inbound)).toEqual({ ok: true });
+    });
+    inFolder('ours', 'Rebuild cost [approx.] 250,000 GBP.', (pdf, inbound) => {
+      expect(check(EMAIL(pdf), undefined, inbound).ok).toBe(false);
+    });
+  });
+
+  it('a document for signature or a letter in the inbound folder is not read (F7)', () => {
+    inFolder('inbound/18c0ffee00000002', 'Statement of fact [for 36 months] to sign and return.', (pdf, inbound) => {
+      expect(check(`DOCUMENT: ${pdf}\nSIGNERS: kevinbrittain@gmail.com\n---\nThe insurer's statement of fact to sign.\n\n**Carrying this out will involve:** sending it for signature.`,
+        undefined, inbound)).toEqual({ ok: true });
+    });
+  });
+
+  it('a posted tenancy pack document keeps its code-made em dash lines; control: any other letter is refused (F7)', () => {
+    const POSTPACK = (pdf) => `POST:\nCouncil Tax\nExample District Council\nPO Box 1\nExampletown\nEX1 2AB\nDOCUMENT: ${pdf}\nDELIVERY: cheap\n---\nThe tenant's signed authority.\n\n**Carrying this out will involve:** posting the letter.`;
+    inFolder('ours', 'Sam Example — authority to act — Example District Council 1', (pdf, inbound) => {
+      expect(check(POSTPACK(pdf), undefined, inbound)).toEqual({ ok: true });
+    });
+    inFolder('ours', 'Sam Example — please treat this as authority.', (pdf, inbound) => {
+      expect(check(POSTPACK(pdf), undefined, inbound).ok).toBe(false);
+    });
+  });
+});
+
+describe('the Roy rule has no holes and no false refusals (review of PR 951, F4)', () => {
+  it('refuses a "words: words" sentence and a note line naming Roy', () => {
+    for (const body of ['Hello Jordan,\n\nRoy will call you on the day to confirm: please keep your phone on.',
+      'Hello Jordan,\n\nNote: Roy will meet you at the door.']) {
+      const r = check(ROY(body));
+      expect(r.ok, body).toBe(false);
+      expect(r.error, body).toMatch(/names Roy above the sign-off/);
+    }
+  });
+
+  it('reads an email signed just "Roy"', () => {
+    const head = 'TO: office@example-sparks.test\nFROM: info@agilelets.co.uk\nSUBJECT: Access';
+    for (const sign of ['Thanks, Roy', 'Thanks,\nRoy', 'Roy']) {
+      const r = check(`${head}\n---\nHello Jordan,\n\nRoy will arrange access on Friday.\n\n${sign}\n\n**Carrying this out will involve:** sending this email.`);
+      expect(r.ok, sign).toBe(false);
+      expect(r.error, sign).toMatch(/^this email is signed Roy but names Roy/);
+    }
+    // Control: the same email in the first person passes.
+    expect(check(`${head}\n---\nHello Jordan,\n\nI will arrange access on Friday.\n\nThanks, Roy\n\n**Carrying this out will involve:** sending this email.`))
+      .toEqual({ ok: true });
+  });
+
+  it('passes another person named Roy, a street, quoted words and a details line', () => {
+    for (const body of [
+      'Hello Jordan,\n\nThe tenant in Unit 2, Roy Example, will let you in.',
+      'Hello Jordan,\n\nThe job is at 12 Roy Road, Exampletown.',
+      'Hello Jordan,\n\nYou wrote that "Roy said Monday works". I can confirm Monday.',
+      'Hello Jordan,\n\nThe details:\n- Contact: Roy on 07700 900111\n- Keys: in the lockbox\n\nI will see you there.',
+    ]) {
+      expect(check(ROY(body)), body).toEqual({ ok: true });
+    }
+  });
+});
+
+describe('placeholders: what the review found refused wrongly, and what it found passing (F5, F6)', () => {
+  it('passes "[sic]", a reference in brackets, a link with brackets, a bare domain, a sum, a masked card and a mailto', () => {
+    for (const body of [
+      'Dear Sir or Madam,\n\nYour letter says the "propery [sic]" was let.',
+      'Dear Sir or Madam,\n\nYour reference [AB-123456] and licence [HMO/2026/0042] are noted.',
+      'Hi Sam,\n\nThe list is at https://portal.example.test/units?filter[status]=open for you.',
+      'Hi Sam,\n\nPlease use the address on <example-lets.test> for anything new.',
+      'Hi Sam,\n\nIf the balance is < 100 and > 50 we will settle it in one go.',
+      'Hi Sam,\n\nThe refund went to card XXXX-1234 on Monday.',
+      'Hi Sam,\n\nPlease write to sam@example-energy.test [mailto:sam@example-energy.test] with the meter reading.',
+    ]) {
+      expect(check(KEVIN(body)), body).toEqual({ ok: true });
+    }
+  });
+
+  it('refuses "{amount}", "(insert address)", "£X" and the em dash written as &mdash; or a horizontal bar', () => {
+    for (const [body, want] of [
+      ['Dear Sir or Madam,\n\nI can pay {amount} a month.', /placeholder/],
+      ['Dear Sir or Madam,\n\nPlease write to me at (insert address).', /placeholder/],
+      ['Dear Sir or Madam,\n\nI can offer £X a month from next month.', /placeholder/],
+      ['Dear Sir or Madam,\n\nAccount 4455 &mdash; 9 Example Road.', /em dash/],
+      ['Dear Sir or Madam,\n\nAccount 4455 ― 9 Example Road.', /em dash/],
+    ]) {
+      const r = check(KEVIN(body));
+      expect(r.ok, body).toBe(false);
+      expect(r.error, body).toMatch(want);
+    }
+  });
+
+  it('a refusal names the shape and the way through', () => {
+    expect(check(KEVIN('Hi Sam,\n\nYour ref is [EXTERNAL] on our side.')).error).toMatch(/write it without square brackets/);
+    expect(check(KEVIN('Hi Sam,\n\nThe date is TBC.')).error).toMatch(/to be confirmed by/);
+  });
+
+  it('a details line starting "From:" or ">" is the sender\'s own words, so what follows is still read', () => {
+    for (const body of ['Dear Sir or Madam,\n\nThe tenancy details:\nFrom: 1 December 2026\nRent: [amount] a month.',
+      'Dear Sir or Madam,\n\nThe block:\n> 50 rooms in the block\nRent: [amount] a room.']) {
+      const r = check(KEVIN(body));
+      expect(r.ok, body).toBe(false);
+      expect(r.error, body).toMatch(/placeholder/);
+    }
+    // Control: a quoted reply's header block still starts the quote, so the other side's brackets pass.
+    expect(check(KEVIN('Hi Sam,\n\nThank you, noted.\n\nFrom: Sam Example\nSent: 10 November 2026 09:00\nSubject: Rent\nYour ref [TBC]')))
+      .toEqual({ ok: true });
   });
 });

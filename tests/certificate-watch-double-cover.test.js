@@ -51,9 +51,9 @@ INS, PERSONAL, OTHER = 'recSUBINSURANCE01', 'recSUBPERSONALINS', 'recSUBCOMPLIAN
 def pol(rid, pid, renewal, notes='', status='Active', units=()):
     return {'id': rid, 'type': 'Landlord Insurance', 'propertyIds': [pid], 'unitIds': list(units), 'status': status,
             'renewalDate': renewal, 'notes': notes, 'hasFile': True, 'taskIds': [], 'created': '2026-10-01'}
-def cost(cid, name, props, expected=15.0, active=True, sub=INS, end='2027-09-30', status='In Payment'):
+def cost(cid, name, props, expected=15.0, active=True, sub=INS, end='2027-09-30', status='In Payment', first=''):
     return {'id': cid, 'name': name, 'expected': expected, 'frequency': 'Monthly', 'payStatus': status,
-            'active': active, 'propertyIds': list(props), 'subCategoryIds': [sub], 'endDate': end}
+            'active': active, 'propertyIds': list(props), 'subCategoryIds': [sub], 'endDate': end, 'firstDate': first}
 def doubles(policies, costs=None, today=TODAY):
     ds, counts = cw.insurance_doubles(PAGES, policies, costs, [INS], today)
     return ds, counts
@@ -254,7 +254,7 @@ print(json.dumps({'name': f[cw.TF['name']], 'desc': f[cw.TF['desc']], 'props': f
 // The whole daily pass, with the book, the reads and the gate stubbed. ROWS are what each
 // table returns; the created task is fed back in on the second run.
 const DAILY = `${COST_ROWS}
-def run_daily(open_extra=(), costs_rows=None, subs=None, paused=False, apply=True):
+def run_daily(open_extra=(), costs_rows=None, subs=None, paused=False, apply=True, costs_raise=None):
     fake = types.SimpleNamespace()
     fake.AF = {'name': 'fN', 'description': 'fD', 'status': 'fS', 'completion': 'fC'}
     fake.CERT_FIELDS = {'type': 'cT', 'property': 'cP', 'renewal': 'cR', 'notes': 'cN'}
@@ -282,6 +282,8 @@ def run_daily(open_extra=(), costs_rows=None, subs=None, paused=False, apply=Tru
     def qr(table, formula=None, fields=None, max_records=None):
         if table == 'tblTASKS':
             return OPEN if formula.startswith('AND({Status}') else KEYED
+        if costs_raise is not None and table == CR.T_COSTS:
+            raise costs_raise
         return SERVE.get(table, [])
     fake.query_records = qr
     fake.property_agent_paused = lambda: paused
@@ -366,5 +368,75 @@ print(json.dumps([cw.watch_summary(1000, 1000, 1000, 1000, 100, 100, paused=True
     expect(r[0]).toContain('double cover: Costs NOT CHECKED');
     expect(r[1]).toContain('covered twice: 3 of 24 insured houses, 3 raised');
     expect(r[1].length).toBeLessThanOrEqual(220);
+  });
+});
+
+// Review of PR 951 (16 Nov 2026). F10: a renewal recorded the way cost-record.py records it (old cost End Date =
+// its last payment, new cost Due Date = its first) read as a double, because the first payment was never read.
+// Back-tested read-only on the live Costs table on 16 Nov 2026: 11 of the 12 live insurance costs carry a first
+// payment date, and the cost side flags exactly the same one house as before (a true double: two policies paid over the same months).
+describe('a correctly recorded renewal is not a double (review of PR 951, F10)', () => {
+  it('the old cost ends at its last payment and the new one starts after it: clear, with or without an End Date', () => {
+    const r = py(`
+old = cost('recCOSTOLDPOLICY1', 'Acme Insurance - old year - 7 Example Road', [A], end='2026-11-20', first='2025-12-20')
+print(json.dumps({
+  'openEnded': houses([], [old, cost('recCOSTNEWPOLICY2', 'Example Mutual - new year - 7 Example Road', [A], end='', first='2026-12-20')]),
+  'tenInstalments': houses([], [old, cost('recCOSTNEWPOLICY2', 'Example Mutual - 10 instalments - 7 Example Road', [A], end='2027-09-20', first='2026-12-20')]),
+  'controlOverlap': houses([], [old, cost('recCOSTNEWPOLICY2', 'Example Mutual - 7 Example Road', [A], end='', first='2026-09-20')]),
+  'controlNoFirstDate': houses([], [old, cost('recCOSTNEWPOLICY2', 'Example Mutual - 7 Example Road', [A], end='')]),
+}))`);
+    expect(r.openEnded).toEqual([]);
+    expect(r.tenInstalments).toEqual([]);
+    // Two covers paid over the same months are still a double, and a date nobody recorded is never read as clear.
+    expect(r.controlOverlap).toEqual(['7 Example Road']);
+    expect(r.controlNoFirstDate).toEqual(['7 Example Road']);
+  });
+
+  it("the Costs read takes each cost's first payment from cost-record.py's Due Date", () => {
+    const r = py(`${COST_ROWS}
+row = crow('recCOSTPAYING0001', 'a', [A])
+row['fields'][CR.COST_DUE_DATE] = '2026-12-20'
+SERVE = {CR.T_SUBCATEGORIES: SUBS, CR.T_COSTS: [row]}
+asked = []
+def qr(table, formula=None, fields=None, max_records=None):
+    asked.append(list(fields or []))
+    return SERVE[table]
+fake = types.SimpleNamespace(links=lambda v: list(v or []), _cost_record=lambda: CR, query_records=qr)
+costs, ids = cw.insurance_cost_rows(fake)
+print(json.dumps({'first': costs[0].get('firstDate'), 'asked': CR.COST_DUE_DATE in asked[-1]}))`);
+    expect(r).toEqual({ first: '2026-12-20', asked: true });
+  });
+});
+
+// F12: a timeout or a dropped connection is not a RuntimeError, so it escaped, and the daily run crashed after
+// steps 1 and 2 had raised their tasks, printing neither its JSON nor its last line.
+describe('a network error in the double-cover step never loses the run\'s report (review of PR 951, F12)', () => {
+  it('a timeout reading Costs is NOT CHECKED: the JSON and the last line still print, and the book side still raises', () => {
+    const r = py(`${DAILY}
+import urllib.error
+code, made, out, last = run_daily(costs_raise=urllib.error.URLError('timed out'))
+print(json.dumps({'code': code, 'names': [m[cw.TF['name']] for m in made], 'last': last,
+                  'why': out['doubleCover'].get('costsNotChecked'), 'failures': [f['what'] for f in out['failures']]}))`);
+    expect(r.code).toBe(1);
+    expect(r.names).toEqual(['INSURANCE: two live policies on 7 Example Road - keep the cheapest']);
+    expect(r.why).toContain('URLError');
+    expect(r.failures).toEqual(['double cover']);
+    expect(r.last).toContain('double cover: Costs NOT CHECKED');
+  });
+
+  it('a failure anywhere in the step is NOT CHECKED for the whole step, and the rest of the report stands', () => {
+    const r = py(`${DAILY}
+def broken(*a, **k):
+    raise TimeoutError('the read timed out')
+cw.double_cover_check = broken
+code, made, out, last = run_daily()
+print(json.dumps({'code': code, 'last': last, 'why': out['doubleCover'].get('costsNotChecked'),
+                  'failures': [f['what'] for f in out['failures']], 'missedItems': out['missedItems']}))`);
+    expect(r.code).toBe(1);
+    expect(r.why).toMatch(/^the double-cover check could not run: TimeoutError/);
+    expect(r.failures).toEqual(['double cover']);
+    expect(r.last).toMatch(/^COMPLIANCE: /);
+    expect(r.last).toContain('double cover NOT CHECKED');
+    expect(r.last.length).toBeLessThanOrEqual(220);
   });
 });
