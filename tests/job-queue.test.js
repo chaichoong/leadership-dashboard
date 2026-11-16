@@ -25,6 +25,11 @@ const FINDINGS = resolve(__dirname, '../scripts/findings.py');
 vi.setConfig({ testTimeout: 60000, hookTimeout: 30000 });
 
 const ROOT = mkdtempSync(join(tmpdir(), 'jobqueue-'));
+// A daily cron twelve hours from now (local time, as job-queue.py reads it). A job with
+// maxLateMinutes 0 on it is always stale and never inside the 120-minute early grace. A fixed
+// '0 2 * * *' read as EARLY from 00:00 to 02:00 (the early-trigger fix of 1 Nov 2026), so the
+// skip cases failed every night just after midnight (found 00:18, 16 Nov 2026).
+const FAR_CRON = `0 ${(new Date().getHours() + 12) % 24} * * *`;
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 
 let stateDir;
@@ -207,7 +212,7 @@ describe('staleness cut-off', () => {
     // maxLateMinutes 0 rather than the 02:00 job, so this cannot pass or fail
     // depending on what time the suite happens to run.
     writeFileSync(schedulePath, JSON.stringify({
-      'always-stale': { cron: '0 2 * * *', maxLateMinutes: 0, mode: 'cooperative' },
+      'always-stale': { cron: FAR_CRON, maxLateMinutes: 0, mode: 'cooperative' },
     }));
     expect(run(['acquire', 'always-stale']).code).toBe(3);
     const states = events().map((e) => e.state);
@@ -221,7 +226,7 @@ describe('staleness cut-off', () => {
   it('writes a SKIPPED line with the reason into the job\'s runs.log when a wrapped run is refused', () => {
     const fakeHome = mkdtempSync(join(ROOT, 'home-'));
     writeFileSync(schedulePath, JSON.stringify({
-      'always-stale': { cron: '0 2 * * *', maxLateMinutes: 0, mode: 'wrapped' },
+      'always-stale': { cron: FAR_CRON, maxLateMinutes: 0, mode: 'wrapped' },
     }));
     const r = run(['run', 'always-stale', '--', 'true'], { env: { HOME: fakeHome } });
     expect(r.code).toBe(3);
@@ -253,7 +258,7 @@ describe('staleness cut-off', () => {
   it('writes an ok:false job-status row when a wrapped run is refused as stale', () => {
     const fakeHome = mkdtempSync(join(ROOT, 'home-'));
     writeFileSync(schedulePath, JSON.stringify({
-      'always-stale': { cron: '0 2 * * *', maxLateMinutes: 0, mode: 'wrapped' },
+      'always-stale': { cron: FAR_CRON, maxLateMinutes: 0, mode: 'wrapped' },
     }));
     expect(run(['run', 'always-stale', '--', 'true'], { env: { HOME: fakeHome } }).code).toBe(3);
     const rows = statusRows(fakeHome).filter((r) => r.job === 'always-stale');
@@ -944,7 +949,7 @@ describe('morning digest', () => {
 
   it('reports a skipped job as skipped, never as worked', () => {
     writeFileSync(schedulePath, JSON.stringify({
-      'always-due': { cron: '0 2 * * *', maxLateMinutes: 0, mode: 'cooperative' },
+      'always-due': { cron: FAR_CRON, maxLateMinutes: 0, mode: 'cooperative' },
     }));
     expect(run(['acquire', 'always-due']).code).toBe(3);
     const r = digest();

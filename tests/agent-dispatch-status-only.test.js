@@ -413,7 +413,10 @@ A = d.AF
 def row():
     return {'id': TID, 'fields': {A['name']: live[g.F['name']], A['status']: {'name': 'Today'}, A['dueDate']: live[g.F['due']],
             A['teamMember']: live[g.F['team']], A['notes']: live[g.F['notes']], A['description']: live[g.F['desc']]}}
-ts = (datetime.now(timezone.utc) - timedelta(minutes=30)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+# The rest began today in London, never yesterday: from 00:00 to 00:30 "half an hour ago" fell on
+# yesterday, the rest's due-date cap then ended it today, and the case failed (found 00:18, 16 Nov 2026).
+_start = datetime.combine(today, datetime.min.time(), tzinfo=d.LONDON).astimezone(timezone.utc) + timedelta(minutes=1)
+ts = max(datetime.now(timezone.utc) - timedelta(minutes=30), _start).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 with open(d.INTENT_LEDGER, 'w') as fh:
     fh.write(json.dumps({'task': TID, 'ts': ts, 'event': 'status', 'fp': d.rest_fingerprint(d.rest_view(row()))}) + '\\n')
 g.fetch_open_tasks = lambda: [{'id': TID, 'fields': dict(live)}]
