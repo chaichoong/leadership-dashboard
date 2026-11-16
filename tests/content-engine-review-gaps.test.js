@@ -321,10 +321,10 @@ notes = ["Learning from my diary is still not in the right place.",
          "Learnings from my diary is cut off too early again.",
          "The title card on the learnings clip is wrong."]
 res = [render.learnings_doubted(n) for n in notes]`).res;
-    // 2112's 26 Oct note gives its time in the NEXT sentence, which PR 948's M2 rule does not read, so it counts as
-    // "wrong, no time": the finder decides and the hand window is the fallback. The same words in one sentence give a time.
+    // 2112's 26 Oct note gives its time in the sentence straight after ("It should kick in at around 4:32"), which is
+    // read since 16 Nov 2026 (the follow-on rule below), so it is a time, not "wrong, no time".
     // The last five must never fire (review of PR 957): praise, a note about another part, the clip's end, its banner.
-    expect(r).toEqual([true, true, true, true, true, false, false, false, false, true, false, false, false, false, false, false, false]);
+    expect(r).toEqual([true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false]);
   });
 
   const REDO = (note) => `
@@ -374,6 +374,62 @@ res = render.concrete_receipt(text, 2121, {"a": ep}, {"redo_lfmd_before": {"wind
   });
 });
 
+describe('a Learnings time in the sentence straight after: read only when it is plainly about the same clip', () => {
+  it("BACK-TEST: 2112's 26 Oct note gives 4:32, on the full episode's clock", () => {
+    const r = py(`res = [render.learnings_time_from(n) for n in (
+        "Learnings from my diary is wrong. It should kick in at around 4:32 of the main episode.",
+        "Learnings from my diary is wrong. It should kick in at around 4:32.",
+        "Learnings from my diary is wrong. This one starts at 4:32.",
+        "Learnings from my diary is wrong. That should come in at about 4:32.",
+        "Learnings from my diary is wrong. It should be at 4:32.")]`).res;
+    expect(r).toEqual([[true, 272], [true, 272], [true, 272], [true, 272], [true, 272]]);   // origin/main: [true, null] for every one
+  });
+
+  it('never reads a sentence that is about something else, or not plainly about the clip', () => {
+    const r = py(`res = [render.learnings_time_from(n) for n in (
+        "The learnings from my diary is fine. The jingle should start at 0:05.",
+        "Learnings from my diary is wrong. It should start at 4:32, after the intro.",
+        "Learnings from my diary is fine. It is a great episode, about 4:32 in.",
+        "Learnings from my diary is wrong. The clip should kick in at 4:32.",
+        "The thumbnail is wrong. It should start at 4:32.",
+        "Learnings from my diary should end at 8:05. It should start at 6:00.",
+        "Learnings from my diary is wrong. It should kick in at 4:32. It should start at 6:00.")]
+res.append(list(render.jingle_cut_from("The jingle is still in the wrong place. It should appear at about 33 seconds")))`).res;
+    // the last note: only the ONE sentence straight after a Learnings sentence is read, so 6:00 (two sentences on) is not
+    expect(r).toEqual([[true, null], [true, null], [true, null], [true, null], [false, null], [true, null], [true, 272], [true, null]]);
+  });
+
+  it("redo_day parks 2112's 4:32 for the night render, instead of treating the note as wrong-with-no-time", () => {
+    const r = py(`
+tmp = tempfile.mkdtemp()
+note = "Learnings from my diary is wrong. It should kick in at around 4:32 of the main episode."
+state = {"2112": {"task": "recFAKE0000002112", "verdict": "changes", "feedback": note, "synced": "2026-10-26T09:00:00"}}
+led = {"VID_A.insv": {"day": 2112, "episode": 2112, "role": "episode", "status": "rendered", "duration": 700.0, "intro_at": 25.65,
+                      "lfmd_window": [401.56, 454.4], "lfmd_window_by": "operator"}}
+rp = os.path.join(tmp, "r.md"); open(rp, "w").write(render.sent_back_receipt(note))
+watch.save_ledger = lambda l: None
+render.redo_day(2112, rp, "test", ledger=led, state=state, root=tmp, today=dt.date(2026, 10, 26), last_night=None, running=False)
+e = led["VID_A.insv"]
+res = {k: e.get(k) for k in ("lfmd_at_keep", "lfmd_window_doubted")}`).res;
+    expect(r).toEqual({ lfmd_at_keep: { full: 272, master: 265 }, lfmd_window_doubted: null });
+  });
+
+  it('the receipt says when a Learnings time on his note was found but not used, and why', () => {
+    const r = py(`
+unread = "Learnings from my diary is wrong. The clip should kick in at 4:32."
+two = "Learnings from my diary starts at 4:30, and the learnings from my diary on 2121 starts at 6:30."
+ep = {"episode": 2112, "role": "episode", "status": "rendered", "intro_at": 25.65, "lfmd_window": [401.56, 454.4], "lfmd_window_by": "detector"}
+res = [render.concrete_receipt(render.sent_back_receipt(unread), 2112, {"a": ep}, {"feedback": unread}),
+       render.lfmd_receipt(two, (401.56, 454.4), intro_at=25.65),
+       render.lfmd_receipt("The learnings from my diary is fine. The jingle should start at 0:05.", (401.56, 454.4), intro_at=25.65),
+       render.lfmd_receipt("Learnings from my diary is wrong. It should kick in at around 4:32.", (264.0, 340.0), intro_at=25.65)]`).res;
+    expect(r[0]).toContain('(the time on your note (4:32) was not used: it is not in a sentence about the Learnings clip)');
+    expect(r[1]).toContain('(the times on your note (4:30 and 6:30) were not used: the note gives two different times for the clip)');
+    expect(r[2]).not.toContain('not used');      // a jingle time is not a Learnings time left unused
+    expect(r[3]).not.toContain('not used');      // a time that was used is not reported as unused
+  });
+});
+
 describe('F3: the title rule leaves a ranking, a comparison and a countdown alone', () => {
   it('BACK-TEST: the three titles the review found mangled are left as written', () => {
     const r = py(`res = [platform_copy.title_day_first(t) for t in ("#1 Mistake Every Barefoot Runner Makes", "Day 1 vs Day 2100: What Changed",
@@ -381,11 +437,18 @@ describe('F3: the title rule leaves a ranking, a comparison and a countdown alon
     expect(r).toEqual([null, null, null, null, null]);
   });
 
+  it('Kevin, 16 Nov 2026: a span with a dash, a list with "and", and "v" are left alone too', () => {
+    const r = py(`res = [platform_copy.title_day_first(t) for t in ("Day 1 - Day 2100: What Changed", "Day 1, 2 and 3: Recovery",
+       "Week 1 v Week 2", "Week 1 v Week 2: Recovery Compared")]`).res;
+    expect(r).toEqual([null, null, null, null]);
+  });
+
   it('CONTROL: a leading day label still moves to the end', () => {
     const r = py(`res = [platform_copy.title_day_first(t) for t in ("Day 2079: Running in the Rain", "Day 2079 Running in the Rain",
-       "#12: Why I Run Barefoot", "Day 2100, 5 Lessons From the Run", "Episode 2100 | Rest Days")]`).res;
+       "#12: Why I Run Barefoot", "Day 2100, 5 Lessons From the Run", "Episode 2100 | Rest Days", "Day 2100 - 5 Lessons From the Run")]`).res;
     expect(r).toEqual([['Day 2079', 'Running in the Rain (Day 2079)'], ['Day 2079', 'Running in the Rain (Day 2079)'],
-      ['#12', 'Why I Run Barefoot (#12)'], ['Day 2100', '5 Lessons From the Run (Day 2100)'], ['Episode 2100', 'Rest Days (Episode 2100)']]);
+      ['#12', 'Why I Run Barefoot (#12)'], ['Day 2100', '5 Lessons From the Run (Day 2100)'], ['Episode 2100', 'Rest Days (Episode 2100)'],
+      ['Day 2100', '5 Lessons From the Run (Day 2100)']]);
   });
 });
 

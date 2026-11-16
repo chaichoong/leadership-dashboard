@@ -1470,19 +1470,47 @@ LENGTH_WORDS_RE = re.compile(r"\b(?:end|ends|ending|ended|finish\w*|length|lasts
                              r"|\d\s*(?:minutes?|mins?|seconds?|secs?)\s+long\b", re.I)
 
 
+# The ONE sentence a Learnings time may come from without naming the clip (Kevin, 16 Nov 2026, on PR 957): the one
+# straight after a Learnings sentence, when it is plainly about that clip. It starts with It, This or That, says where
+# the clip starts, and names no other part of the episode. 2112's 26 Oct note: "Learnings from my diary is wrong. It
+# should kick in at around 4:32 of the main episode." "The jingle should start at 0:05" never qualifies.
+FOLLOW_ON_RE = re.compile(r"^\W*(?:it|this|that)\b", re.I)
+FOLLOW_START_RE = re.compile(r"\b(?:kick(?:s|ed|ing)?\s+in|start\w*|begin\w*|began|come[s]?\s+in|came\s+in|should\s+be\s+at)\b", re.I)
+OTHER_PART_RE = re.compile(r"\b(?:jingle|intro\w*|title\w*|summary|short\w*|thumbnail\w*|teaser|banner)\b", re.I)
+
+
 def note_figures(feedback, topic, figure_re):
     """Every figure figure_re finds in a sentence of Kevin's note that NAMES `topic` itself ('jingle' or
     'learnings'). A time never carries into or out of a neighbouring sentence (review of PR 948, 16 Nov 2026):
     "The jingle is in the right place. The thumbnail at 0:45 shows the wrong frame." must not move the jingle to
     45 s. The price is paid knowingly: 2100's "The jingle is still in the wrong place. It should appear at about 33
     seconds" now gives no figure and the pause detector decides, as it does for a jingle note with no time. A
-    Learnings sentence about length or the end of the clip gives no start."""
-    out = []
-    for s in note_sentences(feedback):
+    Learnings sentence about length or the end of the clip gives no start. The one exception is a Learnings
+    follow-on sentence (FOLLOW_ON_RE above), and only for the Learnings clip."""
+    out, sents = [], note_sentences(feedback)
+    for i, s in enumerate(sents):
         if topic == "jingle" and not about_jingle(s): continue
-        if topic == "learnings" and (not about_learnings(s) or LENGTH_WORDS_RE.search(s)): continue
+        if topic == "learnings" and LENGTH_WORDS_RE.search(s): continue
+        if topic == "learnings" and not about_learnings(s):
+            follows = i > 0 and about_learnings(sents[i - 1]) and not LENGTH_WORDS_RE.search(sents[i - 1])
+            if not (follows and FOLLOW_ON_RE.search(s) and FOLLOW_START_RE.search(s) and not OTHER_PART_RE.search(s)): continue
         out += [round(clock_seconds(m), 2) for m in figure_re.finditer(s)]
     return out
+
+
+def learnings_times_unused(feedback):
+    """The receipt clause when Kevin's note carries a Learnings-style time that was NOT used, else ''. Said so he
+    never reads a rebuild as following a time it ignored (Kevin, 16 Nov 2026, on PR 957)."""
+    about, used = learnings_time_from(feedback)
+    if not about or used is not None: return ""
+    seen = sorted({round(clock_seconds(m)) for x in note_sentences(feedback) if not OTHER_PART_RE.search(x) and not about_jingle(x)
+                   for m in LEARN_AT_RE.finditer(x)} - {0})      # a jingle or title time is not a Learnings time left unused
+    if not seen: return ""
+    read = {v for v in note_figures(feedback, "learnings", LEARN_AT_RE) if v > 0}
+    return "the time%s on your note (%s) %s not used: %s" % (
+        "s" if len(seen) > 1 else "", " and ".join(mmss(v) for v in seen), "were" if len(seen) > 1 else "was",
+        "the note gives two different times for the clip" if len(read) > 1 else
+        "%s not in a sentence about the Learnings clip" % ("they are" if len(seen) > 1 else "it is"))
 
 
 def jingle_cut_from(feedback):
@@ -1773,6 +1801,7 @@ def lfmd_receipt(feedback, window, points=None, intro_at=None, unused=None, why_
     if not pts: return ""
     clip = "the Learnings from my diary clip is rebuilt from %s" % window_words(window, intro_at, jingle_s)
     if unused is not None: clip += " (%s)" % note_unused_words(unused, "the clip finder", why_unused)
+    elif learnings_times_unused(feedback): clip += " (%s)" % learnings_times_unused(feedback)
     return answer_points([p.strip() for p in pts], clip + " and goes to the socials and the YouTube Short with this episode",
                          "rebuilt to this note: " + clip + "; nothing else on the episode changed")
 
@@ -2375,6 +2404,7 @@ def concrete_receipt(text, day, ledger, card):
               # his note said the hand-placed section was wrong and gave no time, and the finder found no other start
               " (the clip finder found no other start, so this is the section placed by hand before; send it back with "
               "the time it starts and the clip moves there)" if ep.get("lfmd_doubted_kept") else "")
+    if not placed and learnings_times_unused((card or {}).get("feedback")): placed = " (%s)" % learnings_times_unused(card["feedback"])
     return text.replace(REDO_LEARNINGS, "the episode was re-rendered and its Learnings from my diary clip now runs from %s%s%s; "
                         "it goes to the socials and the YouTube Short with this episode" % (window_words(w, at, j), placed, was))
 
@@ -2925,8 +2955,10 @@ def _selftest_note_times():
     assert learnings_time_from("The intro jingle should happen at 26 seconds of the full episode.") == (False, None)
     # the Learnings clip: twelve notes gave its start and nothing read one
     assert learnings_time_from("Learnings from my diary is at exactly 4 minutes and 37 seconds of the main episode.") == (True, 277.0)
-    assert learnings_time_from("Learnings from my diary is wrong. It should kick in at around 4:32 of the main episode.") == (True, None), \
-        "a time never carries out of its own sentence (review of PR 948)"
+    assert learnings_time_from("Learnings from my diary is wrong. It should kick in at around 4:32 of the main episode.") == (True, 272.0), \
+        "the one sentence straight after, plainly about the same clip, is read (Kevin, 16 Nov 2026)"
+    assert learnings_time_from("The learnings from my diary is fine. The jingle should start at 0:05.") == (True, None), \
+        "a time never carries out of its own sentence into another part of the episode (review of PR 948)"
     assert learnings_time_from("Learnings from my diary should kick in at around 4:32 of the main episode.") == (True, 272.0)
     assert learnings_time_from("Learning from my diary is at 4m50s of the episode - please sort and resubmit for approval") == (True, 290.0)
     assert learnings_time_from("There was a learnings from my diary in this episode, about 7 minutes and 8 seconds in.") == (True, 428.0)
