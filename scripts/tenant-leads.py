@@ -855,7 +855,7 @@ def docs_card(data, lead, town, day):
             "2. The name and phone number or email of someone who can give you a reference: a previous "
             "landlord or a support worker.\n\n"
             "If the form does not work for you, reply to this email with them instead.\n\n"
-            "Roy will also check your photo ID in person before you move in. It is the right to rent check "
+            "I will also check your photo ID in person before you move in. It is the right to rent check "
             "the law asks every landlord to make.\n\n"
             "If you would rather not hear from us, reply STOP.")
     return {"kind": "docs", "town": town, "name": f"{PREFIXES['docs']}{first_name(lead)} for a room in {town} {fmt_day(day)}",

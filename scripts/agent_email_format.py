@@ -882,6 +882,141 @@ def signoff_problem(body):
     return ""
 
 
+# ─── WHAT KEVIN HAS RULED OUT OF ANYTHING SENT (16 Nov 2026) ─────────
+#
+# Four lessons that agents kept breaking, moved from prose into refusals (the 13 Nov 2026 estate
+# review: a rule code can enforce is a refusal in code, never a line in a prompt):
+#   - no placeholders (creditor-management lessons of 27 and 28 Aug 2026: "No placeholders, ever.
+#     Find the reference number, address and amount before the card reaches Kevin." A letter of
+#     authority went to his queue carrying "[Kevin's home address - confirm before approving]");
+#   - no em dash (4 Sep 2026: "Take out the em dash"; his house style bans it everywhere);
+#   - mail signed Roy Lavin is written AS Roy (22 Oct 2026: "the email is signed off by Roy, so you
+#     can't write it as if Roy is in the third person");
+#   - a tenant mail-out never shows its recipients each other (30 Sep 2026: "It's critical that these
+#     emails are put in the BCC section so that they can't see each other's email addresses").
+# Submit only, like the rest of validate_submission: an email Kevin already approved still goes out.
+#
+# Each reads only the SENDER'S OWN WORDS: the body above the first quoted message. A reply that
+# quotes the other side's email carries their dashes, brackets and names, which are theirs to write.
+QUOTED_START_RE = re.compile(
+    r"^[ \t]*(?:On .{3,200}wrote:[ \t]*$|-{2,}[ \t]*(?:Original|Forwarded) [Mm]essage|From: .+|>|_{3,}[ \t]*$)",
+    re.M)
+
+
+def own_words(body):
+    """The body above the first quoted message (a "On ... wrote:" line, an Original or Forwarded
+    message marker, a quoted "From:" line, a "> " line or Outlook's line of underscores)."""
+    text = body or ""
+    m = QUOTED_START_RE.search(text)
+    return text[:m.start()] if m else text
+
+
+# A square-bracket token that is not a link's text ("[the form](https://...)"), or an angle-bracket
+# token that is not an email address or a web link ("<name@example.com>", "<https://...>"). A real
+# email has no use for either: every one measured is a value the agent never found, or a note for
+# Kevin ("[ EMAIL TO THE COUNCIL - this is what will be sent ]") sitting inside what is sent.
+PLACEHOLDER_SQUARE_RE = re.compile(r"\[[^\[\]\n]*[A-Za-z£$][^\[\]\n]*\](?!\()")
+PLACEHOLDER_ANGLE_RE = re.compile(r"<(?![^<>\n]*(?:@|://|mailto:|www\.))[^<>\n]*[A-Za-z][^<>\n]*>")
+# Capitals only, whole words: "XXX" and longer, "TBC", "TBA", "INSERT". "Xxx" in a name, "tbc" in a
+# web address and "insert" in a sentence ("insert the key") are the email's own words. A masked card
+# number is written "XXXX1234" or "**** 1234"; only "XXXX 1234" would be read, and an agent's email
+# has no reason to carry either.
+PLACEHOLDER_MARK_RE = re.compile(r"(?<![A-Za-z0-9])(?:X{3,}|TBC|TBA|INSERT)(?![A-Za-z0-9])")
+EM_DASH = "—"
+
+
+def placeholder_problem(text, where="the email"):
+    """Why `text` still carries a placeholder, or ""."""
+    for rx in (PLACEHOLDER_SQUARE_RE, PLACEHOLDER_ANGLE_RE, PLACEHOLDER_MARK_RE):
+        m = rx.search(text or "")
+        if m:
+            return ("%s still carries a placeholder (%r). Kevin's ruling, 27 Aug 2026: no placeholders, "
+                    "ever. Find the reference number, address or amount before the card reaches him, or "
+                    "say plainly in the card above the headers what could not be found." % (where, m.group(0)[:80]))
+    return ""
+
+
+def em_dash_problem(text, where="the email"):
+    """Why `text` carries an em dash, or ""."""
+    i = (text or "").find(EM_DASH)
+    if i < 0:
+        return ""
+    near = " ".join(text[max(0, i - 30):i + 30].split())
+    return ("%s carries an em dash (near %r). Kevin's house style bans the em dash in anything that "
+            "goes out (4 Sep 2026): use a comma, a full stop or a hyphen." % (where, near))
+
+
+ROY_SIGNATURE_RE = re.compile(r"^Roy Lavin\b")
+ROY_NAMED_RE = re.compile(r"\bRoy\b")
+# Roy saying who he is, in the first person, is not Roy in the third person ("Hi Anthony, Roy here.").
+ROY_SELF_RE = re.compile(r"\b(?:Roy(?: Lavin)? here|this is Roy(?: Lavin)?|I am Roy(?: Lavin)?|I'm Roy(?: Lavin)?"
+                         r"|my name is Roy(?: Lavin)?)\b", re.I)
+# A details line ("- Managing agent: Roy Lavin, Agile Lets, c/o ...") states a fact a council or insurer asked
+# for; it does not speak of Roy in the third person. Found in the back-test, in a reply to a council officer.
+ROY_FIELD_LINE_RE = re.compile(r"^[ \t]*(?:[-*•][ \t]*)?[A-Za-z][A-Za-z '&/()-]{0,40}:[ \t]+[^\n]*$", re.M)
+
+
+def roy_third_person_problem(body):
+    """Why a body signed Roy Lavin names Roy above its sign-off, or ""."""
+    words = own_words(body)
+    lines = words.splitlines()
+    sig = None
+    for i in range(len(lines) - 1, -1, -1):
+        if ROY_SIGNATURE_RE.match(lines[i].strip()):
+            sig = i
+            break
+    if sig is None or not any(ROY_SIGNATURE_RE.match(ln) for ln in closing_block(words)):
+        return ""
+    above = "\n".join(lines[:sig])
+    last = None
+    for m in SIGNOFF_RE.finditer(above):
+        last = m
+    if last is not None:
+        above = above[:last.start()]
+    m = ROY_NAMED_RE.search(ROY_SELF_RE.sub(" ", ROY_FIELD_LINE_RE.sub("", above.replace("’", "'"))))
+    if not m:
+        return ""
+    return ("this email is signed Roy Lavin but names Roy above the sign-off (%r). Kevin's ruling, "
+            "22 Oct 2026: mail signed by Roy is written as Roy, in the first person (\"I will\", "
+            "\"my mobile\", \"I am copied in\"), never \"Roy will\" or \"Roy has asked\"."
+            % " ".join(above[max(0, m.start() - 30):m.end() + 30].split()))
+
+
+# The tenant-finding chain's email cards (scripts/tenant-leads.py PREFIXES): each goes to many people
+# who must never see each other. TO-EACH sends the same words to each address separately.
+MAILOUT_TASK_PREFIXES = ("TENANT MAILOUT: ", "TENANT REFERRAL: ", "TENANT KEEPWARM: ", "TENANT PAST APPLICANTS: ")
+
+
+def mailout_recipients_problem(task_name, parsed):
+    """Why a tenant mail-out would show one recipient another's address, or ""."""
+    name = str(task_name or "").strip()
+    if not name.upper().startswith(tuple(p.strip().upper() for p in MAILOUT_TASK_PREFIXES)):
+        return ""
+    shown = len(parsed.get("to") or []) + len(parsed.get("cc") or [])
+    if shown > 1:
+        return ("this is a tenant mail-out and its TO and CC lines carry %d addresses, so each person "
+                "would see the others. Kevin, 30 Sep 2026: they must never see each other's addresses. "
+                "Use `TO-EACH:` (the same words go to each address as a separate email); BCC is refused "
+                "because every address goes on the card." % shown)
+    return ""
+
+
+def letter_text(document):
+    """The text of a PDF this card will post, or None when there is no such file to read here (the
+    submit gate's own file check refuses a missing file). Raises EmailFormatError when the file is
+    there but cannot be read: a letter nobody could check is not a letter that passed."""
+    import os
+    path = os.path.expanduser(str(document or ""))
+    if not path.lower().endswith(".pdf") or not os.path.isfile(path):
+        return None
+    try:
+        import pypdf
+        return "\n".join((page.extract_text() or "") for page in pypdf.PdfReader(path).pages)
+    except Exception as exc:  # any read failure becomes a refusal that names it, never a pass
+        raise EmailFormatError("could not read the text of %s to check it for placeholders and em dashes "
+                               "(%s: %s)" % (os.path.basename(path), type(exc).__name__, str(exc)[:120]))
+
+
 def expected_sender(subject, body):
     """Which identity this copy must go out as.
 
@@ -898,11 +1033,12 @@ def expected_sender(subject, body):
     return PERSONAL_SENDER
 
 
-def validate_submission(output):
+def validate_submission(output, task_name=None):
     """Strict checks the SUBMIT gate applies. Raises EmailFormatError.
 
     Returns the parsed email so the caller does not parse twice. Never called
-    on the send path — see the note above.
+    on the send path — see the note above. `task_name` lets the mail-out check
+    know a tenant mail-out; without it that one check cannot run.
     """
     parse_text(output)                                 # a bad text is refused before Kevin sees the card, by name
     parsed = parse_output(output)
@@ -965,6 +1101,13 @@ def validate_submission(output):
             "line above `on behalf of <company>` when writing for an entity. "
             "No address, no phone number, no contact block." % bad)
     bad = sms_reply_problem(parsed)
+    if bad:
+        raise EmailFormatError(bad)
+    words = own_words(parsed["body"])
+    # The body only, never the SUBJECT: a reply keeps the inbound subject so it threads, and the back-test
+    # found every subject hit was the other side's ("[SMS]", "[EXTERNAL]", "[Quote Ref: 931520229]").
+    bad = (placeholder_problem(words) or em_dash_problem(words) or roy_third_person_problem(parsed["body"])
+           or mailout_recipients_problem(task_name, parsed))
     if bad:
         raise EmailFormatError(bad)
     # A mail-out redrafted as one long TO line shows every contact to every other
@@ -1385,19 +1528,35 @@ def parse_any(output):
     return parsed
 
 
-def validate_submission_any(output):
+def validate_submission_any(output, task_name=None):
     """The SUBMIT gate for all three shapes. Raises EmailFormatError.
 
     Email keeps its strict extra rules (a FROM identity, no contact details
     under the sign-off) because those came from counting Kevin's own
     corrections. A postal letter and a signature request have no sender
-    identity to get wrong, so their strict layer IS their parser.
+    identity to get wrong, so their strict layer is their parser plus the
+    document's own text (16 Nov 2026): a letter we post carries no placeholder
+    and no em dash, and a document going out for signature carries no
+    placeholder. The summary under a POST or SIGN card is for Kevin and is not
+    read. An em dash is not refused in a document for signature: the tenancy
+    pack's code-made title lines carry one, and the agent cannot change them.
     """
     kind = detect_kind(output)
     if kind == "signkevin":
         return parse_sign_as_kevin_output(output)
     if kind == "post":
-        return parse_post_output(output)
+        parsed = parse_post_output(output)
+        text = letter_text(parsed["document"])
+        if text is not None:
+            bad = placeholder_problem(text, "the letter") or em_dash_problem(text, "the letter")
+            if bad:
+                raise EmailFormatError(bad)
+        return parsed
     if kind == "sign":
-        return parse_sign_output(output)
-    return validate_submission(output)
+        parsed = parse_sign_output(output)
+        text = letter_text(parsed["document"])
+        bad = placeholder_problem(text, "the document") if text is not None else ""
+        if bad:
+            raise EmailFormatError(bad)
+        return parsed
+    return validate_submission(output, task_name=task_name)
