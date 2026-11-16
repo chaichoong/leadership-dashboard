@@ -281,6 +281,48 @@ def check_km(t, cum, transcript=""):
     return KM_RE.sub(fix, t), issues
 
 
+# THE DAY NUMBER NEVER LEADS A TITLE (Kevin's performance reads, 1 Oct and 1 Nov 2026, lessons sort line 43): plain
+# topic first, "Day 2079" and series labels such as "Day 4 of My 30 Day Experiment" at the end, never the start.
+# Only the START is refused. Back-test, 16 Nov 2026, on the 256 SEO titles of all 128 episode cards: none started
+# with a label, and 34 carried one somewhere other than the end ("Running Streak Day 2100: ...", "What Day 2071
+# Taught Me"), every one approved by Kevin with no note on the title, so "only at the end" would have flagged 34
+# good titles and stays judgement, with the keyword-first rule the copy prompt already reads.
+TITLE_FIELDS = ("YouTube Copy", "Blog Copy")
+SEO_TITLE_RE = re.compile(r"^(?P<lead>[ \t*_#]*SEO Title[ \t*_]*:[ \t*_]*)(?P<title>[^\n]*?)(?P<trail>[ \t*_]*)$", re.I | re.M)
+# what may follow a leading label: a colon, a bar, a dash with space round it, or the comma an em dash becomes
+_TITLE_SEP = r"(?:\s*[:|,–—]|\s+-\s)"
+LABEL_FIRST_RE = re.compile(
+    r"^[\s(\[]*(?P<label>(?:day|ep|episode|part|week)\.?\s*#?\s*\d+(?:,\d{3})*(?:\s+of\s+[^\n]{1,60}?(?=" + _TITLE_SEP + r"))?"
+    r"|#\d+(?:,\d{3})*|\d+(?:,\d{3})*(?=" + _TITLE_SEP + r"))[\s)\]]*(?:[:|,–—]|-(?=\s))?\s*(?P<rest>.*)$", re.I)
+
+
+def title_day_first(title):
+    """(label, title with the label moved to the end) when the title STARTS with a day or number label, else None.
+    'Day 2079: Running in the Rain' -> ('Day 2079', 'Running in the Rain (Day 2079)'). A count is a topic, not a
+    label: '3 Lessons From the Run' and '2100 Days Barefoot' are left alone. The rest is None when the title is
+    nothing but the label, which is reported and not rewritten."""
+    m = LABEL_FIRST_RE.match(title or "")
+    if not m: return None
+    label, rest = " ".join(m.group("label").split()), m.group("rest").strip()
+    return label, (("%s (%s)" % (rest, label)) if rest else None)
+
+
+def check_titles(field, text):
+    """(text, issues): a YouTube or blog SEO title that starts with the day number is refused as written; the label
+    is moved to the end, the way an em dash is replaced, so the copy still lands and the card says what changed."""
+    if field not in TITLE_FIELDS: return text, []
+    issues = []
+    def fix(m):
+        got = title_day_first(m.group("title"))
+        if not got: return m.group(0)
+        label, moved = got
+        if not moved:
+            issues.append("%s: SEO title is only the label '%s'; it needs a topic first" % (field, label)); return m.group(0)
+        issues.append("%s: SEO title started with '%s'; moved to the end (topic first, the day number last)" % (field, label))
+        return m.group("lead") + moved + m.group("trail")
+    return SEO_TITLE_RE.sub(fix, text), issues
+
+
 def rules_check(fields, transcript="", km=None):
     """Returns (fixed_fields, issues). Em dashes are fixed; distances are corrected (check_km); everything else is
     reported. `transcript` is the source text a figure must appear in: the transcript plus the prompt's own inputs
@@ -290,6 +332,7 @@ def rules_check(fields, transcript="", km=None):
     for field, txt in fields.items():
         t = txt.replace(" — ", ", ").replace("—", ", ").replace(" – ", ", ")
         if t != txt: issues.append("%s: em dash replaced" % field)
+        t, title_issues = check_titles(field, t); issues += title_issues
         t, km_issues = check_km(t, km, transcript); issues += ["%s: %s" % (field, i) for i in km_issues]
         for b in BANNED:
             if b in t.lower(): issues.append("%s: banned phrase '%s'" % (field, b))
@@ -551,7 +594,18 @@ def selftest():
     assert unfilled_work(fulls, {2069}, find=recs.get) == [(2071, "Learnings From My Diary"), (2071, "Short Form Video")], \
         "an approved day is never rewritten; a missing record counts; a record with copy does not"
     _selftest_run_day_isolation()
-    print(json.dumps({"checks": 23, "failed": []}))
+    # the day number never leads a YouTube or blog SEO title (lessons sort line 43); a count of things is a topic
+    assert title_day_first("Day 2079: Running in the Rain") == ("Day 2079", "Running in the Rain (Day 2079)")
+    assert title_day_first("Day 4 of My 30 Day Experiment: Cold Showers") == ("Day 4 of My 30 Day Experiment", "Cold Showers (Day 4 of My 30 Day Experiment)")
+    for keep in ("Running Streak Day 2100: My Hardest 100 Days So Far", "3 Lessons From the Run", "2100 Days Barefoot: What I Learned",
+                 "Day Off Running: Why Rest Matters", "Daytime Running Tips"):
+        assert title_day_first(keep) is None, keep
+    f7, i7 = rules_check({"YouTube Copy": "SEO Title: Day 2079 — Running in the Rain\nDescription: Day 2079 of my run.",
+                          "Podcast Copy": "Title: Day 2079: Running"}, "")
+    assert f7["YouTube Copy"].startswith("SEO Title: Running in the Rain (Day 2079)\nDescription: Day 2079 of my run."), f7
+    assert f7["Podcast Copy"] == "Title: Day 2079: Running", "only the YouTube and blog SEO titles"
+    assert any("SEO title started with 'Day 2079'" in i for i in i7), i7
+    print(json.dumps({"checks": 28, "failed": []}))
 
 
 def _selftest_run_day_isolation():
