@@ -72,6 +72,8 @@ describe('no placeholder in an email body (27 and 28 Aug 2026)', () => {
   });
 
   it('passes the email\'s own brackets: a link, an address, a web link, and quoted mail below', () => {
+    // The control: the same kind of email with a value never found IS refused.
+    expect(check(KEVIN('Hi Sam,\n\nPlease fill in the form for account [reference].')).ok).toBe(false);
     for (const body of [
       'Hi Sam,\n\nPlease fill in [the short form](https://forms.example.test/abc) when you can.',
       'Hi Sam,\n\nPlease reply to <billing@example-energy.test> or see <https://example-energy.test/help>.',
@@ -84,6 +86,9 @@ describe('no placeholder in an email body (27 and 28 Aug 2026)', () => {
   });
 
   it('never reads the SUBJECT: a reply keeps the other side\'s tag so it threads (back-test: 12 false refusals)', () => {
+    // The control: under that subject, a placeholder in the BODY is still refused.
+    expect(check(KEVIN('Hi Sam,\n\nThe amount is [amount].',
+      'TO: accounts@example-energy.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: Re: [EXTERNAL] Rent at 9 Example Road')).ok).toBe(false);
     for (const subject of ['Re: [EXTERNAL] Rent at 9 Example Road', 'Re: Renewal [Quote Ref: 123456789]']) {
       const r = check(KEVIN('Hi Sam,\n\nThank you, that is fine.',
         `TO: accounts@example-energy.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: ${subject}`));
@@ -100,6 +105,8 @@ describe('no em dash in anything that goes out (4 Sep 2026)', () => {
   });
 
   it('passes an en dash, a hyphen, and an em dash only in the quoted reply below', () => {
+    // The control: the same reply with the em dash in its own words is refused.
+    expect(check(KEVIN('Hi Sam,\n\nThanks \u2014 noted.\n\n-----Original Message-----\nFrom: Sam\nWe will call soon.')).ok).toBe(false);
     expect(check(KEVIN('Dear Sir or Madam,\n\nUnit 1 – 9 Example Road, and a well-kept garden.'))).toEqual({ ok: true });
     expect(check(KEVIN('Hi Sam,\n\nThanks, noted.\n\n-----Original Message-----\nFrom: Sam\nWe will call — soon.'))).toEqual({ ok: true });
   });
@@ -125,6 +132,8 @@ describe('mail signed Roy Lavin is written as Roy (22 Oct 2026)', () => {
   });
 
   it('passes Roy introducing himself, a details line, Royal Mail, Roy in the quote, and Kevin naming Roy', () => {
+    // The control: the third person, in the same shape, is refused.
+    expect(check(ROY('Hi Anthony,\n\nRoy has asked me to thank you for telling us about the change.')).ok).toBe(false);
     expect(check(ROY('Hi Anthony,\n\nRoy here. Thank you for telling me about the change.'))).toEqual({ ok: true });
     expect(check(ROY('Dear Ms Example,\n\nThe details you asked for:\n- Owner: Mr A Example\n- Managing agent: Roy Lavin, Agile Lets\n\nI confirm receipt of the notice.'))).toEqual({ ok: true });
     expect(check(ROY('Hello Lee,\n\nThe report went by Royal Mail on Monday. I will arrange access myself.'))).toEqual({ ok: true });
@@ -192,14 +201,20 @@ tl = importlib.util.module_from_spec(spec); spec.loader.exec_module(tl)
 from agent_email_format import validate_submission_any, EmailFormatError
 lead = {"id": "recLEADexample0001", "fields": {tl.L["name"]: "Sam Example", tl.L["email"]: "sam@example-mail.test"}}
 card = tl.docs_card({}, lead, "Exampletown", date(2026, 11, 16))
-try:
-    validate_submission_any(card["output"], task_name=card["name"])
-    print(json.dumps({"ok": True}))
-except EmailFormatError as e:
-    print(json.dumps({"ok": False, "error": str(e)}))
+out = {}
+for label, text in (("asWritten", card["output"]),
+                    ("thirdPerson", card["output"].replace("I will also check your photo ID", "Roy will also check your photo ID"))):
+    try:
+        validate_submission_any(text)
+        out[label] = "ok"
+    except EmailFormatError as e:
+        out[label] = "refused: " + str(e)[:80]
+print(json.dumps(out))
 `;
     const r = JSON.parse(execFileSync('python3', ['-c', py, SCRIPTS], { encoding: 'utf8' }).trim());
-    expect(r).toEqual({ ok: true });
+    expect(r.asWritten).toBe('ok');
+    // The wording it had until 16 Nov 2026 would now be refused, so the card had to change with the check.
+    expect(r.thirdPerson).toMatch(/^refused: this email is signed Roy Lavin/);
   });
 });
 
@@ -252,6 +267,10 @@ describe('a letter we post, and a document going out for signature, are read too
   });
 
   it('passes a clean letter, and leaves a missing file to the file gate', () => {
+    // The control: the same letter with an em dash is refused.
+    withPdf('Dear Sir \u2014 please hold the account while the court order stands.', (pdf) => {
+      expect(check(POST(pdf)).ok).toBe(false);
+    });
     withPdf('Dear Sir, please hold the account while the court order stands. Yours faithfully, A Example', (pdf) => {
       expect(check(POST(pdf))).toEqual({ ok: true });
     });
