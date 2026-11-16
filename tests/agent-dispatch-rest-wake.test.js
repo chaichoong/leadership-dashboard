@@ -191,13 +191,13 @@ verdict_woke = by["recVerdictAaaaaaa"].get("wokeByChange", {}).get("changed")
 verdict_ok = complete("recVerdictAaaaaaa", until=day(10), note="carried out his new approval")
 refused = complete("recWokeAaaaaaaaaa", until=day(10), note="checked the portal")
 ok = complete("recWokeAaaaaaaaaa", until=day(10), note="checked the portal",
-              changed="The council sent a final notice; I raised it as its own card for Kevin.")
+              changed="Description: the council sent a final notice; I raised it as its own card for Kevin.")
 date_ok = complete("recDateAaaaaaaaaa", until=day(6), note="checked, nothing new")
 print(json.dumps({"verdictWoke": verdict_woke, "verdictOk": verdict_ok, "refused": refused, "ok": ok, "dateOk": date_ok, "line": F("recWokeAaaaaaaaaa")[AF["notes"]].split("\\n\\n")[-1]}))`);
     expect(r.refused).toMatch(/it woke because something on it changed since its last rest \(Description changed\)/);
     expect(r.refused).toMatch(/--changed "<one sentence: what changed on the task and what you did about it>"/);
     expect(r.ok).toBeNull();
-    expect(r.line).toMatch(/CARRIED OUT \(task left open\): checked the portal\. What changed since the last look: The council sent a final notice; I raised it as its own card for Kevin\. Left OPEN deliberately/);
+    expect(r.line).toMatch(/CARRIED OUT \(task left open\): checked the portal\. What changed since the last look: Description: the council sent a final notice; I raised it as its own card for Kevin\. Left OPEN deliberately/);
     expect(r.dateOk).toBeNull();
     // A wake that is Kevin's verdict alone is named, and the carry-out is its answer: no --changed asked.
     expect(r.verdictWoke).toEqual(['Approved At']);
@@ -212,7 +212,7 @@ F("recNoSnapAaaaaaaa")[AF["description"]] += "\\n\\n" + REPLY
 SHIFT[0] = timedelta(days=3, hours=1)
 annotate("recOwnNoteAaaaaaa", "Checked the portal today: no reply.")
 print(json.dumps({"desc": complete("recNoSnapAaaaaaaa", until=day(8)), "ownNote": complete("recOwnNoteAaaaaaa", until=day(8)),
-                  "ownNoteSaid": complete("recOwnNoteAaaaaaa", until=day(8), changed="Only my own note from this look; nothing new arrived.")}))`);
+                  "ownNoteSaid": complete("recOwnNoteAaaaaaa", until=day(8), changed="Notes: only my own note from this look; nothing new arrived.")}))`);
     expect(r.desc).toMatch(/\(Description changed\)/);
     expect(r.desc).toMatch(/No queue snapshot was found for it: AGENT_RUN_QUEUE is not set.*Compared with its last rest instead, Notes included/);
     // No snapshot: a Notes change counts like any other (review of PR 938, finding 3), so the run's own
@@ -241,7 +241,9 @@ print(json.dumps({"race": race, "untouched": F("recRaceAaaaaaaaaa")[AF["notes"]]
 });
 
 describe("D. a status update is never refused for the agent's own note in the same run", () => {
-  it("with the run's snapshot the own note files; with none the refusal says why; a reply mid-run is the window's", () => {
+  // 16 Nov 2026 (review of PR 938, finding 8): with no snapshot the own note files too, because Notes is a
+  // field runs write themselves; only the fields a run never writes are compared with the rest.
+  it("with or without the run's snapshot the own note files; a reply mid-run is the window's", () => {
     const r = py(`
 def filed_then_due(i):
     rec(i, notes=LOOK, approved=False)
@@ -261,7 +263,7 @@ nosnap = submit_status("recNoSnapStatAaaa", day(7))
 print(json.dumps({"own": own, "race": race, "nosnap": nosnap}))`);
     expect(r.own).toBeNull();
     expect(r.race).toMatch(/the task changed while you were working \(Description changed/);
-    expect(r.nosnap).toMatch(/the task has changed since it last rested \(Notes changed\).*no queue snapshot was found for it: .*a note you wrote in this run counts as a change/s);
+    expect(r.nosnap).toBeNull();
   });
 });
 
@@ -555,7 +557,7 @@ by = snapshot(name=stamp + "-173000")                    # this run's own queue,
 told = by["recOrderAaaaaaaaa"]["wokeByChange"]["changed"]
 chosen = m.run_snapshot("recOrderAaaaaaaaa")[1]
 ok = complete("recOrderAaaaaaaaa", until=day(10), note="raised the final notice as its own card",
-              changed="The council sent a final notice; I raised it as its own card for Kevin.")
+              changed="Description: the council sent a final notice; I raised it as its own card for Kevin.")
 os.environ.pop("AGENT_RUN_QUEUE")
 none = m.run_snapshot("recOrderAaaaaaaaa")
 # the queue subcommand writes the run's own copy where the variable says

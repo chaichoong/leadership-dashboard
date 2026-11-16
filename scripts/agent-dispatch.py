@@ -1563,9 +1563,13 @@ def ledger_rest_prints():
     return prints
 
 
-# The only ledger step that may follow a rest's own event and still leave that rest the task's last
-# look: `intent`, which a run writes just before it carries the woken task out (cmd_intent).
-REST_LOOK_FOLLOWERS = ("intent",)
+# THE ONE LEDGER STEP THAT ANSWERS A WAKE (16 Nov 2026, review of PR 938, finding 6). A wake used to
+# be dropped by ANY step written after the rest (only `intent` was let through), so a woken task that
+# met a sign-in wall and had it cleared (`parked`, then `unblocked`) came back with no wokeByChange, and
+# a keep-open buried the reply it had woken for. A wall, its clear, a filed certificate or a run's
+# intent answer nothing: the change is still unanswered. Only a Level A carry-out at submit (`handled`)
+# is an answer, and a new rest (`done`, `status`) starts a fresh entry of its own.
+REST_WAKE_ANSWERS = ("handled",)
 
 
 def ledger_rest_events():
@@ -1708,11 +1712,11 @@ def rest_added_text(t, fingerprint, lengths):
 
 def rest_wake(t, rest):
     """What woke a task whose last rest ended because the task changed, or None. `rest` is the task's
-    ledger_rest_events entry. None when no fingerprinted rest was begun, when the task has taken a
-    step of its own since (a wall, a clear: that step, not the change, is what it is waiting on; only
-    a run's `intent` may follow), when nothing changed (the rest ended on its date), or when the rest
-    carried no fingerprint at all (every rest begun before 15 Nov 2026: nothing can be said changed)."""
-    if not rest or not rest.get("fp") or any(a not in REST_LOOK_FOLLOWERS for a in rest.get("after") or []):
+    ledger_rest_events entry. None when no fingerprinted rest was begun, when a step since has answered
+    the change (REST_WAKE_ANSWERS: a wall and its clear do not), when nothing changed (the rest ended on
+    its date), or when the rest carried no fingerprint at all (every rest begun before 15 Nov 2026:
+    nothing can be said changed)."""
+    if not rest or not rest.get("fp") or any(a in REST_WAKE_ANSWERS for a in rest.get("after") or []):
         return None
     changed = rest_print_changes(t, rest["fp"])
     if not changed or changed == ["no fingerprint"]:
@@ -2868,13 +2872,20 @@ def status_changed_problem(task_rec):
     fp = ledger_rest_prints().get(tid, "")
     if not fp:
         return ""
-    changed = rest_print_changes(snap if snap else live, fp)
+    # ONLY THE FIELDS A RUN NEVER WRITES (16 Nov 2026, review of PR 938, finding 8). Notes and Due Date
+    # are written by runs themselves (annotate, `due`), so a note one run left ("Gmail search failed this
+    # run") was "something new" to every later run and refused every status filing on that task for good.
+    # What reaches a task from outside lands in the fields RUN_WINDOW_LABELS names: a reply or a fold in
+    # the Description (a twin closed onto the task writes its dated UPDATE line there too), a verdict, a
+    # holder. Notes and Due Date still end the rest (the fingerprint), so the next run is handed the task
+    # and shown what was added; a NEXT CHECK can never pass the due date (next_look_problem).
+    changed = [label for label in rest_print_changes(snap if snap else live, fp) if label in RUN_WINDOW_LABELS
+               or label == "no fingerprint"]
     if not changed:
         return ""
     return (f"the task has changed since it last rested ({', '.join(changed)} changed), so something new "
             "has reached it: read it, and raise what changed as a card"
-            + ("" if snap else f" (no queue snapshot was found for it: {snap_why}; so the live task was compared, "
-               "and a note you wrote in this run counts as a change)"))
+            + ("" if snap else f" (no queue snapshot was found for it: {snap_why}; so the live task was compared)"))
 
 
 def status_history_terms(body, task_rec):
@@ -9297,31 +9308,78 @@ def demote_for_cost(level, cost_owed):
 VERDICT_LABELS = {"Approval Outcome", "Approved At"}
 
 
-def kept_open_woke(task_id, t):
-    """([labels of what woke the task by a change], a note for the refusal) before a keep-open writes.
-    Exits when the task changed while the run worked (run_window_problem). With the run's queue
-    snapshot, the wake is what the queue told the run (its wokeByChange). With none, it is read from
-    the ledger's last rest against the task as it is now, Notes included."""
+def kept_open_woke(task_id, t, what=None):
+    """(the task's wokeByChange, or {} when nothing it has not answered changed, and a note for the
+    refusal) before a keep-open or a close writes. Exits when the task changed while the run worked
+    (run_window_problem). With the run's queue snapshot, the wake is what the queue told the run (its
+    wokeByChange). With none, it is read from the ledger's last rest against the task as it is now,
+    Notes included."""
     snap, why = run_snapshot(task_id)
     window = run_window_problem(task_id, t, snap)
     if window:
-        sys.exit(f"ERROR: refusing to keep {task_id} open: {window}.")
+        sys.exit(f"ERROR: refusing to {what or f'keep {task_id} open'}: {window}.")
     if snap is not None:
-        labels = list(((snap.get("wokeByChange") or {}).get("changed")) or [])
+        woke = dict(snap.get("wokeByChange") or {})
         # Kevin's own verdict alone is the instruction this carry-out acts on, not news it could bury.
-        return ([] if set(labels) <= VERDICT_LABELS else labels), ""
+        return ({} if set(woke.get("changed") or []) <= VERDICT_LABELS else woke), ""
     # No snapshot (a run by hand, a run suspended past the age limit, a runner without the variable):
     # every change since the last rest counts, Notes included (review of PR 938, finding 3). A note
     # this run wrote itself then costs one --changed sentence, the safe direction: a twin folded into
     # Notes is never let through unasked.
-    woke = rest_wake(t, ledger_rest_events().get(task_id))
-    labels = list((woke or {}).get("changed", []))
-    if set(labels) <= VERDICT_LABELS:
-        labels = []
+    woke = rest_wake(t, ledger_rest_events().get(task_id)) or {}
+    if set(woke.get("changed") or []) <= VERDICT_LABELS:
+        return {}, ""
     print(f"INFO: no queue snapshot for {task_id} ({why}); its last rest was compared with the task as it is "
           "now, Notes included.", file=sys.stderr)
-    return labels, (f"\n       (No queue snapshot was found for it: {why}. Compared with its last rest instead, "
-                    "Notes included, so a note you wrote yourself in this run counts too: say so in --changed.)")
+    return woke, (f"\n       (No queue snapshot was found for it: {why}. Compared with its last rest instead, "
+                  "Notes included, so a note you wrote yourself in this run counts too: say so in --changed.)")
+
+
+# A --changed SENTENCE MUST BE ABOUT THE CHANGE (16 Nov 2026, review of PR 938, finding 4). Any
+# sentence used to pass, "x" included, and rested a woken task for up to 14 days. Nothing cleverer than
+# this: it names at least one field the wake names, or it quotes CHANGED_QUOTE_WORDS words in a row from
+# the text the wake shows as added (all of it, when shorter). It cannot prove the agent acted; it does
+# prove the agent read what woke the task.
+CHANGED_QUOTE_WORDS = 4
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9£]+", str(text or "").lower())
+
+
+def changed_sentence_problem(sentence, woke):
+    """'' when --changed names a field that changed or quotes the text added, else why not."""
+    labels = list(woke.get("changed") or [])
+    said = " ".join(_words(sentence))
+    if any(re.search(r"(?<![a-z0-9])" + re.escape(" ".join(_words(label))) + r"(?![a-z0-9])", said)
+           for label in labels if _words(label)):
+        return ""
+    for text in (woke.get("added") or {}).values():
+        words = _words(text)
+        n = min(CHANGED_QUOTE_WORDS, len(words))
+        if n and any(" ".join(words[i:i + n]) in said for i in range(len(words) - n + 1)):
+            return ""
+    return (f"--changed must say what changed: name at least one of the fields that changed "
+            f"({', '.join(labels) or 'none named'}), or quote {CHANGED_QUOTE_WORDS} words in a row from the "
+            "text added since the last rest (wokeByChange.added)")
+
+
+def woke_close_problem(task_id, t, changed_said, what):
+    """The --changed rule shared by a keep-open and a close: '' when the task did not wake by a change,
+    or --changed is about the change; else the refusal text (without the leading ERROR). `what` is the
+    act refused, "keep <id> open" or "close <id>"."""
+    woke, snap_note = kept_open_woke(task_id, t, what=what)
+    if not woke:
+        return ""
+    labels = ", ".join(woke.get("changed") or [])
+    if not changed_said:
+        return (f"refusing to {what}: it woke because something on it changed since its last rest "
+                f"({labels} changed). Read the whole task again and raise what changed as its own card (or carry "
+                "it out if it is already approved work) first. Then add --changed \"<one sentence: what changed "
+                "on the task and what you did about it>\", naming the field that changed or quoting what was "
+                "added, which goes on its Notes for Kevin to read." + snap_note)
+    problem = changed_sentence_problem(changed_said, woke)
+    return f"refusing to {what}: {problem}." + snap_note if problem else ""
 
 
 def cmd_complete(args):
@@ -9411,13 +9469,9 @@ def cmd_complete(args):
         if problem:
             sys.exit(f"ERROR: refusing to keep {args.task} open: {problem}.\n" + KEPT_OPEN_UNTIL_HELP)
         changed_said = " ".join(str(getattr(args, "changed", "") or "").split())
-        woke, snap_note = kept_open_woke(args.task, t)
-        if woke and not changed_said:
-            sys.exit(f"ERROR: refusing to keep {args.task} open: it woke because something on it changed "
-                     f"since its last rest ({', '.join(woke)} changed). Read the whole task again and raise what "
-                     "changed as its own card (or carry it out if it is already approved work) first. Then keep "
-                     "it open with --changed \"<one sentence: what changed on the task and what you did about "
-                     "it>\", which goes on the CARRIED OUT line for Kevin to read." + snap_note)
+        problem = woke_close_problem(args.task, t, changed_said, f"keep {args.task} open")
+        if problem:
+            sys.exit("ERROR: " + problem)
         holder = next(iter(t.get("teamMemberIds") or []), "")
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         # One line: a note with line breaks could otherwise forge a stamped line of its own.
@@ -9594,6 +9648,19 @@ def cmd_complete(args):
                     "--bought-as <new|second-hand> --price <n> --supplier \"<who>\" --link <url>\n"
                     "       or, if nothing was bought, say why on the record:\n"
                     f"         python3 scripts/agent-dispatch.py complete {args.task} --not-bought \"<why>\"")
+
+    # A CLOSE ON A TASK WOKEN BY A CHANGE ASKS THE SAME QUESTION A KEEP-OPEN DOES (16 Nov 2026, review
+    # of PR 938, finding 5). A plain `complete` closed it with nothing asked, and a Completed task never
+    # wakes again, so the reply that woke it was buried for good. Checked last, so the refusal only
+    # comes when the close would otherwise go through.
+    changed_said = " ".join(str(getattr(args, "changed", "") or "").split())
+    problem = woke_close_problem(args.task, t, changed_said, f"close {args.task}")
+    if problem:
+        sys.exit("ERROR: " + problem)
+    if changed_said:
+        sign_note = ((sign_note + "\n\n") if sign_note else "") + (
+            f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] What changed since the last look: "
+            f"{changed_said[:600].rstrip('.')}.")
 
     # Written with the close, never before it: a refused close leaves no mark.
     evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
@@ -14844,9 +14911,9 @@ def main():
                         "hearing), after today and at most %d days ahead; the task rests until then"
                         % KEPT_OPEN_MAX_DAYS)
     c.add_argument("--changed", default="", metavar="SENTENCE",
-                   help="REQUIRED with --keep-open when the task woke because something on it changed "
-                        "(the queue entry's wokeByChange): one sentence, what changed and what you did "
-                        "about it; written on the CARRIED OUT line")
+                   help="REQUIRED, with or without --keep-open, when the task woke because something on it "
+                        "changed (the queue entry's wokeByChange): one sentence that names the field that "
+                        "changed or quotes the text added, and says what you did about it; written to Notes")
     c.add_argument("--no-certificate", default="", metavar="REASON",
                    help="the file that arrived on this task is not a certificate "
                         "(say what it is); recorded in Notes")
