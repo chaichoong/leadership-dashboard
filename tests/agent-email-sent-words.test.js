@@ -116,9 +116,9 @@ describe('no em dash in anything that goes out (4 Sep 2026)', () => {
 describe('mail signed Roy Lavin is written as Roy (22 Oct 2026)', () => {
   it('refuses Roy in the third person above his own sign-off', () => {
     for (const body of [
-      'Hello Lee,\n\nPlease send two or three dates. Roy is copied in and will arrange access.',
-      'Hello Lee,\n\nThe portal sends its login code to Roy’s personal mailbox.',
-      'Hello Lee,\n\nYou asked Roy about the 90 GBP on 3 November.',
+      'Hello Jordan,\n\nPlease send two or three dates. Roy is copied in and will arrange access.',
+      'Hello Jordan,\n\nThe portal sends its login code to Roy’s personal mailbox.',
+      'Hello Jordan,\n\nYou asked Roy about the 90 GBP on 3 November.',
     ]) {
       const r = check(ROY(body));
       expect(r.ok, body).toBe(false);
@@ -128,17 +128,17 @@ describe('mail signed Roy Lavin is written as Roy (22 Oct 2026)', () => {
 
   it('refuses it with no sign-off phrase too, when the last lines are his name', () => {
     const r = check('TO: office@example-sparks.test\nFROM: info@agilelets.co.uk\nSUBJECT: Access\n---\n'
-      + 'Hello Lee,\n\nRoy will meet you at the door.\n\nRoy Lavin\nAgile Lets\n\n**Carrying this out will involve:** sending this email.');
+      + 'Hello Jordan,\n\nRoy will meet you at the door.\n\nRoy Lavin\nAgile Lets\n\n**Carrying this out will involve:** sending this email.');
     expect(r.ok).toBe(false);
   });
 
   it('passes Roy introducing himself, a details line, Royal Mail, Roy in the quote, and Kevin naming Roy', () => {
     // The control: the third person, in the same shape, is refused.
-    expect(check(ROY('Hi Anthony,\n\nRoy has asked me to thank you for telling us about the change.')).ok).toBe(false);
-    expect(check(ROY('Hi Anthony,\n\nRoy here. Thank you for telling me about the change.'))).toEqual({ ok: true });
+    expect(check(ROY('Hi Robin,\n\nRoy has asked me to thank you for telling us about the change.')).ok).toBe(false);
+    expect(check(ROY('Hi Robin,\n\nRoy here. Thank you for telling me about the change.'))).toEqual({ ok: true });
     expect(check(ROY('Dear Ms Example,\n\nThe details you asked for:\n- Owner: Mr A Example\n- Managing agent: Roy Lavin, Agile Lets\n\nI confirm receipt of the notice.'))).toEqual({ ok: true });
-    expect(check(ROY('Hello Lee,\n\nThe report went by Royal Mail on Monday. I will arrange access myself.'))).toEqual({ ok: true });
-    expect(check(ROY('Hello Lee,\n\nThank you, Friday suits me.\n\nOn Tue, 10 Nov 2026, Lee wrote:\n> Can Roy meet us there?'))).toEqual({ ok: true });
+    expect(check(ROY('Hello Jordan,\n\nThe report went by Royal Mail on Monday. I will arrange access myself.'))).toEqual({ ok: true });
+    expect(check(ROY('Hello Jordan,\n\nThank you, Friday suits me.\n\nOn Tue, 10 Nov 2026, Jordan wrote:\n> Can Roy meet us there?'))).toEqual({ ok: true });
     expect(check(KEVIN('Dear Sir or Madam,\n\nRoy Lavin manages the property and is copied in.'))).toEqual({ ok: true });
   });
 });
