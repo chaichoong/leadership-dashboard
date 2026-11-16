@@ -97,7 +97,8 @@ def submit(output, type_="Admin", plain_approve="The card closes and the agent r
         try:
             m.cmd_submit(types.SimpleNamespace(task="recTESTTESTTEST01", agent=BUILDER, type=type_,
                          output_file=fh.name, tier1=False, attach=None, plain_task="A job came in for one of the houses.",
-                         plain_approve=plain_approve, tenant_notice=tenant_notice))
+                         plain_approve=plain_approve, tenant_notice=tenant_notice,
+                         certificate_search='searched the compliance book, the task history and each inbox (info@ and Gmail): no certificate held for this house'))
         except SystemExit as e:
             err = str(e)
     st = CAPTURED.get(AF["status"])

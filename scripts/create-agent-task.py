@@ -68,7 +68,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -101,6 +101,12 @@ F = {
     "tenants":      "fld6ZcfEogJmeQj2c",
     "properties":   "fldZKFvEpJ6NZeFKz",
     "units":        "fldEW648YtTZ6j01n",
+    # Read and written only when a new item repeats a task completed in the last
+    # COMPLETED_JOIN_DAYS (16 Nov 2026): when it was completed, and where Kevin's
+    # earlier verdict is kept when the task is reopened for the new item.
+    "completion":   "fldFOi1SwEKuJRmdN",
+    "approvalFeedback": "fldtI7SJI4gEohHD1",
+    "feedbackHistory": "fldOzsq68lhfprKJu",
 }
 
 # Roy Lavin's Team Members row (same id as ROY_REC in task-manager.py and
@@ -2142,6 +2148,146 @@ def decide(incoming_fields, open_rows):
     }
 
 
+# A NEW ITEM THAT REPEATS A MATTER JUST CLOSED JOINS IT (inbound-comms-triage lesson
+# of 2 Sep 2026: "Before creating a task, check open and recently completed tasks
+# for the same matter. Join the existing one. Never raise a second"). Until 16 Nov
+# 2026 `decide` read only OPEN tasks, so the fourth automated "overdue licensing
+# tasks" email from one council in ten days became a fourth task, each worked and
+# closed on its own. A new inbound item now joins a task completed in the last
+# COMPLETED_JOIN_DAYS when it is unmistakably the same matter, with the same outcome
+# as a fold: the item is folded in and nothing is created. A completed task is
+# reopened to take it, because a fold into a closed task is work nobody will see.
+#
+# NARROW ON PURPOSE, because a fold destroys and a closed task's next instance is
+# usually real new work. The back-test of 16 Nov 2026 (586 creates in the 30 days
+# before, each against the tasks completed in the 14 days before it) found the
+# open-task fold rules matching 137 (23%) and the subject key alone 72 (12%): weekly
+# reviews, each week's mail-out, the next episode, repeat chases. Kept to: an
+# inbound item (it has a sender), not a follow-up the triage skill names on purpose
+# (`INBOUND (follow-up):`), not a diary or buying task, the same sender, the same
+# lane, no other house, tenant or linked record, and then EITHER the same subject
+# word for word OR the same subject key with a shared reference that is not a house
+# number (six digits or more, or digits inside a token such as "L01/0742989"). That
+# joins 5 of the 221 inbound creates, all repeats: three copies of one council's
+# automated reminder with the same subject, a premium finance
+# notice raised twice, an insurer's second letter on one policy number. A looser
+# version (the key and the sender) joined 14; the nine it adds include a refund
+# request folded into a waste quote on the key "inbound|asks roy", one flat's council
+# tax into another flat's, two different smoke alarm messages and two diary changes,
+# so they are left to be created, the cheap direction.
+#
+# Kevin's earlier verdict on the reopened task is archived in Feedback History and
+# cleared from the record, or the dispatcher would read the old approval as owed a
+# carry-out and act on it again.
+COMPLETED_JOIN_DAYS = 14
+FOLLOW_UP_NAME_RE = re.compile(r"\(follow[- ]?up\)", re.I)
+
+
+def _same_words(name):
+    """The subject as words, lane prefix gone, case and punctuation ignored."""
+    return " ".join(re.findall(r"[a-z0-9]+", _strip_lane_prefix(name).lower()))
+
+
+def _reference_ids(name):
+    """The strong ids in `name` that are a REFERENCE, not a house number: six digits or more, or digits
+    written inside a token with letters, a slash or a dash ("L01/0742989", "INV-13974"). A bare "1406"
+    is the house in "1406 Example Road", and a house is where, never which (14 Oct 2026)."""
+    out = set()
+    for sid in dupe_signals(name)[1]:
+        digits = sid.split(":", 1)[1]
+        token = re.search(r"[A-Za-z0-9/\-]*" + re.escape(digits) + r"[A-Za-z0-9/\-]*", str(name or ""))
+        if len(digits) >= 6 or (token and token.group(0) != digits):
+            out.add(sid)
+    return out
+
+
+def completed_twin(incoming_fields, done_rows, today=None):
+    """{"row", "why"} for the task completed in the last COMPLETED_JOIN_DAYS that this
+    new item repeats, newest first, or None. Pure: no network."""
+    name = str(incoming_fields.get(F["name"]) or "")
+    sender = str(incoming_fields.get(F["inboundSender"]) or "").strip()
+    if not sender or FOLLOW_UP_NAME_RE.search(name) or calendar_task(name) or sourcing_task(name):
+        return None
+    key = dupe_task_key(name)
+    if not key:
+        return None
+    lane = fold_lane(name, incoming_fields.get(F["team"]), bool(incoming_fields.get(F["maintenance"])))
+    words, strong = _same_words(name), _reference_ids(name)
+    since = ((today or date.today()) - timedelta(days=COMPLETED_JOIN_DAYS)).isoformat()
+    rows = [r for r in done_rows or []
+            if _sel_name((r.get("fields") or {}).get(F["status"])) == "Completed"
+            and str((r.get("fields") or {}).get(F["completion"]) or "")[:10] >= since]
+    rows.sort(key=lambda r: str((r.get("fields") or {}).get(F["completion"]) or ""), reverse=True)
+    for row in rows:
+        f = row.get("fields") or {}
+        other = str(f.get(F["name"]) or "")
+        if fold_lane(other, f.get(F["team"]), bool(f.get(F["maintenance"]))) != lane:
+            continue
+        if links_disagree(incoming_fields, f) or identity_conflict(name, other):
+            continue
+        if not str(f.get(F["inboundSender"]) or "").strip() or not senders_agree(sender, f.get(F["inboundSender"])):
+            continue
+        if _same_words(other) == words:
+            return {"row": row, "why": "the same subject, word for word, from the same sender"}
+        shared = strong & _reference_ids(other)
+        if not shared or dupe_task_key(other) != key:
+            continue
+        verdict = dupe_verdict(name, other, mode="fold")
+        if not verdict["match"] or fold_on_a_number_only(name, other, verdict["shared"]) \
+                or fold_on_address_only(name, other, verdict["shared"]) or fold_on_a_different_reference(name, other):
+            continue
+        return {"row": row, "why": "the same subject and reference (%s) from the same sender"
+                                   % ", ".join(sorted(s.split(":", 1)[1] for s in shared))}
+    return None
+
+
+def build_reopen(existing_fields, incoming_fields, today_iso, stamp):
+    """The patch that reopens a completed task for a new item: the fold's own patch,
+    the new item's due date (never the closed task's past one), and Kevin's earlier
+    verdict moved to Feedback History so it is never carried out a second time."""
+    patch = build_update(existing_fields, incoming_fields, today_iso)
+    if _sel_name(patch.get(F["status"])) not in NEW_TASK_STATUSES or patch.get(F["status"]) == "Approval":
+        patch[F["status"]] = "Today"
+    patch[F["due"]] = str(incoming_fields.get(F["due"]) or "")[:10] or today_iso
+    patch[F["hardDeadline"]] = bool(incoming_fields.get(F["hardDeadline"]))
+    outcome = _sel_name(existing_fields.get(F["approvalOutcome"])).strip()
+    approved_at = str(existing_fields.get(F["approvedAt"]) or "").strip()
+    note = " ".join(str(existing_fields.get(F["approvalFeedback"]) or "").split())
+    if outcome or approved_at or note:
+        line = "[%s] Kept when the duplicate gate reopened this task for a new item: earlier verdict %s%s%s" % (
+            stamp, outcome or "(none)", (" at " + approved_at) if approved_at else "", (": " + note) if note else "")
+        history = (str(existing_fields.get(F["feedbackHistory"]) or "").rstrip() + "\n\n" + line).strip()
+        patch[F["feedbackHistory"]] = history[-90000:]
+        patch[F["approvalOutcome"]] = None
+        patch[F["approvedAt"]] = None
+        patch[F["approvalFeedback"]] = ""
+    return patch
+
+
+def fetch_recent_completed(days=COMPLETED_JOIN_DAYS):
+    """Every task completed in the last `days`, paginated: Status Completed and the
+    Status changed in that window (the Completion field is then checked client-side
+    by completed_twin, so a display-name rename cannot silently empty the read)."""
+    records, offset = [], None
+    formula = ("AND({Status}='Completed', IS_AFTER(LAST_MODIFIED_TIME({Status}), "
+               "DATEADD(NOW(), -%d, 'days')))" % (int(days) + 1))
+    while True:
+        params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"), ("filterByFormula", formula)]
+        for fid in (F["name"], F["status"], F["completion"], F["team"], F["inboundSender"], F["maintenance"],
+                    F["tenancies"], F["tenants"], F["properties"], F["units"]):
+            params.append(("fields[]", fid))
+        if offset:
+            params.append(("offset", offset))
+        data = _request("GET", f"/{TASKS}?{urllib.parse.urlencode(params)}")
+        # A REPLY WITH NO RECORDS KEY IS AN ERROR, NOT AN EMPTY WINDOW (CLAUDE.md).
+        if not isinstance(data, dict) or not isinstance(data.get("records"), list):
+            raise RuntimeError("the completed-tasks read returned no records list")
+        records.extend(data["records"])
+        offset = data.get("offset")
+        if not offset:
+            return records
+
+
 def build_update(existing_fields, incoming_fields, today_iso):
     """The pure patch builder for a fold.
 
@@ -2714,6 +2860,59 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
                   "Nothing was created; count this item unhandled.", file=sys.stderr)
             return 2
         verdict = decide(fields, rows)
+        # NOTHING OPEN TO FOLD INTO: does it repeat a matter closed in the last two weeks (16 Nov 2026)?
+        # Read only for an item completed_twin could match, so most creates cost no second read. A read
+        # that fails is NOT CHECKED and the item is created as before, said in the note.
+        if verdict["action"] == "create" and str(fields.get(F["inboundSender"]) or "").strip() \
+                and not FOLLOW_UP_NAME_RE.search(str(fields.get(F["name"]) or "")):
+            try:
+                twin = completed_twin(fields, fetch_recent_completed())
+            except (RuntimeError, OSError, ValueError) as exc:
+                twin = None
+                verdict["note"] = ((verdict.get("note", "") + " ").lstrip()
+                                   + "NOT CHECKED: the tasks completed in the last %d days could not be read (%s), "
+                                     "so a repeat of a closed matter was not looked for." % (COMPLETED_JOIN_DAYS, str(exc)[:120]))
+            if twin:
+                verdict = {"action": "update", "reopen": True, "taskId": twin["row"]["id"],
+                           "matchedName": (twin["row"].get("fields") or {}).get(F["name"], ""),
+                           "matchedWhy": twin["why"], "key": verdict.get("key", "")}
+
+    live_fields = None
+    if verdict["action"] == "update" and verdict.get("reopen"):
+        live = _request("GET", f"/{TASKS}/{verdict['taskId']}?returnFieldsByFieldId=true")
+        live_fields = live.get("fields", {}) or {}
+        # Re-read, never trusted from the listing: a task someone reopened since is an open task now, with
+        # whatever verdict it carries, and the open-task rules (which never fold into a decided card) have
+        # already passed it by. So it is created, and said.
+        if _sel_name(live_fields.get(F["status"])) != "Completed":
+            verdict = {"action": "create", "key": verdict.get("key", ""),
+                       "note": "repeats %s, which is no longer Completed, so nothing was reopened" % verdict["taskId"]}
+
+    if verdict["action"] == "update" and verdict.get("reopen"):
+        task_id = verdict["taskId"]
+        now = datetime.now()
+        patch = build_reopen(live_fields, fields, date.today().isoformat(), now.strftime("%Y-%m-%d %H:%M"))
+        line = ("[%s — create-agent-task] REOPENED: a new item from the same sender repeats this task, "
+                "completed %s (%s), so it joins this task instead of starting a second one. New item: %s. "
+                "Any earlier verdict of Kevin's is kept in Feedback History."
+                % (now.strftime("%d %b %Y %H:%M"), str(live_fields.get(F["completion"]) or "")[:10] or "recently",
+                   verdict["matchedWhy"], str(fields.get(F["name"]) or "")[:160]))
+        patch[F["notes"]] = (str(live_fields.get(F["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
+        if not dry_run:
+            _request("PATCH", f"/{TASKS}/{task_id}", {"typecast": True, "fields": patch})
+            post_comment(task_id, "Duplicate gate: a new item repeats this task, completed in the last %d days, "
+                                  "so it was reopened and the item folded in instead of creating a sibling. New item: %s"
+                         % (COMPLETED_JOIN_DAYS, str(fields.get(F["name"], ""))))
+            write_track_record(task_id, fields)
+        out = {"action": "updated", "reopened": True, "taskId": task_id,
+               "matchedName": verdict.get("matchedName", ""), "matchedWhy": verdict.get("matchedWhy", ""),
+               "key": verdict.get("key", ""), "dryRun": dry_run}
+        if holder_note:
+            out["holderCheck"] = holder_note
+        print(json.dumps(out))
+        print("REOPENED %s (%s): %s" % (task_id, verdict.get("matchedWhy", ""), verdict.get("matchedName", "")),
+              file=sys.stderr)
+        return 0
 
     if verdict["action"] == "update":
         task_id = verdict["taskId"]

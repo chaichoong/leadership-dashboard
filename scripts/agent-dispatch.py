@@ -6217,10 +6217,11 @@ def payment_card(name, output, task_type):
     return {"amount": amount or None, "payee": payee}
 
 
-def fetch_bank_lines(since_iso):
-    """Every bank line dated after since_iso: id, date, signed amount, bank text, tenancy links."""
-    rows = query_records(TRANSACTIONS_TABLE, formula="IS_AFTER({**Date}, '" + since_iso + "')",
-                         fields=[TX_FIELDS["date"], TX_FIELDS["amount"], TX_FIELDS["name"], TX_TENANCY_FIELD])
+def fetch_bank_lines(since_iso, records=None):
+    """Every bank line dated after since_iso: id, date, signed amount, bank text, tenancy links. `records`
+    is a caller's own paginated reader (the send scripts pass theirs); with none, query_records."""
+    rows = (records or query_records)(TRANSACTIONS_TABLE, formula="IS_AFTER({**Date}, '" + since_iso + "')",
+                                      fields=[TX_FIELDS["date"], TX_FIELDS["amount"], TX_FIELDS["name"], TX_TENANCY_FIELD])
     return [{"id": r.get("id"), "date": str((r.get("fields") or {}).get(TX_FIELDS["date"]) or "")[:10],
              "amount": float((r.get("fields") or {}).get(TX_FIELDS["amount"]) or 0),
              "name": str((r.get("fields") or {}).get(TX_FIELDS["name"]) or ""),
@@ -6453,10 +6454,11 @@ def tenant_notice_problem(name, output, task_type, notice):
 # 4. CHECK THE BANK AGAIN BEFORE A LATE-RENT CARD (cash-flow-voids 30 Oct 2026: a chase reached Kevin
 # for rent he had already seen arrive). A RENT LATE: card is refused when the bank lines matched to the
 # tenancy for the owed cycle (from EARLY_RENT_DAYS before its due day, net of money out) add up to the rent. It
-# cannot see money the feed has not brought in yet (the 30 Oct incident was exactly that, so a
-# send-time check is still owed in the send scripts), but it stops a card for rent that landed
-# between the morning rent check and the agent's submit. Back-test: 10 keyed RENT LATE cards, none
-# refused (nothing had landed for the owed cycle when each was submitted).
+# cannot see money the feed has not brought in yet (the 30 Oct incident was exactly that), but it
+# stops a card for rent that landed between the morning rent check and the agent's submit. Back-test:
+# 10 keyed RENT LATE cards, none refused (nothing had landed for the owed cycle when each was
+# submitted). The send reads the bank again through rent_landed_state (16 Nov 2026): send-email.py
+# rent_landed_refusal, which send-text.py calls for the same card's text.
 RENT_KEY_RE = re.compile(r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):\d")
 RENT_FIELD = "fldDMyfZLFMeONPq8"               # Tenancies: monthly rent (rent-check.py TY["rent"])
 TX_TENANCY_FIELD = "fldPmAMmxwqs4SdPa"         # Transactions: Tenancy link (rent-check.py TX["tenancy"])
@@ -6472,22 +6474,37 @@ def rent_next_due(due, due_day):
     return due.replace(year=year, month=month, day=min(int(due_day), calendar.monthrange(year, month)[1]))
 
 
-def rent_paid_problem(name, notes, description):
+def rent_landed_state(name, notes, description, records=None):
+    """Has the owed cycle's rent landed since the rent check raised this RENT LATE task? One reading for
+    the card (rent_paid_problem, at submit) and for the send (send-email.py and send-text.py, at send
+    time; Kevin, 16 Nov 2026), so the two can never disagree about what "landed" means. `records` is
+    the caller's own paginated reader (table, formula=, fields=), so a send reads through its own door;
+    with none, this file's query_records and fetch_bank_lines.
+    {"state": "landed", "detail", "shown", "total", "rent", "owed"} | {"state": "unchecked", "detail"} |
+    {"state": ""} when it is not a keyed RENT LATE task or the rent has not landed."""
     if not str(name or "").startswith("RENT LATE: "):
-        return ""
+        return {"state": ""}
     key = RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")
     if not key:
-        return ""
+        return {"state": ""}
     tenancy, owed = key.group(1), datetime.strptime(key.group(2), "%Y-%m-%d").date()
+    since = (owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat()
     try:
-        rows = query_records(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'", fields=[RENT_FIELD, RENT_DUE_DAY_FIELD])
+        rows = (records or query_records)(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'",
+                                          fields=[RENT_FIELD, RENT_DUE_DAY_FIELD])
         ten = (rows[0].get("fields") or {}) if rows else {}
         rent = float(ten.get(RENT_FIELD) or 0)
         due_day = int(ten.get(RENT_DUE_DAY_FIELD) or owed.day)
-        bank = fetch_bank_lines((owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat())
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
-        return (f"the bank could not be read again for this tenancy ({str(exc)[:120]}): NOT CHECKED. Try again; "
-                "a late-rent card goes only on a fresh read")
+        return {"state": "unchecked", "detail": str(exc)[:120]}
+    if not rent:
+        note_not_checked(f"rent paid-again check: tenancy {tenancy} has no rent on its record, so code could not "
+                         "tell whether what was matched to it since the due day covers the rent")
+        return {"state": ""}
+    try:
+        bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
+        return {"state": "unchecked", "detail": str(exc)[:120]}
     # The owed cycle's money, as rent-check.py's cycle_money counts it: every line matched to the tenancy
     # from EARLY_RENT_DAYS before the due day to that point before the NEXT due day (rent-check's next_due,
     # the tenancy's own due day; review of PR 950, finding 9: a flat 30 days took March's early rent as
@@ -6496,17 +6513,24 @@ def rent_paid_problem(name, notes, description):
     cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] < hi]
     paid = [b for b in cycle if b["amount"] > 0]
     total = sum(b["amount"] for b in cycle)
-    if not rent:
-        note_not_checked(f"rent paid-again check: tenancy {tenancy} has no rent on its record, so code could not "
-                         f"tell whether the £{total:,.2f} matched to it since the due day covers the rent")
-        return ""
     if total < rent - RENT_SLACK:
-        return ""
+        return {"state": ""}
     shown = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in paid[:4])
-    return (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: {shown}, "
-            f"£{total:,.2f} against rent of £{rent:,.2f}. Do not chase it (Kevin, 30 Oct 2026): file the task as "
-            "information only, naming the payment, with the closing line **Carrying this out will involve:** "
-            "Nothing. Information only")
+    return {"state": "landed", "shown": shown, "total": total, "rent": rent, "owed": owed,
+            "detail": (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: "
+                       f"{shown}, £{total:,.2f} against rent of £{rent:,.2f}")}
+
+
+def rent_paid_problem(name, notes, description):
+    landed = rent_landed_state(name, notes, description)
+    if landed["state"] == "unchecked":
+        return (f"the bank could not be read again for this tenancy ({landed['detail']}): NOT CHECKED. Try again; "
+                "a late-rent card goes only on a fresh read")
+    if landed["state"] == "landed":
+        return (f"{landed['detail']}. Do not chase it (Kevin, 30 Oct 2026): file the task as "
+                "information only, naming the payment, with the closing line **Carrying this out will involve:** "
+                "Nothing. Information only")
+    return ""
 
 
 # 5. A COST THAT CHANGES IS WRITTEN ON THE SAME CARD (creditor-management 3 Oct 2026; BINDING "FIXED COSTS
@@ -6739,6 +6763,337 @@ def managed_compliance_problem(name, output, mail_subject, task_fields=None):
             "certificate yearly, the EICR when due), with no quote in its subject and no PASS TO ROY line, and file "
             "the copy when it comes. We arrange only the insurance. If Kevin has asked on this task for the booking, "
             "his own words in Approval Feedback let it through")
+
+
+# ─── SIX MORE LESSONS BECOME CHECKS (Kevin, "Do it now", 16 Nov 2026, the second round) ───
+#
+# The same shape as the eight above: each reads only the shape it is about, says what it found, and
+# names its way through. Every one was back-tested read-only on the stored Agent Outputs of the 30 days
+# to 16 Nov 2026 (547 tasks with a submit in that window, 202 Inbox Response submit rounds, 112
+# Property Administration rounds) and narrowed until it refused fewer than 1 in 10.
+#
+# A line that names the agent's check never goes in an email body, where it would be sent. On an email
+# card there is no other line for it: everything above the `---` is read as a header (an unknown header
+# refuses the card) and the closing line may not carry a record id. So, as --tenant-notice does, each
+# check has a submit flag stamped on the task's Notes with the card; on a card that is not an email, the
+# line itself on the card does the same.
+
+
+def outside_email_body(output):
+    """The output with the email's body taken out: where a check line may sit without being sent. A
+    non-email output is returned whole."""
+    text = str(output or "")
+    try:
+        body = ((parse_email_output(text) or {}).get("body") or "").strip()
+    except EmailFormatError:
+        return text
+    if body and body in text:
+        return text.replace(body, "\n")
+    return text
+
+
+TWIN_DETAIL_MONEY_RE = re.compile(r"£\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?GBP\b", re.I)
+TWIN_DETAIL_UNIT_RE = re.compile(r"\b(?:flat|unit|apartment|apt|room)\s*(\d{1,3}[a-z]?)\b", re.I)
+
+
+def names_differ_on_detail(name_a, name_b):
+    """True when two task names each carry an amount, or each a flat or unit number, and share none:
+    "PAY: Intus 554 GBP - Flat 5" and "PAY: Intus 376 GBP - Flat 1" are two bills, whatever their key
+    says (the back-test of 16 Nov 2026 found exactly that pair reading as one subject)."""
+    def amounts(n):
+        return {round(float((a or b).replace(",", "")), 2) for a, b in TWIN_DETAIL_MONEY_RE.findall(str(n or ""))}
+
+    def units(n):
+        return {u.lower() for u in TWIN_DETAIL_UNIT_RE.findall(str(n or ""))}
+    for read in (amounts, units):
+        a, b = read(name_a), read(name_b)
+        if a and b and not (a & b):
+            return True
+    return False
+
+
+def waiting_cards(exclude_id, fetch=None):
+    """Every card waiting on Kevin now: Status Approval with a sender (the gate hides an Approval row
+    with none), the record's links included so the gate's link check can see them."""
+    if fetch is None:
+        g = _gate().F
+        fields = list(AF.values()) + [g["tenancies"], g["tenants"], g["properties"], g["units"]]
+        rows = query_records(TASKS, "{Status}='Approval'", fields)
+    else:
+        rows = fetch("{Status}='Approval'")
+    return [r for r in rows if r.get("id") != exclude_id
+            and links((r.get("fields") or {}).get(AF["sentForApprovalBy"]))]
+
+
+def held_together(task_id, task_notes, other):
+    """True when one of the two was submitted under the other as a property group sibling."""
+    other_notes = str((other.get("fields") or {}).get(AF["notes"]) or "")
+    return f"HELD UNDER {task_id}" in other_notes or f"HELD UNDER {other.get('id')}" in str(task_notes or "")
+
+
+CLOSE_OR_STATUS_RE = re.compile(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", re.I)
+
+
+# 9. ONE MATTER, ONE CARD (inbound-comms-response lesson of 27 Aug 2026: "Before any submit, search open
+# and pending tasks for the same matter. Fold or close a duplicate. Never send Kevin the same thing
+# twice"). An Inbox Response card is refused while another card the creation gate would fold it into
+# (its own decide(): same lane, no other house, tenant or linked record, same counterparty, then the
+# subject key or the word pass with every guard) is already waiting on Kevin, unless the card names that
+# card and says why it is another matter. Narrowed to cards WAITING on him because that is where "twice"
+# happens: PR 950's back-test of the open-task version refused 171 of 1,246 submits (content episodes,
+# football fixtures), and an open task with no card yet is caught when its own card is submitted. Back-
+# test, 30 days to 16 Nov 2026: 4 of 202 Inbox Response submit rounds refused, three a second or third
+# card on one subscription cancellation while the cost card on it waited, one a second card on one
+# letting agent's October move. A fifth, two bills from one letting agent for two flats, is why
+# names_differ_on_detail exists: it passes.
+DUPLICATE_CHECK_LINE_RE = re.compile(r"\bDUPLICATE CHECK[ \t*_]*:[ \t*_]*not the same matter as[ \t*_]*"
+                                     r"(rec[A-Za-z0-9]{14})[ \t*_]*:?[ \t*_]*(\S[^\n]{9,})", re.I)
+
+
+def twin_card_problem(task_rec, output, fetch=None, said=""):
+    """Why an Inbox Response card must not reach Kevin while its twin is already waiting on him, or ''.
+    `said` is the submit's --duplicate-check text."""
+    if CLOSE_OR_STATUS_RE.match(output or ""):
+        return ""
+    tf = dict((task_rec or {}).get("fields") or {})
+    name = str(tf.get(AF["name"]) or "")
+    rows = [r for r in waiting_cards((task_rec or {}).get("id"), fetch)
+            if not names_differ_on_detail(name, (r.get("fields") or {}).get(AF["name"]))
+            and not held_together((task_rec or {}).get("id"), tf.get(AF["notes"]), r)]
+    if not rows:
+        return ""
+    # The gate reads its own Status of the incoming item only to place a fold; an open status keeps the
+    # comparison what it is at creation time.
+    tf[AF["status"]] = "Today"
+    verdict = _gate().decide(tf, rows)
+    if verdict.get("action") != "update":
+        return ""
+    twin = verdict.get("taskId", "")
+    said = f"DUPLICATE CHECK: {said}" if str(said or "").strip() else ""
+    named = {m_.group(1) for m_ in DUPLICATE_CHECK_LINE_RE.finditer(outside_email_body(output) + "\n" + said)}
+    if twin in named:
+        return ""
+    return (f"a card for the same matter is already waiting on Kevin: {twin} \"{str(verdict.get('matchedName') or '')[:90]}\" "
+            f"(the creation gate reads them as one: {verdict.get('matchedWhy') or 'same subject'}). Kevin's rule (27 Aug "
+            "2026): never send him the same thing twice. If it is the same matter, add what is new to that task "
+            f"(python3 scripts/agent-dispatch.py annotate {twin} --note \"<what is new>\") and close this one with "
+            f"CLOSE PROPOSAL: duplicate of {twin}. If it is another matter, say why with --duplicate-check \"not the "
+            f"same matter as {twin}: <what makes it different>\" (stamped on the task's Notes, never in the email; on a "
+            f"card that is not an email, the line DUPLICATE CHECK: not the same matter as {twin}: <why> does the same)")
+
+
+# 10. A BILL KEVIN MUST PAY IS A MARK FOR PAYMENT CARD (inbound-comms-response lesson of 25 Sep 2026: "A real
+# bill Kevin must pay is a MARK FOR PAYMENT card, listed on the Friday before it is due. Never just say it
+# will be paid"). An output whose own words say a bill will be paid, or is paid by us, is refused unless
+# the card carries a MARK FOR PAYMENT block, a PAID CHECK line (it is already paid), or names a task whose
+# own card is a MARK FOR PAYMENT card (a link in its TRACK RECORD counts: code reads that task). Read on
+# every submit, a close proposal and a report that files itself included, because "it will be paid on
+# Friday. Nothing. Information only." is exactly the close the lesson forbids. PR 950 built a "payment run"
+# words check and dropped it (41 outputs, nearly all correct): what it lacked was the named card, which
+# is how a correct reply says the bill is already listed. Back-test, 30 days to 16 Nov 2026: of 547
+# outputs, 5 say a bill of ours will be paid; 1 carries the block, 2 name a task holding the payment card
+# and pass, 2 are refused: an email telling a contractor "It will go on our next payment run" with no
+# card found anywhere on the board (the lesson's own failure), and a note to Roy that names no card (its
+# card exists, so it passes once it names it). Five shapes the first draft read are not read: money owed
+# TO us, a tenant's arrears, a TRACK RECORD line quoting another task, "it has to be paid every year",
+# and reported words ("It says the £376 will be paid in advance").
+BILL_PROMISE_RE = re.compile(
+    r"\b(?:we|i|agile lets|tnt(?: management)?(?: limited| ltd)?|kevin|the company|our company)\s+(?:will|shall|'ll|are going to"
+    r"|am going to|is going to)\s+(?:then\s+)?(?:pay|settle|clear)\b"
+    r"|\b(?:we'll|i'll)\s+(?:pay|settle|clear)\b"
+    r"|\b(?:will|shall|is going to|are going to)\s+be\s+(?:paid|settled)\b"
+    r"|\b(?:is|are|was|were|has been|have been|being|gets?|will be)\s+paid\s+by\s+(?:us|agile lets|tnt|kevin|the company|our company)\b"
+    r"|\bpaid\s+(?:on|this|next)\s+(?:friday|the friday|the next payment run)\b"
+    r"|\b(?:on|onto|to|into|in)\s+(?:the\s+|this\s+|next\s+|friday'?s\s+|this friday'?s\s+|our\s+)?(?:weekly\s+|next\s+)?"
+    r"payment\s+(?:run|list)\b", re.I)
+BILL_WORD_RE = re.compile(r"\b(?:invoice|bill|fee|charge|statement|balance|amount|sum|payment|premium|debt)\b|£\s?\d", re.I)
+BILL_HEDGE_RE = re.compile(r"\b(?:not|never|no|nothing|none|won't|isn't|aren't|without|instead of|rather than|already|if|whether"
+                           r"|once|unless|until|when|before|after|ask|asking|asks|confirm|could|would|should|may|might"
+                           # Reported words are theirs, not ours: "It says the £376 will be paid in advance".
+                           r"|says?|said|asked|wants?|wrote|writes|requests?|requested)\b", re.I)
+BILL_OTHER_PAYER_RE = re.compile(
+    r"\b(?:tenant|tenants|they|you|your|mears|the agent|letting agent|insurer|council|dwp|universal credit|housing benefit"
+    r"|landlord|he|she|roy)\s+(?:will|shall|'ll|is going to|are going to)\b"
+    r"|\bby\s+(?:the\s+)?(?:tenant|tenants|agent|letting|mears|them|you|insurer|council|dwp)\b", re.I)
+# Money coming TO us is not a bill: rent, a deposit, benefit, arrears, anything someone "owes us".
+BILL_TO_US_RE = re.compile(r"\b(?:owes? us|owed to us|pay us|paid to us|rent|deposit|benefit|universal credit|housing element"
+                           r"|arrears|refund)\b", re.I)
+REC_ID_RE = re.compile(r"\b(rec[A-Za-z0-9]{14})\b")
+
+
+def bill_own_words(output, plain_approve=""):
+    """The agent's own words about a bill: its quoted lines (">") and its TRACK RECORD block (dated lines
+    quoting other tasks) left out, the --plain-approve line added."""
+    kept, in_record = [], False
+    for ln in str(output or "").splitlines():
+        s = ln.strip()
+        if s.upper().startswith(TRACK_RECORD_MARK):
+            in_record = True
+            continue
+        if in_record:
+            if not s:
+                in_record = False
+            continue
+        if s.startswith(">"):
+            continue
+        kept.append(ln)
+    return "\n".join(kept) + "\n" + str(plain_approve or "")
+
+
+def bill_promise_sentence(text):
+    """The first sentence that says a bill of ours will be paid, or ''."""
+    for s in _sentences(text):
+        hit = BILL_PROMISE_RE.search(s)
+        if not hit or not BILL_WORD_RE.search(s):
+            continue
+        if BILL_HEDGE_RE.search(s[:hit.start()]) or BILL_OTHER_PAYER_RE.search(s) or BILL_TO_US_RE.search(s):
+            continue
+        return s
+    return ""
+
+
+def bill_promise_problem(task_id, output, plain_approve, fetch=None, said=""):
+    """Why an output that says a bill will be paid must not go up as it stands, or ''. `said` is the
+    submit's --on-payment-list text."""
+    promise = bill_promise_sentence(bill_own_words(agent_own_text(output), plain_approve))
+    if not promise:
+        return ""
+    if PAYMENT_CARD_RE.search(output or "") or PAID_CHECK_RE.search(output or ""):
+        return ""
+    fetch = fetch or get_task
+    unread = []
+    for rid in sorted(set(REC_ID_RE.findall(f"{output or ''}\n{said or ''}")) - {task_id}):
+        try:
+            other = (fetch(rid) or {}).get("fields") or {}
+        except (Exception, SystemExit) as exc:               # noqa: BLE001 — said, and the card is refused
+            unread.append(f"{rid} ({str(exc)[:60]})")
+            continue
+        if PAYMENT_CARD_RE.search(str(other.get(AF["agentOutput"]) or "")):
+            return ""
+    tail = (f" Code could not read {', '.join(unread)} to see whether it is that card: NOT CHECKED, try again."
+            if unread else "")
+    return (f"it says a bill will be paid (\"{promise[:160]}\") and no card lists it. Kevin's rule (25 Sep 2026): a real "
+            "bill he must pay is a MARK FOR PAYMENT card, listed on the Friday before it is due; never just say it "
+            "will be paid. Do ONE of these: add the MARK FOR PAYMENT block to this card; or, if another task's card "
+            "already lists it, name that task with --on-payment-list <its rec id> (stamped on the task's Notes, never "
+            "in the email; on a card that is not an email, the line ON PAYMENT LIST: <its rec id>) and code reads that "
+            "card for the block; or, if it is already paid, add PAID CHECK: <the payment's date, amount and transaction "
+            "id>; or, if we are not the one paying, say who pays." + tail)
+
+
+# 11. ONE JOB PER HOUSE AND CERTIFICATE (property-administration lesson of 15 Sep 2026: "Before raising or
+# submitting anything, look for another open task or waiting card on the same house and certificate. If
+# one exists, fold into it"). A Property Administration card on a task about one certificate at one house
+# is refused while another card on the same house and certificate is waiting on Kevin, unless the card
+# names it and says why it is another job. Narrowed to waiting cards: PR 950 measured the open-task version
+# at 24 of 90 refused, 16 of them approved as-is (a quote reply and its booking are two open tasks in one
+# chain). Back-test, 30 days to 16 Nov 2026: 1 of 112 Property Administration submit rounds, a contractor
+# booking for a gas safety check while a card asking the letting agent for the same house's certificate
+# waited (the double purchase the lesson is about).
+SAME_HOUSE_LINE_RE = re.compile(r"\bSAME HOUSE CHECK[ \t*_]*:[ \t*_]*(rec[A-Za-z0-9]{14})[ \t*_]*is a different job"
+                                r"[ \t*_]*:?[ \t*_]*(\S[^\n]{9,})", re.I)
+
+
+def same_house_card_problem(task_rec, output, fetch=None, said=""):
+    """Why a Property Administration card must not reach Kevin beside another on the same house and
+    certificate, or ''. `said` is the submit's --same-house-check text."""
+    if CLOSE_OR_STATUS_RE.match(output or ""):
+        return ""
+    tf = (task_rec or {}).get("fields") or {}
+    name = str(tf.get(AF["name"]) or "")
+    ctype = certificate_type(name)
+    if not ctype:
+        return ""
+    props = fetch_properties()
+    pid, how = place_task_house(name, props, tf)
+    if not pid:
+        note_not_checked(f"same-house check: the card is about one certificate ({ctype}) and {how}, so code could "
+                         "not look for another card on the same house and certificate")
+        return ""
+    said = f"SAME HOUSE CHECK: {said}" if str(said or "").strip() else ""
+    named = {m_.group(1) for m_ in SAME_HOUSE_LINE_RE.finditer(outside_email_body(output) + "\n" + said)}
+    for r in waiting_cards((task_rec or {}).get("id"), fetch):
+        rf = r.get("fields") or {}
+        rname = str(rf.get(AF["name"]) or "")
+        if certificate_type(rname) != ctype or held_together((task_rec or {}).get("id"), tf.get(AF["notes"]), r):
+            continue
+        if place_task_house(rname, props, rf)[0] != pid or r.get("id") in named:
+            continue
+        house = next((p["short"] for p in props if p["id"] == pid), pid)
+        return (f"another card on {house} and the same certificate ({ctype}) is already waiting on Kevin: {r['id']} "
+                f"\"{rname[:90]}\". Kevin's rule (15 Sep 2026): one job per house and certificate, so nothing is "
+                f"bought or asked for twice. Fold this into it (python3 scripts/agent-dispatch.py annotate {r['id']} "
+                f"--note \"<what is new>\") and close this one with CLOSE PROPOSAL: duplicate of {r['id']}; or, if it "
+                f"is another job, say why with --same-house-check \"{r['id']} is a different job: <why>\" (stamped on the "
+                f"task's Notes, never in the email; on a card that is not an email, the line SAME HOUSE CHECK: {r['id']} is "
+                "a different job: <why> does the same)")
+    return ""
+
+
+# 12. SEARCH FOR THE CERTIFICATE BEFORE ANY QUOTE, CHASE OR BOOKING (property-administration lesson of 2 Oct
+# 2026: "Before any quote, chase or booking, search every inbox and record for an existing certificate for
+# that house, so we never pay twice. Write the search up"). PR 950 tried to do the search in code and
+# dropped it: Gmail search cannot tell a certificate from a quote thread (8 of 8 checkable purchases
+# matched). What code can hold is that the search was done and written up: a quote request, a chase or a
+# booking on a certificate task carries --certificate-search "<where you looked and what you found>"
+# (stamped on the task's Notes with the card, never in the email) or a CERTIFICATE SEARCH: line outside the
+# email body, naming the mail and the records searched. Back-test, 30 days to 16 Nov 2026: the trigger
+# fires on 10 of 547 outputs (6 bookings, 4 quote requests, no chase), every one a real purchase step for
+# a certificate; none carries the search yet, because the flag is new, so each costs one retry until the
+# agents' files name it.
+CERT_SEARCH_TYPES = ("EICR", "GSC", "EPC", "EMERGENCY LIGHTING", "FIRE")
+CERT_SEARCH_LINE_RE = re.compile(r"\bCERTIFICATE SEARCH[ \t*_]*:[ \t*_]*(\S[^\n]{19,})", re.I)
+CERT_SEARCH_MAIL_RE = re.compile(r"\b(?:inbox(?:es)?|gmail|mail(?:box|boxes)?|e-?mails?)\b", re.I)
+CERT_SEARCH_RECORD_RE = re.compile(r"\b(?:book|records?|airtable|certificates? (?:table|book)|property certificates"
+                                   r"|compliance|tasks?)\b", re.I)
+CERT_QUOTE_SUBJECT_RE = re.compile(r"\b(?:quote|quotes|quotation|price|pricing)\b", re.I)
+CERT_QUOTE_ASK_RE = re.compile(r"\b(?:please|could you|can you|would you)\b[^.\n?]{0,60}\b(?:quote|quotation|price)\b", re.I)
+CERT_CHASE_RE = re.compile(r"\bchas(?:e|es|ed|ing)\b|\bfollow(?:ing)?[ -]up\b|\bany update\b"
+                           r"|\bstill (?:waiting|awaiting|not (?:had|received|seen))\b|\bgentle reminder\b", re.I)
+
+
+def certificate_step(name, output, mail_subject=""):
+    """'quote', 'booking' or 'chase' when the output is that step for a certificate at a house, or ''."""
+    if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX) or certificate_type(name) not in CERT_SEARCH_TYPES:
+        return ""
+    own = agent_own_text(output)
+    if CLOSE_OR_STATUS_RE.match(own):
+        return ""
+    if re.search(r"^\s*PASS TO ROY:", own, re.I | re.M):
+        return "booking"
+    body = email_own_body(own)
+    if not body:
+        return ""
+    if CERT_QUOTE_SUBJECT_RE.search(str(mail_subject or "")) or CERT_QUOTE_ASK_RE.search(body):
+        return "quote"
+    if visit_booking_sentence(body):
+        return "booking"
+    if CERT_CHASE_RE.search(str(mail_subject or "")) or CERT_CHASE_RE.search(body):
+        return "chase"
+    return ""
+
+
+def certificate_search_problem(name, output, mail_subject, description, search):
+    """Why a certificate quote, chase or booking must not go up without its search written up, or ''."""
+    if certificate_watch.FILING_TASK_MARK in str(description or ""):
+        return ""        # the engine's own filing task: asking for the copy of a paid certificate IS the search
+    step = certificate_step(name, output, mail_subject)
+    if not step:
+        return ""
+    how = ("--certificate-search \"<where you looked: the compliance book, the task history, each inbox (info@ and "
+           "Kevin's Gmail), the letting agent's mail> and <what you found>\" (stamped on the task's Notes, never in "
+           "the email; on a card that is not an email, the line CERTIFICATE SEARCH: <the same> does the same)")
+    said = " ".join(str(search or "").split())
+    lines = [m_.group(1) for m_ in CERT_SEARCH_LINE_RE.finditer(outside_email_body(agent_own_text(output)))]
+    evidence = said or (lines[0] if lines else "")
+    if not evidence:
+        return (f"it is a certificate {step} ({name[:90]}) and does not say where you searched for a certificate we may "
+                "already hold. Kevin's rule (2 Oct 2026): before any quote, chase or booking, search every inbox and "
+                f"record for an existing certificate for that house, so we never pay twice, and write the search up. Add {how}")
+    if len(evidence) < 20 or not CERT_SEARCH_MAIL_RE.search(evidence) or not CERT_SEARCH_RECORD_RE.search(evidence):
+        return (f"its certificate search (\"{evidence[:120]}\") does not name both the mail and the records it searched. "
+                f"Write {how}")
+    return ""
 
 
 def cmd_submit_group(args):
@@ -7042,8 +7397,19 @@ def cmd_submit(args):
              lambda: cost_line_problem(_creditor_agent, _name, own, plain_approve),
              lambda: bedroom_problem(_name, own),
              lambda: licence_cert_problem(_name, own, plain_approve, tf_early),
-             lambda: managed_compliance_problem(_name, own, _subject, tf_early))
-    for rule in rules if _acts else ():
+             lambda: managed_compliance_problem(_name, own, _subject, tf_early),
+             # The second round (16 Nov 2026, evening): a twin card, one house and certificate, the search.
+             lambda: (twin_card_problem(rec_early, own, said=getattr(args, "duplicate_check", None))
+                      if args.agent == RESPONSE_REC_ID else ""),
+             lambda: (same_house_card_problem(rec_early, own, said=getattr(args, "same_house_check", None))
+                      if args.agent == PROPERTY_REC_ID else ""),
+             lambda: certificate_search_problem(_name, own, _subject, tf_early.get(AF["description"], "") or "",
+                                                getattr(args, "certificate_search", None)))
+    # A BILL SAID TO BE PAID is read on EVERY submit, a close and a report that files itself included:
+    # "it will be paid on Friday. Nothing. Information only." is the very close the lesson forbids.
+    rules = ((lambda: bill_promise_problem(args.task, own, plain_approve, said=getattr(args, "on_payment_list", None)),)
+             + (rules if _acts else ()))
+    for rule in rules:
         try:
             problem = rule()
         except (Exception, SystemExit) as exc:               # noqa: BLE001 — refused, never passed
@@ -7376,6 +7742,12 @@ def cmd_submit(args):
     tenant_notice = " ".join(str(getattr(args, "tenant_notice", "") or "").split())
     if tenant_notice:
         stamps.append(note_line("agent-dispatch", f"TENANT NOTICE (round {round_no}): {tenant_notice[:300]}"))
+    # What the agent said it checked, on the flags that keep it out of an email (16 Nov 2026).
+    for flag, label in (("certificate_search", "CERTIFICATE SEARCH"), ("duplicate_check", "DUPLICATE CHECK"),
+                        ("same_house_check", "SAME HOUSE CHECK"), ("on_payment_list", "ON PAYMENT LIST")):
+        said_flag = " ".join(str(getattr(args, flag, "") or "").split())
+        if said_flag:
+            stamps.append(note_line("agent-dispatch", f"{label} (round {round_no}): {said_flag[:600]}"))
     for text in unchecked:
         stamps.append(note_line("agent-dispatch", f"{NOT_CHECKED_MARK} (round {round_no}): {text}"))
     # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
@@ -15652,6 +16024,19 @@ def main():
                    help="REQUIRED when an email books or confirms a contractor visit at a house: '<visit date "
                         "YYYY-MM-DD>: <who is told and how>' (inside 24 hours a ClickSend text), or 'none needed: "
                         "<why>'. Stamped on the task's Notes, never put in the email.")
+    s.add_argument("--certificate-search", default="", metavar="TEXT",
+                   help="REQUIRED on a quote request, chase or booking for a certificate: where you searched for a "
+                        "certificate we may already hold (the compliance book, the task history, each inbox) and "
+                        "what you found. Stamped on the task's Notes, never put in the email.")
+    s.add_argument("--duplicate-check", default="", metavar="TEXT",
+                   help="when an Inbox Response card is refused because a card on the same matter already waits on "
+                        "Kevin and it is another matter: 'not the same matter as <rec id>: <why>'. Stamped on Notes.")
+    s.add_argument("--same-house-check", default="", metavar="TEXT",
+                   help="when a Property Administration card is refused because another card on the same house and "
+                        "certificate waits on Kevin and it is another job: '<rec id> is a different job: <why>'.")
+    s.add_argument("--on-payment-list", default="", metavar="RECID",
+                   help="when the card says a bill will be paid and another task's MARK FOR PAYMENT card lists it: "
+                        "that task's rec id (code reads its card for the block). Stamped on Notes.")
     s.add_argument("--coverage", metavar="PATH",
                    help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
                         "covers ... (source: url) lines; refused without it (7 Sep 2026)")

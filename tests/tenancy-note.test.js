@@ -38,7 +38,7 @@ sent, comments = [], []
 def worker(url, payload=None):
     sent.append(payload["to"]); return {"id": "msg-1"}
 m.worker_call = worker
-LOOKUPS, PATCHES = [], []
+LOOKUPS, PATCHES, RENT_READS = [], [], []
 def api(method, url, payload=None):
     if method == "PATCH":
         PATCHES.append(json.dumps(payload))
@@ -59,6 +59,11 @@ def api(method, url, payload=None):
     if "tblqB8b22hKBL4PF1?" in url:
         LOOKUPS.append("tasks")
         return {"records": [{"id": "recOPENRENT%06d" % i, "fields": {m.TASK_TENANCIES: [t]}} for i, t in enumerate(a.get("chased", []))]}
+    # The send reads a keyed RENT LATE card's rent again before it goes (16 Nov 2026, send-email.py
+    # rent_landed_refusal). No rent on the fixture tenancy, so it stops there and the bank is not read.
+    if "fldDMyfZLFMeONPq8" in q:
+        RENT_READS.append(url.split("?")[0].rsplit("/", 1)[1])
+        return {"records": []}
     if "tblN51a88qTDB6iMH?" in url:
         LOOKUPS.append("tenancies")
         asked = set(re.findall(r"RECORD_ID\\(\\)='(rec\\w+)'", q))
@@ -70,7 +75,7 @@ with contextlib.redirect_stdout(buf):
     m.cmd_send(argparse.Namespace(task="recRENTCARD000001", dry_run=False, rule=None))
 ledger = [json.loads(l)["event"] for l in open(m.SENT_LEDGER)]
 print(json.dumps({"out": json.loads(buf.getvalue().strip().splitlines()[-1]), "sent": sent, "comments": comments, "ledger": ledger,
-                  "lookups": LOOKUPS, "patches": PATCHES}))
+                  "lookups": LOOKUPS, "patches": PATCHES, "rentReads": RENT_READS}))
 `], { input: JSON.stringify({ dir, output: EMAIL, name: 'RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep (reminder)',
     notes: 'RENT CHECK KEY: recTENANCYNOTE001:2026-09-30:1', holders: ['rec7aHLK1Q8fMLRXH'], tenancies: ['recTENANCYNOTE001'], ...opts }),
   encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -189,8 +194,10 @@ print(json.dumps({"rc": m and datetime.strptime(m.group(1), "%d %b %Y").date().i
     // An unknown address: said as such.
     expect(send({ ...REPLY, output: EMAIL.replace('sam@example.com', 'nobody@example.com') }).out.tenancyNoteProblem)
       .toBe('the card names no tenancy and its address matches no tenant with a tenancy, so no tenancy comment was written');
-    // A card that links its tenancy never looks anyone up.
-    expect(send({}).lookups).toEqual([]);
+    // A card that links its tenancy never looks anyone up. Its rent is read again before the send, once.
+    const linked = send({});
+    expect(linked.lookups).toEqual([]);
+    expect(linked.rentReads).toEqual(['tblN51a88qTDB6iMH']);
   });
 
   it('two tenancies, the second comment fails: the first is reported as written, so nobody writes it twice', () => {
