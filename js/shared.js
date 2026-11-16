@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain', 'growth-plan', 'publishing'];
+        const iframeTabs = ['os-strategy', 'tasks', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain', 'growth-plan', 'publishing'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -801,7 +801,6 @@
         // Kevin looking at a Tasks page from before a deploy and reporting a
         // shipped feature as missing. A reload after IFRAME_MAX_AGE_MS means a
         // long-lived tab picks deploys up on its own.
-if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         // Render income tab on switch
         if (tabId === 'income') {
             if (typeof renderIncomeTab === 'function') renderIncomeTab();
@@ -853,10 +852,6 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         // Load Prospecting pipeline on switch
         if (tabId === 'prospecting') {
             if (typeof loadProspectingTab === 'function') loadProspectingTab();
-        }
-        // Render Skills Library on switch
-        if (tabId === 'skills') {
-            if (typeof renderSkillsTab === 'function') renderSkillsTab();
         }
         // Task Manager lazy-load
         if (tabId === 'tasks') lazyLoadFrame('tasksFrame', 'tasks');

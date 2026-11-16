@@ -16,7 +16,10 @@ main = "worker.js"
 compatibility_date = "2024-09-01"
 
 [triggers]
-crons = ["0 7 * * *"]
+# Daily timer removed 15 Nov 2026 (Kevin, brain Decisions/2026-11-15 Remove what Kevin does not use):
+# Agent Activity has had no new row in 60 days. The Worker stays for the run button on the AI Agents page.
+# Was: crons = ["0 7 * * *"]. Takes effect only on `npx --yes wrangler deploy` from workers/agent-runner.
+crons = []
 
 # Same-zone workers cannot call each other via public URLs (Cloudflare error
 # 1042) — the AI calls go through a direct service binding to claude-proxy.

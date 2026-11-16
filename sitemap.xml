@@ -121,11 +121,6 @@
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://app.operationsdirector.co.uk/index.html#skills</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.5</priority>
-  </url>
-  <url>
     <loc>https://app.operationsdirector.co.uk/how-it-works.html</loc>
     <lastmod>2026-05-20</lastmod>
     <changefreq>monthly</changefreq>

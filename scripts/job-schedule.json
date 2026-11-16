@@ -197,6 +197,8 @@
   "retryWhenDeferred": true
  },
  "masterplan-sync": {
+  "enabled": false,
+  "retiredNote": "SWITCHED OFF 15 Nov 2026 (Kevin, brain Decisions/2026-11-15 Remove what Kevin does not use): Operations Director is parked to January 2027 and every run since 1 Nov ended 'sync: ticked 0, created 0, flags 0'. launchd job com.od.masterplan-sync to be unloaded and its plist parked in ~/Library/LaunchAgents.parked/. scripts/sync-master-plan.py and its tests stay until the January decision. Never re-enable to silence a missing-run alarm.",
   "cron": "0 7 * * *",
   "maxLateMinutes": 240,
   "mode": "wrapped",
@@ -391,6 +393,8 @@
   "note": "Kevin, 28 Sep 2026: emails him new UK gigs (date, venue, city, booking link) for every Apple Music library artist with 5 or more songs, from Ticketmaster, matched by attraction id so tribute acts never pass as the band; the best tribute acts for favourite bands that no longer tour (private tributes.json) get their own labelled section. Fires daily, checks weekly: scripts/uk-gigs.py run does the Ticketmaster check only once 7 calendar days have passed since the last good one, so a missed day is caught up the next and no weekday sits in the cron. A month with nothing new still gets one email, and the run fails when Ticketmaster matches under 30% of the artists. Outside the queue: it reads Music and Ticketmaster and writes only its private logs and one email through send-email.py self-note, never the repo, Airtable or the queue."
  },
  "job-digest": {
+  "enabled": false,
+  "retiredNote": "SWITCHED OFF 15 Nov 2026 (Kevin, brain Decisions/2026-11-15 Remove what Kevin does not use): 0 passes and 15 failures from 1 to 15 Nov (exit 1 every day), and estate-status already reports missed runs every 10 minutes. launchd job com.kevinbrittain.job-digest to be unloaded and its plist parked in ~/Library/LaunchAgents.parked/. Fields kept so the tests that read them still do. Never re-enable to silence a missing-run alarm.",
   "completedWhen": "ran",
   "completedWhenNote": "job-digest EXITS 1 BY DESIGN whenever the morning message contains anything needing attention \u2014 that is how run-job.sh records a real problem rather than a clean sweep \u2014 and it runs outside the queue, so it never writes a `released` event either. Graded on attendance. Found 19 Sep 2026 by the reachability control added with finding 20260919-daily-ops-phase2-excepti-549, which caught it before it produced its own false outage line; daily-ops and data-invariants had to be read on Kevin's screen first.",
   "cron": "0 11 * * *",

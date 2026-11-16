@@ -457,9 +457,11 @@ describe('auto-bump trigger list does not drift from the auto-bump mapping', () 
   it('parses both lists (control — guards against a vacuous pass)', () => {
     expect(mapped.length, 'FILE_TO_PAGE parsed empty').toBeGreaterThan(25);
     expect(triggers.length, 'workflow paths parsed empty').toBeGreaterThan(25);
-    // The file whose absence caused the CRM miss. If this stops matching, the block is blind.
-    expect(mapped).toContain('crm-supabase.html');
-    expect(triggers).toContain('crm-supabase.html');
+    // A file both lists must carry. If this stops matching, the block is blind. (The file
+    // whose absence caused the CRM miss, crm-supabase.html, was removed on 15 Nov 2026 with
+    // the Supabase shadow build.)
+    expect(mapped).toContain('compliance.html');
+    expect(triggers).toContain('compliance.html');
   });
 
   it('every mapped file is in the workflow paths filter', () => {

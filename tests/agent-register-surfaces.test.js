@@ -20,13 +20,11 @@ const tasksPage = read('os/tasks/index.html');
 // → AI Agents page (os/agents/) on 25 Aug 2026 — Systemisation keeps only
 // the SOP-building flow and a pointer tab.
 const agentsPage = read('os/agents/index.html');
-const skills = read('js/skills.js');
 const dashboard = read('js/dashboard.js');
-const shim = read('os/systemisation/systemisation-shim.js');
-const spec = read('docs/supabase-schema-spec.md');
 
 describe('every owner surface reads the register', () => {
-  for (const [name, src] of [['Tasks & Projects', tasksPage], ['AI Agents page', agentsPage], ['Skills Library', skills]]) {
+  // (The Skills Library, js/skills.js, was a third surface until it was removed on 15 Nov 2026.)
+  for (const [name, src] of [['Tasks & Projects', tasksPage], ['AI Agents page', agentsPage]]) {
     it(`${name} references the register table`, () => {
       expect(src).toContain(REGISTER);
     });
@@ -54,9 +52,9 @@ describe('every owner surface reads the register', () => {
 });
 
 describe('the role-agent deep link has both halves', () => {
-  it('the Skills Library (same window) uses the parent postMessage helper — the localStorage handoff raced a reloading iframe (24 Aug 2026)', () => {
-    expect(skills).toContain('deepLinkAgents({ agent: recId })');
-    expect(skills).not.toContain("localStorage.setItem('sys_open_role_agent'");
+  it('the same-window deep link uses the parent postMessage helper — the localStorage handoff raced a reloading iframe (24 Aug 2026)', () => {
+    // The Skills Library (js/skills.js) was the first sender; it was removed on
+    // 15 Nov 2026. The helper and its receiver stay for the shell and Systemisation.
     // sender in shared.js, receiver + boot handshake on the page
     const shared = read('js/shared.js');
     expect(shared).toContain('window.deepLinkAgents');
@@ -74,20 +72,8 @@ describe('the role-agent deep link has both halves', () => {
   });
 });
 
-describe('the client build knows what it owes', () => {
-  it('the shim warning names all three unmapped tables and points to the spec', () => {
-    expect(shim).toContain(REGISTER);
-    expect(shim).toContain(DAILY_LOG);
-    expect(shim).toMatch(/2\.8/);
-  });
-
-  it('the spec section 2.8 specs ai_agents, agent_daily_log and the module gate', () => {
-    expect(spec).toMatch(/### 2\.8 AI Agents register \+ daily log/);
-    expect(spec).toContain('ai_agents');
-    expect(spec).toContain('agent_daily_log');
-    expect(spec).toMatch(/agents: bool/);
-  });
-});
+// 'the client build knows what it owes' (the Systemisation shim and the Supabase schema spec)
+// was removed on 15 Nov 2026 with the Supabase shadow build.
 
 describe("the shell's badge poll mirrors the page's approval queue", () => {
   // The sidebar badge is polled by js/shared.js BEFORE the tab is ever

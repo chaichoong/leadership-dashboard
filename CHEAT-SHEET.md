@@ -25,7 +25,6 @@
 | Site Map & Links | `js/sitemap.js` |
 | AI Assistant chat | `js/ai-assistant.js` |
 | Operating Systems pages | `os/*.html` |
-| Inbound Comms | `follow-up.html` |
 | Property Compliance | `compliance.html` |
 | SOPs | `sop*.html` |
 

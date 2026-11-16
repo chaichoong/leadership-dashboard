@@ -29,7 +29,7 @@ Review each match. Remove any that are leftover from development. Keep intention
 Run htmlhint on all changed HTML files. The PostToolUse hook covers edits, but verify no issues slipped through:
 
 ```bash
-npx -y htmlhint@1.1.4 index.html follow-up.html compliance.html
+npx -y htmlhint@1.1.4 index.html compliance.html
 ```
 
 **Pass criteria:** No errors.

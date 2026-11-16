@@ -28,8 +28,9 @@
 // separately matches nothing: the one live row at Status=Approval without a
 // raiser link has no assignee either, so it never reaches the send.
 //
-// The twin at os/tasks/index-supabase.html runs the same catch-up. It needs
-// the field requested and mapped, not just the guard pasted in — covered by
+// The twin at os/tasks/index-supabase.html ran the same catch-up until it was
+// removed on 15 Nov 2026. A page needs the field requested and mapped, not just
+// the guard pasted in — covered by
 // tests/notification-catchup-guard.test.js.
 //
 // Airtable is mocked and stubExternalHosts() blocks the internet, so the

@@ -143,3 +143,34 @@ describe('the two halves of the tier-1 decision agree', () => {
         expect(approverWrites.length, 'Approver is written outside the tier-1 branch').toBe(1);
     });
 });
+
+// The two describes below moved here, unchanged, from
+// tests/follow-up-label12-agent-routing.test.js when the Inbound Comms page it
+// tested (follow-up.html) was removed on 15 Nov 2026. They guard live code: the
+// approvals worker and the Tasks page drawer.
+describe('approvals worker routing (approverFor)', () => {
+  it('routes by the Approver field, defaulting to Kevin', () => {
+    expect(approverFor({ approverEmail: 'micaa.work@gmail.com' }, false).name).toBe('Mica');
+    expect(approverFor({ approverEmail: 'kevin@runpreneur.org.uk' }, false).name).toBe('Kevin');
+    expect(approverFor({ approverEmail: '' }, false).name).toBe('Kevin');
+  });
+
+  it('tier 1 ALWAYS diverts to Kevin, whatever the field says', () => {
+    expect(approverFor({ approverEmail: 'micaa.work@gmail.com' }, true).name).toBe('Kevin');
+  });
+});
+
+describe('the task drawer approval box works for any approver', () => {
+  // Mica approves label-8 work in the SAME drawer Kevin uses. Before
+  // 12 Aug 2026 the box was gated on assigneeEmail === KEVIN_EMAIL, so Mica
+  // opening her own approval was told to "reassign it to yourself".
+  const TASKS = read('os/tasks/index.html');
+
+  it('gates the decision on the logged-in user, not a hardcoded person', () => {
+    const start = TASKS.indexOf('function renderApprovalBlock(');
+    expect(start).toBeGreaterThan(-1);
+    const block = TASKS.slice(start, TASKS.indexOf('async function apvDecide('));
+    expect(block).toContain('currentUser');
+    expect(block).not.toContain('KEVIN_EMAIL');
+  });
+});

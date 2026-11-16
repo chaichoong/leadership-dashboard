@@ -391,8 +391,8 @@ REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 # a build session adding one must update ALL of:
 #   1. this dict (one entry, its registerRow included)
 #   2. ~/.claude/agents/<agent>.md (the local agent definition)
-#   3. AI_AGENT_TEAM_MEMBER_RECS in follow-up.html AND follow-up-supabase.html
-#      (content-equality drift-tested in follow-up-label12-agent-routing)
+#   3. (retired 15 Nov 2026: the AI_AGENT_TEAM_MEMBER_RECS copy lived only in the
+#      Inbound Comms page, follow-up.html, removed that day; this dict is its home)
 #   4. the register row itself: all seven stages, Built/Live status
 #   5. AUTO_ROUTES below, if the agent has a deterministic lane
 # Dispatchability is enforced at runtime against the LIVE register status

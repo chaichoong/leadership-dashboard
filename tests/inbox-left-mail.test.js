@@ -971,25 +971,7 @@ describe('the people and pages around the card', () => {
     expect(block).toContain('Nothing. Information only.');
   });
 
-  it('the Inbound Comms page no longer offers "Respond" on label 19, and every other label is unchanged', () => {
-    const html = readFileSync(join(ROOT, 'follow-up.html'), 'utf8');
-    const src = html.match(/function getActionButtonLabel\(\) \{[\s\S]*?\n {4}\}/)[0];
-    const label = (name) => vm.runInNewContext(`${src}\ngetActionButtonLabel()`, { currentLabel: name });
-    expect(label('19: for Kevin to read')).toBe('Follow up');
-    for (const n of ['1: to respond', '10: property compliance', '12: kevin to respond', '13: maintenance',
-      '18: creditor', '8: task created']) expect(label(n), n).toBe('Respond');
-    expect(label('3: to pay')).toBe('Delay Payment');
-    expect(label('6: newsletter')).toBe('Follow up');
-  });
-
-  it('the draft step does not treat label 19 as "to respond" either', () => {
-    const html = readFileSync(join(ROOT, 'follow-up.html'), 'utf8');
-    const line = html.match(/const isToRespondDraft = ([^\n]+);/)[1];
-    const respond = (name) => vm.runInNewContext(line, { currentLabel: name });
-    expect(respond('19: for Kevin to read')).toBe(false);
-    for (const n of ['1: to respond', '12: kevin to respond', '13: maintenance']) expect(respond(n), n).toBe(true);
-    expect(respond('6: newsletter')).toBe(false);
-  });
+  // Two checks on the Inbound Comms page's label-19 buttons went on 15 Nov 2026 with the page (follow-up.html).
 
   it('the Gmail worker returns the Cc header, so a reply-all that answered the sender in Cc is seen', async () => {
     const src = readFileSync(join(ROOT, 'workers/drive-upload/worker.js'), 'utf8');

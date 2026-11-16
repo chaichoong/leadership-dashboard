@@ -33,10 +33,6 @@
         airtable: [
             { label: 'Job List Overview', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Summarise the current contractor job list. How many active jobs are there? Are any overdue or stalled? What needs attention?' },
         ],
-        comms: [
-            { label: 'Inbox Status', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Summarise the current inbound communications status. How many emails need responding to? Are there any urgent items?' },
-            { label: 'Follow-up Priorities', model: AI_MODEL_DEFAULT, maxTokens: 1000, prompt: 'Review the pending follow-ups and suggest which ones to prioritise based on urgency and importance.' },
-        ],
         compliance: [
             { label: 'Compliance Status', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Summarise the property compliance status. Are any certificates expired or expiring soon? Which properties need attention?' },
             { label: 'Expiry Report', model: AI_MODEL_DEFAULT, maxTokens: 1500, prompt: 'Generate a compliance expiry report. List all certificates by expiry date, flag any that are expired or expiring within 30 days, and suggest an action plan.' },
@@ -75,7 +71,6 @@
         'cfv': 'CFVs (Cash Flow Voids) — detects tenancies where rent hasn\'t landed on time, runs a 3-stage chase sequence, tracks exposure.',
         'invoices': 'Invoices — pending invoices pulled from Gmail, AI-matched to vendors/jobs, approved and marked paid.',
         'pnl': 'Profit & Loss — business-level P&L with category breakdown, period comparison, and variance.',
-        'comms': 'Inbound Comms — email triage with AI label suggestions, follow-up tracking, priority scoring.',
         'compliance': 'Property Compliance — certificate tracking (gas, EICR, EPC, legionella, fire, PAT), expiry monitoring, renewal actions.',
         'airtable': 'Contractor Job List — active maintenance jobs, contractor assignment, status.',
         'kpi-library': 'KPI Library (admin only) — the catalogue of ready-made KPI templates clients pick from when their leadership dashboard is built; ten computation shapes, generic core plus property pack, seeded from the platform\'s own live metrics.',
@@ -245,9 +240,6 @@
             }
             if (tab === 'compliance') {
                 ctx.compliancePage = 'Property compliance tracking page (loaded as iframe)';
-            }
-            if (tab === 'comms') {
-                ctx.commsPage = 'Inbound communications tracker (loaded as iframe)';
             }
             if (tab === 'growth-plan') {
                 // The Growth Plan page (growth-plan.html, same origin) leaves its computed plan on
