@@ -6474,6 +6474,16 @@ def rent_next_due(due, due_day):
     return due.replace(year=year, month=month, day=min(int(due_day), calendar.monthrange(year, month)[1]))
 
 
+def owed_cycle_lines(bank, tenancy, owed, due_day):
+    """The owed cycle's bank lines, as rent-check.py's cycle_money counts them: every line matched to the
+    tenancy BY ITS OWN Tenancy link, from EARLY_RENT_DAYS before the due day to that point before the NEXT due
+    day (rent-check's next_due, the tenancy's own due day; review of PR 950, finding 9: a flat 30 days took
+    March's early rent as February's), money out included, so a payment that bounced back nets to nothing."""
+    lo = (owed - timedelta(days=EARLY_RENT_DAYS)).isoformat()
+    hi = (rent_next_due(owed, due_day) - timedelta(days=EARLY_RENT_DAYS)).isoformat()
+    return [b for b in bank if tenancy in b["tenancyIds"] and lo <= b["date"] < hi]
+
+
 def rent_landed_state(name, notes, description, records=None):
     """Has the owed cycle's rent landed since the rent check raised this RENT LATE task? One reading for
     the card (rent_paid_problem, at submit) and for the send (send-email.py and send-text.py, at send
@@ -6508,12 +6518,7 @@ def rent_landed_state(name, notes, description, records=None):
         bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
         return {"state": "unchecked", "detail": str(exc)[:120]}
-    # The owed cycle's money, as rent-check.py's cycle_money counts it: every line matched to the tenancy
-    # from EARLY_RENT_DAYS before the due day to that point before the NEXT due day (rent-check's next_due,
-    # the tenancy's own due day; review of PR 950, finding 9: a flat 30 days took March's early rent as
-    # February's), money out included, so a payment that bounced back nets to nothing.
-    hi = (rent_next_due(owed, due_day) - timedelta(days=EARLY_RENT_DAYS)).isoformat()
-    cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] < hi]
+    cycle = owed_cycle_lines(bank, tenancy, owed, due_day)
     paid = [b for b in cycle if b["amount"] > 0]
     total = sum(b["amount"] for b in cycle)
     if total < rent - RENT_SLACK:
@@ -6538,6 +6543,72 @@ def rent_paid_problem(name, notes, description):
                 "information only, naming the payment, with the closing line **Carrying this out will involve:** "
                 "Nothing. Information only")
     return ""
+
+
+# THE SAME RE-READ FOR A LETTING AGENT'S CARD (Kevin, "Do it now", 16 Nov 2026, after PR 959). An AGENT RENT
+# LATE card emails the letting agent about one or more of its units (one task per agent and due date since
+# 16 Nov 2026, one RENT AGENT KEY line per unit: rent-check.py agent_late_plan). At the send every unit named by
+# a key line is read again: its tenancy, then the bank lines matched to it by their own Tenancy link in its owed
+# cycle (owed_cycle_lines). An agent's payout arrives net of fees and in shares (and a letting fee month dips),
+# so, as rent-check.py judges an agent-managed rent, ANY money matched to the unit in the owed cycle covers it,
+# net of money that came back: weighing it against the rent would chase rent the agent has already paid. A unit
+# the robot has dropped from a rewritten email is declared on the card with --rent-received (a RENT RECEIVED
+# stamp in Notes) and is left out only while its money is really there.
+AGENT_RENT_PREFIX = "AGENT RENT LATE: "                       # rent-check.py AGENT_LATE_PREFIX
+AGENT_RENT_KEY_RE = re.compile(r"RENT AGENT KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2})(?::(?:2|roy))?(?![\w:])")
+RENT_RECEIVED_RE = re.compile(r"\bRENT RECEIVED(?: \(round \d+\))?:\s*(rec[A-Za-z0-9]{14})")
+UNIT_REF_FIELD = "fldql2nyQlPfkPP4p"           # Tenancies: unit reference (rent-check.py TY["unitRef"])
+
+
+def agent_rent_landed_state(name, notes, description, records=None):
+    """Has the rent landed, since the card was made, for the units an AGENT RENT LATE card chases?
+    {"state": "landed", "paid"} every unit paid | {"state": "partial", "paid", "unpaid"} some paid and not
+    declared | {"state": "nokey"} | {"state": "notenancy", "tenancy"} | {"state": "norent", "tenancy"} |
+    {"state": "unchecked", "detail"} | {"state": ""} nothing landed or not an agent card. Each unit is
+    {"tenancy", "unit", "owed", "shown"}."""
+    if not str(name or "").startswith(AGENT_RENT_PREFIX):
+        return {"state": ""}
+    keys = []
+    for tenancy, owed in AGENT_RENT_KEY_RE.findall(f"{notes or ''}\n{description or ''}"):
+        if (tenancy, owed) not in keys:
+            keys.append((tenancy, owed))
+    if not keys:
+        return {"state": "nokey"}
+    read, units = records or query_records, []
+    for tenancy, owed_s in keys:
+        try:
+            rows = read(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'",
+                        fields=[RENT_FIELD, RENT_DUE_DAY_FIELD, UNIT_REF_FIELD])
+            if not rows:
+                return {"state": "notenancy", "tenancy": tenancy}
+            ten = rows[0].get("fields") or {}
+            rent = float(ten.get(RENT_FIELD) or 0)
+            owed = datetime.strptime(owed_s, "%Y-%m-%d").date()
+            due_day = int(ten.get(RENT_DUE_DAY_FIELD) or owed.day)
+        except (Exception, SystemExit) as exc:               # noqa: BLE001 — refused, never passed
+            return {"state": "unchecked", "detail": str(exc)[:120]}
+        if not rent:
+            return {"state": "norent", "tenancy": tenancy}
+        ref = ten.get(UNIT_REF_FIELD)
+        ref = ref[0] if isinstance(ref, list) and ref else ref
+        units.append({"tenancy": tenancy, "unit": str(ref or tenancy), "owed": owed, "dueDay": due_day})
+    since = (min(u["owed"] for u in units) - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat()
+    try:
+        bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
+        return {"state": "unchecked", "detail": str(exc)[:120]}
+    paid, unpaid = [], []
+    for u in units:
+        cycle = owed_cycle_lines(bank, u["tenancy"], u["owed"], u["dueDay"])
+        u["shown"] = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in cycle if b["amount"] > 0)
+        (paid if sum(b["amount"] for b in cycle) > 0.005 else unpaid).append(u)
+    if paid and not unpaid:
+        return {"state": "landed", "paid": paid}
+    declared = set(RENT_RECEIVED_RE.findall(str(notes or "")))
+    chased = [u for u in paid if u["tenancy"] not in declared]
+    if chased:
+        return {"state": "partial", "paid": chased, "unpaid": unpaid}
+    return {"state": ""}
 
 
 # 5. A COST THAT CHANGES IS WRITTEN ON THE SAME CARD (creditor-management 3 Oct 2026; BINDING "FIXED COSTS
@@ -7772,7 +7843,8 @@ def cmd_submit(args):
         stamps.append(note_line("agent-dispatch", f"TENANT NOTICE (round {round_no}): {tenant_notice[:300]}"))
     # What the agent said it checked, on the flags that keep it out of an email (16 Nov 2026).
     for flag, label in (("certificate_search", "CERTIFICATE SEARCH"), ("duplicate_check", "DUPLICATE CHECK"),
-                        ("same_house_check", "SAME HOUSE CHECK"), ("on_payment_list", "ON PAYMENT LIST")):
+                        ("same_house_check", "SAME HOUSE CHECK"), ("on_payment_list", "ON PAYMENT LIST"),
+                        ("rent_received", "RENT RECEIVED")):
         given = getattr(args, flag, "") or ""
         for said_flag in (given if isinstance(given, (list, tuple)) else [given]):
             said_flag = " ".join(str(said_flag or "").split())
@@ -16068,6 +16140,10 @@ def main():
     s.add_argument("--on-payment-list", default="", metavar="RECID",
                    help="when the card says a bill will be paid and another task's MARK FOR PAYMENT card lists it: "
                         "that task's rec id (code reads its card for the block). Stamped on Notes.")
+    s.add_argument("--rent-received", action="append", default=None, metavar="TEXT",
+                   help="on an AGENT RENT LATE card rewritten after the send found some units paid: "
+                        "'<tenancy id>: <payment id>' for each paid unit the email no longer chases, once per unit. "
+                        "Stamped on Notes; the send then checks only the units still chased.")
     s.add_argument("--coverage", metavar="PATH",
                    help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
                         "covers ... (source: url) lines; refused without it (7 Sep 2026)")

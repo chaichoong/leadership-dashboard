@@ -160,7 +160,10 @@ print(json.dumps({"rc": m and datetime.strptime(m.group(1), "%d %b %Y").date().i
   });
 
   it('a late agent-managed rent card says it emailed the letting agent, never the tenant (Kevin, 5 Oct 2026)', () => {
-    const r = send({ name: 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep' });
+    // An agent card carries its RENT AGENT KEY line (rent-check.py), and the send reads the unit's rent and the bank
+    // again before it goes (16 Nov 2026): nothing landed in the fixture, so the email goes.
+    const r = send({ name: 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep', notes: 'RENT AGENT KEY: recTENANCYNOTE001:2026-09-30' });
+    expect(r.rentReads).toEqual(['tblN51a88qTDB6iMH', 'tbln0gzhCAorFc3zB']);
     expect(r.comments).toHaveLength(1);
     expect(r.comments[0][1]).toMatch(/: Agile Lets emailed the letting agent \(sam@example\.com\): "Your rent at 1 Example Road"/);
   });
