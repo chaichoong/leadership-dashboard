@@ -452,6 +452,8 @@ function submit(output, agent = RESPONSE) {
   return py(DISPATCH, `
 import tempfile, os, types
 m.require_role_agent_live = lambda *a, **k: None
+# An Inbox Response submit looks for a twin card waiting on Kevin (16 Nov 2026): none is waiting here.
+m.query_records = lambda table, formula=None, fields=None, max_records=None: []
 class Reached(Exception): pass
 reads = []
 def reached(task):

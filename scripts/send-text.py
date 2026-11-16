@@ -231,12 +231,17 @@ def _cmd_send(args):
         sys.exit("REFUSED: text sending is switched off. It is switched on only at the cut-over, by Kevin's decision "
                  f"({SWITCH}).")
     f, number, message, trial, outcome = load_card(args.task, args.dry_run)
+    # The bank is read again at the send (Kevin, 16 Nov 2026): send-email.py's rent_landed_refusal, the one
+    # reading the email and the card share, so the text and the email on one card can never disagree.
+    se = send_email_module()
+    rent_landed = se.rent_landed_refusal(args.task, f.get(AF["name"], ""), f)
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task, "switchedOn": on, "trial": trial or None,
                           "approvalOutcome": outcome or "(not yet approved)", "route": f"{TEXT_FROM} by ClickSend email-to-text",
-                          "numberEnds": number[-3:], "chars": len(message)}, indent=2))
+                          "numberEnds": number[-3:], "chars": len(message), "rentLanded": rent_landed or None}, indent=2))
         return 0
-    se = send_email_module()
+    if rent_landed:
+        sys.exit(f"REFUSED: task {args.task}: {rent_landed}.")
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent", "numberEnds": number[-3:], "chars": len(message)})
     try:
         sent = se.worker_call(se.SEND_URL, {"to": clicksend_address(number), "from": TEXT_FROM,

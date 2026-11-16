@@ -494,7 +494,7 @@ def load_approved(task_id, require_approval=True, rule=None):
             sys.exit(f"REFUSED: task {task_id} does not qualify for the {rule!r} rule: "
                      f"{problem}. It needs Kevin's approval.")
         parsed.update({"taskName": f.get(AF["name"], "(Untitled)"),
-                       "outcome": f"rule:{rule}"})
+                       "outcome": f"rule:{rule}", "fields": f})
         return parsed
     name = f.get(AF["name"], "(Untitled)")
     outcome = sel(f.get(AF["approvalOutcome"]))
@@ -527,7 +527,7 @@ def load_approved(task_id, require_approval=True, rule=None):
 
     parsed = parse_output(output, task_id)
     parsed.update({"taskName": name, "outcome": outcome, "approvalProblem": evidence,
-                   "approvedAt": f.get(AF["approvedAt"]) or ""})
+                   "approvedAt": f.get(AF["approvedAt"]) or "", "fields": f})
     return parsed
 
 
@@ -672,6 +672,10 @@ def _cmd_send(args):
     # send below is still gated.
     rule = getattr(args, "rule", None)
     mail = load_approved(args.task, require_approval=not args.dry_run, rule=rule)
+    # The bank is read again at the send, not only when the card was made (Kevin, 16 Nov 2026).
+    rent_landed = rent_landed_refusal(args.task, mail.get("taskName"), mail.get("fields"))
+    if rent_landed and not args.dry_run:
+        sys.exit(f"REFUSED: task {args.task} ({mail['taskName']}): {rent_landed}.")
     if prior:
         # Something already went on this task: only a new approval of a different email goes (716).
         again = second_send_problem(args.task, mail)
@@ -694,8 +698,9 @@ def _cmd_send(args):
                           or "(not yet approved)",
                           "wouldSend": bool(mail["outcome"] in APPROVED)
                           and not mail.get("approvalProblem")
-                          and not sender_problem,
+                          and not sender_problem and not rent_landed,
                           "approvalProblem": mail.get("approvalProblem") or None,
+                          "rentLanded": rent_landed or None,
                           "from": mail["from"] or "(worker default: kevinbrittain@gmail.com)",
                           "senderProblem": sender_problem or None,
                           "to": mail["to"], "cc": mail["cc"],
@@ -1005,6 +1010,64 @@ def dispatch_module():
         spec.loader.exec_module(ad)
         _DISPATCH["ad"] = ad
     return _DISPATCH["ad"]
+
+
+def _rent_rows(table, formula=None, fields=None, max_records=None):
+    """The send's own paginated read for the rent check, through this file's `api` door. A reply with no
+    records list is an error, never an empty table (CLAUDE.md): it reads as NOT CHECKED and refuses."""
+    rows, offset = [], None
+    while True:
+        q = [("pageSize", "100"), ("returnFieldsByFieldId", "true")] + ([("filterByFormula", formula)] if formula else [])
+        q += [("fields[]", f) for f in (fields or [])] + ([("offset", offset)] if offset else [])
+        page = api("GET", f"https://api.airtable.com/v0/{BASE_ID}/{table}?" + urllib.parse.urlencode(q))
+        if not isinstance(page, dict) or not isinstance(page.get("records"), list):
+            raise RuntimeError(f"the read of {table} returned no records list")
+        rows += page["records"]
+        offset = page.get("offset")
+        if not offset:
+            return rows
+
+
+# THE RENT IS READ AGAIN AT THE SEND (Kevin, 16 Nov 2026; cash-flow-voids lesson of 30 Oct 2026: a chase
+# reached a tenant for rent Kevin had already seen arrive). agent-dispatch.py refuses a RENT LATE card when
+# the bank shows the cycle's rent at SUBMIT (rent_paid_problem, PR 950), but Kevin approves hours or days
+# later and the rent often lands in between: it arrives the night before (Thursday night carries Friday to
+# Sunday), and the feed lags the bank. So the send reads it again, through the SAME function the card used
+# (agent-dispatch.py rent_landed_state), and a late-rent message whose rent has landed is never sent. A bank
+# that cannot be read refuses too: a late-rent message goes only on a fresh read. send-text.py, the same
+# card's text, calls this function. It cannot see money the feed has not brought in yet. Back-test, read
+# only: of the 4 keyed RENT LATE cards sent in the 30 days to 16 Nov 2026, 1 would have been refused at
+# the send, the 30 Oct card itself (its rent is dated the day of the 14:33 send; whether the feed held it
+# by then cannot be told from the record).
+def rent_landed_refusal(task_id, task_name, fields=None):
+    """'' or why a RENT LATE email or text must not go now. `fields` is the task as the send already read
+    it; with none, it is read here."""
+    if not str(task_name or "").startswith("RENT LATE: "):
+        return ""
+    f = fields if fields is not None else (get_task(task_id).get("fields", {}) or {})
+    landed = dispatch_module().rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
+                                                 f.get(AF["description"], ""), records=_rent_rows)
+    if landed.get("state") == "landed":
+        return (f"{landed['detail']}. Nothing was sent: the rent landed after the card was made, so the chase is "
+                f"not owed (Kevin, 16 Nov 2026). Close the task naming the payment: python3 scripts/agent-dispatch.py "
+                f"complete {task_id} --evidence \"rent arrived before the send: {landed.get('shown', '')[:140]}\"")
+    if landed.get("state") == "unchecked":
+        return (f"the bank could not be read again for this tenancy ({landed.get('detail', '')}), so whether the rent "
+                "has landed since the card was made is NOT CHECKED. Nothing was sent. Run the send again; a late-rent "
+                "message goes only on a fresh read")
+    # Running is not working (review of PR 959): a card the check cannot place is refused, never sent on a guess.
+    if landed.get("state") == "nokey":
+        return ("it is a RENT LATE card with no RENT CHECK KEY line, so code cannot tell which tenancy and rent cycle "
+                "to read the bank for: NOT CHECKED. Nothing was sent. The rent check writes that line on every RENT LATE "
+                "task it raises; record a TOOL wall naming the missing key line rather than send without it")
+    if landed.get("state") == "notenancy":
+        return (f"the tenancy {landed.get('tenancy', '')} in its RENT CHECK KEY is not in the Tenancies table, so the "
+                "rent cannot be read: NOT CHECKED. Nothing was sent. Find the tenancy the chase is about; record a TOOL "
+                "wall if the key is wrong")
+    if landed.get("state") == "norent":
+        return (f"tenancy {landed.get('tenancy', '')} has no rent on its record, so code cannot tell whether what landed "
+                "covers it: NOT CHECKED. Nothing was sent. Put the rent on the tenancy record, then run the send again")
+    return ""
 
 
 def notify_due_again(task_id, days, now=None):
