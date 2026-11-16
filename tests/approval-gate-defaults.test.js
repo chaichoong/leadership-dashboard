@@ -202,7 +202,7 @@ describe('the rules are enforced where they cannot be skipped', () => {
     // their strict layer. The property under test is unchanged: submit
     // validates strictly, and never with the permissive parser.
     const src = readFileSync(DISPATCH, 'utf8');
-    expect(src).toMatch(/validate_any_submission\(output\)/);
+    expect(src).toMatch(/validate_any_submission\(output(?:, task_name=_pn)?\)/);
     expect(src, 'submit fell back to the permissive parser')
       .not.toMatch(/^\s*parse_email_output\(output\)/m);
   });
