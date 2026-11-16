@@ -480,9 +480,44 @@ m.fetch_properties = lambda refresh=False: (_ for _ in ()).throw(RuntimeError("H
 e = submit(email("It is a two-bedroom house, at 7 Example Road."), type_="Correspondence")["err"]
 m.fetch_properties = real
 out["couldNotRun"] = ["Try again" in e, ok(submit(email("It is a two-bedroom house, at 7 Example Road."), type_="Correspondence"))]
+# ─── the gaps the review of PR 950 left open (16 Nov 2026), each refusal followed once ───
+# 14. tenant notice, another booking wording (finding 5)
+task("COMPLIANCE: EICR renewal due - 9 Sample Street")
+start = email("Can you confirm you can start at 9 Sample Street at 9am on Thursday 26 November for the EICR?")
+e = submit(start, type_="Correspondence")["err"]
+out["noticeMoreWords"] = ["--tenant-notice" in e, ok(submit(start, type_="Correspondence", tenant_notice=day(10) + ": every tenant by text and email from info@"))]
+# 15. tenant notice, a PASS TO ROY booking on a named day (finding 5); Roy's handover itself is not this test's business
+m.handle_without_kevin = lambda args, output, trec, level, attached: (CAPTURED.update({AF["status"]: "Completed"}), 0)[1]
+roy = ("PASS TO ROY: the EICR at 9 Sample Street is booked for Thursday 26 November at 9am with Fixture Electrical; please be there to let them in.\\n\\n"
+       "**Carrying this out will involve:** Roy meets the electrician at the house.")
+e = submit(roy)["err"]
+out["noticeRoy"] = ["--tenant-notice" in e, ok(submit(roy, tenant_notice=day(10) + ": every tenant by text and email from info@"))]
+# 16. renewal, said in the email's own words (finding 6)
+task("INSURANCE: buildings cover renewal - 9 Sample Street")
+e = submit(mail("this email goes to the insurer.").replace("Please see below.", "Please go ahead and renew the policy from 1 December."), type_="Correspondence")["err"]
+line = re.search(r"NO TOPCASHBACK QUOTE: <[^>]+>", e).group(0)
+out["renewalInBody"] = [bool(e), ok(submit(mail("this email goes to the insurer. " + fill(line, "no TopCashback insurer quotes a house let to a council scheme")).replace("Please see below.", "Please go ahead and renew the policy from 1 December."), type_="Correspondence"))]
+# 17. licence, a task name with the address cut short (finding 7)
+task("COMPLIANCE: HMO licence fee - 7 Example Rd")
+e = submit("The fee is £150.\\nSPEND: £150\\n\\n**Carrying this out will involve:** the agent submits the licence application.")["err"]
+out["licenceShortName"] = ["comes back as its own card once they are filed" in e,
+                           ok(submit("The certificates are missing.\\n\\n**Carrying this out will involve:** the agent books the EICR and the gas check; the licence fee comes back as its own card once they are filed."))]
+# 18. licence, "gas" in the task's name (finding 7)
+task("COMPLIANCE: HMO licence - gas and EICR first - 7 Example Road")
+e = submit("Report.\\n\\n**Carrying this out will involve:** the agent pays the licence fee to the council.")["err"]
+out["licenceGasInName"] = ["comes back as its own card once they are filed" in e,
+                           ok(submit("Report.\\n\\n**Carrying this out will involve:** the agent books the EICR and the gas check; the licence fee comes back as its own card once they are filed."))]
+# 19. paid check, a payee of three letters (finding 8)
+task("INBOUND: pay AXA landlord insurance premium GBP 61.20")
+BANK[:] = [{"id": "recBankAxaAaaaaaa", "date": day(-2), "amount": -61.20, "name": "AXA INSURANCE DD", "tenancyIds": []}]
+axa = lambda line: ("MARK FOR PAYMENT: AXA premium for November\\nPAYEE: AXA\\nAMOUNT: £61.20\\n" + line +
+                    "\\n\\n**Carrying this out will involve:** £61.20 goes on the Friday payment list.")
+e = submit(axa("PAID CHECK: none found (searched the bank)"))["err"]
+line = re.search(r"PAID CHECK: not this bill: \\d+ payments from \\S+ to \\S+ \\(<[^>]+>\\)", e).group(0)
+out["paidShortPayee"] = ["recBankAxaAaaaaa" in e, ok(submit(axa(fill(line, "that was October's premium, this bill is November's"))))]
 print(json.dumps(out))`);
     for (const [k, v] of Object.entries(r)) expect([k, v]).toEqual([k, [true, true]]);
-    expect(Object.keys(r).length).toBe(18);      // every new refusal, each followed once
+    expect(Object.keys(r).length).toBe(24);      // every refusal, each followed once (18 from PR 950, 6 added 16 Nov)
   });
 });
 

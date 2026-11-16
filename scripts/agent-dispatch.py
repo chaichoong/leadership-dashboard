@@ -6115,6 +6115,24 @@ SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
 CHECK_NEG_RE = re.compile(r"\b(?:not|never|no|nothing|none|won't|isn't|without|instead of|rather than|already)\b", re.I)
 
 
+# NOT CHECKED REACHES KEVIN (review of PR 950, finding 11; BINDING "NO SILENT ZEROS", 17 Sep 2026). A check
+# that lets a card through without having been able to look (a tenancy with no rent, a bill with no readable
+# amount, a licence or managed-house card that names no single house, a bought-twice check that could not
+# run) used to say so on stderr only, which nobody reads. It is now collected here during one submit and
+# stamped on the task's Notes as a dated NOT CHECKED BY CODE line with the card, where his card's trail
+# shows it. Never in the Agent Output: on an email card a line there would be sent.
+_SUBMIT_NOT_CHECKED = []
+NOT_CHECKED_MARK = "NOT CHECKED BY CODE"
+
+
+def note_not_checked(text):
+    """Record that a submit check let a card through without looking, and say so on stderr too."""
+    text = " ".join(str(text or "").split())[:400]
+    if text and text not in _SUBMIT_NOT_CHECKED:
+        _SUBMIT_NOT_CHECKED.append(text)
+    print(f"NOT CHECKED: {text}", file=sys.stderr)
+
+
 def agent_own_text(output):
     """The output as the agent wrote it: the tier-1 banner submit (or the agent) put on top taken off."""
     body = str(output or "").strip()
@@ -6160,8 +6178,25 @@ def _card_line(text, label):
     return match.group(1).strip() if match else ""
 
 
-def payee_words(text):
-    return {w for w in re.findall(r"[a-z][a-z'&]{3,}", str(text or "").lower()) if w not in PAYEE_STOP}
+# A PAYEE OF THREE LETTERS OR FEWER (review of PR 950, finding 8): "PAYEE: AXA" gave no words, so a bank
+# line "AXA INSURANCE -£61.20" never matched and the card passed on the agent's own line; EDF, EE, BT and
+# SSE the same. A short name counts when the card writes it in capitals (a brand, not "of" or "the") and
+# it is not one of the bank's own abbreviations below; the bank side is read in full, since a statement
+# writes everything in capitals. The amount must still be the same to the penny.
+PAYEE_SHORT_STOP = {"ltd", "plc", "llp", "the", "and", "for", "uk", "gb", "dd", "so", "fp", "vat", "ref", "inv",
+                    "no", "co", "gbp", "bgc", "tfr", "via", "on", "of", "to", "at", "by", "in", "pay", "due",
+                    "fee", "tax", "cic", "inc", "llc", "st", "rd", "dr", "mr", "mrs", "ms", "re", "fwd", "pdf",
+                    "atm", "pos", "cr", "chq", "std", "ac", "acc", "id", "nb", "eur", "usd"}
+
+
+def payee_words(text, bank=False):
+    """The telling words of a payee or a bank line: words of four letters or more, and the short names
+    above (any short word on a bank line; a short word in capitals on the card)."""
+    text = str(text or "")
+    words = {w for w in re.findall(r"[a-z][a-z'&]{3,}", text.lower()) if w not in PAYEE_STOP}
+    short = re.findall(r"(?<![A-Za-z0-9&'])([A-Za-z]{2,3})(?![A-Za-z0-9&'])", text)
+    words |= {w.lower() for w in short if (bank or w.isupper()) and w.lower() not in PAYEE_SHORT_STOP}
+    return words
 
 
 def payment_card(name, output, task_type):
@@ -6221,8 +6256,8 @@ def paid_check_problem(task_rec, output, task_type):
                 "Gmail, the other tasks on this payee> from <date> to <date>)")
     if not card["amount"]:
         if lines:
-            print(f"NOT CHECKED: the bill card on {task_rec.get('id')} has no amount code can read, so code did "
-                  "not search the bank; the agent's PAID CHECK line is all there is.", file=sys.stderr)
+            note_not_checked("paid check: the bill has no amount code can read (a £ figure or GBP), so code did "
+                             "not search the bank; the agent's PAID CHECK line is all there is")
             return ""
         return ("it lists a bill to pay and code cannot read its amount, so the bank was NOT CHECKED by code. "
                 "Search Transactions and Gmail for the payee yourself; if it is paid, close the task naming the "
@@ -6242,7 +6277,7 @@ def paid_check_problem(task_rec, output, task_type):
                 "already paid is NOT CHECKED (the feed or the read is broken). Try again; if it persists, record "
                 "a TOOL wall")
     words = payee_words(card["payee"])
-    same = lambda b: abs(abs(b["amount"]) - card["amount"]) < 0.005 and bool(words & payee_words(b["name"]))  # noqa: E731
+    same = lambda b: abs(abs(b["amount"]) - card["amount"]) < 0.005 and bool(words & payee_words(b["name"], bank=True))  # noqa: E731
     hits = [b for b in bank if b["amount"] < 0 and same(b)]
     # Money that came back (a bounced or refunded payment) cancels the payment it returns, so listing the
     # bill again never needs a false "not this bill" line (review of PR 950, finding 12).
@@ -6283,10 +6318,13 @@ def paid_check_problem(task_rec, output, task_type):
 # with the line it passes. Asking an insurer to CONFIRM a renewal date is not accepting it.
 INSURANCE_LANE_RE = re.compile(r"insurance|premium\s+(?:finance|credit)|close\s+brothers", re.I)
 RENEWAL_ACCEPT_RE = re.compile(
-    r"\brenew(?:s|ing)?\s+(?:the|this|your|our|its|their)\s+(?:\w+\s+){0,2}(?:policy|policies|cover|insurance)\b"
+    r"\brenew(?:s|ing)?\s+(?:the|this|your|our|my|its|their)\s+(?:\w+\s+){0,2}(?:policy|policies|cover|insurance)\b"
     r"|\b(?:accept|accepts|accepting|take|takes|taking|proceed with|proceeds with|go ahead with|goes ahead with"
-    r"|sign|signs|signing|agree to|agrees to|keep|keeps)\b[^.\n;]{0,40}\brenewal\b"
-    r"|\b(?:telling|tells|asking|asks|instructing|instructs)\s+(?!not\b)\w+(?:\s+(?!not\b)\w+)?\s+to\s+renew\b", re.I)
+    r"|sign|signs|signing|agree to|agrees to|keep|keeps|pay|pays|paying)\b[^.\n;]{0,40}\brenewal\b"
+    r"|\b(?:telling|tells|asking|asks|instructing|instructs)\s+(?!not\b)\w+(?:\s+(?!not\b)\w+)?\s+to\s+renew\b"
+    # Review of PR 950, finding 6: the same acceptance in other words, and in the email that carries it.
+    r"|\b(?:go|goes|going) ahead and renew\b|\bplease renew\b"
+    r"|\b(?:continue|continues|continuing)\s+(?:with\s+)?(?:the|this|your|our|my|its|their)?\s*(?:\w+\s+)?cover\b", re.I)
 FINANCE_SIGN_RE = re.compile(r"\bsigns?\b[^.\n;]{0,50}\b(?:credit|finance)\s+agreement\b", re.I)
 # Read anywhere in the output, the closing line included: on an email card any other line would be
 # sent to the insurer, and the closing line never is (the send path takes it off).
@@ -6294,10 +6332,21 @@ TOPCASHBACK_LINE_RE = re.compile(r"\b(?:TOPCASHBACK QUOTE[ \t*_]*:[^\n]*£\s?\d|
                                  r"[ \t*_]*\S[^\n]{9,})", re.I)
 
 
+def email_own_body(output):
+    """The body of the email in an output, its quoted lines (">") left out, or '' when it holds none."""
+    try:
+        mail = parse_email_output(output or "")
+    except EmailFormatError:
+        return ""
+    return "\n".join(ln for ln in ((mail or {}).get("body") or "").splitlines() if not ln.lstrip().startswith(">"))
+
+
 def renewal_problem(name, output, plain_approve):
     if not INSURANCE_LANE_RE.search(str(name or "")) or TOPCASHBACK_LINE_RE.search(output or ""):
         return ""
-    for s in _sentences(_approve_text(output, plain_approve)):
+    # The email's own words count as well as the closing and approve lines (review of PR 950, finding 6):
+    # "Please go ahead and renew the policy" in the body IS the acceptance, whatever the closing line says.
+    for s in _sentences(_approve_text(output, plain_approve) + "\n" + email_own_body(output)):
         hit = RENEWAL_ACCEPT_RE.search(s) or (FINANCE_SIGN_RE.search(s) if re.search(r"renew", s, re.I) else None)
         if hit and not CHECK_NEG_RE.search(s[:hit.end()]):
             return (f"what Approve sets going renews an insurance policy or signs its renewal (\"{s[:160]}\"). "
@@ -6321,7 +6370,43 @@ VISIT_DAY = (r"(?:(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\.?,?\s+(
              r"|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)")
 VISIT_BOOK_RE = re.compile(r"\b(?:please book(?: us| it| him| her| them)?(?: in)?|book us in|i confirm|we confirm"
                            r"|(?:is|are) booked(?: in)?(?: for| to)?|booked (?:in )?for)\b[^.\n]{0,100}?" + VISIT_DAY, re.I)
+# MORE WAYS A VISIT GETS BOOKED (review of PR 950, finding 5). The words above caught 6 of the booking
+# emails in the stored outputs; these caught the rest that fix a contractor's visit on a named day: asking
+# them to confirm they can start or go in, "yes please to <day>", "<day> is great", "please carry out ...
+# on <day>", taking an offered slot, clearing the house for a day. Back-tested on the 1,883 stored outputs
+# (16 Nov 2026): 7 more emails fire, every one a booking on a named day; a deadline ("reply by Friday 23
+# October"), a past visit ("the visit on Monday 12 October did not go ahead"), an availability question
+# ("a free slot on Friday 9 October?"), a range ("any day from Monday 2 to Friday 6 November") and a
+# provisional hold fire on none. A PASS TO ROY line that books a named day is read the same way: Roy
+# books it, and the tenants still need telling (none of the 3 stored PASS TO ROY outputs does).
+VISIT_BOOK_MORE_RE = re.compile(
+    r"\bconfirm\s+(?:that\s+)?(?:you|they|he|she|the\s+[a-z]+(?:\s+[a-z]+)?)\s+(?:can|could|will|are able to|is able to)\s+"
+    r"(?:start|attend|come|go in|get in|visit|call|do the|carry out)\b[^.\n]{0,100}?" + VISIT_DAY +
+    r"|\byes,?\s+please,?\s+(?:to|for|on)\s+(?:the\s+)?" + VISIT_DAY +
+    # A weekday first ("Friday 6 November is great"), so "a 1 December start is fine" on an insurance card is not a visit.
+    r"|\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?(?:\s+(?:of\s+)?[a-z]{3,9})?"
+    r"(?:\s+at\s+[\d.:]+\s*(?:am|pm)?)?\s+(?:is|would be)\s+(?:great|fine|perfect|ideal|good for us)\b"
+    r"|\bplease\s+(?:carry out|attend|come (?:in|round|out)|start)\b[^.\n]{0,100}?\bon\s+" + VISIT_DAY +
+    r"|\b(?:take|accept|book)\s+(?:that|this|the|your)\s+(?:slot|date|appointment)\b"
+    r"|\bcleared the (?:house|property|flat)\s+for\s+" + VISIT_DAY, re.I)
+VISIT_DAY_RE = re.compile(VISIT_DAY, re.I)
 PROPERTY_TASK_RE = re.compile(r"^\s*(?:COMPLIANCE|MAINTENANCE|INSURANCE|PROPERTY)\b", re.I)
+PASS_TO_ROY_BLOCK_RE = re.compile(r"^\s*PASS TO ROY:[^\n]*(?:\n(?!\s*\n)[^\n]*)*", re.I | re.M)
+
+
+def visit_booking_sentence(text):
+    """The first sentence of `text` that books a contractor visit on a named day, or ''."""
+    for s in _sentences(text):
+        if re.search(r"\bcancel", s, re.I):
+            continue
+        if VISIT_BOOK_RE.search(s):
+            return s
+        # "take that slot" carries no day of its own: the day must be in the same sentence.
+        more = VISIT_BOOK_MORE_RE.search(s)
+        if more and VISIT_DAY_RE.search(s) and not CHECK_NEG_RE.search(s[:more.start()]) \
+                and not re.search(r"\b(?:cannot|can't|couldn't|unable)\b", s[:more.start()], re.I):
+            return s
+    return ""
 
 
 def tenant_notice_problem(name, output, task_type, notice):
@@ -6331,8 +6416,9 @@ def tenant_notice_problem(name, output, task_type, notice):
         mail = parse_email_output(output or "")
     except EmailFormatError:
         mail = None
-    body = (mail or {}).get("body") or ""
-    hit = next((s for s in _sentences(body) if VISIT_BOOK_RE.search(s) and not re.search(r"\bcancel", s, re.I)), "")
+    body = "\n".join(ln for ln in ((mail or {}).get("body") or "").splitlines() if not ln.lstrip().startswith(">"))
+    roy = "\n".join(mm.group(0) for mm in PASS_TO_ROY_BLOCK_RE.finditer(output or "")) if not mail else ""
+    hit = visit_booking_sentence(body) or visit_booking_sentence(roy)
     if not hit:
         return ""
     notice = " ".join(str(notice or "").split())
@@ -6411,8 +6497,8 @@ def rent_paid_problem(name, notes, description):
     paid = [b for b in cycle if b["amount"] > 0]
     total = sum(b["amount"] for b in cycle)
     if not rent:
-        print(f"NOT CHECKED: tenancy {tenancy} has no rent on its record, so the paid-again check on {name[:60]} "
-              "could not compare a total.", file=sys.stderr)
+        note_not_checked(f"rent paid-again check: tenancy {tenancy} has no rent on its record, so code could not "
+                         f"tell whether the £{total:,.2f} matched to it since the due day covers the rent")
         return ""
     if total < rent - RENT_SLACK:
         return ""
@@ -6543,15 +6629,49 @@ LICENCE_ACT_RE = re.compile(r"\b(?:pay|pays|paying)\s+(?:the\s+|our\s+|a\s+)?(?:
                             r"|\bappl(?:y|ies|ying)\s+for\s+(?:the\s+|a\s+)?(?:\w+\s+)?licen[cs]e\b"
                             r"|\bapplication\s+(?:goes in|is submitted|is sent)\b", re.I)
 LICENCE_LATER_RE = re.compile(r"\b(?:once|after|until|when|then|later|separately|not|no|never|nothing|before)\b", re.I)
+TASK_PROPERTIES_FIELD = "fldZKFvEpJ6NZeFKz"     # Tasks: Properties link (certificate_watch.py TF["properties"])
+HOUSE_NUMBER_STREET_RE = re.compile(r"(?<![0-9A-Za-z])(\d{1,4}[A-Za-z]?)\s+([A-Za-z][A-Za-z'-]{2,})")
 
 
-def licence_cert_problem(name, output, plain_approve):
+def place_task_house(name, props, task_fields=None):
+    """(the one property a task is about, how it was placed) or ("", why not). The name first, as
+    task_property_id reads it; then the task's own Properties link when it holds exactly one; then a house
+    number and the street's first word, when exactly one house has both ("- 7 Example Rd" for 7 Example
+    Road: a name cut short or abbreviated placed no house, so a £600 fee passed unchecked, review of PR
+    950, finding 7)."""
+    pid = task_property_id(name, props)
+    if pid:
+        return pid, "the task name"
+    linked = [p for p in links((task_fields or {}).get(TASK_PROPERTIES_FIELD)) if any(q["id"] == p for q in props)]
+    if len(linked) == 1:
+        return linked[0], "the task's Properties link"
+    guesses = set()
+    for num, word in HOUSE_NUMBER_STREET_RE.findall(str(name or "")):
+        for p in props:
+            short = str(p.get("short") or "").strip()
+            mm = HOUSE_NUMBER_STREET_RE.match(short)
+            if mm and mm.group(1).lower() == num.lower() and mm.group(2).lower() == word.lower():
+                guesses.add(p["id"])
+    if len(guesses) == 1:
+        return guesses.pop(), "the house number and street in the task name"
+    if len(linked) > 1 or len(guesses) > 1:
+        return "", "the task names more than one house"
+    return "", "neither the task name nor its Properties link names a house"
+
+
+def licence_cert_problem(name, output, plain_approve, task_fields=None):
     name = str(name or "")
-    if not LICENCE_TASK_RE.search(name) or CERT_TASK_RE.search(name) \
-            or re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I):
+    if not LICENCE_TASK_RE.search(name) or re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I):
         return ""
+    # A task whose name also names a certificate ("HMO licence: gas and EICR first") may be buying that
+    # certificate, so its SPEND line or bill is not taken as the licence fee: only words that pay the
+    # licence or put the application in count there, and a bill whose heading says licence. The name used
+    # to switch the whole check off (review of PR 950, finding 7: "gas" in a licence task's name).
+    cert_named = bool(CERT_TASK_RE.search(name))
     spend = SPEND_AMOUNT_RE.search(output or "")
-    acts = (spend and float(spend.group(1).replace(",", "")) > 0) or PAYMENT_CARD_RE.search(output or "")
+    bill = PAYMENT_CARD_RE.search(output or "")
+    bill_licence = bool(bill) and bool(re.search(r"licen[cs]", (output or "")[bill.start():].split("\n", 1)[0], re.I))
+    acts = bill_licence or (not cert_named and ((spend and float(spend.group(1).replace(",", "")) > 0) or bill))
     if not acts:
         for s in _sentences(_approve_text(output, plain_approve)):
             hit = LICENCE_ACT_RE.search(s)
@@ -6561,8 +6681,10 @@ def licence_cert_problem(name, output, plain_approve):
     if not acts:
         return ""
     props = fetch_properties()
-    pid = task_property_id(name, props)
+    pid, how = place_task_house(name, props, task_fields)
     if not pid:
+        note_not_checked(f"licence check: the card pays a licence fee or puts an application in, and {how}, so "
+                         "code could not check its gas and electrical certificates")
         return ""
     house = next(p for p in props if p["id"] == pid)
     certs, today = fetch_certificates(), today_london()
@@ -6604,9 +6726,13 @@ def managed_compliance_problem(name, output, mail_subject, task_fields=None):
     if KEVIN_ASKS_BOOKING_RE.search(f"{tf.get(AF['approvalFeedback']) or ''}\n{tf.get(AF['feedbackHistory']) or ''}"):
         return ""
     props = fetch_properties()
-    pid = task_property_id(name, props)
+    pid, how = place_task_house(name, props, tf)
     house = next((p for p in props if p["id"] == pid), None)
-    if not house or house.get("manager") not in MANAGER_ARRANGES_COMPLIANCE:
+    if not house:
+        note_not_checked(f"managed-house check: the card books or asks a quote for a certificate, and {how}, so "
+                         "code could not check whether a managing agent arranges that house's compliance")
+        return ""
+    if house.get("manager") not in MANAGER_ARRANGES_COMPLIANCE:
         return ""
     return (f"{house['short']} is managed by {house['manager']}, who arranges all its compliance (Kevin, 19 Oct "
             "2026). Do not buy the certificate: send the managing agent an email asking for the latest copy (the gas "
@@ -6881,6 +7007,7 @@ def cmd_submit(args):
     # warns and lets the card through: Kevin still sees it, and the daily
     # paid-but-not-filed check is the backstop.
     _subject = ""
+    _SUBMIT_NOT_CHECKED.clear()
     try:
         try:
             _subject = (parse_email_output(output) or {}).get("subject") or ""
@@ -6890,8 +7017,8 @@ def cmd_submit(args):
                                               tf_early.get(AF["description"], "") or "")
     except (SystemExit, Exception) as exc:                # noqa: BLE001
         bought = ""
-        print(f"WARNING: bought-twice check could not run for {args.task}: {str(exc)[:160]}",
-              file=sys.stderr)
+        note_not_checked(f"bought-twice check: it could not run ({type(exc).__name__}: {str(exc)[:160]}), so code "
+                         "did not check whether this certificate is already held or paid for")
     if bought:
         sys.exit(
             f"ERROR: refusing to submit {args.task}: {bought}\n"
@@ -6914,7 +7041,7 @@ def cmd_submit(args):
              lambda: rent_paid_problem(_name, tf_early.get(AF["notes"]), tf_early.get(AF["description"])),
              lambda: cost_line_problem(_creditor_agent, _name, own, plain_approve),
              lambda: bedroom_problem(_name, own),
-             lambda: licence_cert_problem(_name, own, plain_approve),
+             lambda: licence_cert_problem(_name, own, plain_approve, tf_early),
              lambda: managed_compliance_problem(_name, own, _subject, tf_early))
     for rule in rules if _acts else ():
         try:
@@ -6924,6 +7051,8 @@ def cmd_submit(args):
                        "CHECKED. Try again; if it fails again, record a TOOL wall")
         if problem:
             sys.exit(f"ERROR: refusing to submit {args.task}: {problem}.")
+    # What a check let through without looking, stamped with the card below (finding 11 of PR 950's review).
+    unchecked = list(_SUBMIT_NOT_CHECKED)
 
     # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
     # the card, from this round, or the submit is refused.
@@ -7247,6 +7376,8 @@ def cmd_submit(args):
     tenant_notice = " ".join(str(getattr(args, "tenant_notice", "") or "").split())
     if tenant_notice:
         stamps.append(note_line("agent-dispatch", f"TENANT NOTICE (round {round_no}): {tenant_notice[:300]}"))
+    for text in unchecked:
+        stamps.append(note_line("agent-dispatch", f"{NOT_CHECKED_MARK} (round {round_no}): {text}"))
     # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
     if is_sourcing(output):
         stamps.append(note_line("agent-dispatch", f"{SOURCING_SUBMITTED_MARK} (round {round_no}): "
@@ -15092,6 +15223,111 @@ def cmd_certificate(args):
                       "choiceCreated": choice_created}))
 
 
+# A CANCELLED POLICY IS MARKED EXPIRED BY A ROBOT, ON KEVIN'S APPROVAL AND THE INSURER'S WORD (review of PR
+# 951, 16 Nov 2026). The daily double-cover check (certificate_watch.py) raises a house again 14 days after
+# its task closes unless the cancelled policy's book row reads Status Expired, and `certificate` cannot set
+# that, so every cancellation Kevin approved came back to him a fortnight later. This is the one door that
+# sets it, and it is narrow: a Landlord Insurance row only (a certificate runs out on its own date), on a
+# task whose card Kevin approved naming that row on a cancel line, with the insurer's written confirmation
+# quoted, and never the last policy in force on the house (that is not a double, it is a house with no
+# cover, which is his to see on a card). The cost side goes Inactive through cost-record.py as before.
+CANCEL_WORD_RE = re.compile(r"\bcancel", re.I)
+KEEP_NOT_CANCEL_RE = re.compile(r"\b(?:keep|keeps|kept|keeping)\b|\b(?:not|never|don't|do not)\s+cancel", re.I)
+EXPIRE_EVIDENCE_MIN = 20
+
+
+def policy_cancel_line_problem(agent_output, row_id, house_rows):
+    """'' when a line of the approved card names `row_id` with a cancel word and no other policy row of the
+    same house, else why not."""
+    others = [r for r in house_rows if r != row_id]
+    for line in str(agent_output or "").splitlines():
+        if row_id in line and CANCEL_WORD_RE.search(line) and not any(o in line for o in others) \
+                and not KEEP_NOT_CANCEL_RE.search(line):
+            return ""
+    return (f"the card Kevin approved does not name {row_id} on a line of its own with the word cancel (a line "
+            "that also names the house's other policy row cannot say which one goes)")
+
+
+def policy_left_problem(row, certs, today):
+    """'' when every house on the row keeps another Landlord Insurance row in force that covers what this one
+    did, else why not."""
+    for pid in row["propertyIds"]:
+        keep = [c for c in certs if c["id"] != row["id"] and c["type"] == "Landlord Insurance"
+                and pid in c["propertyIds"] and c["status"] != "Expired" and c["renewalDate"]
+                and c["renewalDate"] >= today
+                and (not c["unitIds"] or set(row["unitIds"]) <= set(c["unitIds"]))]
+        if not keep:
+            return pid
+    return ""
+
+
+def cmd_certificate_expire(args):
+    """Mark a cancelled landlord policy's book row Expired: the one robot door for it."""
+    row_id = str(args.row or "").strip()
+    certs = fetch_certificates()
+    row = next((c for c in certs if c["id"] == row_id), None)
+    if not row:
+        sys.exit(f"ERROR: {row_id} is not a row of the Property Certificates table. Pass the book row's own id, "
+                 "as the double-cover task lists it (\"row rec...\").")
+    if row["type"] != "Landlord Insurance":
+        sys.exit(f"ERROR: {row_id} is a {row['type'] or 'blank'} row. Only a landlord policy cancelled in writing is "
+                 "marked Expired here; a certificate runs out on its own renewal date, so file the new one with "
+                 "`certificate` instead.")
+    if row["status"] == "Expired":
+        print(json.dumps({"row": row_id, "status": "Expired", "changed": False,
+                          "why": "the row already reads Expired"}))
+        return 0
+    evidence = " ".join(str(args.evidence or "").split())
+    if len(evidence) < EXPIRE_EVIDENCE_MIN or not re.search(r"\d", evidence):
+        sys.exit("ERROR: --evidence must quote the insurer's written confirmation, with its date: who wrote, when, "
+                 "and the day cover ends (e.g. \"Fixture Insure email 20 Nov 2026: policy FX-1 cancelled from 25 Nov "
+                 "2026, refund £41.20\"). Search Gmail for it first (inbound-triage.py search); if it has not "
+                 "come, keep the task open with --until the day you will chase it.")
+    task = task_view(get_task(args.task))
+    if task["outcome"] not in APPROVED or not task["approvedAt"]:
+        sys.exit(f"ERROR: {args.task} is not work Kevin approved ({task['outcome'] or 'no verdict'}). A policy is "
+                 "marked Expired only on the task whose card he approved to cancel it: run this on that task, or "
+                 "put the cancellation to him as a card naming the row first.")
+    house_rows = [c["id"] for c in certs if c["type"] == "Landlord Insurance"
+                  and set(c["propertyIds"]) & set(row["propertyIds"])]
+    problem = policy_cancel_line_problem(task["agentOutput"], row_id, house_rows)
+    if problem:
+        sys.exit(f"ERROR: refusing to mark {row_id} Expired: {problem}. Kevin approved a card, so it must say "
+                 f"which policy he agreed to cancel. Raise the card again with a line of its own, \"Cancel: row "
+                 f"{row_id} (<insurer>, <policy number>)\", and run this once he approves it.")
+    names = {p["id"]: p["short"] for p in fetch_properties()}
+    bare = policy_left_problem(row, certs, today_london())
+    if bare:
+        sys.exit(f"ERROR: refusing to mark {row_id} Expired: {names.get(bare, bare)} would have no landlord policy in "
+                 "force on the book. That is not a double, it is a house with no cover: put it to Kevin as a card "
+                 "now (the house, the policy that ended, what is needed), and file the new policy with "
+                 "`certificate` before this row is marked.")
+    prior = str((_request("GET", f"/{CERTIFICATES_TABLE}/{row_id}?returnFieldsByFieldId=true")
+                 .get("fields") or {}).get(CERT_FIELDS["notes"]) or "")
+    line = f"{today_london()}: Expired: cancelled in writing ({evidence}). Kevin approved the cancellation on {args.task}."
+    fields = {CERT_FIELDS["status"]: "Expired",
+              CERT_FIELDS["notes"]: (prior.rstrip() + "\n" + line).strip(),
+              CERT_FIELDS["tasks"]: sorted(set(row["taskIds"]) | {args.task})}
+    filename = upload_attachment(args.task, args.file) if getattr(args, "file", None) else None
+    _request("PATCH", f"/{CERTIFICATES_TABLE}/{row_id}", {"fields": fields, "typecast": False})
+    live = cert_view(_request("GET", f"/{CERTIFICATES_TABLE}/{row_id}?returnFieldsByFieldId=true"))
+    if live["status"] != "Expired":
+        sys.exit(f"ERROR: the write to {row_id} returned but the row reads {live['status'] or 'blank'}, not Expired. "
+                 "Nothing is marked: run this again, and if it repeats record a TOOL wall.")
+    houses = ", ".join(names.get(p, p) for p in row["propertyIds"])
+    stamp = f"POLICY MARKED EXPIRED: row {row_id} ({houses}), cancelled in writing: {evidence}"
+    if filename:
+        stamp += f" The confirmation is attached: {filename}."
+    t = get_task(args.task)
+    existing = str(t.get("fields", {}).get(AF["notes"]) or "")
+    patch_task(args.task, {AF["notes"]: cap_notes((existing.rstrip() + "\n\n" + note_line("agent-dispatch", stamp)).strip(),
+                                                  task_id=args.task)})
+    print(json.dumps({"row": row_id, "status": "Expired", "changed": True, "houses": houses,
+                      "file": filename, "next": "write the cost's RECORD CHANGE line through scripts/cost-record.py "
+                                                "(Payment Status = Inactive) if it is not Inactive already"}))
+    return 0
+
+
 def property_selftest():
     today = "2026-09-02"
     P = lambda **kw: {"managerEmail": "", "postcode": "", "manager": "",  # noqa: E731
@@ -15661,6 +15897,16 @@ def main():
                                    "certificate in a block")
     ct.add_argument("--note", help="one line: who issued it, policy number")
 
+    cx = sub.add_parser("certificate-expire",
+                        help="mark a CANCELLED landlord policy's book row Expired, on the task whose card Kevin "
+                             "approved naming that row on a cancel line, with the insurer's written confirmation; "
+                             "refuses the last policy in force on a house")
+    cx.add_argument("row", help="the Property Certificates row id (rec...) of the cancelled policy")
+    cx.add_argument("--task", required=True, help="the task whose approved card cancels it")
+    cx.add_argument("--evidence", required=True,
+                    help="the insurer's written confirmation, quoted with its date and the day cover ends")
+    cx.add_argument("--file", help="the confirmation itself (PDF or image), attached to the task")
+
     args = p.parse_args()
     # RETURN the handler's exit code. It used to be discarded, so a command that
     # signalled failure by returning 1 still exited 0 and every caller read it
@@ -15677,7 +15923,7 @@ def main():
             "block": cmd_block, "unblock": cmd_unblock, "blockers": cmd_blockers,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "signed-for-kevin": cmd_signed_for_kevin, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate, "certificate-gaps": cmd_certificate_gaps,
+            "signed": cmd_signed, "signed-for-kevin": cmd_signed_for_kevin, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate, "certificate-gaps": cmd_certificate_gaps, "certificate-expire": cmd_certificate_expire,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 
