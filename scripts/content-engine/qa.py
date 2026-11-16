@@ -106,6 +106,39 @@ def frame_rate_check(ep):
                                                    " — resampled by %.3f fps, which reads as stabilisation judder" % gap))
 
 
+RECORD_LINK_FIELDS = ("Video Edited URL", "Subtitled Video URL", "Reframed Video URL", "Summary Video URL", "Thumbnail URL")
+DRIVE_ID_RE = re.compile(r"/d/([A-Za-z0-9_-]{10,})|[?&]id=([A-Za-z0-9_-]{10,})")
+
+
+def drive_file_id(link):
+    """The Drive file id in a link the render recorded, or None."""
+    m = DRIVE_ID_RE.search(str(link or ""))
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def crossed_record(day, fields, ledger):
+    """[what is wrong] when the episode record for `day` holds another episode's files, [] when it does not.
+
+    16 Nov 2026: five catch-up renders wrote into the NEXT day's record (render.find_or_create_record), and two
+    records still hold them: "Episode 2137 Full Episode" carries 2136's video, Learnings clip and thumbnail, and
+    "Episode 2144 Full Episode" carries 2143's video and thumbnail, with copy written from those episodes' words.
+    The evidence is the render ledger: every file a render uploads is recorded under the clip it was cut from and
+    the episode that clip was rendered as, so a link on the record that the ledger owns for another episode is
+    proof. Back-tested on all 273 engine Full records: exactly those two flagged. (The day said in the transcript
+    was tried and dropped: 17 records differ from it, 15 of them published correctly.)"""
+    owners = {}
+    for key, v in (ledger or {}).items():
+        for kind, link in (v.get("outputs") or {}).items():
+            fid = drive_file_id(link)
+            if fid: owners.setdefault(fid, (v.get("episode"), kind, key))
+    out = []
+    for field in RECORD_LINK_FIELDS:
+        owner = owners.get(drive_file_id((fields or {}).get(field)))
+        if owner and owner[0] is not None and owner[0] != day:
+            out.append("%s is episode %s's %s (clip %s)" % (field, owner[0], owner[1], owner[2]))
+    return out
+
+
 def ledger_entries(day, ledger):
     """(episode entry, teaser entry) for the day, the RENDERED one of each when there is one. A second recording of
     the day that failed ("a second long recording for episode 2108 ... not rendered") keeps the same episode and role

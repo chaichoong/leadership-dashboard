@@ -250,6 +250,12 @@ def output_gate(day, ledger, state, recs=None):
     if leak:
         ok = False
         failures = list(failures) + [("copy holds session text", "%s %s (%s); remove it: platform_copy.py clean --day %d" % (c, f, m, day)) for c, f, m in leak]
+    # A record holding ANOTHER episode's files is never put in front of Kevin: his Approve would publish the wrong
+    # episode under this one's name (16 Nov 2026: 2137 and 2144 hold 2136's and 2143's). Refused, and said exactly.
+    crossed = qa.crossed_record(day, (((recs or {}).get("Long Form Video") or {}).get("fields") or {}), ledger) if recs else []
+    if crossed:
+        ok = False
+        failures = list(failures) + [("record holds another episode", "; ".join(crossed) + ". The record must be put right before any card")]
     full_f = ((recs or {}).get("Long Form Video") or {}).get("fields") or {}
     for ctype, link in (("Learnings From My Diary", "Reframed Video URL"), ("Short Form Video", "Summary Video URL")):
         # a clip with no copy would publish nothing for it (2069's teasers, 23 Sep 2026); the nightly copy step retries it
@@ -603,6 +609,7 @@ def _selftest_gate_wait():
     fake = types.ModuleType("qa")
     fake.WAIT_CHECK = "files readable"
     fake.is_wait = lambda f: bool(f) and all(n == fake.WAIT_CHECK for n, _ in f)
+    fake.crossed_record = lambda day, fields, ledger: []      # the crossed-record guard has its own tests
     fake.card_lines = lambda passed, failures=(): ["ok"]
     real = _s.modules.get("qa")
     state = {}

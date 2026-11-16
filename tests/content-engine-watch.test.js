@@ -33,7 +33,7 @@ describe('content-engine watch: selftest', () => {
   it('creates one record per shooting day, not per clip, and checks for an existing one first', () => {
     const src = readFileSync(WATCH, 'utf8');
     expect(src).toContain('one record per shooting day');
-    expect(src).toContain('def find_record(file_id, day)');
+    expect(src).toContain('def find_record(file_id, day, raw_link=True)');   // raw_link=False: the render's own record, by name only (16 Nov 2026)
     expect(src).toMatch(/MAX_PULLED = 2/);
   });
 });
