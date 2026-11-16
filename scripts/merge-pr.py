@@ -1258,9 +1258,30 @@ def card_verdict_moved(card_id, approved_at, pr):
         what = "its verdict is now %s, not an approval" % (card.get("outcome") or "blank")
     elif (card.get("approvedAt") or "") != approved_at:
         what = "its Approved At is now %s" % (card.get("approvedAt") or "blank")
+    elif card.get("status") == "Cancelled":
+        what = "it is now Cancelled"          # review N11: a cancelled card is not an approval to act on
     else:
         return None
     return "changed", "MERGE card %s changed while the gate ran (%s), so nothing was merged" % (card_id, what)
+
+
+# The wall clock card reads are timed by (a module name, so a test can move it). A normal read takes
+# about a second; the Airtable client's own timeout is 60.
+wall = time.time
+CARD_FRESH_SECONDS = 30
+
+
+def fresh_card_check(card_id, approved_at, pr):
+    """card_verdict_moved, read so that what it says is still current when the merge call follows: a
+    read that took longer than CARD_FRESH_SECONDS by the wall clock (the Mac slept inside it, review
+    N8) is read once more, and a second slow read is "unreadable", so nothing merges."""
+    for _ in range(2):
+        t0 = wall()
+        moved = card_verdict_moved(card_id, approved_at, pr)
+        if moved or wall() - t0 <= CARD_FRESH_SECONDS:
+            return moved
+    return "unreadable", ("MERGE card %s took over %d seconds to read, twice (the Mac may have slept), so what it "
+                          "said may be out of date and nothing was merged" % (card_id, CARD_FRESH_SECONDS))
 
 
 def log_line(pr, head, status, why, flaky=None):
@@ -1477,9 +1498,11 @@ def gate(pr, dry_run, expect_head="", card_id="", card_approved_at=""):
     if card_id:
         # The LAST look before the merge call (15 Nov 2026 review R1). What is left is the time this
         # read takes plus gh pr merge's own call: a verdict changed inside that is merged before it
-        # was seen, and merge-approved.py says exactly that on the card.
+        # was seen, and merge-approved.py says exactly that on the card. The read is timed by the wall
+        # clock (review N8): a Mac asleep inside it stretches "seconds" to hours, so a slow read is
+        # read once more, and a second slow one merges nothing.
         progress("re-reading MERGE card %s just before the merge" % card_id)
-        moved = card_verdict_moved(card_id, card_approved_at, pr)
+        moved = fresh_card_check(card_id, card_approved_at, pr)
         if moved:
             res["cardCheck"], res["why"] = moved
             return res, 1

@@ -273,7 +273,9 @@ code2, out2 = cmd_run()
 print(json.dumps({"code": code, "done": out["done"][0], "done2": out2["done"][0], "notes": NOTES, "att": att()["812"], "adds": len(ADDS)}))`);
     expect(r.done).toMatchObject({ result: 'merged-before-change', sha: 'abc123def4567890' });
     expect(r.code).toBe(0);
-    expect(r.notes[0]).toMatch(/^MERGED BEFORE YOUR CHANGE WAS SEEN: PR #812 merged as abc123def456\. merge-pr\.py read this card just before its merge call and it was still approved; then the card's status changed \(Today, now Completed\), while GitHub was merging/);
+    // Review N9: his verdict is named before the status, and the words claim nothing about what merge-pr.py read or when.
+    expect(r.notes[0]).toMatch(/^MERGED BEFORE YOUR CHANGE WAS SEEN: PR #812 merged as abc123def456; meanwhile the card's verdict changed \(Approved as-is, now Rejected\), so the card was not closed and keeps your newer verdict\./);
+    expect(r.notes[0]).not.toMatch(/while GitHub was merging|still approved/);
     expect(r.att).toMatchObject({ result: 'merged', sha: 'abc123def4567890', verdictMovedFirst: true });
     expect(r.done2.action).toBe('note-rejected');
     expect(r.notes[1]).toBe('MERGE CARD REJECTED: Kevin rejected the merge card, but PR #812 had already merged as abc123def456 before the rejection was seen. Nothing more runs.');
@@ -868,5 +870,218 @@ code, out = cmd_run()
 print(json.dumps({"done": out["done"][0], "att": att()["812"], "adds": [title(a) for a in ADDS]}))`);
     expect(r.att).toMatchObject({ result: 'moved', movedTries: 4, finding: '20261106-merge-approved-001' });
     expect(r.adds).toEqual(["PR #812's new code failed 4 re-tests after its MERGE card; the robot stopped"]);
+  });
+});
+
+// THE THIRD ROUND (16 Nov 2026): the open findings of the PR 939 review (N4, N6 to N13) and of the PR 937
+// review (R11). Same harness, same rules: the real functions, invented names, nothing reaches the network.
+describe('N4, N7: a change he asks for on a PR that is no longer open is filed once, in words that match', () => {
+  for (const verdict of ['Changes requested', 'Approved with minor edits']) {
+    it(`"${verdict}" with a note in the remaining window: filed as new work, never "commit to its branch", and the card then only closes`, () => {
+      const r = drive(`
+real_py = ma.py
+def py2(script, *args, **k):
+    # agent-dispatch.py complete's minor-edits gate: an edit asked for and not applied never completes.
+    if script == "agent-dispatch.py" and args[0] == "complete" and card(args[1])["outcome"] == "Approved with minor edits" and card(args[1])["feedback"]:
+        return subprocess.CompletedProcess([script], 1, "", "ERROR: refusing to complete: the edit was not applied (invented)")
+    return real_py(script, *args, **k)
+ma.py = py2
+AFTER_CHECK.append(lambda pr, head: kevin(outcome="${verdict}", approvedAt="2026-11-06T09:10:00.000Z", feedback="Rename the invented helper."))
+_, out = cmd_run(); AFTER_CHECK[:] = []
+outs = []
+for h in (0.5, 1, 1.5):
+    at(h); outs.append(cmd_run()[1]["done"][0])
+c = card("recCardAaaaaaaaaa")
+print(json.dumps({"first": out["done"][0]["result"], "actions": [o.get("action") for o in outs], "adds": ADDS, "notes": NOTES,
+                  "card": [c["status"], c["outcome"], c["feedback"]], "real": real_merges()}))`);
+      expect(r.first).toBe('merged-before-change');
+      expect(r.actions).toEqual(['note-edit', 'close-merged', 'skip']);
+      expect(r.adds).toHaveLength(1);
+      expect(title(r.adds[0])).toBe('Kevin asked for a change to PR #812, which had already merged');
+      const fix = r.adds[0][r.adds[0].indexOf('--fix') + 1];
+      expect(fix).toMatch(/make the change as a new PR from main/);
+      expect(fix).not.toMatch(/own branch/);
+      expect(detail(r.adds[0])).toMatch(/Kevin wrote: Rename the invented helper\./);
+      const all = r.notes.join('\n');
+      expect(all).toMatch(/MERGED, CHANGE FILED: Kevin's note asks for a change/);
+      expect(all).toMatch(/MERGED, CARD STILL OPEN: PR #812 is merged on GitHub as abc123def456/);
+      expect(all).not.toMatch(/MERGED OUTSIDE THIS CARD|MERGE CARD NOT MERGED|nothing merged/);
+      expect(r.card).toEqual(['Approval', '', '']);                   // passed on, so nothing reads it as new
+      expect(r.real).toHaveLength(1);
+    });
+  }
+
+  it('N7: a change request on a card whose PR was closed first is filed before the robot closes the card', () => {
+    const r = drive(`
+CARDS[:] = [C(outcome="Changes requested", feedback="Use the invented helper instead.")]
+gh(812).update(state="CLOSED")
+_, out = cmd_run()
+at(0.5); _, out2 = cmd_run()
+print(json.dumps({"actions": [out["done"][0].get("action"), out2["done"][0].get("action")], "adds": ADDS, "notes": NOTES,
+                  "status": card("recCardAaaaaaaaaa")["status"]}))`);
+    expect(r.actions).toEqual(['note-edit', 'close-unmerged']);
+    expect(r.adds).toHaveLength(1);
+    expect(title(r.adds[0])).toBe('Kevin asked for a change to PR #812, which was closed without merging');
+    expect(r.notes[0]).toMatch(/^PR CLOSED, CHANGE FILED: Kevin's note asks for a change \(Changes requested\)/);
+    expect(r.notes[1]).toMatch(/^PR CLOSED, NOT MERGED:/);
+    expect(r.status).toBe('Completed');
+  });
+});
+
+describe('N6: a bad record mended and broken the same way later is a new episode', () => {
+  it('noted again on its first sight, with its own count, never a silent rest on the old stop finding', () => {
+    const r = drive(`
+ma.save_attempts({"812": ["invented"]})
+for h in (0, 0.5, 6.6, 12.7):
+    at(h); cmd_run()
+held = lambda: len([n for n in NOTES if n.startswith("MERGE CARD HELD:")])
+before = [held(), len(ADDS)]
+a = att(); del a["812"]; ma.save_attempts(a)          # mended, as the stop finding says
+GATE = (1, json.dumps({"merged": False, "why": "cannot judge: a busy gate (invented)", "vitest": None}), "")
+at(13); MERGE_RESULTS[:] = [GATE]; cmd_run()            # read cleanly: a real try, refused by the gate
+mended = "812" in (att().get("held") or {})
+a = att(); a["812"] = ["invented"]; ma.save_attempts(a)   # broken the same way again, days later
+at(200); code, out = cmd_run()
+print(json.dumps({"before": before, "mended": mended, "code": code, "done": out["done"][0], "held": held()}))`);
+    expect(r.before).toEqual([2, 1]);
+    expect(r.mended).toBe(false);                             // the clean read ended the old hold
+    expect(r.done).toMatchObject({ action: 'bad-record', tries: 1 });
+    expect(r.code).toBe(1);                                   // loud on its first sight, like the first time
+    expect(r.held).toBe(3);
+  });
+});
+
+describe('N9, N10: a merge is never reported wrongly', () => {
+  it('N9: complete closes the card, then exits 1 (its ledger write failed): merged, never "merged before your change"', () => {
+    const r = drive(`
+real_py = ma.py
+def py2(script, *args, **k):
+    if script == "agent-dispatch.py" and args[0] == "complete":
+        real_py(script, *args, **k)               # its write lands: the card is Completed
+        return subprocess.CompletedProcess([script], 1, "", "the ledger write failed after the PATCH (invented)")
+    return real_py(script, *args, **k)
+ma.py = py2
+code, out = cmd_run()
+print(json.dumps({"code": code, "done": out["done"][0], "notes": NOTES, "att": att()["812"]}))`);
+    expect(r.done).toMatchObject({ result: 'merged', sha: 'abc123def4567890' });
+    expect(r.done.completeWarning).toMatch(/complete closed the card and then exited 1: the ledger write failed/);
+    expect(r.notes.join(' ')).not.toMatch(/BEFORE YOUR CHANGE|CARD NOT CLOSED/);
+    expect(r.att).toMatchObject({ result: 'merged' });
+    expect(r.code).toBe(0);
+  });
+
+  for (const [label, result] of [['merge-pr.py said merged', 'green'], ['merge-pr.py was stopped at our limit', 'killed']]) {
+    it(`N10: ${label}, then GitHub could not be read: "not confirmed", never "left open", and the next run closes the card`, () => {
+      const r = drive(`
+${result === 'killed' ? `def killed(pr, head, dry_run=False, card=None):
+    MERGES.append([pr, head[:8], "REAL"])
+    gh(pr).update(state="MERGED", mergeCommit={"oid": "abc123def4567890"})     # it landed just before the kill
+    return subprocess.CompletedProcess(["merge-pr.py"], 124, "", "stopped after 45 minutes")
+ma.run_merge_pr = killed` : ''}
+real_state = ma.pr_state
+calls = [0]
+def flaky(pr):
+    calls[0] += 1
+    if calls[0] == 3:                      # attach_live, the read before the merge, then the one after it
+        raise RuntimeError("gh cannot read PR #812: HTTP 502 (invented)")
+    return real_state(pr)
+ma.pr_state = flaky
+code, out = cmd_run()
+ma.pr_state, ma.run_merge_pr = real_state, merge_pr
+at(0.5); code2, out2 = cmd_run()
+print(json.dumps({"code": code, "done": out["done"][0], "done2": out2["done"][0], "notes": NOTES,
+                  "status": card("recCardAaaaaaaaaa")["status"], "real": real_merges()}))`);
+      expect(r.done).toMatchObject({ result: 'error', kind: 'merge-unconfirmed' });
+      expect(r.notes[0]).toMatch(/^MERGE NOT CONFIRMED: merge-pr\.py (said PR #812 merged|did not say it merged PR #812)/);
+      expect(r.notes[0]).not.toMatch(/left open|nothing was merged/);
+      expect(r.code).toBe(0);                                  // rests on the robot's clock, listed with a retryAt
+      expect(r.done2).toMatchObject({ action: 'merge', result: 'merged' });
+      expect(r.status).toBe('Completed');
+      expect(r.real).toHaveLength(1);                          // merged once, never run again
+    });
+  }
+});
+
+describe('N11, N12, N13', () => {
+  it('N11: an approved card whose status is Cancelled merges nothing', () => {
+    const r = drive(`
+CARDS[:] = [C(status="Cancelled")]
+code, out = cmd_run()
+print(json.dumps({"done": out["done"][0], "real": real_merges()}))`);
+    expect(r.done).toMatchObject({ action: 'skip', why: 'cancelled' });
+    expect(r.real).toEqual([]);
+  });
+
+  it('N12: a browser run that named its failing tests is a red, even when its retry could not read them', () => {
+    const r = drive(`
+print(json.dumps([
+  ma.gate_failed(1, {"vitest": {"ok": True}, "browser": {"ok": False, "okAfterRetry": False, "failed": ["tests/sync-invariants/invented.spec.js > a page"],
+                                                         "retry": {"why": "no .last-run.json (invented)"}}}),
+  ma.gate_failed(1, {"vitest": {"ok": True}, "browser": {"ok": False, "okAfterRetry": False, "failed": [],
+                                                         "retry": {"why": "the browser run failed with no failing test recorded"}}}),
+]))`);
+    expect(r).toEqual([true, false]);
+  });
+
+  it('N13: he rejects while the refresh reads GitHub and the findings: the refresh writes nothing over it', () => {
+    const r = drive(`
+gh(812).update(headRefOid="${NEWHEAD}")
+DRY[:] = ["green"]
+real_sh = ma.sh
+def sh2(args, timeout=120):
+    if args[:3] == ["gh", "pr", "view"] and "title,url,files" in args:
+        kevin(status="Completed", outcome="Rejected")      # inside the refresh, after the dry run
+    return real_sh(args, timeout)
+ma.sh = sh2
+code, out = cmd_run()
+print(json.dumps({"done": out["done"][0], "writes": [p for p in PATCHES if "fldzswp8fx6PqpLQ5" in p[1]], "card": card("recCardAaaaaaaaaa")["outcome"]}))`);
+    expect(r.done.result).toBe('skip');
+    expect(r.done.why).toMatch(/^the card's verdict changed \(Approved as-is, now Rejected\) since this run read it, so the card was not refreshed/);
+    expect(r.writes).toEqual([]);
+    expect(r.card).toBe('Rejected');
+  });
+});
+
+describe('R11: a card waiting in his queue whose PR has moved', () => {
+  const WAITING = `CARDS[:] = [C(status="Approval", outcome="", approvedAt="", fields={"fld30Yw8SWYVp049g": ["${BUILDER}"]})]`;
+
+  it('is tested now and refreshed to the new head when the reviewer passed it, so his Approve merges what it shows', () => {
+    const r = drive(`
+${WAITING}
+gh(812).update(headRefOid="${NEWHEAD}")
+DRY[:] = ["green"]
+code, out = cmd_run()
+c = card("recCardAaaaaaaaaa")
+print(json.dumps({"done": out["done"][0], "head": c["head"][:8], "status": c["status"], "real": real_merges(), "dry": [m for m in MERGES if m[2] == "dry"]}))`);
+    expect(r.done).toMatchObject({ action: 'retest', result: 'refreshed' });
+    expect(r.head).toBe(NEWHEAD.slice(0, 8));
+    expect(r.status).toBe('Approval');
+    expect(r.dry).toHaveLength(1);
+    expect(r.real).toEqual([]);
+  });
+
+  it('without the reviewer\'s pass it rests on the moved clock, says so in words for a card nobody approved, and never runs a gate', () => {
+    const r = drive(`
+${WAITING}
+ma.second_reviewer = lambda: type("NotYet", (), {"passed": staticmethod(lambda pr, head: False), "load_state": staticmethod(lambda: {"records": []})})()
+gh(812).update(headRefOid="${NEWHEAD}")
+code, out = cmd_run()
+at(0.5); _, out2 = cmd_run()
+print(json.dumps({"done": out["done"][0], "done2": out2["done"][0], "notes": NOTES, "merges": MERGES}))`);
+    expect(r.done).toMatchObject({ action: 'retest', result: 'moved' });
+    expect(r.notes[0]).toMatch(/The card waiting for Kevin still shows the old code, so its Approve merges nothing until the new code is a green card/);
+    expect(r.notes[0]).not.toMatch(/Kevin's approval was not of this code/);
+    expect(r.done2.action).toBe('skip');
+    expect(r.merges).toEqual([]);
+  });
+
+  it('safety: a waiting card that reaches the merge step with the PR back at its own head merges nothing', () => {
+    const r = drive(`
+CARDS[:] = [C(status="Approval", outcome="", approvedAt="")]       # Airtable holds it waiting, too
+res = ma._merge_locked(C(status="Approval", outcome="", approvedAt=""), {})
+print(json.dumps({"res": res, "real": real_merges(), "notes": NOTES}))`);
+    expect(r.res).toMatchObject({ result: 'skip', why: 'waiting for Kevin; the PR is at the head the card shows' });
+    expect(r.real).toEqual([]);
+    expect(r.notes).toEqual([]);
   });
 });

@@ -602,6 +602,21 @@ def cmd_merge(args):
     # secondReview is in the JSON on EVERY path (null when the run never got that far), so the
     # fixer's report line always has a source (review C6).
     review = None
+    # A PR the reviewer cannot run on for want of a finding is told so before the ten-minute gate, in
+    # the reviewer's own words (second review C11). Not a round: nothing is recorded.
+    try:
+        reviewer = second_reviewer()
+        missing = "" if reviewer.expected_findings(args.pr) else reviewer.no_findings_why(args.pr)
+    except Exception as e:  # noqa: BLE001 — not checked here is said; review() checks it again after the gate
+        print("FINDINGS CHECK NOT MADE for PR #%d before the gate: %s" % (args.pr, e), file=sys.stderr)
+        missing = ""
+    if missing:
+        print(json.dumps({**d, "merged": False, "gate": None,
+                          "secondReview": {"pr": args.pr, "pass": False, "refusedBy": "cannot-run", "counted": False,
+                                           "why": missing},
+                          "why": "the second reviewer cannot run on this PR: %s. No gate ran, nothing merged" % missing},
+                         indent=2))
+        return 0
     base = pinned_base()
     if not base:
         print(json.dumps({**d, "merged": False, "gate": {"error": "could not pin origin/main to a commit"},

@@ -712,8 +712,13 @@ card_reads = []
 if "card" in cfg:
     fake_mc = types.ModuleType("merge_card")
     fake_mc.APPROVED = ("Approved as-is", "Approved with minor edits")
+    # cardReadJumps: seconds the wall clock jumps inside each card read (the Mac asleep, review N8).
+    jumps, wall_now = list(cfg.get("cardReadJumps") or []), [1000.0]
+    mp.wall = lambda: wall_now[0]
     def _get_card(task_id):
         card_reads.append(task_id)
+        if jumps:
+            wall_now[0] += jumps.pop(0)
         if cfg["card"] is None:
             raise RuntimeError("Airtable GET -> HTTP 503 (invented)")
         return dict(cfg["card"])
@@ -803,7 +808,7 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
                 local = null, local2 = null, live = null, argv = ['--pr', '5'], mergeConfirms = true, mergeExit = 0,
                 ff = false, moveMain = null, build = null, suitesCrash = false, interruptServerPoll = false,
                 patch = null, pullRef = false, headIsReal = false, env = {}, prMessage = null, viewLate = null,
-                mainMergedIn = false, mainMovesAgain = false, nodeModules = 'usable', card = undefined } = {}) {
+                mainMergedIn = false, mainMovesAgain = false, nodeModules = 'usable', card = undefined, patchCfg = {} } = {}) {
   const bin = stubs(view, { mergeConfirms, mergeExit, suites });
   const home = tmp('merge-pr-home-');
   const g = gitFixture({ ff, pullRef, prMessage, mainMergedIn, mainMovesAgain });
@@ -836,7 +841,7 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
   if (moveMain) g.moveMain(moveMain);           // main moves AFTER the tree was built
   // argv may be built from the fixture (a test that names the fixture's own head).
   const cfg = { tree, repo: g.repo, scratch: g.root, argv: typeof argv === 'function' ? argv(g) : argv, build, suitesCrash, interruptServerPoll, patch,
-                ...(card !== undefined ? { card } : {}) };
+                ...(card !== undefined ? { card } : {}), ...patchCfg };
   const r = spawnSync('python3', ['-c', LOAD + DRIVER], {
     encoding: 'utf8', timeout: 90000,
     env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg), MERGE_PR_REF_WAIT: '0', ...env },
@@ -978,6 +983,31 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
       expect(r.log[3]).toBe('REFUSED');
     });
   }
+
+  // Review N8: the Mac can sleep inside the last card read, so what it said is hours old by the merge call.
+  it('--card, one read the Mac slept through: the card is read once more, and still approved, it merges', () => {
+    const slept = flow({ affected: NONE, argv: WITH_CARD, card: CARD, patchCfg: { cardReadJumps: [3 * 3600] } });
+    expect(slept.cardReads).toEqual([CARD.id, CARD.id]);
+    expect(slept.code).toBe(0);
+    expect(slept.result.merged).toBe(true);
+  });
+
+  it('--card, two reads the Mac slept through: nothing merges, "unreadable", and GitHub is never asked to merge', () => {
+    const r = flow({ affected: NONE, argv: WITH_CARD, card: CARD, patchCfg: { cardReadJumps: [3 * 3600, 3 * 3600] } });
+    expect(r.code).toBe(1);
+    expect(r.result.merged).toBe(false);
+    expect(r.result.cardCheck).toBe('unreadable');
+    expect(r.result.why).toMatch(/took over 30 seconds to read, twice \(the Mac may have slept\)/);
+    expect(r.gh).not.toMatch(/pr merge/);
+  });
+
+  it('--card, the card Cancelled during the gate with its approval left on: nothing merges (review N11)', () => {
+    const r = flow({ affected: NONE, argv: WITH_CARD, card: { ...CARD, status: 'Cancelled' } });
+    expect(r.code).toBe(1);
+    expect(r.result.cardCheck).toBe('changed');
+    expect(r.result.why).toMatch(/it is now Cancelled/);
+    expect(r.gh).not.toMatch(/pr merge/);
+  });
 
   it('--card without --card-approved-at is a bad argument (exit 2), never a merge with half a check', () => {
     const r = flow({ affected: NONE, argv: ['--pr', '5', '--card', CARD.id], card: CARD });
