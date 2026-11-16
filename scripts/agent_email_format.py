@@ -923,6 +923,7 @@ PLACEHOLDER_ANGLE_RE = re.compile(r"<(?![^<>\n]*(?:@|://|mailto:|www\.))[^<>\n]*
 # has no reason to carry either.
 PLACEHOLDER_MARK_RE = re.compile(r"(?<![A-Za-z0-9])(?:X{3,}|TBC|TBA|INSERT)(?![A-Za-z0-9])")
 EM_DASH = "—"
+REPLY_SUBJECT_RE = re.compile(r"^\s*(?:re|fwd?)\s*:", re.I)
 
 
 def placeholder_problem(text, where="the email"):
@@ -973,13 +974,17 @@ def roy_third_person_problem(body):
         last = m
     if last is not None:
         above = above[:last.start()]
-    m = ROY_NAMED_RE.search(ROY_SELF_RE.sub(" ", ROY_FIELD_LINE_RE.sub("", above.replace("’", "'"))))
+    # The quote is cut from the SAME text the match was found in: cut from the text before the details
+    # lines came out, a details line above the sentence shifted it onto words with no Roy in them
+    # (review of PR 951, 16 Nov 2026).
+    read = ROY_SELF_RE.sub(" ", ROY_FIELD_LINE_RE.sub("", above.replace("’", "'")))
+    m = ROY_NAMED_RE.search(read)
     if not m:
         return ""
     return ("this email is signed Roy Lavin but names Roy above the sign-off (%r). Kevin's ruling, "
             "22 Oct 2026: mail signed by Roy is written as Roy, in the first person (\"I will\", "
             "\"my mobile\", \"I am copied in\"), never \"Roy will\" or \"Roy has asked\"."
-            % " ".join(above[max(0, m.start() - 30):m.end() + 30].split()))
+            % " ".join(read[max(0, m.start() - 30):m.end() + 30].split()))
 
 
 # The tenant-finding chain's email cards (scripts/tenant-leads.py PREFIXES): each goes to many people
@@ -1104,9 +1109,13 @@ def validate_submission(output, task_name=None):
     if bad:
         raise EmailFormatError(bad)
     words = own_words(parsed["body"])
-    # The body only, never the SUBJECT: a reply keeps the inbound subject so it threads, and the back-test
-    # found every subject hit was the other side's ("[SMS]", "[EXTERNAL]", "[Quote Ref: 931520229]").
-    bad = (placeholder_problem(words) or em_dash_problem(words) or roy_third_person_problem(parsed["body"])
+    # A subject the agent wrote is read the same way. A reply or forward keeps the other side's subject so
+    # it threads, and every subject hit in the first back-test was theirs ("Re: ... [SMS]", "[EXTERNAL]",
+    # "[Quote Ref: 931520229]"), so a subject starting Re:, Fw: or Fwd: is not read (review of PR 951).
+    own_subject = "" if REPLY_SUBJECT_RE.match(parsed["subject"] or "") else (parsed["subject"] or "")
+    bad = (placeholder_problem(words) or em_dash_problem(words)
+           or placeholder_problem(own_subject, "the subject") or em_dash_problem(own_subject, "the subject")
+           or roy_third_person_problem(parsed["body"])
            or mailout_recipients_problem(task_name, parsed))
     if bad:
         raise EmailFormatError(bad)

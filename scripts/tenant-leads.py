@@ -1757,17 +1757,23 @@ def monitor(data, day, opens, run_notes):
         tasks = chain_tasks(data, kind)
         last = max((created_day(t) for t in tasks), default=None)
         bad, warn, info = [], [], []
-        for town in ready:
+        watch = [(t, every) for t in ready]
+        if kind == "mailout":
+            # The home towns get the "register now" mail-out every 28 days whatever the room count
+            # (HOME_TOWNS, mailout_cards). Watching only towns with a ready room left nothing watched on a
+            # day with none, so a stopped mail-out read as fine (review of PR 951, 16 Nov 2026).
+            watch += [(t, MAILOUT_QUIET_EVERY_DAYS) for t in HOME_TOWNS if t not in ready]
+        for town, town_every in watch:
             if kind == "mailout":
                 # The chain's own clock: is some referrer near this town on a card, or emailed lately?
                 # Told = an email actually went (Last Emailed) or a card is waiting / being sent. A card
                 # closed without sending (rejected, or tidied away) is NOT telling anyone.
                 near = referrers_near(data, town)
                 pending = referrers_busy(data, day, pending_only=True)
-                told = [r for r in near if r["id"] in pending or ((lambda d: d and (day - d).days <= every + 2)
+                told = [r for r in near if r["id"] in pending or ((lambda d: d and (day - d).days <= town_every + 2)
                                                                   (parse_day(r["fields"].get(R["lastEmailed"]))))]
                 if near and not told:
-                    bad.append(f"{town}: no referrer near it emailed in {every + 2} days")
+                    bad.append(f"{town}: no referrer near it emailed in {town_every + 2} days")
                 continue
             nothing_to_send = False
             if kind == "referral":
@@ -1783,8 +1789,8 @@ def monitor(data, day, opens, run_notes):
                             f"{len(g['unanswered'])} not answered")
                 nothing_to_send = bool(g["open"]) or (not says.count(ASK_YES) and not g["unanswered"])
             newest = max((created_day(t) for t in chain_tasks(data, kind, town)), default=None)
-            if (not newest or (day - newest).days > every + 2) and not nothing_to_send:
-                (warn if kind == "referral" else bad).append(f"{town}: none in {every + 2} days")
+            if (not newest or (day - newest).days > town_every + 2) and not nothing_to_send:
+                (warn if kind == "referral" else bad).append(f"{town}: none in {town_every + 2} days")
         waiting = [t for t in tasks if is_open(t) and (day - created_day(t)).days > 3]
         if waiting:
             warn.append(f"{len(waiting)} open more than 3 days")

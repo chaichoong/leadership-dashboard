@@ -86,11 +86,17 @@ describe('no placeholder in an email body (27 and 28 Aug 2026)', () => {
     }
   });
 
-  it('never reads the SUBJECT: a reply keeps the other side\'s tag so it threads (back-test: 12 false refusals)', () => {
-    // The control: under that subject, a placeholder in the BODY is still refused.
-    expect(check(KEVIN('Hi Sam,\n\nThe amount is [amount].',
-      'TO: accounts@example-energy.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: Re: [EXTERNAL] Rent at 9 Example Road')).ok).toBe(false);
-    for (const subject of ['Re: [EXTERNAL] Rent at 9 Example Road', 'Re: Renewal [Quote Ref: 123456789]']) {
+  it('reads a subject the agent wrote, never a reply\'s or a forward\'s (back-test: 12 false refusals on replies)', () => {
+    const head = (subject) => `TO: accounts@example-energy.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: ${subject}`;
+    // Review of PR 951: an agent's own subject carried "[TENANT NAME]" or an em dash and passed.
+    for (const subject of ['Arrears for [TENANT NAME]', 'Rent \u2014 9 Example Road', 'EICR quote request \u2014 9 Example Road']) {
+      const r = check(KEVIN('Hi Sam,\n\nThank you, that is fine.', head(subject)));
+      expect(r.ok, subject).toBe(false);
+      expect(r.error, subject).toMatch(/^the subject (still carries a placeholder|carries an em dash)/);
+    }
+    // A reply or forward keeps the other side's subject so it threads: their tags and dashes stay.
+    for (const subject of ['Re: [EXTERNAL] Rent at 9 Example Road', 'Re: Renewal [Quote Ref: 123456789]',
+      'RE: Account 4455 \u2014 9 Example Road', 'Fwd: Notice \u2014 9 Example Road', 'Fw: [SMS] Unit 2']) {
       const r = check(KEVIN('Hi Sam,\n\nThank you, that is fine.',
         `TO: accounts@example-energy.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: ${subject}`));
       expect(r, subject).toEqual({ ok: true });
@@ -124,6 +130,14 @@ describe('mail signed Roy Lavin is written as Roy (22 Oct 2026)', () => {
       expect(r.ok, body).toBe(false);
       expect(r.error, body).toMatch(/signed Roy Lavin but names Roy/);
     }
+  });
+
+  it('quotes the sentence that names Roy, even below details lines (review of PR 951)', () => {
+    const r = check(ROY('Dear Ms Example,\n\nThe details you asked for:\n- Address: 9 Example Road, Exampletown, EX1 1AA\n'
+      + '- Bedrooms: 5 (all let)\n- Managing agent: Agile Lets\n\nRoy is copied in and will arrange access.'));
+    expect(r.ok).toBe(false);
+    // The quote must hold the words the robot has to change, or it cannot fix them in one go.
+    expect(r.error).toMatch(/\('[^']*Roy is copied in[^']*'\)/);
   });
 
   it('refuses it with no sign-off phrase too, when the last lines are his name', () => {

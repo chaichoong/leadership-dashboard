@@ -316,4 +316,26 @@ out["advertsReady"] = m1["adverts"]["state"]
     expect(r.openings).toMatch(/12 Quillon Close: a room kept for a move, not free/);
     expect(r.advertsReady).toBe('fail');
   });
+
+  it('keeps watching the home town\'s register-now mail-out on a day with no room ready (review of PR 951)', () => {
+    // The register-now mail-out goes to the home towns every 28 days whatever the room count. The first
+    // version watched only towns with a ready room, so on a day with none (16 Nov 2026) nothing was
+    // watched and a stopped mail-out read as fine.
+    const r = py(`
+w = world(ready=False)
+def mail(w):
+    m = {x["key"]: x for x in tl.monitor(w, DAY, tl.openings(w, DAY), [])["steps"]}
+    return [m["mailout"]["state"], m["mailout"]["note"]]
+out["never"] = mail(w)                        # no referrer near Haverhill has ever been emailed
+for r_ in w["refs"]: r_["fields"][R["lastEmailed"]] = iso(DAY - timedelta(days=20))
+out["twenty"] = mail(w)                       # 20 days ago: inside the 28-day register-now clock
+for r_ in w["refs"]: r_["fields"][R["lastEmailed"]] = iso(DAY - timedelta(days=40))
+out["forty"] = mail(w)                        # 40 days ago: the register-now mail-out has stopped
+`);
+    expect(r.never[0]).toBe('fail');
+    expect(r.never[1]).toMatch(/Haverhill: no referrer near it emailed in 30 days/);
+    expect(r.twenty[0]).not.toBe('fail');
+    expect(r.forty[0]).toBe('fail');
+    expect(r.forty[1]).toMatch(/Haverhill: no referrer near it emailed in 30 days/);
+  });
 });
