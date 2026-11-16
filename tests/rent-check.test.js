@@ -139,13 +139,15 @@ def paid_up(tid, today, amount, cycles=3, account="recA_main"):
     return out
 def waiting(day, amount, account="recA_main"):
     return rec("txU" + day, {TX["date"]: day, TX["amount"]: amount, TX["account"]: [account]})
+# On an agent-managed tenancy the tenant record IS the letting agent: its (invented) name heads the batched task.
+TENANTS = [rec("recT_uc", {TN["payType"]: "Universal Credit"}), rec("recT_work", {TN["payType"]: "Working"}),
+           rec("recT_agent", {TN["payType"]: "Agent-Managed", TN["name"]: "Example Lettings"})]
 def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None, lateBefore=(), noChase=(), noChaseTenancies=()):
     # The bank feed defaults to noon (London) on the day checked. A matched payment on a tenancy
     # outside the test keeps Main Bank a known rent account.
     feed = feed or (day.isoformat() + "T11:03:29.000Z")
     return {"tenancies": list(tenancies),
-            "tenants": [rec("recT_uc", {TN["payType"]: "Universal Credit"}), rec("recT_work", {TN["payType"]: "Working"}),
-                        rec("recT_agent", {TN["payType"]: "Agent-Managed"})],
+            "tenants": list(TENANTS),
             "tx": [paid("recOTHER", (day - timedelta(days=4)).isoformat(), 500)] + list(tx), "unmatched": list(unmatched),
             "accounts": accounts if accounts is not None else [rec("recA_main", {AC["alias"]: "Main Bank", AC["updated"]: feed})],
             "preSlate": set(pre), "lateBefore": set(lateBefore), "noChase": set(noChase),
@@ -967,7 +969,7 @@ print(json.dumps({"beyond": rows["recX"].get("beyond"), "key": plan[0]["key"].sp
     expect(r.desc).toContain('no payment matched in the last 80 days');
   });
 
-  it('a late agent-managed tenancy gives Roy one task per owed payment, emailed, and nobody else; never a tenant message', () => {
+  it('late agent-managed tenancies give the agent ONE task per letting agent per owed payment (16 Nov 2026), and nobody else; never a tenant message', () => {
     const r = py(`
 ts = [tenancy("recAgent", 30, 500, tenant="recT_agent", unit="Unit 9 – 1 Example Road"),
       tenancy("recAgentFine", 1, 500, tenant="recT_agent"),
@@ -978,29 +980,31 @@ ts[-1]["fields"][TY["unitRef"]] = []
 ts[-1]["fields"][TY["surname"]] = "Sample"
 tx = [paid(i, "2026-08-30", 500) for i in ("recAgent", "recAgentVoid", "recLate", "recAgentNoUnit")] + [paid("recAgentFine", "2026-10-01", 500)]
 res, rows = run(ts, tx)
-plan = rc.agent_late_plan(res, ts, {}, DAY)
-again = rc.agent_late_plan(res, ts, {"recAgent:2026-09-30": {"id": "recOLD", "status": "Completed"}}, DAY)
+plan = rc.agent_late_plan(res, ts, {}, DAY, TENANTS)
+again = rc.agent_late_plan(res, ts, {"recAgent:2026-09-30": {"id": "recOLD", "status": "Completed"}}, DAY, TENANTS)
 lane_a = [p["tenancy"] for p in rc.task_plan(res, ts, {}, DAY)]
 res2, _ = run(ts, tx, noChase=["recT_agent"])
-quiet = rc.agent_late_plan(res2, ts, {}, DAY)
-print(json.dumps({"plan": sorted([p["tenancy"], p["key"], p["name"]] for p in plan), "again": [p["tenancy"] for p in again],
-                  "laneA": lane_a, "quiet": quiet, "desc": [p for p in plan if p["tenancy"] == "recAgent"][0]["description"],
-                  "noUnitDesc": [p for p in plan if p["tenancy"] == "recAgentNoUnit"][0]["description"]}))`);
-    expect(r.plan).toEqual([
-      ['recAgent', 'recAgent:2026-09-30', 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep'],
-      // No unit linked: the surname never reaches a task name.
-      ['recAgentNoUnit', 'recAgentNoUnit:2026-09-30', 'AGENT RENT LATE: a tenancy with no unit linked, rent due 30 Sep'],
-      // A late agent-managed cash flow void: the agent holds this rent too.
-      ['recAgentVoid', 'recAgentVoid:2026-09-30', 'AGENT RENT LATE: Unit recAgentVoid, rent due 30 Sep'],
-    ]);
-    // One task per owed payment: a task for it already exists (even closed), so none again.
-    expect(r.again.sort()).toEqual(['recAgentNoUnit', 'recAgentVoid']);
+quiet = rc.agent_late_plan(res2, ts, {}, DAY, TENANTS)
+print(json.dumps({"plan": [[p["tenancies"], p["keys"], p["name"]] for p in plan], "again": [[p["tenancies"], p["name"]] for p in again],
+                  "laneA": lane_a, "quiet": quiet, "desc": plan[0]["description"]}))`);
+    expect(r.plan).toEqual([[
+      // A late agent-managed cash flow void is the agent's too; no unit linked: the surname never reaches a task.
+      ['recAgent', 'recAgentVoid', 'recAgentNoUnit'],
+      ['recAgent:2026-09-30', 'recAgentVoid:2026-09-30', 'recAgentNoUnit:2026-09-30'],
+      'AGENT RENT LATE: Example Lettings, rent due 30 Sep (3 units)',
+    ]]);
+    // One key per owed payment: a task for it already exists (even closed), so that unit is never raised again. The
+    // others turned late after it: their own task, said to be more, never merged into the earlier one.
+    expect(r.again).toEqual([[['recAgentVoid', 'recAgentNoUnit'], 'AGENT RENT LATE: Example Lettings, rent due 30 Sep (2 more units)']]);
     // Lane A still never chases an agent-managed tenant.
     expect(r.laneA).toEqual(['recLate']);
     expect(r.quiet).toEqual([]);
-    expect(r.desc).toContain('the letting agent collects this rent');
-    expect(r.desc).toContain('RENT AGENT KEY: recAgent:2026-09-30');
-    expect(r.noUnitDesc).not.toMatch(/Sample/);
+    expect(r.desc).toContain('The letting agent, Example Lettings, collects the rent for these 3 units');
+    expect(r.desc).toContain('- Unit 9 – 1 Example Road: £500.00 owed (1 month at £500.00, the oldest due 30 Sep 2026), 2 days late today.');
+    expect(r.desc).toContain('- a tenancy with no unit linked: £500.00 owed');
+    expect(r.desc).toContain('Total owed: £1,500.00.');
+    expect(r.desc).toContain('RENT AGENT KEY: recAgent:2026-09-30\nRENT AGENT KEY: recAgentVoid:2026-09-30\nRENT AGENT KEY: recAgentNoUnit:2026-09-30');
+    expect(r.desc).not.toMatch(/Sample/);
   });
 
   it('the letting-agent tasks are found by name or by their key line (a task renamed by hand is still found), never by an empty read', () => {
@@ -1025,10 +1029,10 @@ print(json.dumps({"found": rc2.read_agent_late(), "formula": seen[-1]}))`);
 ts = [tenancy("recAgent", 30, 500, tenant="recT_agent", unit="Unit 9 – 1 Example Road")]
 res, rows = run(ts, [paid("recAgent", "2026-08-30", 500)])
 B = "recAgent:2026-09-30"
-def steps(existing, day=DAY): return [[p["step"], p["key"], p["name"]] for p in rc.agent_late_plan(res, ts, existing, day)]
+def steps(existing, day=DAY): return [[p["step"], p["keys"], p["name"]] for p in rc.agent_late_plan(res, ts, existing, day, TENANTS)]
 first = lambda status="Completed", sent=DAY - timedelta(days=3): {"id": "recA1", "status": status, "sent": sent}
 second = lambda status="Completed", sent=DAY - timedelta(days=4): {"id": "recA2", "status": status, "sent": sent}
-roy_plan = rc.agent_late_plan(res, ts, {B: first(sent=DAY - timedelta(days=8)), B + ":2": second()}, DAY)
+roy_plan = rc.agent_late_plan(res, ts, {B: first(sent=DAY - timedelta(days=8)), B + ":2": second()}, DAY, TENANTS)
 print(json.dumps({
   "none": steps({}),
   "withKevin": steps({B: first(status="Approval", sent=None)}),
@@ -1038,21 +1042,22 @@ print(json.dumps({
   "turnedDown": steps({B: first(status="Cancelled", sent=None)}),
   "secondWithKevin": steps({B: first(sent=DAY - timedelta(days=8)), B + ":2": second(status="Approval", sent=None)}),
   "royTooSoon": steps({B: first(sent=DAY - timedelta(days=6)), B + ":2": second(sent=DAY - timedelta(days=3))}),
-  "roy": [[p["step"], p["key"]] for p in roy_plan], "royDesc": roy_plan[0]["description"] if roy_plan else "",
+  "roy": [[p["step"], p["keys"], p["name"]] for p in roy_plan], "royDesc": roy_plan[0]["description"] if roy_plan else "",
   "secondTurnedDown": steps({B: first(sent=DAY - timedelta(days=8)), B + ":2": second(status="Cancelled", sent=None)}),
   "royDone": steps({B: first(sent=DAY - timedelta(days=12)), B + ":2": second(sent=DAY - timedelta(days=8)), B + ":roy": {"id": "recR", "status": "Completed", "sent": None}}),
-  "paid": [p["key"] for p in rc.agent_late_plan(run(ts, [paid("recAgent", "2026-09-30", 500)])[0], ts, {B: first()}, DAY)],
+  "paid": [p["keys"] for p in rc.agent_late_plan(run(ts, [paid("recAgent", "2026-09-30", 500)])[0], ts, {B: first()}, DAY, TENANTS)],
 }))`);
-    expect(r.none).toEqual([['1', 'recAgent:2026-09-30', 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep']]);
+    // One unpaid unit is still the batch shape: one task, the agent's name, "(1 unit)".
+    expect(r.none).toEqual([['1', ['recAgent:2026-09-30'], 'AGENT RENT LATE: Example Lettings, rent due 30 Sep (1 unit)']]);
     expect(r.withKevin).toEqual([]);
     expect(r.tooSoon).toEqual([]);
-    expect(r.second).toEqual([['2', 'recAgent:2026-09-30:2', 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep (second email)']]);
+    expect(r.second).toEqual([['2', ['recAgent:2026-09-30:2'], 'AGENT RENT LATE: Example Lettings, rent due 30 Sep (1 unit, second email)']]);
     // Closed with nothing sent (a refusal at the send door), or turned down by Kevin: no second email.
     expect(r.noSend).toEqual([]);
     expect(r.turnedDown).toEqual([]);
     expect(r.secondWithKevin).toEqual([]);
     expect(r.royTooSoon).toEqual([]);
-    expect(r.roy).toEqual([['roy', 'recAgent:2026-09-30:roy']]);
+    expect(r.roy).toEqual([['roy', ['recAgent:2026-09-30:roy'], 'AGENT RENT LATE: Example Lettings, rent due 30 Sep (1 unit): phone the letting agent']]);
     expect(r.royDesc).toContain('Please phone them');
     expect(r.secondTurnedDown).toEqual([]);
     expect(r.royDone).toEqual([]);
@@ -1082,29 +1087,32 @@ class FakeAd:
     AF = {"assignee": "fldASSIGNEE000001"}
 rc.lane_b_rules.module = lambda key: FakeAd
 rc.lane_b_rules.notify_roy = lambda tid, to: mailed.append([tid, to]) or {"notified": tid}
-off = rc.agent_late(res, ts, DAY, True, False)
-dry = rc.agent_late(res, ts, DAY, False, True)
+off = rc.agent_late(res, ts, DAY, True, False, TENANTS)
+dry = rc.agent_late(res, ts, DAY, False, True, TENANTS)
 written_dry = [len(posts), len(mailed)]
 rc.read_agent_late = lambda: {"recOther:2026-09-01:roy": {"id": "recOPENROY000001", "status": "Today", "sent": None},
                               "recOther:2026-09-01": {"id": "recOPENAGENT0001", "status": "Today", "sent": None}}
-on = rc.agent_late(res, ts, DAY, True, True)
+on = rc.agent_late(res, ts, DAY, True, True, TENANTS)
 print(json.dumps({"off": [off["raised"], rc.agent_late_line(off)], "dry": [dry["planned"], written_dry, rc.agent_late_line(dry)],
                   "on": on["raised"], "owner": posts[0][rc.TK["teamMember"]], "assignee": posts[0].get("fldASSIGNEE000001"),
-                  "key": posts[0][rc.TK["notes"]], "desc": posts[0][rc.TK["description"]], "mailed": mailed, "line": rc.agent_late_line(on)}))`);
+                  "key": posts[0][rc.TK["notes"]], "tenancies": posts[0][rc.TK["tenancies"]], "desc": posts[0][rc.TK["description"]],
+                  "mailed": mailed, "line": rc.agent_late_line(on)}))`);
     expect(r.off[0]).toEqual([]);
     expect(r.off[1]).toMatch(/switched off/);
-    expect(r.dry[0]).toEqual(['AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep']);
+    expect(r.dry[0]).toEqual(['AGENT RENT LATE: Example Lettings, rent due 30 Sep (1 unit)']);
     expect(r.dry[1]).toEqual([0, 0]);
     expect(r.dry[2]).toMatch(/^Agent-managed late rent a real run would raise: AGENT RENT LATE/);
-    expect(r.on).toEqual(['AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep']);
+    expect(r.on).toEqual(['AGENT RENT LATE: Example Lettings, rent due 30 Sep (1 unit)']);
     // Kevin, 5 Oct 2026: "Anything administrative, the AI agent can do." The agent's card, nobody assigned.
     expect(r.owner).toEqual(['rec7aHLK1Q8fMLRXH']);
     expect(r.assignee).toBeNull();
     expect(r.key).toBe('RENT AGENT KEY: recAgent:2026-09-30');
+    expect(r.tenancies).toEqual(['recAgent']);
+    // The sender wording is unchanged (it waits on Kevin's decision card).
     expect(r.desc).toContain('It goes from kevinbrittain@gmail.com, signed Kevin Brittain');
     // Only the open ROY step is offered to his email again (its ledger never sends a second copy); the agent's card never.
     expect(r.mailed).toEqual([['recOPENROY000001', 'roy@example.test']]);
-    expect(r.line).toMatch(/^Agent-managed late rent raised: AGENT RENT LATE: Unit 9/);
+    expect(r.line).toMatch(/^Agent-managed late rent raised: AGENT RENT LATE: Example Lettings/);
   });
 
   it('at the Roy step, an email to Roy that fails turns the run red (the task stands and is offered again); a refusal by the email gate is a note', () => {

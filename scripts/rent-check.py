@@ -18,9 +18,11 @@ WHAT ONE RUN DOES
 WHAT IT NEVER DOES
 It sends nothing to a tenant. It writes its own Estate Status row, (lane A, 2 Oct 2026) one RENT
 LATE task per late tenancy per stage for the Cash Flow Voids agent, (lane B) the tasks that walk
-a new tenant into payment, and (3 Oct 2026) one AGENT RENT LATE task for Roy per late agent-managed
-rent (the letting agent collects it, so Roy asks the agent; no tenant is contacted), only while that
-agent's register row is Built or Live. Its one tenancy write is lane B's: CFV to CFV Actioned with a
+a new tenant into payment, and (3 Oct 2026) AGENT RENT LATE tasks for a late agent-managed rent (the
+letting agent collects it, so the letting agent is asked; no tenant is contacted), only while that
+agent's register row is Built or Live. Since 16 Nov 2026 that is ONE task per letting agent per due
+date per step, listing every unpaid unit (Kevin, 13 Nov 2026: one email covering every unpaid StayCay
+property, not one email per property). Its one tenancy write is lane B's: CFV to CFV Actioned with a
 comment, after Kevin confirms he sent the direct rent payment form.
 
 LANE A, IN TRIAL (Kevin, 2 Oct 2026)
@@ -134,7 +136,9 @@ TY = {"rent": "fldDMyfZLFMeONPq8", "dueDay": "fldhy2U0CQmM2oS4P", "payStatus": "
       # Rent Set-off From / Until (9 Oct 2026): the window of rent a letting agent keeps against a bill we owe them.
       # Kevin, 6 Oct 2026: that rent is PAID, not a cash flow void. Written only by scripts/tenancy-record.py.
       "setOffFrom": "fldkeJL4wXDcO6wqq", "setOffUntil": "fldwvF3MrJXlQMoCk"}
-TN = {"payType": "fldZbrk8Xw5Dcwxhi"}
+# Tenant Name: on an agent-managed tenancy the tenant record IS the letting agent, so its name heads the batched
+# AGENT RENT LATE task (16 Nov 2026). Same id as scripts/rent_new_tenant.py TENANT_NAME_FIELD.
+TN = {"payType": "fldZbrk8Xw5Dcwxhi", "name": "fldxBKW7QnujSDWqA"}
 TX = {"date": "fldoyQ6Rr9cHp3bgQ", "tenancy": "fldPmAMmxwqs4SdPa", "amount": "fldot7iisZeL3WrdR",
       "account": "fld9hm24JQUPOCoWj"}
 AC = {"alias": "fld21HAxSawQCxICj", "updated": "fld8HOlbBrXbHesoA"}
@@ -179,7 +183,8 @@ AGENT_MANAGED = "Agent-Managed"
 # A LATE AGENT-MANAGED RENT: the letting agent collects it, so no tenant is contacted. Since 5 Oct 2026 (Kevin:
 # "Roy only gets escalations for things that we can't physically do. Anything administrative, the AI agent can
 # do.") the Cash Flow Voids agent emails the letting agent, twice at most, and Roy phones them only after that
-# (agent_late_plan). Before, Roy got every one (3 Oct 2026).
+# (agent_late_plan). Before, Roy got every one (3 Oct 2026). Since 16 Nov 2026 one task covers every unpaid unit of
+# one letting agent with the same due date at the same step; it carries one key line per unit (agent_late_plan).
 AGENT_LATE_PREFIX, AGENT_LATE_MARK = "AGENT RENT LATE: ", "RENT AGENT KEY: "
 AGENT_CHASE_DAYS, AGENT_ROY_DAYS = 3, 4     # second email 3 days after the first went; Roy 4 days after the second
 # Zero rows from any of these is a broken read, not an empty business (64 live tenancies, 35 active
@@ -849,16 +854,53 @@ def lane_a(res, tenancies, day, writes, on_plan=frozenset()):
     return out
 
 
-def agent_late_plan(res, tenancies, existing, day):
-    """The AGENT RENT LATE steps today's result calls for, per late agent-managed tenancy per owed payment, on
+def letting_agent(f, tenants):
+    """(key, name) of the letting agent holding an agent-managed tenancy's rent. On such a tenancy the linked tenant
+    record IS the letting agent (Rent Payment Type Agent-Managed; read 16 Nov 2026: one record per agent, linked to
+    each of its tenancies). Keyed on the record id, never the name, so two agents are never merged; an agent held under
+    two tenant records gets a task per record, the safe direction. With no tenant read, every linked id is the key.
+    ("", "") when no tenant is linked."""
+    ids = [t for t in (f.get(TY["tenants"]) or []) if isinstance(t, str) and t]
+    agents = [t for t in ids if "agent" in sel((tenants.get(t) or {}).get(TN["payType"])).lower()]
+    ids = sorted(set(agents or ids))
+    names = [str((tenants.get(t) or {}).get(TN["name"]) or "").strip() for t in ids]
+    return "+".join(ids), " and ".join(n for n in names if n)
+
+
+def owed_months(owed, due_day, day):
+    """How many monthly rents have fallen due from `owed` up to `day`. Every one is unpaid: no payment covers any cycle
+    from the owed one on (first_uncovered). At least 1."""
+    if not 1 <= due_day <= 31:
+        return 1
+    n, due = 0, owed
+    while due <= day:
+        n, due = n + 1, next_due(due, due_day)
+    return max(n, 1)
+
+
+def agent_late_plan(res, tenancies, existing, day, tenants=()):
+    """The AGENT RENT LATE steps today's result calls for, from every late agent-managed tenancy per owed payment, on
     trusted bank data, never for a tenant on the do-not-chase list. Pure. Kevin, 5 Oct 2026: "Roy only gets
-    escalations for things that we can't physically do. Anything administrative, the AI agent can do." So:
+    escalations for things that we can't physically do. Anything administrative, the AI agent can do." So, per unit:
       1  the Cash Flow Voids agent drafts the email to the letting agent (key <tenancy>:<owed>, as before)
       2  AGENT_CHASE_DAYS after it went and the rent still late: a second, firmer email (key ...:2)
       roy AGENT_ROY_DAYS after that and still late: Roy's task to phone them (key ...:roy), emailed to him
-    A step waits while the one before is with Kevin; Kevin turning one down ends the chase (his call)."""
+    A step waits while the one before is with Kevin; Kevin turning one down ends the chase (his call).
+
+    ONE TASK PER LETTING AGENT PER DUE DATE (Kevin, 13 Nov 2026, on "AGENT RENT LATE: Unit 1 – 22 Newton Street": one
+    email covering every unpaid StayCay property, not one per property). Every unit of one letting agent
+    (letting_agent) whose oldest unpaid rent fell due the same day, standing at the same step today, goes in ONE task,
+    which carries every unit's key line. The step is still worked out per unit from its own key, so:
+      * a re-run the same day or the next finds every unit's key and raises nothing again;
+      * a per-unit task raised before 16 Nov 2026 holds its unit's key, so that unit never joins a batch for a step it
+        already has; its next step joins whichever units of the same agent reach that step the same day;
+      * a unit that turns late after its agent's task exists has no key yet: it gets a task of its own for the same
+        agent and due date, named "more unit", naming the earlier task. The earlier task is never edited, because it
+        may already be drafted, approved or sent.
+    Different due dates for one agent are separate tasks: the key is per owed payment."""
     by_id = {r["id"]: r.get("fields") or {} for r in tenancies}
-    plan = []
+    people = {r["id"]: r.get("fields") or {} for r in tenants or ()}
+    groups = {}
     for r in res["tenancies"]:
         # In Payment or a cash flow void: either way the letting agent holds the rent (review, 4 Oct 2026).
         if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] != AGENT_MANAGED or r.get("noChase"):
@@ -881,35 +923,82 @@ def agent_late_plan(res, tenancies, existing, day):
             continue
         else:
             step, key = "roy", base + ":roy"
-        owed = parse_day(r["owed"])
-        place = lane_b_rules.place_name(r["unit"])
-        late = (f"{r['daysLate']} days late today" if "daysLate" in r
-                else f"no payment matched in the last {TX_LOOKBACK_DAYS} days")
         f = by_id.get(r["id"]) or {}
+        agent, who = letting_agent(f, people)
+        # No tenant linked (judge never calls such a tenancy late): the tenancy is its own group, never merged.
+        group = groups.setdefault((agent or r["id"], r["owed"], step), {"who": who, "units": []})
+        group["units"].append({"row": r, "key": key, "fields": f, "first": first_, "second": second})
+    # The first-email tasks already raised per agent and due date: a unit late after them is told apart, never merged in.
+    earlier = {}
+    for key, t in existing.items():
+        tid, _, owed_s = key.partition(":")
+        if not owed_s or ":" in owed_s:
+            continue
+        agent, _ = letting_agent(by_id.get(tid) or {}, people)
+        earlier.setdefault((agent or tid, owed_s), set()).add(str(t.get("id") or "?"))
+    plan = []
+    for (agent, owed_s, step), group in sorted(groups.items()):
+        units = sorted(group["units"], key=lambda u: (lane_b_rules.place_name(u["row"]["unit"]), u["row"]["id"]))
+        owed = parse_day(owed_s)
+        who = group["who"]
+        n = len(units)
+        before = sorted(earlier.get((agent, owed_s), ())) if step == "1" else []
+        count = f"{n}{' more' if before else ''} unit{'s' if n != 1 else ''}"
+        lines, total, at_least = [], 0.0, False
+        for u in units:
+            r = u["row"]
+            try:
+                due_day = int(sel(u["fields"].get(TY["dueDay"])) or 0)
+            except ValueError:
+                due_day = 0
+            months = owed_months(owed, due_day, day)
+            amount = months * r["rent"]
+            total += amount
+            beyond = "daysLate" not in r
+            at_least = at_least or beyond
+            late = f"{r['daysLate']} days late today" if not beyond else f"no payment matched in the last {TX_LOOKBACK_DAYS} days"
+            lines.append(f"- {lane_b_rules.place_name(r['unit'])}: {'at least ' if beyond else ''}{money(amount)} owed "
+                         f"({months} month{'s' if months != 1 else ''} at {money(r['rent'])}, the oldest due "
+                         f"{owed.strftime('%-d %b %Y')}), {late}. Tenancy record {r['id']}. What the check saw: {r['note']}")
+        holder = f"The letting agent, {who}," if who else "The letting agent"
         head = [f"Raised by the daily rent check on {day.strftime('%-d %b %Y')}.", "",
-                f"{place}: the letting agent collects this rent and pays it to us. The payment due "
-                f"{owed.strftime('%-d %b %Y')} has not reached us ({late}).",
-                f"What the check saw: {r['note']}", f"Bank data as at {res['feed']['asAt'] or 'unknown'}.", ""]
+                f"{holder} collects the rent for {'this unit' if n == 1 else f'these {n} units'} and pays it to us. The "
+                f"payment due {owed.strftime('%-d %b %Y')} has not reached us:", *lines,
+                f"Total owed: {'at least ' if at_least else ''}{money(total)}.",
+                f"Bank data as at {res['feed']['asAt'] or 'unknown'}.", ""]
+        if before:
+            head += [f"An earlier task for this letting agent and this due date exists ({', '.join(before)}). "
+                     f"{'This unit' if n == 1 else 'These units'} turned late after it, so this email covers only "
+                     f"{'this unit' if n == 1 else 'these units'}.", ""]
+        title = f"{AGENT_LATE_PREFIX}{who or 'an unnamed letting agent'}, rent due {owed.strftime('%-d %b')}"
+
+        def sent(which, units=units):
+            """The days the earlier step's emails went for these units (they may differ: per-unit tasks before 16 Nov)."""
+            return " and ".join(d.strftime("%-d %b") for d in sorted({u[which]["sent"] for u in units}))
         if step == "1":
-            name = f"{AGENT_LATE_PREFIX}{place}, rent due {owed.strftime('%-d %b')}"
-            ask = ["Draft the email to the letting agent asking what has happened to this payment and when it will "
-                   "be paid. It goes from kevinbrittain@gmail.com, signed Kevin Brittain (Kevin, 5 Oct 2026: the "
+            name = f"{title} ({count})"
+            ask = [f"Draft ONE email to the letting agent covering every unit above, asking what has happened to "
+                   f"{'this payment' if n == 1 else 'each payment'} and when it will be paid. It goes from "
+                   "kevinbrittain@gmail.com, signed Kevin Brittain (Kevin, 5 Oct 2026: the "
                    "letting agent knows him as the landlord), to their accounts contact, in the thread of the last "
                    "emails about this place where there is one (agent-dispatch.py history). Nothing goes to the tenant."]
         elif step == "2":
-            name = f"{AGENT_LATE_PREFIX}{place}, rent due {owed.strftime('%-d %b')} (second email)"
-            ask = [f"The email to the letting agent went on {first_['sent'].strftime('%-d %b')} and the rent has still "
-                   "not arrived. Draft a second, firmer email in the same thread, from kevinbrittain@gmail.com, signed "
-                   "Kevin Brittain, asking for the payment date in writing. Nothing goes to the tenant."]
+            name = f"{title} ({count}, second email)"
+            ask = [f"The email to the letting agent went on {sent('first')} and the rent has still not arrived. One "
+                   "email covers every unit above. Draft a second, firmer email in the same thread, from "
+                   "kevinbrittain@gmail.com, signed Kevin Brittain, asking for the payment date in writing. Nothing "
+                   "goes to the tenant."]
         else:
-            name = f"{AGENT_LATE_PREFIX}{place}, rent due {owed.strftime('%-d %b')}: phone the letting agent"
-            ask = [f"Two emails to the letting agent ({first_['sent'].strftime('%-d %b')} and "
-                   f"{second['sent'].strftime('%-d %b')}) and the rent has still not arrived. Please phone them, ask "
-                   "when it will be paid, and reply to this email with what they say. Nothing has been sent to the tenant."]
+            name = f"{title} ({count}): phone the letting agent"
+            ask = [f"Two emails to the letting agent ({sent('first')} and {sent('second')}) and the rent for "
+                   f"{'this unit' if n == 1 else 'these units'} has still not arrived. Please phone them, ask when it "
+                   "will be paid, and reply to this email with what they say. Nothing has been sent to the tenant."]
+        keys = [u["key"] for u in units]
         plan.append({
-            "key": key, "step": step, "tenancy": r["id"], "tenants": list(f.get(TY["tenants"]) or []), "name": name,
-            "description": "\n".join(head + ask + ["", "Reference for the rent check, please leave it in:",
-                                                     AGENT_LATE_MARK + key])})
+            "keys": keys, "step": step, "agent": agent, "tenancies": [u["row"]["id"] for u in units],
+            "tenants": sorted({t for u in units for t in (u["fields"].get(TY["tenants"]) or [])}), "name": name,
+            "description": "\n".join(head + ask + ["", "Reference for the rent check, please leave it in:"]
+                                     + [AGENT_LATE_MARK + k for k in keys])})
     return plan
 
 
@@ -937,24 +1026,28 @@ def read_agent_late():
     return out
 
 
-def agent_late(res, tenancies, day, writes, on):
+def agent_late(res, tenancies, day, writes, on, tenants=()):
     """Plan and (on a real run) raise the AGENT RENT LATE steps: the agent's emails to the letting agent, and Roy's
     task at the last step, emailed to him; offer any still-open Roy task to notify again (its ledger never sends a
-    second copy). Gated on the same agent switch as lanes A and B. Never stops the rent check: a failure is said on
-    the row and in the exit code."""
+    second copy). One task per letting agent per due date per step (agent_late_plan): it links every tenancy it covers
+    and carries every unit's key line in Notes. Gated on the same agent switch as lanes A and B. Never stops the rent
+    check: a failure is said on the row and in the exit code."""
     out = {"on": on, "raised": [], "planned": [], "problems": [], "failed": ""}
     if not on:
         return out
     fails = []
     try:
         existing = read_agent_late()
-        plan = agent_late_plan(res, tenancies, existing, day)
+        plan = agent_late_plan(res, tenancies, existing, day, tenants)
         out["planned"] = [p["name"] for p in plan]
         if not writes:
             return out
         ad = lane_b_rules.module("ad")
+        offered = set()
         for key, t in existing.items():
-            if key.endswith(":roy") and t["status"] not in ("Completed", "Cancelled"):
+            # A batched Roy task carries a :roy key per unit: offered once, not once per unit.
+            if key.endswith(":roy") and t["status"] not in ("Completed", "Cancelled") and t["id"] not in offered:
+                offered.add(t["id"])
                 try:
                     if lane_b_rules.cut_off(lane_b_rules.notify_roy(t["id"], ad.ROY_EMAIL)):
                         out["problems"].append(f"the email of task {t['id']} to Roy was cut off part way and is not sent twice")
@@ -965,8 +1058,9 @@ def agent_late(res, tenancies, day, writes, on):
                         fails.append(f"task {t['id']} could not be emailed to Roy: {str(exc)[:120]}")
         for item in plan:
             fields = {TK["name"]: item["name"], TK["status"]: "Today", TK["due"]: day.isoformat(),
-                      TK["description"]: item["description"], TK["notes"]: AGENT_LATE_MARK + item["key"],
-                      TK["tenancies"]: [item["tenancy"]]}
+                      TK["description"]: item["description"],
+                      TK["notes"]: "\n".join(AGENT_LATE_MARK + k for k in item["keys"]),
+                      TK["tenancies"]: list(item["tenancies"])}
             if item["step"] == "roy":
                 fields[TK["teamMember"]] = [ad.HUMANS[ad.ROY_EMAIL]["rec"]]
                 fields[ad.AF["assignee"]] = {"email": ad.ROY_EMAIL}
@@ -1081,7 +1175,7 @@ def main(argv=None):
     # Roy's emailed answers to a housing costs check go on his task first, so lane B reads them this run.
     res["royEmail"] = rent_roy_email.run(_Here(), data, now, writes, switch)
     res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
-    res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
+    res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch, data["tenants"])
     res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
     res["cap"] = rent_cap.run(_Here(), data, day, res, writes, switch, plans["onTrack"])
     res["forms"] = rent_form_chase.run(_Here(), data, day, res, writes, switch)
