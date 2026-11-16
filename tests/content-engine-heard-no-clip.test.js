@@ -47,8 +47,9 @@ print(json.dumps({"res": res, "out": out.getvalue(), "err": err.getvalue()}))
 }
 
 const TALK = Array(50).fill('and that is how the day went for me');
-// a near miss: the shape of 2138's line, which the finder cannot cut (the apostrophe breaks its loose route)
-const NEAR = [...TALK, "so the learning somewhere I've died for today", 'is that disappointments pass', ...Array(10).fill('keep going'), 'stay positive and I will see you tomorrow'];
+// a near miss the clip finder cannot cut ("dire" sounds like diary; no "today" for the loose route). 2138's own line,
+// "the learning somewhere I've died for today", is cut since PR 953 read words with an apostrophe, so it is no fixture.
+const NEAR = [...TALK, 'so the learning from a dire week is that', 'disappointments pass', ...Array(10).fill('keep going'), 'stay positive and I will see you tomorrow'];
 const PLAIN = [...TALK, 'stay positive and I will see you tomorrow'];
 
 describe('a Learnings line heard with no clip: one automatic retry, then the card, never a person', () => {
@@ -87,7 +88,7 @@ led = {"c.insv": {"episode": 2138, "role": "episode", "status": "rendered", "loc
 saved = []
 watch.load_ledger = lambda: led; watch.save_ledger = lambda l: saved.append(json.loads(json.dumps(l)))
 srt = os.path.join(tmp, "s.srt")
-open(srt, "w").write("1\\n00:08:40,000 --> 00:08:50,000\\nso the learning somewhere I've died for today is that\\n\\n2\\n00:10:50,000 --> 00:11:00,000\\nstay positive and see you tomorrow\\n")
+open(srt, "w").write("1\\n00:08:40,000 --> 00:08:50,000\\nso the learning from a dire week is that\\n\\n2\\n00:10:50,000 --> 00:11:00,000\\nstay positive and see you tomorrow\\n")
 render.transcribe = lambda c, w: ("text", srt)
 approval.load_state = lambda: {"2138": {"task": "recFAKE0000002138", "verdict": "changes", "feedback": "Please fix the title."}}
 blocked = []
@@ -109,7 +110,7 @@ g = gate_day({"lfmd_retried": {"finder": render.finder_code(), "found": False}},
 res = {"ok": g["ok"], "line": [d for n, d in g["passed"] if n == "Learnings section"]}`).res;
     expect(r.ok).toBe(true);
     expect(r.line).toHaveLength(1);
-    expect(r.line[0]).toMatch(/^NO LEARNINGS CLIP CUT: the captions say '\.\.\..*learning somewhere I've died for today.*', which sounds like the diary line, but the clip finder \(its exact and loose routes\) found no start it could cut, in this episode's transcript and full captions or on the automatic retry with today's finder$/);
+    expect(r.line[0]).toMatch(/^NO LEARNINGS CLIP CUT: the captions say '\.\.\..*the learning from a dire week.*', which sounds like the diary line, but the clip finder \(its exact and loose routes\) found no start it could cut, in this episode's transcript and full captions or on the automatic retry with today's finder$/);
   });
 
   it('the same for a diary line heard in the transcript: retry first, then the card with the line', () => {
@@ -133,7 +134,7 @@ res = [g["ok"], [d for n, d in g["passed"] if n == "Learnings section"][0]]`).re
 
   it('a full re-render keeps the retry record, so a day sent back for anything else goes straight back to Kevin', () => {
     const r = py(`
-talk = ["some of the talk goes here"] * 100 + ["so the learning somewhere I've died for today"] + ["keep going"] * 30 + ["stay positive, see you tomorrow"]
+talk = ["some of the talk goes here"] * 100 + ["so the learning from a dire week is that"] + ["keep going"] * 30 + ["stay positive, see you tomorrow"]
 def cues(lines): return "".join("%d\\n00:%02d:%02d,000 --> 00:%02d:%02d,900\\n%s\\n\\n" % (i + 1, i // 60, i % 60, i // 60, i % 60, t) for i, t in enumerate(lines))
 tmp = tempfile.mkdtemp(); clip = os.path.join(tmp, "VID_X.insv"); open(clip, "w").write("x")
 def transcribe(c, w):
