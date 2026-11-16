@@ -7028,7 +7028,7 @@ def cmd_submit(args):
         # sign-off with no contact block). It runs only here, never on the send
         # path, so a draft he already approved is still carried out.
         try:
-            validate_any_submission(output)
+            validate_any_submission(output, task_name=_pn)
         except EmailFormatError as exc:
             sys.exit(
                 f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
