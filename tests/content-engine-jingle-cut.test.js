@@ -35,7 +35,11 @@ print(json.dumps(res))
 describe('content engine: the jingle cut Kevin gives', () => {
   it("takes the figure out of his note on 2113 and on 2100", () => {
     expect(py(`res = render.jingle_cut_from("The intro jingle should happen at 26 seconds of the full episode. It is still not in the right place.")`)).toEqual([true, 26.0]);
-    expect(py(`res = render.jingle_cut_from("The jingle is still in the wrong place. It should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.")`)).toEqual([true, 33.0]);
+    // 16 Nov 2026 (review of PR 948): a time counts only in the sentence that names the jingle, so 2100's figure in
+    // the NEXT sentence is no longer taken and the pause detector decides, as for any jingle note with no time.
+    // The price of never letting "The thumbnail at 0:45 shows the wrong frame" move a jingle he said was right.
+    expect(py(`res = render.jingle_cut_from("The jingle is still in the wrong place. It should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.")`)).toEqual([true, null]);
+    expect(py(`res = render.jingle_cut_from("The jingle should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.")`)).toEqual([true, 33.0]);
   });
 
   it('never reads the length of the pause as the place for the cut', () => {

@@ -176,7 +176,8 @@ led, folder, uploads = two_clip_day(${J(EP_SILENT)}, ${J(PLAIN)}, ${J(TEASER)})
 res = gate(led)`);
     expect(r.res.failures).toEqual([]);
     expect(r.res.ok).toBe(true);
-    expect(r.res.passed.find(([n]) => n === 'Learnings section')[1]).toContain('by design');
+    // 16 Nov 2026: the card says no Learnings line was found and where it looked, instead of a silent "by design"
+    expect(r.res.passed.find(([n]) => n === 'Learnings section')[1]).toMatch(/^NO LEARNINGS LINE FOUND/);
   });
 
   it('BACK-TEST: the episode said the diary line and no clip was cut, so the card is refused (the teaser used to hide it)', () => {
