@@ -92,14 +92,14 @@ def patch(i, f):
     return {"id": i}
 m.patch_task = patch
 def submit(output, agent=None, type_="Admin", plain_approve="The card closes and the agent records it.",
-           plain_task="A bill or a booking came in for one of the houses.", tenant_notice=""):
+           plain_task="A bill or a booking came in for one of the houses.", tenant_notice="", tier1=False):
     CAPTURED.clear(); BANK_CALLS.clear()
     fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False); fh.write(output); fh.close()
     err = None
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             m.cmd_submit(types.SimpleNamespace(task="recTESTTESTTEST01", agent=agent or BUILDER, type=type_,
-                         output_file=fh.name, tier1=False, attach=None, plain_task=plain_task,
+                         output_file=fh.name, tier1=tier1, attach=None, plain_task=plain_task,
                          plain_approve=plain_approve, tenant_notice=tenant_notice))
     except SystemExit as e:
         err = str(e)
@@ -134,14 +134,14 @@ describe('the paid check: a bill reaches Kevin only after the bank, and the agen
 task("INBOUND: pay Fixture Plumbing invoice 4411 GBP 90 - 7 Example Road")
 BANK.extend([{"id": "recBankPaidAaaaaa", "date": day(-2), "amount": -90.0, "name": "FIXTURE PLUMBING LTD 7 EXAMPLE", "tenancyIds": []},
              {"id": "recBankOtherAaaaa", "date": day(-1), "amount": -90.0, "name": "Somebody Else Ltd", "tenancyIds": []},
-             {"id": "recBankInAaaaaaaa", "date": day(-1), "amount": 90.0, "name": "FIXTURE PLUMBING REFUND", "tenancyIds": []}])
+             {"id": "recBankInAaaaaaaa", "date": day(-3), "amount": 90.0, "name": "FIXTURE PLUMBING REFUND", "tenancyIds": []}])   # money in BEFORE the payment: it returns nothing
 paid = submit(${JSON.stringify(CARD('PAID CHECK: none found (searched the bank and Gmail this week)'))}.replace("\${day(10)}", day(10)))
 named = submit(${JSON.stringify(CARD('PAID CHECK: not this bill: recBankPaidAaaaaa (that was the March call-out, invoice 4102)'))}.replace("\${day(10)}", day(10)))
 print(json.dumps({"paid": paid, "named": named}))`);
-    expect(r.paid.err).toMatch(/refusing to submit recTESTTESTTEST01: the bank already shows a payment that matches this bill \(£90\.00/);
+    expect(r.paid.err).toMatch(/refusing to submit recTESTTESTTEST01: the bank already shows 1 payment\(s\) that match this bill \(£90\.00/);
     expect(r.paid.err).toMatch(/recBankPaidAaaaaa/);
     expect(r.paid.err).not.toMatch(/recBankOtherAaaaa|recBankInAaaaaaaa/);   // another payee, money in: not this bill
-    expect(r.paid.err).toMatch(/PAID CHECK: not this bill: <each transaction id above>/);
+    expect(r.paid.err).toMatch(/PAID CHECK: not this bill: 1 payments from \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2} \(<why they are other payments>\)/);
     expect(r.paid.status).toBeNull();
     expect(r.named.err).toBeNull();
     expect(r.named.status).toBe('Approval');
@@ -202,7 +202,7 @@ confirm = m.renewal_problem("INSURANCE: buildings cover renewal - 9 Sample Stree
 notrenew = m.renewal_problem("INSURANCE: buildings cover renewal - 9 Sample Street", mail("this email asks them not to renew and to refund the payment."), "")
 other = m.renewal_problem("COMPLIANCE: EICR renewal due - 9 Sample Street", mail("this email tells them to renew the insurance."), "")
 print(json.dumps({"renew": renew, "accept": accept, "reason": reason, "quotes": quotes, "confirm": confirm, "notrenew": notrenew, "other": other}))`);
-    expect(r.renew.err).toMatch(/renews an insurance policy or signs its renewal .*never renew an existing policy.*NO TOPCASHBACK QUOTE: <why>/);
+    expect(r.renew.err).toMatch(/renews an insurance policy or signs its renewal .*never renew an existing policy.*NO TOPCASHBACK QUOTE: <what stopped the quotes>/);
     expect(r.accept.err).toMatch(/renews an insurance policy or signs its renewal/);
     expect(r.reason).toBe('');
     expect(r.quotes).toBe('');
@@ -321,7 +321,7 @@ block = m.bedroom_problem("COMPLIANCE: EPC - Fixture Building", email("Flat 2 at
 quoted = m.bedroom_problem(NAME, email('Changed from the last draft: "3 bedrooms" removed for 7 Example Road.'))
 right = m.bedroom_problem(NAME, email("7 Example Road is a two-bedroom house."))
 print(json.dumps({"wrong": wrong, "two": two, "unit": unit, "block": block, "quoted": quoted, "right": right}))`);
-    expect(r.wrong.err).toMatch(/its email says 3 bedroom\(s\) at 7 Example Road .*but the Properties table says 2 \(No\. of Bedrooms\)/);
+    expect(r.wrong.err).toMatch(/its email gives 7 Example Road 3 bedroom\(s\) \("three-bedroom shared house"\), but the Properties table says 2 \(No\. of Bedrooms\)/);
     expect(r.two).toBe('');
     expect(r.unit).toBe('');
     expect(r.block).toBe('');
@@ -358,7 +358,7 @@ own = m.managed_compliance_problem("COMPLIANCE: GSC renewal due 2026-12-01 - 9 S
 ins = m.managed_compliance_problem("COMPLIANCE: Landlord Insurance renewal - 11 Test Lane", "PASS TO ROY: insure it.", "")
 asking = m.managed_compliance_problem("COMPLIANCE: GSC renewal due 2026-12-01 - 11 Test Lane", "Email to the agent.", "Latest gas certificate please")
 print(json.dumps({"roc": roc, "own": own, "ins": ins, "asking": asking}))`);
-    expect(r.roc.err).toMatch(/11 Test Lane is managed by Roc Immo, who arranges all its compliance .*ask the managing agent for the latest copy/);
+    expect(r.roc.err).toMatch(/11 Test Lane is managed by Roc Immo, who arranges all its compliance .*send the managing agent an email asking for the latest copy/);
     expect(r.own).toBe('');
     expect(r.ins).toBe('');
     expect(r.asking).toBe('');
@@ -374,5 +374,191 @@ m.fetch_properties = down
 out = submit(email("It is a three-bedroom shared house, at 7 Example Road."), type_="Correspondence")
 print(json.dumps(out))`);
     expect(r.err).toMatch(/a submit check could not run \(RuntimeError: HTTP 502\), so it is NOT CHECKED/);
+  });
+});
+
+// ─── THE REVIEW OF PR 950 (16 Nov 2026) ───────────────────────────────────────────────────────────
+// R1: every refusal names a way through, and doing exactly what the message says gets through.
+// R2: every check reads the agent's own words (the tier-1 banner taken off first).
+// R3: the paid check never demands more than it lists (every match shown; one line may cover them all).
+// R5: a check that would refuse correct work is narrowed (bedroom sizes, the licence application, the
+//     rent cycle, Kevin's own words on a managed house).
+
+const TABLE_PRE = `
+import re
+# The later gates that are not these rules' business (the track record, the email shape, the coverage
+# file) are passed here, so "gets through" means the card is written.
+m.track_record_problem = lambda *a, **k: ""
+m.validate_any_submission = lambda *a, **k: None
+m.coverage_problem = lambda *a, **k: ""
+m.checked_problem = lambda *a, **k: ""
+def ok(res):
+    return res["err"] is None and res["status"] in ("Approval", "Completed")
+def fill(template, why="the earlier payments were last month's"):
+    return re.sub(r"<[^>]+>", why, template)
+`;
+
+describe('R1. every new refusal names a way through, and doing exactly what it says gets through', () => {
+  it("applies each refusal's own instruction and the next submit lands", () => {
+    const r = py(TABLE_PRE + `
+out = {}
+FIXNAME = "INBOUND: pay Fixture Plumbing invoice 4411 GBP 90 - 7 Example Road"
+def card(extra=""):
+    return ("MARK FOR PAYMENT: Fixture Plumbing invoice 4411\\nPAYEE: Fixture Plumbing Ltd\\nAMOUNT: £90.00\\n" + extra +
+            "\\n\\n**Carrying this out will involve:** the £90 bill goes on the Friday payment list.")
+# 1. paid, no line: the message gives the line to add
+task(FIXNAME); BANK[:] = [{"id": "recBankCafeAaaaaa", "date": day(-1), "amount": -4.5, "name": "Sample Cafe", "tenancyIds": []}]
+e = submit(card())["err"]; line = re.search(r"PAID CHECK: none found \\(searched [^)]*\\)", e).group(0)
+out["paidNoLine"] = [bool(e), ok(submit(card(fill(line, "the bank and Gmail this week"))))]
+# 2. paid, a match that is another bill: the count line the message gives
+BANK[:] = [{"id": "recBankOtherAaaaa", "date": day(-2), "amount": -90.0, "name": "FIXTURE PLUMBING LTD", "tenancyIds": []}]
+e = submit(card("PAID CHECK: none found (searched the bank)"))["err"]
+line = re.search(r"PAID CHECK: not this bill: \\d+ payments from \\S+ to \\S+ \\(<[^>]+>\\)", e).group(0)
+out["paidOther"] = [bool(e), ok(submit(card(fill(line))))]
+# 3. paid, the match IS this bill: take the block off and file it as information only
+done = "The bank shows £90 paid to Fixture Plumbing (recBankOtherAaaaa): the bill is paid.\\n\\n**Carrying this out will involve:** Nothing. Information only."
+out["paidThisBill"] = [ "file the task as information only" in e, ok(submit(done, type_="Analysis"))]
+# 4. paid, no readable amount
+e = submit("MARK FOR PAYMENT: a fine, EUR 45\\nPAYEE: Fixture Fines\\n\\n**Carrying this out will involve:** it goes on the Friday payment list.")["err"]
+line = re.search(r"PAID CHECK: none found \\(searched [^)]*\\)", e).group(0)
+out["paidNoAmount"] = [bool(e), ok(submit("MARK FOR PAYMENT: a fine, EUR 45\\nPAYEE: Fixture Fines\\n" + fill(line, "the bank and Gmail") + "\\n\\n**Carrying this out will involve:** it goes on the Friday payment list."))]
+# 5. paid, the bank read came back empty: try again once it reads
+BANK[:] = []
+e = submit(card("PAID CHECK: none found (searched the bank)"))["err"]
+BANK[:] = [{"id": "recBankCafeAaaaaa", "date": day(-1), "amount": -4.5, "name": "Sample Cafe", "tenancyIds": []}]
+out["paidEmpty"] = ["Try again" in e, ok(submit(card("PAID CHECK: none found (searched the bank)")))]
+# 6. renewal: the reason line, in the closing line of an email card
+task("INSURANCE: buildings cover renewal - 9 Sample Street")
+mail = lambda close: ("TO: renewals@fixture-insure.test\\nFROM: info@agilelets.co.uk\\nSUBJECT: Policy FX-1\\n---\\nPlease see below.\\n\\n"
+                      "Kind regards\\nRoy Lavin\\nAgile Lets\\n\\n**Carrying this out will involve:** " + close)
+e = submit(mail("this email tells the insurer to renew the insurance on 9 Sample Street."), type_="Correspondence")["err"]
+line = re.search(r"NO TOPCASHBACK QUOTE: <[^>]+>", e).group(0)
+out["renewal"] = [bool(e), ok(submit(mail("this email tells the insurer to renew the insurance on 9 Sample Street. " + fill(line, "the three TopCashback insurers that cover this house refused an online quote for a flat over a shop")), type_="Correspondence"))]
+# 7. tenant notice: no flag, then a past date, then inside 24 hours without a text
+task("COMPLIANCE: EICR renewal due - 9 Sample Street")
+book = email("Please book us in for Thursday 26 November at 9am for the EICR at 9 Sample Street.")
+e = submit(book, type_="Correspondence")["err"]
+out["noticeNone"] = [ "--tenant-notice" in e, ok(submit(book, type_="Correspondence", tenant_notice=day(10) + ": every tenant by text and email from info@"))]
+e = submit(book, type_="Correspondence", tenant_notice=day(-2) + ": tenants told")["err"]
+out["noticePast"] = ["already past" in e, ok(submit(book, type_="Correspondence", tenant_notice=day(10) + ": every tenant by text and email"))]
+e = submit(book, type_="Correspondence", tenant_notice=day(1) + ": every tenant by email")["err"]
+out["noticeSoon"] = ["ClickSend text" in e, ok(submit(book, type_="Correspondence", tenant_notice=day(1) + ": every tenant by ClickSend text and email"))]
+e = submit(book, type_="Correspondence", tenant_notice="the tenants will be told")["err"]
+out["noticeNoDate"] = ["names no visit date" in e, ok(submit(book, type_="Correspondence", tenant_notice="none needed: empty"))]
+# 8. rent arrived: file it as information only
+task("RENT LATE: Unit 1 - 7 Example Road, rent due (reminder)", notes="RENT CHECK KEY: recTenancyAaaaaaa:" + day(-6) + ":1")
+BANK[:] = [{"id": "recRentInAaaaaaaa", "date": day(-1), "amount": 500.0, "name": "RECEIPT", "tenancyIds": ["recTenancyAaaaaaa"]}]
+e = submit(email("Your rent has not reached us.", to="tenant@example.test", subject="Rent"), type_="Correspondence")["err"]
+close = re.search(r"\\*\\*Carrying this out will involve:\\*\\* Nothing\\. Information only", e).group(0)
+out["rent"] = [bool(e), ok(submit("The rent arrived: £500 (recRentInAaaaaaaa).\\n\\n" + close + ".", type_="Analysis"))]
+# 9. cost line: the RECORD line, or the reason none is owed
+task("FIXED COST: Fixture Software billing rise")
+cl = "**Carrying this out will involve:** The Fixture Software cost in your cost list changes from £40.11 to £50.51."
+e = submit("Billing rose.\\n\\n" + cl)["err"]
+out["costRecord"] = ["RECORD CHANGE: <cost id>" in e, ok(submit("Billing rose.\\n\\nRECORD CHANGE: recCostFixtureAaa Expected Cost = 50.51\\n\\n" + cl))]
+out["costNone"] = ["NO COST CHANGE: <why>" in e, ok(submit("Billing rose.\\n\\n" + cl + " " + fill("NO COST CHANGE: <why>", "the rise was refunded")))]
+# 10. bedrooms: use the table's number, or reword
+task("COMPLIANCE: fire alarm quote - 7 Example Road")
+e = submit(email("It is a three-bedroom shared house let as three rooms, at 7 Example Road."), type_="Correspondence")["err"]
+n = re.search(r"the Properties table says (\\d+)", e).group(1)
+out["bedTable"] = [bool(e), ok(submit(email("It is a " + n + "-bedroom shared house let as three rooms, at 7 Example Road."), type_="Correspondence"))]
+out["bedReword"] = ["reword it" in e, ok(submit(email("It is a shared house with three rooms let, at 7 Example Road."), type_="Correspondence"))]
+# 11. licence: make the card get the certificates, with the fee as its own card once they are filed
+task("COMPLIANCE: HMO licence fee - 7 Example Road")
+e = submit("The fee is £150.\\nSPEND: £150\\n\\n**Carrying this out will involve:** the agent submits the licence application.")["err"]
+out["licence"] = ["comes back as its own card once they are filed" in e,
+                  ok(submit("The certificates are missing.\\n\\n**Carrying this out will involve:** the agent books the EICR and the gas check; the licence fee comes back as its own card once they are filed."))]
+# 12. managed house: ask the agent for the copy, no quote subject and no PASS TO ROY line
+task("COMPLIANCE: GSC renewal due 2026-12-01 - 11 Test Lane")
+e = submit("PASS TO ROY: book the gas safety check at 11 Test Lane.\\n\\n**Carrying this out will involve:** Roy books it.")["err"]
+out["managed"] = ["send the managing agent an email asking for the latest copy" in e,
+                  ok(submit(email("Could you send us the latest gas safety certificate for 11 Test Lane?", to="office@fixture-agency.test", subject="Latest gas certificate"), type_="Correspondence"))]
+# 13. a check that could not run: try again once the read works
+task("COMPLIANCE: fire alarm quote - 7 Example Road")
+real = m.fetch_properties
+m.fetch_properties = lambda refresh=False: (_ for _ in ()).throw(RuntimeError("HTTP 502"))
+e = submit(email("It is a two-bedroom house, at 7 Example Road."), type_="Correspondence")["err"]
+m.fetch_properties = real
+out["couldNotRun"] = ["Try again" in e, ok(submit(email("It is a two-bedroom house, at 7 Example Road."), type_="Correspondence"))]
+print(json.dumps(out))`);
+    for (const [k, v] of Object.entries(r)) expect([k, v]).toEqual([k, [true, true]]);
+    expect(Object.keys(r).length).toBe(18);      // every new refusal, each followed once
+  });
+});
+
+describe("R2 and R3. the agent's own words; every match shown, and one line may cover them all", () => {
+  it('a tier-1 PAY: task closed as already paid gets through; six instalments are all listed and one line covers them; a bounced payment needs no false line', () => {
+    const r = py(TABLE_PRE + `
+task("PAY: Fixture Solicitors invoice 1200 GBP - fees")
+BANK[:] = [{"id": "recBankPaidAaaaaa", "date": day(-1), "amount": -1200.0, "name": "FIXTURE SOLICITORS LLP", "tenancyIds": []}]
+close = ("CLOSE PROPOSAL: already handled — see recDoneTaskAaaaaa\\n\\nThe bank shows £1,200 paid to Fixture Solicitors (recBankPaidAaaaaa).\\n\\n"
+         "**Carrying this out will involve:** this task closes as already paid.")
+tier1 = submit(close, tier1=True)
+lic = m.licence_cert_problem("COMPLIANCE: HMO licence fee - 7 Example Road", m.agent_own_text(m.TIER1_BANNER + "\\n\\nCLOSE PROPOSAL: duplicate of recOtherAaaaaaaa\\nSPEND: £150\\n\\n**Carrying this out will involve:** this closes."), "")
+task("INBOUND: Fixture Debt Recovery payment plan", created=(datetime.now(timezone.utc) - timedelta(days=200)).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+BANK[:] = [{"id": "recInst%07dAaa" % i, "date": day(-30 * i), "amount": -50.0, "name": "FIXTURE DEBT RECOVERY", "tenancyIds": []} for i in range(1, 7)]
+card = lambda line: ("MARK FOR PAYMENT: Fixture Debt Recovery instalment for December\\nPAYEE: Fixture Debt Recovery\\nAMOUNT: £50.00\\n" + line +
+                     "\\n\\n**Carrying this out will involve:** £50 goes on the Friday payment list.")
+first = submit(card("PAID CHECK: none found for December (searched the bank)"))["err"]
+ids = sorted(set(re.findall(r"rec[A-Za-z0-9]{14}", first.replace("recTESTTESTTEST01", ""))))
+count_line = fill(re.search(r"PAID CHECK: not this bill: \\d+ payments from \\S+ to \\S+ \\(<[^>]+>\\)", first).group(0))
+by_count = submit(card(count_line))
+by_ids = submit(card("PAID CHECK: not this bill: " + ", ".join(ids) + " (earlier months' instalments)"))
+five = submit(card("PAID CHECK: not this bill: " + ", ".join(ids[:5]) + " (earlier months' instalments)"))
+short_count = submit(card(count_line.replace("6 payments", "5 payments")))
+task("INBOUND: pay Fixture Plumbing invoice 4411 GBP 90")
+BANK[:] = [{"id": "recBankOutAaaaaaa", "date": day(-3), "amount": -90.0, "name": "FIXTURE PLUMBING LTD", "tenancyIds": []},
+           {"id": "recBankBackAaaaaa", "date": day(-2), "amount": 90.0, "name": "FIXTURE PLUMBING LTD RETURNED", "tenancyIds": []}]
+bounced = submit("MARK FOR PAYMENT: Fixture Plumbing invoice 4411 (the first payment bounced back)\\nPAYEE: Fixture Plumbing Ltd\\nAMOUNT: £90.00\\n"
+                 "PAID CHECK: none found that stayed paid (paid and returned this week)\\n\\n**Carrying this out will involve:** £90 goes on the Friday payment list again.")
+print(json.dumps({"tier1": tier1, "lic": lic, "ids": ids, "byCount": by_count, "byIds": by_ids, "five": five["err"], "shortCount": short_count["err"], "bounced": bounced}))`);
+    expect(r.tier1.err).toBeNull();
+    expect(r.tier1.status).toBe('Approval');
+    expect(r.lic).toBe('');
+    expect(r.ids.length).toBe(6);
+    expect(r.byCount.err).toBeNull();
+    expect(r.byIds.err).toBeNull();
+    expect(r.five).toMatch(/the bank already shows 6 payment\(s\)/);
+    expect(r.shortCount).toMatch(/the bank already shows 6 payment\(s\)/);
+    expect(r.bounced.err).toBeNull();
+  });
+});
+
+describe('R5. checks that would refuse correct work are narrowed', () => {
+  it("bedroom counts that are not a house's size; a document sent for an application; March's early rent; Kevin asking for the booking", () => {
+    const r = py(TABLE_PRE + `
+N = "MAINTENANCE: carpets - 9 Sample Street"
+b = {"B1": m.bedroom_problem(N, email("Please quote to replace the carpet in two bedrooms at 9 Sample Street.")),
+     "B2": m.bedroom_problem(N, email("The tenant at 9 Sample Street reports mould in one bedroom. Please inspect.")),
+     "B3": m.bedroom_problem("COMPLIANCE: EICR - 7 Example Road", email("We need EICRs at 7 Example Road and 9 Sample Street. 7 Example Road has 2 bedrooms and the other has 4 bedrooms.")),
+     "B4": m.bedroom_problem("COMPLIANCE: EICR - 7 Example Road", email("Your price list says £150 for 1-3 bed houses. 7 Example Road fits that band.")),
+     "B5": m.bedroom_problem(N, email("Thanks for your reply.\\n\\n> We can quote for your 3 bedroom house at 9 Sample Street."))}
+still = m.bedroom_problem(N, email("9 Sample Street is a three-bedroom house."))
+L = "INBOUND: selective licence application - 7 Example Road"
+lic = {"floorPlan": m.licence_cert_problem(L, "Report.\\n\\n**Carrying this out will involve:** the agent sends the floor plan for the application.", ""),
+       "query": m.licence_cert_problem(L, "Report.\\n\\n**Carrying this out will involve:** the agent files a reply to the council's question on the application.", "")}
+lic_still = m.licence_cert_problem(L, "Report.\\n\\n**Carrying this out will involve:** the agent submits the licence application.", "")
+TENANCIES["recTenancyAaaaaaa"] = 500.0
+m.query_records = lambda table, formula=None, fields=None, max_records=None: [{"id": "recTenancyAaaaaaa", "fields": {m.RENT_FIELD: 500.0, m.RENT_DUE_DAY_FIELD: 1}}]
+BANK[:] = [{"id": "recEarlyMarAaaaaa", "date": "2027-02-25", "amount": 500.0, "name": "TENANT", "tenancyIds": ["recTenancyAaaaaaa"]}]
+march = m.rent_paid_problem("RENT LATE: Unit 1", "RENT CHECK KEY: recTenancyAaaaaaa:2027-02-01:1", "")
+BANK[:] = [{"id": "recFebAaaaaaaaaaa", "date": "2027-02-23", "amount": 500.0, "name": "TENANT", "tenancyIds": ["recTenancyAaaaaaa"]}]
+february = m.rent_paid_problem("RENT LATE: Unit 1", "RENT CHECK KEY: recTenancyAaaaaaa:2027-02-01:1", "")
+task("COMPLIANCE: EICR expired - 11 Test Lane")
+TASK["fields"][AF["approvalFeedback"]] = "Please book the EICR at 11 Test Lane, the agent says this one is ours."
+asked = submit("PASS TO ROY: book the EICR at 11 Test Lane.\\n\\n**Carrying this out will involve:** Roy books it.")
+task("COMPLIANCE: EICR expired - 11 Test Lane")    # fresh: the card above archived his words into Feedback History
+TASK["fields"][AF["approvalFeedback"]] = "Thanks."
+unasked = submit("PASS TO ROY: book the EICR at 11 Test Lane.\\n\\n**Carrying this out will involve:** Roy books it.")
+print(json.dumps({"b": b, "still": still, "lic": lic, "licStill": lic_still, "march": march, "february": february,
+                  "asked": asked["err"], "unasked": unasked["err"]}))`);
+    expect(r.b).toEqual({ B1: '', B2: '', B3: '', B4: '', B5: '' });
+    expect(r.still).toMatch(/gives 9 Sample Street 3 bedroom\(s\)/);
+    expect(r.lic).toEqual({ floorPlan: '', query: '' });
+    expect(r.licStill).toMatch(/puts a licence application in for 7 Example Road/);
+    expect(r.march).toBe('');                     // 25 Feb is the March cycle: rent-check's next due (1 Mar) less 5 days
+    expect(r.february).toMatch(/the rent for the cycle due 01 Feb 2027 has arrived/);
+    expect(r.asked).toBeNull();
+    expect(r.unasked).toMatch(/managed by Roc Immo/);
   });
 });

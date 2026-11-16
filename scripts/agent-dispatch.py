@@ -1569,7 +1569,30 @@ def ledger_rest_prints():
 # a keep-open buried the reply it had woken for. A wall, its clear, a filed certificate or a run's
 # intent answer nothing: the change is still unanswered. Only a Level A carry-out at submit (`handled`)
 # is an answer, and a new rest (`done`, `status`) starts a fresh entry of its own.
+# A WAKE IS ANSWERED ONCE (review of PR 950, finding 3). A card raised after the rest answers it too:
+# the run did what a wake asks, raised the change as its own card, and the card writes no ledger step,
+# so its SUBMITTED stamp in Notes is the record (rest_answered_by_card). Without this, a change that was
+# carded, approved and carried out still asked the closing run for --changed. The cost: a reply that
+# lands after that card and before its close is not a wake (the card is with Kevin by then).
 REST_WAKE_ANSWERS = ("handled",)
+REST_CARD_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4}) (?P<time>\d{2}:\d{2}) — agent-dispatch\] SUBMITTED\b", re.M)
+
+
+def rest_answered_by_card(notes, rest_ts):
+    """True when a SUBMITTED stamp in Notes is later than the rest began. The stamp has minute
+    precision, so a card stamped in the rest's own minute does not count (the safe direction)."""
+    try:
+        began = datetime.fromisoformat(str(rest_ts or "").replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    for mm in REST_CARD_STAMP_RE.finditer(str(notes or "")):
+        try:
+            stamped = datetime.strptime(f"{mm.group('day')} {mm.group('time')}", "%d %b %Y %H:%M").replace(tzinfo=LONDON)
+        except ValueError:
+            continue
+        if stamped > began:
+            return True
+    return False
 
 
 def ledger_rest_events():
@@ -1713,10 +1736,11 @@ def rest_added_text(t, fingerprint, lengths):
 def rest_wake(t, rest):
     """What woke a task whose last rest ended because the task changed, or None. `rest` is the task's
     ledger_rest_events entry. None when no fingerprinted rest was begun, when a step since has answered
-    the change (REST_WAKE_ANSWERS: a wall and its clear do not), when nothing changed (the rest ended on
+    the change (REST_WAKE_ANSWERS, or a card raised since: a wall and its clear do not), when nothing changed (the rest ended on
     its date), or when the rest carried no fingerprint at all (every rest begun before 15 Nov 2026:
     nothing can be said changed)."""
-    if not rest or not rest.get("fp") or any(a in REST_WAKE_ANSWERS for a in rest.get("after") or []):
+    if not rest or not rest.get("fp") or any(a in REST_WAKE_ANSWERS for a in rest.get("after") or []) \
+            or rest_answered_by_card(t.get("notes"), rest.get("ts")):
         return None
     changed = rest_print_changes(t, rest["fp"])
     if not changed or changed == ["no fingerprint"]:
@@ -1803,7 +1827,7 @@ def run_window_problem(task_id, live_view, snapshot):
         return ""
     return (f"the task changed while you were working ({', '.join(raced)} changed since the queue you were "
             "handed was read): read it again, and raise what changed as its own card (or carry it out if "
-            "it is approved work) before you rest it")
+            "it is approved work) before you rest or close it")
 
 
 def rest_due_cap(until_day, due_raw, start_day):
@@ -6091,6 +6115,14 @@ SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
 CHECK_NEG_RE = re.compile(r"\b(?:not|never|no|nothing|none|won't|isn't|without|instead of|rather than|already)\b", re.I)
 
 
+def agent_own_text(output):
+    """The output as the agent wrote it: the tier-1 banner submit (or the agent) put on top taken off."""
+    body = str(output or "").strip()
+    while body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
+    return body
+
+
 def _approve_text(output, plain_approve):
     """The words that say what Approve sets going: the closing line and the --plain-approve line."""
     return carry_out_tail(output) + "\n" + str(plain_approve or "")
@@ -6134,13 +6166,14 @@ def payee_words(text):
 
 def payment_card(name, output, task_type):
     """{"amount": float|None, "payee": text} for a card that lists a bill to pay, or None."""
+    if re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I):
+        return None
     head = PAYMENT_CARD_RE.search(output or "")
     if head:
         card, heading = output[head.start():], output[head.end():].split("\n", 1)[0]
         money = PAY_MONEY_RE.search(_card_line(card, "AMOUNT")) or PAY_MONEY_RE.search(heading)
         payee = _card_line(card, "PAYEE") or heading
     elif (str(name or "").upper().startswith("PAY:") and task_type != "Correspondence"
-          and not re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I)
           and not no_action_declared(carry_out_tail(output))):
         money, payee = PAY_MONEY_RE.search(name), name
     else:
@@ -6157,6 +6190,24 @@ def fetch_bank_lines(since_iso):
              "amount": float((r.get("fields") or {}).get(TX_FIELDS["amount"]) or 0),
              "name": str((r.get("fields") or {}).get(TX_FIELDS["name"]) or ""),
              "tenancyIds": links((r.get("fields") or {}).get(TX_TENANCY_FIELD))} for r in rows]
+
+
+PAID_NOT_THIS_COUNT_RE = re.compile(r"not this bill:\s*(\d+)\s+payments?\s+from\s+(\d{4}-\d{2}-\d{2})\s+to\s+"
+                                    r"(\d{4}-\d{2}-\d{2})", re.I)
+
+
+def paid_lines_cover(lines, hits):
+    """True when the agent's "not this bill" line names every matching payment: each id, or how many there
+    are and a date range that holds them all."""
+    text = " ".join(lines)
+    if "not this bill" not in text.lower():
+        return False
+    if all(h["id"] in set(re.findall(r"rec[A-Za-z0-9]{14}", text)) for h in hits):
+        return True
+    for count, lo, hi in PAID_NOT_THIS_COUNT_RE.findall(text):
+        if int(count) == len(hits) and all(lo <= h["date"] <= hi for h in hits):
+            return True
+    return False
 
 
 def paid_check_problem(task_rec, output, task_type):
@@ -6191,17 +6242,30 @@ def paid_check_problem(task_rec, output, task_type):
                 "already paid is NOT CHECKED (the feed or the read is broken). Try again; if it persists, record "
                 "a TOOL wall")
     words = payee_words(card["payee"])
-    hits = [b for b in bank if b["amount"] < 0 and abs(abs(b["amount"]) - card["amount"]) < 0.005
-            and words & payee_words(b["name"])]
+    same = lambda b: abs(abs(b["amount"]) - card["amount"]) < 0.005 and bool(words & payee_words(b["name"]))  # noqa: E731
+    hits = [b for b in bank if b["amount"] < 0 and same(b)]
+    # Money that came back (a bounced or refunded payment) cancels the payment it returns, so listing the
+    # bill again never needs a false "not this bill" line (review of PR 950, finding 12).
+    back = sorted((b for b in bank if b["amount"] > 0 and same(b)), key=lambda b: b["date"])
+    for h in sorted(hits, key=lambda b: b["date"]):
+        r = next((b for b in back if b["date"] >= h["date"]), None)
+        if r:
+            back.remove(r)
+            hits.remove(h)
     if hits:
-        named = set(re.findall(r"rec[A-Za-z0-9]{14}", " ".join(lines)))
-        if all(h["id"] in named for h in hits) and any("not this bill" in ln.lower() for ln in lines):
+        # EVERY MATCH IS SHOWN, AND ONE LINE MAY COVER THEM ALL (review of PR 950, finding 2). The message
+        # once showed five and demanded every one be named, so a sixth instalment looped a robot for ever.
+        if paid_lines_cover(lines, hits):
             return ""
-        shown = "; ".join(f"{h['date']} £{abs(h['amount']):,.2f} \"{h['name'][:60]}\" ({h['id']})" for h in hits[:5])
-        return (f"the bank already shows a payment that matches this bill (£{card['amount']:,.2f}, payee words "
-                f"{', '.join(sorted(words)[:4])}): {shown}. If it is this bill, it is paid: do not list it, close the "
-                "task naming the transaction. If it is a different payment, say so on the card: PAID CHECK: not "
-                "this bill: <each transaction id above> (<why it is a different payment>)")
+        hits.sort(key=lambda b: b["date"])
+        first, last = hits[0]["date"], hits[-1]["date"]
+        shown = "; ".join(f"{h['date']} £{abs(h['amount']):,.2f} \"{h['name'][:50]}\" ({h['id']})" for h in hits)
+        return (f"the bank already shows {len(hits)} payment(s) that match this bill (£{card['amount']:,.2f}, payee "
+                f"words {', '.join(sorted(words)[:4])}): {shown}. If it is this bill, it is paid: take the MARK FOR "
+                "PAYMENT block off and file the task as information only, naming the transaction, with the closing line "
+                "**Carrying this out will involve:** Nothing. Information only. If they are other payments, add one "
+                f"line to the card: PAID CHECK: not this bill: {len(hits)} payments from {first} to {last} (<why they "
+                "are other payments>), or name each id above after \"PAID CHECK: not this bill:\"")
     if not lines:
         return (f"it lists a bill to pay (£{card['amount']:,.2f}) with no PAID CHECK line. Code searched the bank "
                 f"from {since} and found no payment of that amount to that payee; you check the rest (Gmail, the "
@@ -6240,7 +6304,7 @@ def renewal_problem(name, output, plain_approve):
                     "Kevin's rule (30 Sep 2026): never renew an existing policy; buy a new one from a fresh quote "
                     "through TopCashback. Get the TopCashback quotes and put each on the card as TOPCASHBACK QUOTE: "
                     "<insurer> £<net cost after cashback>, or, if none can be reached, say why: NO TOPCASHBACK QUOTE: "
-                    "<why>. On an email card write it in the closing line, which is never sent")
+                    "<what stopped the quotes>. On an email card write it in the closing line, which is never sent")
     return ""
 
 
@@ -6278,7 +6342,7 @@ def tenant_notice_problem(name, output, task_type, notice):
         return (f"it books a contractor visit (\"{hit[:140]}\") and does not say how the tenants are told. Kevin's "
                 f"rule (29 Oct 2026): every tenant in the house gets a text and an email at least 24 hours before; "
                 f"inside 24 hours, a ClickSend text. Add {how}")
-    if re.match(r"none needed\s*:\s*\S.{5,}", notice, re.I):
+    if re.match(r"none needed\s*:\s*\S", notice, re.I):
         return ""
     when = None
     for fmt_re, fmt in ((r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"), (r"\b(\d{1,2} [A-Za-z]{3})[a-z]* (\d{4})\b", None)):
@@ -6292,6 +6356,8 @@ def tenant_notice_problem(name, output, task_type, notice):
             break
     if when is None:
         return f"its --tenant-notice names no visit date (YYYY-MM-DD or 12 Nov 2026). Write {how}"
+    if when < datetime.now(LONDON).date():
+        return f"its --tenant-notice date {when.isoformat()} is already past: give the visit's own date. Write {how}"
     if when <= datetime.now(LONDON).date() + timedelta(days=1) and not re.search(r"\btext|clicksend", notice, re.I):
         return ("the visit is within 24 hours, so the tenants are told by a ClickSend text (Kevin, 29 Oct 2026): "
                 "say so in --tenant-notice")
@@ -6310,7 +6376,14 @@ RENT_FIELD = "fldDMyfZLFMeONPq8"               # Tenancies: monthly rent (rent-c
 TX_TENANCY_FIELD = "fldPmAMmxwqs4SdPa"         # Transactions: Tenancy link (rent-check.py TX["tenancy"])
 EARLY_RENT_DAYS = 5                            # rent-check.py EARLY_PAY_DAYS
 RENT_SLACK = 1.00                              # rent-check.py SHORT_SLACK
-RENT_CYCLE_DAYS = 30                           # one monthly cycle, near enough (rent-check.py next_due)
+RENT_DUE_DAY_FIELD = "fldhy2U0CQmM2oS4P"       # Tenancies: Due Day of Month (rent-check.py TY["dueDay"])
+
+
+def rent_next_due(due, due_day):
+    """rent-check.py next_due: the due date a month on, a day the month lacks falling on its last day."""
+    import calendar
+    year, month = (due.year, due.month + 1) if due.month < 12 else (due.year + 1, 1)
+    return due.replace(year=year, month=month, day=min(int(due_day), calendar.monthrange(year, month)[1]))
 
 
 def rent_paid_problem(name, notes, description):
@@ -6321,16 +6394,19 @@ def rent_paid_problem(name, notes, description):
         return ""
     tenancy, owed = key.group(1), datetime.strptime(key.group(2), "%Y-%m-%d").date()
     try:
-        rows = query_records(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'", fields=[RENT_FIELD])
-        rent = float(((rows[0].get("fields") or {}).get(RENT_FIELD) or 0) if rows else 0)
+        rows = query_records(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'", fields=[RENT_FIELD, RENT_DUE_DAY_FIELD])
+        ten = (rows[0].get("fields") or {}) if rows else {}
+        rent = float(ten.get(RENT_FIELD) or 0)
+        due_day = int(ten.get(RENT_DUE_DAY_FIELD) or owed.day)
         bank = fetch_bank_lines((owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat())
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
         return (f"the bank could not be read again for this tenancy ({str(exc)[:120]}): NOT CHECKED. Try again; "
                 "a late-rent card goes only on a fresh read")
     # The owed cycle's money, as rent-check.py's cycle_money counts it: every line matched to the tenancy
-    # from EARLY_RENT_DAYS before the due day to that point before the next one (a month on, near enough),
-    # money out included, so a payment that bounced back nets to nothing.
-    hi = (owed + timedelta(days=RENT_CYCLE_DAYS - EARLY_RENT_DAYS)).isoformat()
+    # from EARLY_RENT_DAYS before the due day to that point before the NEXT due day (rent-check's next_due,
+    # the tenancy's own due day; review of PR 950, finding 9: a flat 30 days took March's early rent as
+    # February's), money out included, so a payment that bounced back nets to nothing.
+    hi = (rent_next_due(owed, due_day) - timedelta(days=EARLY_RENT_DAYS)).isoformat()
     cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] < hi]
     paid = [b for b in cycle if b["amount"] > 0]
     total = sum(b["amount"] for b in cycle)
@@ -6380,17 +6456,23 @@ def cost_line_problem(creditor, name, output, plain_approve):
 
 
 # 6. BEDROOMS ARE NOT ROOMS LET (property-administration 4 Sep 2026, broken six times). An email on a
-# property task that states a bedroom count for a house is compared with that house's "No. of Bedrooms"
-# on the Properties table; a different number is refused, naming both. The count is matched to the house
-# named nearest before it (an email can quote two houses), a block is never judged (its flats differ),
-# and a figure in quotation marks or after "Unit"/"Flat" is not a statement. Back-test: 35 emails state
-# a count; one is refused ("three-bedroom shared house let as three rooms" at a house of two bedrooms,
-# the lesson's exact mistake).
+# property task that states a house's SIZE in bedrooms ("a three-bedroom house", "a 4-bed terraced
+# house", "it has 2 bedrooms") is compared with that house's "No. of Bedrooms" on the Properties table; a
+# different number is refused, naming both. Only those size shapes are read (review of PR 950, finding 4:
+# "the carpet in two bedrooms", "mould in one bedroom" and "£150 for 1-3 bed houses" are not a house's
+# size), a quoted reply line (">") is not the agent's statement, the count is matched to the house named
+# before it in the same sentence (with no "the other" between them), and a block is never judged (its
+# flats differ). Back-test: 35 emails state a count; one is refused ("three-bedroom shared house let as
+# three rooms" at a house of two bedrooms, the lesson's exact mistake).
 WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
                 "nine": 9, "ten": 10}
-BEDROOM_RE = re.compile(r"(?<!unit )(?<!flat )(?<!apartment )(?<!room )(?<!no\. )(?<!number )"
-                        r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]*(?:bed(?:room)?s?|bedroomed)\b",
-                        re.I)
+_BED_N = r"(?<![-–\d])(?<!unit )(?<!flat )(?<!apartment )(?<!room )(?<!no\. )(?<!number )\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)"
+BEDROOM_RE = re.compile(
+    r"\b(?:has|have|had)\s+" + _BED_N + r"\s+(?:double\s+|single\s+)?bed(?:room)?s?\b"
+    r"|" + _BED_N.replace("(\\d{1,2}|", "(?P<n2>\\d{1,2}|", 1) +
+    r"[\s-]*bed(?:room)?(?:ed)?\s+(?:[a-z]+[\s-]+){0,2}?(?:house|flat|property|home|apartment|bungalow|maisonette"
+    r"|terrace|cottage)\b(?!s)", re.I)
+BEDROOM_OTHER_RE = re.compile(r"\b(?:other|another|second|neighbour|next door|each|both)\b", re.I)
 
 
 def bedroom_problem(name, output):
@@ -6398,7 +6480,7 @@ def bedroom_problem(name, output):
         mail = parse_email_output(output or "")
     except EmailFormatError:
         return ""
-    body = (mail or {}).get("body") or ""
+    body = "\n".join(ln for ln in ((mail or {}).get("body") or "").splitlines() if not ln.lstrip().startswith(">"))
     if not BEDROOM_RE.search(body):
         return ""
     props = [p for p in fetch_properties() if str(p.get("short") or "").strip()]
@@ -6407,24 +6489,37 @@ def bedroom_problem(name, output):
         out = []
         for p in props:
             for mm in re.finditer(r"(?<![0-9A-Za-z])" + re.escape(str(p["short"]).strip()), text, re.I):
-                out.append((mm.start(), p))
-        return [p for _, p in sorted(out, key=lambda x: x[0])]
-    in_body = {p["id"]: p for p in named(body)}
+                out.append((mm.end(), p))
+        return sorted(out, key=lambda x: x[0])
+    in_body = {p["id"]: p for _, p in named(body)}
     task_p = task_property_id(name, props)
-    for mm in BEDROOM_RE.finditer(body):
-        seg = body[body.rfind("\n", 0, mm.start()) + 1:mm.start()]
-        if seg.count('"') % 2 or seg.count("“") > seg.count("”"):
-            continue
-        before = named(body[max(0, mm.start() - 250):mm.start()])
-        house = (before[-1] if before else next(iter(in_body.values())) if len(in_body) == 1
-                 else next((p for p in props if p["id"] == task_p), None) if not in_body else None)
-        if not house or house.get("kind") == "Block" or house.get("bedrooms") in (None, ""):
-            continue
-        said = int(WORD_NUMBERS.get(mm.group(1).lower(), mm.group(1)))
-        if said != int(house["bedrooms"]):
-            return (f"its email says {said} bedroom(s) at {house['short']} (\"{body[max(0, mm.start() - 40):mm.end() + 20].strip()}\"), "
-                    f"but the Properties table says {int(house['bedrooms'])} (No. of Bedrooms). Bedrooms are not rooms "
-                    "let (Kevin, 4 Sep 2026): use the table's number, or correct the table first if it is wrong")
+    for sentence in _sentences(body):
+        here = named(sentence)
+        for mm in BEDROOM_RE.finditer(sentence):
+            if sentence[:mm.start()].count('"') % 2 or sentence[:mm.start()].count("“") > sentence[:mm.start()].count("”"):
+                continue
+            before = [(end, p) for end, p in here if end <= mm.start()]
+            if before:
+                end, house = before[-1]
+                if BEDROOM_OTHER_RE.search(sentence[end:mm.start()]):
+                    continue
+            elif len({p["id"] for _, p in here}) == 1:
+                house = here[0][1]                 # "a three-bedroom house at <house>": the one house named
+            elif here:
+                continue
+            else:
+                house = (next(iter(in_body.values())) if len(in_body) == 1
+                         else next((p for p in props if p["id"] == task_p), None) if not in_body else None)
+            if not house or house.get("kind") == "Block" or house.get("bedrooms") in (None, ""):
+                continue
+            word = mm.group(1) or mm.group("n2")
+            said = int(WORD_NUMBERS.get(word.lower(), word))
+            if said != int(house["bedrooms"]):
+                return (f"its email gives {house['short']} {said} bedroom(s) (\"{mm.group(0).strip()}\"), but the "
+                        f"Properties table says {int(house['bedrooms'])} (No. of Bedrooms). Bedrooms are not rooms let "
+                        "(Kevin, 4 Sep 2026): if it is the house's size, use the table's number; if the number means "
+                        "something else (rooms let, rooms worked on, a price band), reword it so it does not read as "
+                        "the house's size; if the table is wrong, correct it first")
     return ""
 
 
@@ -6439,10 +6534,14 @@ LICENCE_TASK_RE = re.compile(r"selective\s+licen[cs]|hmo\s+licen[cs]|landlord\s+
                              r"|licen[cs]ing", re.I)
 CERT_TASK_RE = re.compile(r"\b(?:eicr|gsc|gas|electrical|epc|fire|cp12)\b", re.I)
 SPEND_AMOUNT_RE = re.compile(r"^\s*SPEND\s*:\s*£?\s*([0-9][0-9,]*(?:\.\d+)?)", re.I | re.M)
-LICENCE_ACT_RE = re.compile(r"\b(?:pay|pays|paying)\b[^.\n;]{0,40}\blicen[cs]e\b|\b(?:submit|submits|submitting|send"
-                            r"|sends|sending|lodge|lodges|file|files|filing|make|makes)\b[^.\n;]{0,30}\b(?:licen[cs]e\s+)?"
-                            r"application\b|\bapply\b[^.\n;]{0,20}\bfor\b[^.\n;]{0,20}\blicen[cs]e\b"
-                            r"|\bapplication\b[^.\n;]{0,20}\b(?:goes in|is submitted|is sent)\b", re.I)
+# The fee paid, or the APPLICATION itself sent: "sends the floor plan for the application" sends a document,
+# not the application (review of PR 950, finding 7).
+LICENCE_ACT_RE = re.compile(r"\b(?:pay|pays|paying)\s+(?:the\s+|our\s+|a\s+)?(?:[\w£.,]+\s+){0,3}?licen[cs]e(?:\s+fee)?\b"
+                            r"|\b(?:submit|submits|submitting|send|sends|sending|lodge|lodges|lodging|file|files|filing"
+                            r"|make|makes|making|put|puts|putting)\s+(?:in\s+)?(?:the\s+|our\s+|a\s+|this\s+|your\s+)?"
+                            r"(?:\w+\s+)?(?:licen[cs]e\s+)?application\b(?!\s+(?:form\s+)?(?:documents?|plan|pack|papers))"
+                            r"|\bappl(?:y|ies|ying)\s+for\s+(?:the\s+|a\s+)?(?:\w+\s+)?licen[cs]e\b"
+                            r"|\bapplication\s+(?:goes in|is submitted|is sent)\b", re.I)
 LICENCE_LATER_RE = re.compile(r"\b(?:once|after|until|when|then|later|separately|not|no|never|nothing|before)\b", re.I)
 
 
@@ -6475,8 +6574,9 @@ def licence_cert_problem(name, output, plain_approve):
         return ""
     return (f"it pays a licence fee or puts a licence application in for {house['short']}, and the book holds no "
             f"in-date {' or '.join(missing)} for it. Kevin's rule (24 Sep 2026): no licence application or fee "
-            "until the house holds an in-date gas safety certificate and EICR. Get the certificates first (and file "
-            "them), and say so on the card")
+            "until the house holds an in-date gas safety certificate and EICR. File the certificates if they exist; "
+            "if not, make this card get them (no SPEND line for the fee) and say the fee or application comes back "
+            "as its own card once they are filed")
 
 
 # 8. A HOUSE ROB JACKSON'S AGENCY MANAGES IS NOT OURS TO CERTIFY (property-administration 19 Oct 2026).
@@ -6489,10 +6589,19 @@ def licence_cert_problem(name, output, plain_approve):
 MANAGER_ARRANGES_COMPLIANCE = ("Roc Immo",)   # Properties "Agent/Landlord": Rob Jackson's agency
 
 
-def managed_compliance_problem(name, output, mail_subject):
+# Kevin's own words on the task asking for the booking override the rule (review of PR 950, finding 10):
+# his instruction outranks a standing ruling, and the robot must not be left with no route.
+KEVIN_ASKS_BOOKING_RE = re.compile(r"\b(?:book|books|booking|booked|arrange|arranged|go ahead|get (?:it|this|one) done"
+                                   r"|get (?:a |some )?quotes?)\b", re.I)
+
+
+def managed_compliance_problem(name, output, mail_subject, task_fields=None):
     if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX) or certificate_type(name) in ("", "INSURANCE"):
         return ""
     if not (re.search(r"^\s*PASS TO ROY:", output or "", re.I | re.M) or "quote" in str(mail_subject or "").lower()):
+        return ""
+    tf = task_fields or {}
+    if KEVIN_ASKS_BOOKING_RE.search(f"{tf.get(AF['approvalFeedback']) or ''}\n{tf.get(AF['feedbackHistory']) or ''}"):
         return ""
     props = fetch_properties()
     pid = task_property_id(name, props)
@@ -6500,8 +6609,10 @@ def managed_compliance_problem(name, output, mail_subject):
     if not house or house.get("manager") not in MANAGER_ARRANGES_COMPLIANCE:
         return ""
     return (f"{house['short']} is managed by {house['manager']}, who arranges all its compliance (Kevin, 19 Oct "
-            "2026). Do not buy the certificate: ask the managing agent for the latest copy (the gas certificate "
-            "yearly, the EICR when due) and file it. We arrange only the insurance")
+            "2026). Do not buy the certificate: send the managing agent an email asking for the latest copy (the gas "
+            "certificate yearly, the EICR when due), with no quote in its subject and no PASS TO ROY line, and file "
+            "the copy when it comes. We arrange only the insurance. If Kevin has asked on this task for the booking, "
+            "his own words in Approval Feedback let it through")
 
 
 def cmd_submit_group(args):
@@ -6793,15 +6904,18 @@ def cmd_submit(args):
     _creditor_agent = ALL_AGENTS.get(args.agent, {}).get("agent") == "creditor-management"
     # A STATUS ONLY update is judged by its own gate below (it carries nothing to carry out), and a
     # report that files itself with the Nothing line acts on nothing.
-    _acts = not status_only_line(output) and not no_action_declared(carry_out_tail(output))
-    rules = (lambda: paid_check_problem(rec_early, output, args.type),
-             lambda: renewal_problem(_name, output, plain_approve),
-             lambda: tenant_notice_problem(_name, output, args.type, getattr(args, "tenant_notice", None)),
+    # Every rule reads the agent's OWN words: the tier-1 banner submit put on top is taken off first, or a
+    # CLOSE PROPOSAL under it reads as a bill card (review of PR 950, finding 1).
+    own = agent_own_text(output)
+    _acts = not status_only_line(own) and not no_action_declared(carry_out_tail(own))
+    rules = (lambda: paid_check_problem(rec_early, own, args.type),
+             lambda: renewal_problem(_name, own, plain_approve),
+             lambda: tenant_notice_problem(_name, own, args.type, getattr(args, "tenant_notice", None)),
              lambda: rent_paid_problem(_name, tf_early.get(AF["notes"]), tf_early.get(AF["description"])),
-             lambda: cost_line_problem(_creditor_agent, _name, output, plain_approve),
-             lambda: bedroom_problem(_name, output),
-             lambda: licence_cert_problem(_name, output, plain_approve),
-             lambda: managed_compliance_problem(_name, output, _subject))
+             lambda: cost_line_problem(_creditor_agent, _name, own, plain_approve),
+             lambda: bedroom_problem(_name, own),
+             lambda: licence_cert_problem(_name, own, plain_approve),
+             lambda: managed_compliance_problem(_name, own, _subject, tf_early))
     for rule in rules if _acts else ():
         try:
             problem = rule()
@@ -10109,7 +10223,12 @@ def cmd_complete(args):
     # wakes again, so the reply that woke it was buried for good. Checked last, so the refusal only
     # comes when the close would otherwise go through.
     changed_said = " ".join(str(getattr(args, "changed", "") or "").split())
-    problem = woke_close_problem(args.task, t, changed_said, f"close {args.task}")
+    # Two code callers close a card for a reason they record and cannot write a sentence: a MERGE card on
+    # its merge (merge-approved.py, the merge commit checked above) and an episode card once it is out
+    # (content-engine/publish.py). A MERGE card can never rest (keep-open is refused above, submit refuses
+    # to rewrite it), and an episode card rests only by a hand keep-open, so their close is exempt.
+    code_close = merge_pr is not None or str(t.get("name") or "").startswith(EPISODE_CARD_PREFIX)
+    problem = "" if code_close else woke_close_problem(args.task, t, changed_said, f"close {args.task}")
     if problem:
         sys.exit("ERROR: " + problem)
     if changed_said:

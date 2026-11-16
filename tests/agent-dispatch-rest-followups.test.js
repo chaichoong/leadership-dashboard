@@ -219,3 +219,98 @@ print(json.dumps({"run2": run2, "nosnap": nosnap, "reply": reply}))`);
     expect(r.reply).toMatch(/the task has changed since it last rested \(Description changed\)/);
   });
 });
+
+// REVIEW OF PR 950, FINDING 3 / invariant R4: a wake is answered once. A card raised after the rest (its
+// SUBMITTED stamp), a Level A carry-out, or one keep-open with --changed ends it; a card from before the
+// rest does not. Two code callers close for a recorded reason and are exempt: a MERGE card on its merge
+// and an episode card once it is out.
+describe('R4. a wake is answered once', () => {
+  it('a change raised as a card, approved and carried out closes with no --changed, with or without a snapshot; a card from before the rest answers nothing', () => {
+    const r = py(`
+def card_after_rest(i):
+    F(i)[AF["notes"]] += "\\n\\n[" + (TODAY + timedelta(days=1)).strftime("%d %b %Y") + " 10:00 — agent-dispatch] SUBMITTED (round 2) as Correspondence with no new file"
+    F(i)[AF["approvedAt"]] = (_real_now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+woken("recLifeAaaaaaaaaa"); card_after_rest("recLifeAaaaaaaaaa")
+woken("recLifeNoSnapAaaa"); card_after_rest("recLifeNoSnapAaaa")
+# a card stamped BEFORE the rest began: the reply after the rest is still unanswered
+rec("recOldCardAaaaaaa", notes=LOOK)
+assert complete("recOldCardAaaaaaa", until=day(14)) is None
+F("recOldCardAaaaaaa")[AF["description"]] += "\\n\\n" + REPLY
+SHIFT[0] = timedelta(days=3, hours=1)
+by = snapshot()
+snap_close = complete("recLifeAaaaaaaaaa", keep_open=False, evidence="the approved reply was sent")
+old_card = complete("recOldCardAaaaaaa", keep_open=False)
+os.environ.pop("AGENT_RUN_QUEUE")
+nosnap_close = complete("recLifeNoSnapAaaa", keep_open=False, evidence="the approved reply was sent")
+print(json.dumps({"handed": "recLifeAaaaaaaaaa" in by, "woke": (by.get("recLifeAaaaaaaaaa") or {}).get("wokeByChange"),
+                  "snapClose": snap_close, "noSnapClose": nosnap_close, "oldCard": old_card,
+                  "status": [F(i)[AF["status"]] for i in ("recLifeAaaaaaaaaa", "recLifeNoSnapAaaa")]}))`);
+    expect(r.handed).toBe(true);
+    expect(r.woke).toBeNull();
+    expect(r.snapClose).toBeNull();
+    expect(r.noSnapClose).toBeNull();
+    expect(r.status).toEqual(['Completed', 'Completed']);
+    expect(r.oldCard).toMatch(/it woke because something on it changed since its last rest \(Description changed\)/);
+  });
+
+  it('after one keep-open with --changed the next look is not woken again; a MERGE card on its merge and an episode card close with no --changed', () => {
+    const r = py(`
+woken("recOnceAaaaaaaaaa")
+SHIFT[0] = timedelta(days=2, hours=1)
+snapshot()
+first = complete("recOnceAaaaaaaaaa", until=day(5), changed="Description: the final notice is raised as its own card.")
+SHIFT[0] = timedelta(days=6, hours=1)
+by = snapshot()
+second = complete("recOnceAaaaaaaaaa", until=day(10), note="checked, nothing new")
+# a MERGE card and an episode card that somehow rested, then changed: their code callers pass no sentence
+os.environ.pop("AGENT_RUN_QUEUE")
+for i, name in (("recMergeAaaaaaaaa", "MERGE: PR #4242 fixture fix"), ("recEpisodeAaaaaaa", "CONTENT: Publish Episode 2190 of Diary of a Runpreneur - FIXTURE")):
+    rec(i); F(i)[AF["name"]] = name
+    m.ledger_append(i, "done", fingerprint=m.rest_fingerprint(m.rest_view(m.get_task(i))), lengths=m.rest_lengths(m.rest_view(m.get_task(i))))
+    F(i)[AF["notes"]] += "\\n\\nPublished to every section." 
+merge = complete("recMergeAaaaaaaaa", keep_open=False, evidence="PR #4242 merged as abc1234def (gate green). Findings: none pending. Deploy: success.")
+episode = complete("recEpisodeAaaaaaa", keep_open=False)
+plain = None
+rec("recPlainAaaaaaaaa"); m.ledger_append("recPlainAaaaaaaaa", "done", fingerprint=m.rest_fingerprint(m.rest_view(m.get_task("recPlainAaaaaaaaa"))))
+F("recPlainAaaaaaaaa")[AF["notes"]] += "\\n\\nPublished to every section."
+plain = complete("recPlainAaaaaaaaa", keep_open=False)
+print(json.dumps({"first": first, "secondHanded": "recOnceAaaaaaaaaa" in by, "secondWoke": (by.get("recOnceAaaaaaaaaa") or {}).get("wokeByChange"), "second": second,
+                  "merge": merge, "episode": episode, "plain": plain}))`);
+    expect(r.first).toBeNull();
+    expect(r.secondHanded).toBe(true);
+    expect(r.secondWoke).toBeNull();
+    expect(r.second).toBeNull();
+    expect(r.merge).toBeNull();
+    expect(r.episode).toBeNull();
+    expect(r.plain).toMatch(/refusing to close recPlainAaaaaaaaa: it woke because something on it changed/);   // the exemption is those two only
+  });
+});
+
+// Invariant R1 for the close: every refusal names a way through, and doing exactly what it says gets through.
+describe('R1. each refusal on a woken task says how to get through, and doing it gets through', () => {
+  it('the close and keep-open refusals, and the run-window refusal on the next run', () => {
+    const r = py(`
+import re
+woken("recWayAaaaaaaaaaa"); woken("recWayKeepAaaaaaa"); woken("recWayRaceAaaaaaa")
+SHIFT[0] = timedelta(days=2, hours=1)
+snapshot()
+F("recWayRaceAaaaaaa")[AF["description"]] += "\\n\\nNEW MESSAGE: another reply."   # lands mid-run
+out = {}
+def follow(err, i, keep):
+    # the message's own instruction: --changed naming a field it listed
+    field = re.search(r"\\(([A-Za-z ]+?)(?:, [A-Za-z ]+)* changed\\)", err).group(1)
+    return complete(i, keep_open=keep, changed=field + ": the change was raised as its own card for Kevin.")
+e1 = complete("recWayAaaaaaaaaaa", keep_open=False); out["close"] = [bool(e1), follow(e1, "recWayAaaaaaaaaaa", False)]
+e2 = complete("recWayKeepAaaaaaa", until=day(9)); out["keep"] = [bool(e2), follow(e2, "recWayKeepAaaaaaa", True) if e2 else "no refusal"]
+e3 = complete("recWayRaceAaaaaaa", keep_open=False, changed="Description: raised as a card.")
+out["raceWords"] = e3
+SHIFT[0] = timedelta(days=2, hours=2)
+snapshot()                                            # the next run is handed it again
+out["raceNext"] = complete("recWayRaceAaaaaaa", keep_open=False, changed="Description: both replies were raised as one card.")
+print(json.dumps(out))`);
+    expect(r.close).toEqual([true, null]);
+    expect(r.keep).toEqual([true, null]);
+    expect(r.raceWords).toMatch(/the task changed while you were working .*before you rest or close it/);
+    expect(r.raceNext).toBeNull();
+  });
+});
