@@ -15,10 +15,12 @@ THE CHAIN (one daily run, in this order)
   2. screen      a form entry becomes Qualified, Waiting to turn 35 or Not suitable, by rule;
                  a past applicant (2017-2021 sheet) is never screened onto an email list
   3. mail-out    one card per town: the SAME words to every active referrer near it, each sent
-                 separately (TO-EACH), every 14 days while rooms are open, 28 with none
-  4. adverts     one task for Roy per town with openings: SpareRoom, OpenRent, Gumtree, Find My
+                 separately (TO-EACH), every 14 days while a room is vacant and ready, 28 with none.
+                 Every number of rooms anyone outside is told counts ONLY rooms vacant and ready
+                 today, never rooms in works or room moves (FREE_NOW, Kevin, 14 Oct to 11 Nov 2026)
+  4. adverts     one task for Roy per town with a room ready: SpareRoom, OpenRent, Gumtree, Find My
                  Move and Facebook copy, each with its own form link so the channel is recorded
-  5. referral    one card per town with openings, every 28 days: current UC tenants aged 35+
+  5. referral    one card per town with a room ready, every 28 days: current UC tenants aged 35+
                  hear about the £50 bonus
   6. viewings    qualified leads for a town with openings go to Roy, plus up to five past
                  applicants a week to PHONE (no consent on file for texts or emails); an open
@@ -148,6 +150,19 @@ SELF_MANAGED = "Property Portfolio"
 # Growth Strategy values meaning rooms for our niche. The old names are still read (Growth Plan v3).
 UC_STRATEGIES = {"UC HMO", "UC joint tenancy", "HMO", "Joint tenancy", "Add tenants"}
 FREE_NOW, BEING_READIED = ("Void", "Rent Ready"), ("Not Ready",)
+# WHAT WE TELL PEOPLE IS FREE (Kevin corrected the number four times, 14 Oct to 11 Nov 2026: "check the
+# actual database for how many rooms we have free, as we don't have that many when you factor in the
+# quarterly projects"). Every opening above still drives the chain's own work (Roy's list, the move-in,
+# the rooms-legal check), but an email, an advert or a referral only ever counts a room that is VACANT
+# AND READY TODAY: a unit whose Unit Status is Void or Rent Ready, with no live tenancy on it (the
+# Tenancies table's own Live rule: no end date, or one not yet past), and no open task moving a tenant
+# INTO it. Never a room still in works (Not Ready), a Growth Plan room move, a notice not yet served
+# out, or a room kept for one of our tenants moving house (14 Wentworth Terrace Unit 3 read Void for
+# weeks while held for a move; Kevin left it out on 11 Nov). With no room ready, a town is told
+# nothing about numbers: it gets the "register now" mail-out every 28 days, as on a day with none.
+MOVE_WORD_RE = re.compile(r"\bmov(?:e|es|ed|ing)\b", re.I)
+MOVE_INTO_RE = re.compile(r"\bmov(?:e|es|ed|ing)\b.*?\b(?:to|into)\s+(.+?)(?=[,;()]|\s+and\s|$)", re.I)
+REC_ID_RE = re.compile(r"\brec[A-Za-z0-9]{14}\b")
 ROOM_LEVERS = {"Room release", "New room let"}
 LIVE_LEVER_STATUSES = {"Adopted", "In progress"}
 NOTICE_WINDOW_DAYS = 60
@@ -465,6 +480,11 @@ def load(day):
         "levers": fetch_all(T_GROWTH, {"fields[]": list(G.values())}),
         "tasks": fetch_all(T_TASKS, {"filterByFormula": "LEFT({Task Name}, 7)='TENANT '",
                                      "fields[]": list(TK.values())}),
+        # Open tasks that may move a tenant into a unit ("Move X from A Unit 2 to B Unit 3"): a room kept
+        # for a move is not free to tell anyone about (move_hold). Zero is a normal day, so no floor.
+        "moves": fetch_all(T_TASKS, {"filterByFormula": "AND(FIND('mov', LOWER({Task Name})), "
+                                                        "{Status}!='Completed', {Status}!='Cancelled')",
+                                     "fields[]": [TK["name"], TK["status"], TK["desc"]]}),
     }
     # The silent-zero trap, checked straight after the reads and before the network
     # checks below (29 Sep 2026: a broken read now fails fast, and the unit test of
@@ -537,7 +557,49 @@ def scope(data):
     return out
 
 
+def _plain(s):
+    """'Unit 3 – 14 Wentworth Terrace' -> 'unit 3 14 wentworth terrace', for matching a unit named in a task."""
+    return " ".join(re.sub(r"[–—\-,:.]", " ", str(s or "").lower()).split())
+
+
+def live_tenancy(data, uid, day):
+    """The id of a tenancy still live on this unit (no end date, or one not yet past: the Tenancies
+    table's own 'Tenancy Status' rule), or ''. A unit marked Void with a live tenancy is not vacant."""
+    for t in data["tenancies"]:
+        end = parse_day(t["fields"].get(TY["end"]))
+        if uid in links(t["fields"].get(TY["unit"])) and (end is None or end >= day):
+            return t["id"]
+    return ""
+
+
+def move_hold(data, uid, unit_name, prop):
+    """The name of an open task moving a tenant INTO this unit, or ''. The unit counts as named when its
+    record id is in the task's name or description, or when the task name says the move goes 'to' or
+    'into' it ('Move X from 5 Dalham Place Unit 2 to 14 Wentworth Terrace Unit 3'). Only the place after
+    'to'/'into' is read from the name, so the unit a tenant moves OUT of, or a unit a question merely
+    mentions, is never held. A move is one of our tenants changing room, never a room for someone new."""
+    m = re.match(r"^\s*(unit|room|flat)\s+(\w+)\s*[–—\-,:]\s*(.+)$", str(unit_name or ""), re.I)
+    keys = set()
+    if m:
+        kind, num, rest = m.group(1).lower(), m.group(2).lower(), _plain(m.group(3))
+        keys = {f"{rest} {kind} {num}", f"{kind} {num} {rest}"} | ({f"{_plain(prop)} {kind} {num}"} if prop else set())
+    for t in data.get("moves") or []:
+        f = t["fields"]
+        name = str(f.get(TK["name"]) or "")
+        if not is_open(t) or not MOVE_WORD_RE.search(name):
+            continue
+        if uid in REC_ID_RE.findall(name + "\n" + str(f.get(TK["desc"]) or "")):
+            return name
+        for dest in MOVE_INTO_RE.findall(name):
+            if any(re.search(rf"\b{re.escape(k)}\b", _plain(dest)) for k in keys):
+                return name
+    return ""
+
+
 def openings(data, day):
+    """Every room the chain works on: a void, a room in works, a notice, a Growth Plan room move. Each
+    says whether it is 'ready' (vacant and ready to let today: the only kind an outside reader is told
+    about, see FREE_NOW) and, when not, 'why', with the unit's Rental Units status for the evidence."""
     ours = scope(data)
     units = {u["id"]: u["fields"] for u in data["units"]}
     props = {p["id"]: p["fields"] for p in data["props"]}
@@ -548,25 +610,36 @@ def openings(data, day):
 
     for uid, (town, prop) in ours.items():
         status = sel(units[uid].get(U["status"]))
+        unit = str(units[uid].get(U["name"]) or "")
         if status in FREE_NOW:
+            live, held = live_tenancy(data, uid, day), move_hold(data, uid, unit, prop)
+            why = (f"Unit Status {status}, but tenancy {live} is still live on it" if live else
+                   f"Unit Status {status}, kept for a tenant moving in: {held}" if held else "")
+            label = (f"{prop}: a room free now" if not why else
+                     f"{prop}: a room kept for a move, not free" if held else f"{prop}: a room the records disagree on")
             out.append({"key": f"unit:{uid}", "kind": "void", "town": town, "property": prop, "rooms": 1,
-                        "from": day.isoformat(), "label": f"{prop}: a room free now", "pid": pid_of(uid),
-                        "since": None, "status": status})
+                        "from": day.isoformat(), "label": label, "pid": pid_of(uid),
+                        "since": None, "status": status, "unit": unit, "unitStatus": status,
+                        "ready": not why, "why": why})
         elif status in BEING_READIED:
             out.append({"key": f"unit:{uid}", "kind": "prep", "town": town, "property": prop, "rooms": 1,
                         "from": None, "label": f"{prop}: a room being made ready", "pid": pid_of(uid),
-                        "since": None, "status": status})
+                        "since": None, "status": status, "unit": unit, "unitStatus": status,
+                        "ready": False, "why": f"Unit Status {status}: works not finished"})
     for t in data["tenancies"]:
         f = t["fields"]
         end = parse_day(f.get(TY["end"]))
         if not end or not (day <= end <= day + timedelta(days=NOTICE_WINDOW_DAYS)):
             continue
         for uid in links(f.get(TY["unit"])):
-            if uid in ours and sel(units[uid].get(U["status"])) not in FREE_NOW + BEING_READIED:
+            status = sel(units.get(uid, {}).get(U["status"]))
+            if uid in ours and status not in FREE_NOW + BEING_READIED:
                 town, prop = ours[uid]
                 out.append({"key": f"tenancy:{t['id']}", "kind": "notice", "town": town, "property": prop,
                             "rooms": 1, "from": end.isoformat(), "label": f"{prop}: a room free from {fmt_day(end)}",
-                            "pid": pid_of(uid), "since": None, "status": "notice"})
+                            "pid": pid_of(uid), "since": None, "status": "notice",
+                            "unit": str(units[uid].get(U["name"]) or ""), "unitStatus": status or "blank",
+                            "ready": False, "why": f"Unit Status {status or 'blank'}, the tenant there leaves {fmt_day(end)}"})
     for lv in data["levers"]:
         f = lv["fields"]
         lever, status = sel(f.get(G["lever"])), sel(f.get(G["status"]))
@@ -580,8 +653,33 @@ def openings(data, day):
         rooms = int(m.group(1)) if m else (2 if lever == "Take-back" else 1)
         out.append({"key": f"lever:{lv['id']}", "kind": "room", "town": town, "property": prop, "rooms": rooms,
                     "from": None, "label": f"{prop}: {rooms} room{'s' if rooms != 1 else ''} coming up",
-                    "pid": next(iter(pids), None), "since": (f.get(G["adopted"]) or None), "status": status})
+                    "pid": next(iter(pids), None), "since": (f.get(G["adopted"]) or None), "status": status,
+                    "unit": "", "unitStatus": "", "ready": False,
+                    "why": f"a Growth Plan room move ({lever}, {status}): the room is not there to let yet"})
     return sorted(out, key=lambda o: (o["town"], o["property"], o["key"]))
+
+
+def ready_rooms(opens):
+    """The openings an outside reader may be told about: vacant and ready to let today (see FREE_NOW)."""
+    return [o for o in opens if o.get("ready")]
+
+
+def ready_by_town(towns):
+    """{town: its ready openings} for the towns with at least one room vacant and ready today."""
+    return {t: ready_rooms(os_) for t, os_ in towns.items() if ready_rooms(os_)}
+
+
+def rooms_evidence(opens):
+    """The rooms behind the number, each with its Rental Units status, for Kevin to check on the card."""
+    def name(o):
+        unit, house = o.get("unit") or "", o.get("property") or ""
+        return o["label"] if not unit else unit if house and house in unit else ", ".join(x for x in (unit, house) if x)
+    counted = [f"{name(o)} (Unit Status {o.get('unitStatus') or o['status']}, no live tenancy, no move into it)"
+               for o in ready_rooms(opens)]
+    left = [f"{name(o)} ({o.get('why') or 'not vacant and ready today'})" for o in opens if not o.get("ready")]
+    return (f"Rooms counted as free, vacant and ready today (read from Rental Units): {len(counted)}"
+            + "".join(f"\n- {c}" for c in counted)
+            + (f"\nNot counted, so never in the email:" + "".join(f"\n- {x}" for x in left) if left else ""))
 
 
 def by_town(opens):
@@ -829,12 +927,13 @@ def sent_days(tasks):
 
 # ─── emails (cards) ──────────────────────────────────────────────────
 def rooms_line(opens):
-    n = sum(o["rooms"] for o in opens)
-    streets = sorted({street(o["property"]) for o in opens if o["property"]})
-    dated = sorted(o["from"] for o in opens if o["from"])
-    when = ("free now" if any(o["kind"] == "void" for o in opens)
-            else f"free from {fmt_day(parse_day(dated[0]))}" if dated else "coming up soon")
-    return n, streets, when
+    """(rooms, streets, when) as an outside reader is told them: ONLY rooms vacant and ready today. A room
+    in works, a Growth Plan room move, a notice or a room kept for a move is never counted (Kevin's four
+    corrections, 14 Oct to 11 Nov 2026). (0, [], '') when none is ready: the caller then says no number."""
+    ready = ready_rooms(opens)
+    n = sum(o["rooms"] for o in ready)
+    streets = sorted({street(o["property"]) for o in ready if o["property"]})
+    return n, streets, ("free now" if n else "")
 
 
 def email_block(to_each, subject, body, record, carry):
@@ -852,15 +951,19 @@ def track_record(dates, what):
 
 
 def mailout_body(towns, day):
-    """The same words for every referrer in one group: every open town near them, or 'register now'."""
+    """The same words for every referrer in one group: every town near them with a room vacant and ready
+    today, with that number and no other, or 'register now' (no number) when no room is ready."""
     link = form_link("Referrer")
-    open_towns = [t for t, os_ in towns if os_]
+    open_towns = [t for t, os_ in towns if rooms_line(os_)[0]]
     if open_towns:
         parts = []
         for town, os_ in towns:
             n, streets, when = rooms_line(os_)
-            parts.append(f"- {town}: {n} room{'s' if n != 1 else ''} {when}, in shared houses on "
-                         f"{', '.join(streets) or 'streets in ' + town}.")
+            if not n:
+                continue
+            parts.append(f"- {town}: {n} room{'s' if n != 1 else ''} {when}, in "
+                         f"{'a shared house' if n == 1 else 'shared houses'} on "
+                         f"{', '.join(streets) or 'a street in ' + town}.")
         where = " and ".join(open_towns)
         return (f"Rooms in {where} for single adults aged 35+ on Universal Credit",
                 f"Hello,\n\nAgile Lets has rooms for single adults aged 35 or over who claim Universal Credit:\n\n"
@@ -904,7 +1007,12 @@ def mailout_cards(data, towns, day):
 
     Due per REFERRER, not per town (review, 25 Sep 2026): every Soham referrer also serves Haverhill,
     so a card per town left Soham's always empty. Each referrer hears at most every 14 days while a
-    town near them has rooms, every 28 days with none, and is never on two waiting cards."""
+    town near them has a room vacant and ready today, every 28 days with none, and is never on two
+    waiting cards. A town whose openings are all in works, room moves, notices or kept for a move is
+    told nothing about rooms (Kevin, 28 Oct 2026); the card names every room and its Rental Units
+    status, counted or not, so Kevin can check the number before he approves."""
+    every_open = towns
+    towns = ready_by_town(every_open)
     stop = suppressed(data)
     busy_rooms, busy_quiet = referrers_busy(data, day, for_rooms=True), referrers_busy(data, day, for_rooms=False)
     rank = {"High": 0, "Medium": 1, "Low": 2}
@@ -934,21 +1042,27 @@ def mailout_cards(data, towns, day):
         open_towns = [t for t in key if t in towns]
         subject, body = mailout_body([(t, towns.get(t, [])) for t in key], day)
         label = " and ".join(key) + (" rooms" if open_towns else " register now")
+        free = sum(rooms_line(towns[t])[0] for t in open_towns)
+        evidence = rooms_evidence([o for t in key for o in every_open.get(t, [])])
         for i in range(0, len(refs), TO_EACH_MAX):
             chunk = refs[i:i + TO_EACH_MAX]
             ids = {rid for _, rid in chunk}
             last = [parse_day(r["fields"].get(R["lastEmailed"])) for r in data["refs"] if r["id"] in ids]
             what = ("; ".join(o["label"] for t in open_towns for o in towns[t]) if open_towns
                     else "rooms coming up, so they register people now")
+            near = " and ".join(key)
             cards.append({
                 "kind": "mailout", "town": key[0], "towns": list(key),
                 "name": f"{PREFIXES['mailout']}{label} {fmt_day(day)}" + (f" ({i // TO_EACH_MAX + 1})" if len(refs) > TO_EACH_MAX else ""),
-                "description": f"Tenant-finding chain: tell {len(chunk)} council, charity and support contacts near {' and '.join(key)} about {what}.",
+                "description": f"Tenant-finding chain: tell {len(chunk)} council, charity and support contacts near {near} about {what}.\n\n{evidence}",
                 "output": email_block([e for e, _ in chunk], subject, body,
                                       track_record(last, "mail-out to these contacts (Tenant Referrers, Last Emailed)"),
                                       f"sending this email separately to each of the {len(chunk)} contacts above from {SENDER}."),
                 "ids": [rid for _, rid in chunk], "emails": [e for e, _ in chunk],
-                "plainTask": f"Tell {len(chunk)} housing and support contacts near {' and '.join(key)} we have rooms for people aged 35+ on Universal Credit.",
+                "plainTask": (f"Tell {len(chunk)} housing and support contacts near {near} we have {free} room{'s' if free != 1 else ''} "
+                              "free for people aged 35+ on Universal Credit." if open_towns else
+                              f"Ask {len(chunk)} housing and support contacts near {near} to register people aged 35+ on "
+                              "Universal Credit for our next room. No room is free today, so the email gives no number."),
                 "plainApprove": f"The same short email goes to each of the {len(chunk)} contacts separately, from info@agilelets.co.uk, signed Roy Lavin."})
     return cards
 
@@ -976,17 +1090,20 @@ def referral_recipients(data, town, day):
 
 
 def referral_card(data, town, opens, day):
-    to = referral_recipients(data, town, day)
+    """The £50 referral email. It names a number of rooms, so with no room vacant and ready today it is
+    not drafted at all (None), and the chain tries again on a later day."""
+    n, _, _ = rooms_line(opens)
+    to = referral_recipients(data, town, day) if n else []
     if not to:
         return None
-    n, _, _ = rooms_line(opens)
-    body = (f"Hello,\n\nWe have {n} room{'s' if n != 1 else ''} coming free in {town}. Do you know someone aged "
+    body = (f"Hello,\n\nWe have {n} room{'s' if n != 1 else ''} free in {town}. Do you know someone aged "
             "35 or over, living on their own and claiming Universal Credit, who needs somewhere to live?\n\n"
             "Ask them to fill in this two-minute form and put your name where it asks who told them about us:\n"
             f"{form_link('Tenant referral')}\n\nIf they move in, we pay you £{BONUS_AMOUNT} once their first "
             "month's rent has been paid.\n\nIf you would rather not get these emails, reply STOP.")
     return {"kind": "referral", "town": town, "name": f"{PREFIXES['referral']}{town} friends {fmt_day(day)}",
-            "description": f"Tenant-finding chain: ask {len(to)} current tenants in {town} on Universal Credit, aged 35+, to refer a friend for £{BONUS_AMOUNT}. "
+            "description": f"Tenant-finding chain: ask {len(to)} current tenants in {town} on Universal Credit, aged 35+, to refer a friend for £{BONUS_AMOUNT}.\n\n"
+                           + rooms_evidence(opens) + "\n\n"
                            "Roy said to ask: " + ", ".join(str(t["fields"].get(TN["name"]) or "?") for t in referral_candidates(data, town, day)
                                                          if email_of(t["fields"].get(TN["email"])) in to) + ".",
             "output": email_block(to, f"£{BONUS_AMOUNT} for you when a friend moves in", body,
@@ -1193,7 +1310,10 @@ ADVERT_CHANNELS = (
 
 
 def adverts_task(town, opens, day):
+    """Advert copy for the rooms vacant and ready today, or None when there is none to advertise."""
     n, streets, when = rooms_line(opens)
+    if not n:
+        return None
     where = ", ".join(streets) or town
     blocks = []
     for channel, label, says_age in ADVERT_CHANNELS:
@@ -1204,7 +1324,7 @@ def adverts_task(town, opens, day):
             f"{label.format(town=town)}\nTitle: {title}\n"
             f"Text: Room in a shared house on {where}, {town}, {when}. {who}. Universal Credit welcome: the rent "
             f"matches the one-bedroom housing rate. To apply, fill in our two-minute form: {form_link(channel)}")
-    desc = (f"Rooms to fill: {'; '.join(o['label'] for o in opens)}.\n\nAdvert copy. Each has its own form link, "
+    desc = (f"Rooms to fill: {'; '.join(o['label'] for o in ready_rooms(opens))}.\n\nAdvert copy. Each has its own form link, "
             "so we can see which site brings people in. Photos: two of the room and one of the kitchen. If an advert "
             "is still live, leave it up and only post where it is not. Record each live advert on a TENANT ADVERTS "
             "task as a line: ADVERT LIVE: <site> <url>\n\n" + "\n\n".join(blocks))
@@ -1345,20 +1465,24 @@ def pastmail_pool(data, town, day):
 
 
 def pastmail_card(data, town, opens, day):
-    leads = pastmail_leads(data, town, day)
+    """Past applicants are emailed ONCE each, with a number of rooms, so with no room vacant and ready
+    today there is no card (None): nobody is used up on an email with nothing to offer."""
+    n, streets, when = rooms_line(opens)
+    leads = pastmail_leads(data, town, day) if n else []
     if not leads:
         return None
     to = [email_of(l["fields"].get(L["email"])) for l in leads]
-    n, streets, when = rooms_line(opens)
     where = " and ".join(streets) or town
     body = (f"Hello,\n\nYou applied to Agile Lets for a room a few years ago. We have {n} room{'s' if n != 1 else ''} "
-            f"{when} in {town}, in shared houses on {where}, for single adults aged 35 or over. Universal Credit "
+            f"{when} in {town}, in {'a shared house' if n == 1 else 'shared houses'} on {where}, for single adults "
+            "aged 35 or over. Universal Credit "
             "welcome: the rent matches the one-bedroom housing rate.\n\n"
             f"If you still need a room, fill in our two-minute form:\n{form_link('Past applicant')}\n\n"
             "If you no longer need one, reply STOP and we will take you off our list.")
     return {"kind": "pastmail", "town": town, "name": f"{PREFIXES['pastmail']}{town} {fmt_day(day)}",
             "description": f"Tenant-finding chain: email {len(to)} people who applied for a room in 2017 to 2021 and are "
-                           "35 or over by date of birth, once each (Kevin, 30 Sep 2026: email only, never a text).",
+                           "35 or over by date of birth, once each (Kevin, 30 Sep 2026: email only, never a text).\n\n"
+                           + rooms_evidence(opens),
             "output": email_block(to, f"Rooms in {town}: are you still looking?", body,
                                   track_record(sent_days(chain_tasks(data, "pastmail")),
                                                "past applicant email (TENANT PAST APPLICANTS cards)"),
@@ -1592,6 +1716,10 @@ def monitor(data, day, opens, run_notes):
     carries its own absence rule (feedback: trust surfaces report absence).
     """
     towns = by_town(opens)
+    # The emails that name rooms (mail-out, past applicants, referral) and the adverts only go for a
+    # room vacant and ready today, so their absence is only a gap in a town that has one.
+    ready = ready_by_town(towns)
+    free = ready_rooms(opens)
     steps = []
 
     def step(key, label, last, state, note):
@@ -1599,7 +1727,10 @@ def monitor(data, day, opens, run_notes):
                       "state": state, "note": note})
 
     step("openings", "Openings found", day if opens else None, "ok" if opens else "idle",
-         f"{sum(o['rooms'] for o in opens)} room(s): " + "; ".join(o["label"] for o in opens) if opens
+         (f"{sum(o['rooms'] for o in free)} room(s) free to tell people about"
+          + (": " + "; ".join(o["label"] for o in free) if free else "")
+          + (f". Not counted in any email: " + "; ".join(f"{o['label']} ({o['why']})" for o in opens if not o.get("ready"))
+             if len(free) < len(opens) else "")) if opens
          else "No void, notice or adopted room move right now.")
 
     live = bool(data.get("linkLive"))
@@ -1614,8 +1745,8 @@ def monitor(data, day, opens, run_notes):
     down = [f"{site} ({url})" for site, url, _ in ads if checks.get(url) is False]
     unsure = [site for site, url, _ in ads if checks.get(url) is None]
     if not ads:
-        step("adverts", "Adverts live", None, "fail" if opens else "idle",
-             "No advert recorded as live" + (" while rooms need tenants: post them (copy: tenant-leads.py adverts)" if opens else "."))
+        step("adverts", "Adverts live", None, "fail" if free else "idle",
+             "No advert recorded as live" + (" while rooms need tenants: post them (copy: tenant-leads.py adverts)" if free else "."))
     else:
         step("adverts", "Adverts live", max(d for _, _, d in ads), "warn" if down or unsure else "ok",
              "; ".join((["Gone: " + ", ".join(down)] if down else []) + (["Could not check: " + ", ".join(unsure)] if unsure else []))
@@ -1626,7 +1757,7 @@ def monitor(data, day, opens, run_notes):
         tasks = chain_tasks(data, kind)
         last = max((created_day(t) for t in tasks), default=None)
         bad, warn, info = [], [], []
-        for town in towns:
+        for town in ready:
             if kind == "mailout":
                 # The chain's own clock: is some referrer near this town on a card, or emailed lately?
                 # Told = an email actually went (Last Emailed) or a card is waiting / being sent. A card
@@ -1667,7 +1798,7 @@ def monitor(data, day, opens, run_notes):
 
     pm = chain_tasks(data, "pastmail")
     sent_pm = {i for t in pm if SENT_RE.search(str(t["fields"].get(TK["notes"]) or "")) for i in chain_ids(t)}
-    left = sum(len(pastmail_pool(data, town, day)) for town in towns)
+    left = sum(len(pastmail_pool(data, town, day)) for town in ready)
     slow = [t for t in pm if is_open(t) and (day - created_day(t)).days > 3]
     step("pastmail", "Past applicants emailed", max((created_day(t) for t in pm), default=None),
          "warn" if slow else "ok" if pm else "idle",
@@ -1700,9 +1831,9 @@ def monitor(data, day, opens, run_notes):
     asking = (day - first_mail).days if first_mail else None
     if recent:
         state, note = "ok", f"{len(recent)} in the last 14 days"
-    elif opens and asking is not None and asking > 30 and not (newest and (day - newest).days <= 30):
+    elif free and asking is not None and asking > 30 and not (newest and (day - newest).days <= 30):
         state, note = "fail", f"rooms open and no sign-up in 30 days, {asking} days after the first mail-out"
-    elif opens and asking is not None and asking > 14:
+    elif free and asking is not None and asking > 14:
         state, note = "warn", "rooms open and no sign-up in 14 days"
     else:
         state, note = "idle", "No sign-ups yet" + (f"; the first mail-out went {fmt_day(first_mail)}" if first_mail else "")
@@ -2085,6 +2216,9 @@ def run(data, day, w, only=None, replies=None):
         failures.append(f"openings: {str(exc)[:300]}")
         opens, ours, scope_ok = [], set(HOME_TOWNS), False
     towns = by_town(opens)
+    # The towns with a room vacant and ready today: the only ones an email that names rooms goes out
+    # for (past applicants, the referral bonus). Roy's list, move-ins and the rooms check use every opening.
+    ready = ready_by_town(towns)
     ours |= set(towns)       # a town with an opening is one we let in, even through a take-back
     # Nothing carrying the form link goes out until the short link opens the form (Kevin, 25 Sep
     # 2026: no long link, and never a dead one). Viewings and move-ins are phone and in person.
@@ -2332,11 +2466,11 @@ def run(data, day, w, only=None, replies=None):
         return ", ".join(c["name"][len(PREFIXES["mailout"]):] for c in cards)
 
     def do_pastmail():
-        """Past applicants by email, one card a week per town while rooms are open (Kevin, 30 Sep 2026)."""
+        """Past applicants by email, one card a week per town while a room is vacant and ready (Kevin, 30 Sep 2026)."""
         if not link_ok:
             return HELD
         done = []
-        for town, os_ in towns.items():
+        for town, os_ in ready.items():
             if due_again(chain_tasks(data, "pastmail", town), PAST_EMAIL_EVERY_DAYS, day)[0]:
                 card = pastmail_card(data, town, os_, day)
                 if card:
@@ -2348,7 +2482,7 @@ def run(data, day, w, only=None, replies=None):
         if not link_ok:
             return HELD
         done = []
-        for town, os_ in towns.items():
+        for town, os_ in ready.items():
             if not due_again(chain_tasks(data, "referral", town), REFERRAL_EVERY_DAYS, day)[0]:
                 continue
             # Roy says who we may email first (Kevin, 30 Sep 2026); the card waits for his answer.
@@ -2575,7 +2709,9 @@ def main(argv=None):
         return 0
     if a.cmd == "adverts":           # the copy to post, per town with rooms open (Kevin, 30 Sep 2026: we post them)
         for town, os_ in by_town(openings(data, day)).items():
-            print(adverts_task(town, os_, day)["description"] + "\n")
+            t = adverts_task(town, os_, day)
+            print((t["description"] if t else f"{town}: no room is vacant and ready today, so no advert copy.\n"
+                   + rooms_evidence(os_)) + "\n")
         return 0
     if a.cmd == "status":
         print(json.dumps(monitor(data, day, openings(data, day), []), indent=2))
