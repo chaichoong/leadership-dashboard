@@ -228,7 +228,8 @@ describe('the output gate reads the talk the way the cutter does', () => {
   it('BACK-TEST: the show name with a noise note in the transcript is not "he said the diary line"', () => {
     const r = py(`res = gate_for(None, 520.8, transcript="So consecutive day 2090\\n[BLANK_AUDIO]\\nof the diary cover on printer, and today I talk about rest.")`).res;
     expect(r.failures).toEqual([]);
-    expect(r.passed.find(([n]) => n === 'Learnings section')[1]).toContain('by design');
+    // 16 Nov 2026: no longer a silent "by design" pass; the card says no Learnings line was found and where it looked
+    expect(r.passed.find(([n]) => n === 'Learnings section')[1]).toMatch(/^NO LEARNINGS LINE FOUND/);
   });
 
   it('BACK-TEST: the diary line with a noise note inside it, and no clip, is refused (the note used to hide it)', () => {

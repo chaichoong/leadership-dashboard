@@ -1056,6 +1056,32 @@ def process(key, ledger, keep=False):
     # be answered by losing its Learnings clip. A kept window that no longer fits the clip is
     # said and dropped; it never stops the render.
     kept, by_hand = e.pop("lfmd_window_keep", None), False
+    # Which clip finder searched this render's own words, and whether it found the line. The output gate asks for one
+    # automatic re-search only when the finder that searched an episode is older than today's (qa.no_learnings_check):
+    # the same finder on the same words gives the same answer.
+    searched = {"finder": finder_code(), "found": bool(window), "at": dt.datetime.now().isoformat(timespec="seconds")}
+    # The start Kevin gave on his note (redo_day parks it as lfmd_at_keep, already on the recording's clock) is WHERE TO
+    # LOOK: the clip starts there only when a Learnings word is heard at that time, and then it beats a window kept by
+    # hand and the detector, as his newest word on this clip. Nothing heard: the clip is decided as before, and the
+    # receipt says his time found no Learnings line. A time that makes no allowed clip is said and dropped.
+    at_keep = e.pop("lfmd_at_keep", None)
+    note_at, heard = None, None
+    e.pop("lfmd_note_unused", None)
+    if at_keep:
+        try:
+            placed, heard = place_from_note(segs, at_keep["master"])
+            if placed is None:
+                e["lfmd_note_unused"] = {"full": at_keep["full"]}
+                print("%s: the Learnings time on Kevin's note (%s of the full episode) found no Learnings line; %s decides this render"
+                      % (key, mmss(at_keep["full"]), "the kept window" if kept else "the detector"), file=sys.stderr)
+            else:
+                window, by_hand = check_lfmd_window(placed, duration, e.get("episode") or date_day), True
+                kept, note_at = None, at_keep
+                print("%s: Learnings clip placed on \"%s\", heard at the time on Kevin's note (%s of the full episode), %.2f to %.2f s"
+                      % (key, heard[:60], mmss(at_keep["full"]), window[0], window[1]))
+        except (SystemExit, KeyError, TypeError, ValueError) as ex:
+            print("%s: the Learnings time on Kevin's note was dropped (%s); %s decides this render"
+                  % (key, str(ex)[-160:], "the kept window" if kept else "the detector"), file=sys.stderr)
     if kept:
         try:
             window, by_hand = check_lfmd_window(kept, duration, e.get("episode") or date_day), True
@@ -1074,6 +1100,8 @@ def process(key, ledger, keep=False):
     e.pop("lfmd_early_ok", None)      # a clip cut again is watched again before an early start is accepted (qa.py accept-early)
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window); e["role"] = role; e["duration"] = round(duration, 1)
     e["lfmd_window_by"] = "operator" if by_hand else "detector"
+    note_record(e, note_at, window, heard)
+    e["lfmd_searched"] = searched
     # The spoken phrase the start was matched on, so the output gate judges the clip by the phrase and not by its
     # share of the episode (finding 20261019-phase-3-983). A window read off the captions by hand has no phrase.
     e["lfmd_phrase"] = None if by_hand else lfmd_phrase()
@@ -1210,12 +1238,31 @@ def redo_lfmd(day, window=None):
     text, srt = transcribe(clip, workdir)
     segs = srt_segments(open(srt).read())
     by_hand = bool(window)
+    import approval
+    card = approval.load_state().get(str(day)) or {}
+    # A window typed on the command line or the redo list wins; next, the start Kevin gave on the card he sent back.
+    note_at = None if by_hand or card.get("verdict") != "changes" else note_learnings_at(card.get("feedback", ""), e)
+    heard, unused = None, None
     if by_hand:
         window = check_lfmd_window(window, e.get("duration"), day)
         print("episode %d: Learnings window given by hand, %.2f to %.2f s; the detector is not consulted" % (day, window[0], window[1]))
     else:
         window = lfmd_window(segs)
-    if not window: raise SystemExit("episode %d has no diary section in its transcript" % day)
+        # today's finder has searched this episode's words: the output gate's one automatic re-search is done
+        e["lfmd_searched"] = {"finder": finder_code(), "found": bool(window), "at": dt.datetime.now().isoformat(timespec="seconds")}
+        if note_at:
+            placed, heard = place_from_note(segs, note_at["master"])
+            if placed:
+                window, by_hand = check_lfmd_window(placed, e.get("duration"), day), True
+                print("episode %d: Learnings clip placed on \"%s\", heard at the time on Kevin's note (%s of the full episode), %.2f to %.2f s"
+                      % (day, heard[:60], mmss(note_at["full"]), window[0], window[1]))
+            else:
+                unused, note_at = note_at, None
+                print("episode %d: the Learnings time on Kevin's note (%s of the full episode) found no Learnings line; the finder decides"
+                      % (day, mmss(unused["full"])), file=sys.stderr)
+    if not window:
+        if e.get("lfmd_searched"): watch.save_ledger(ledger)      # the search is recorded even when it found nothing
+        raise SystemExit("episode %d has no diary section in its transcript" % day)
     # Saved BEFORE the new clip is filed: a rebuild that dies half way must not leave the new clip under the old yes
     if e.pop("lfmd_early_ok", None) is not None: watch.save_ledger(ledger)      # a clip cut again is watched again (qa.py accept-early)
     masters = render_masters(clip, workdir, only="9:16")
@@ -1228,6 +1275,9 @@ def redo_lfmd(day, window=None):
     if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window)
     e["lfmd_window_by"] = "operator" if by_hand else "detector"
+    note_record(e, note_at, window, heard)
+    if unused: e["lfmd_note_unused"] = {"full": unused["full"]}
+    else: e.pop("lfmd_note_unused", None)
     e["lfmd_phrase"] = None if by_hand else lfmd_phrase()      # the gate judges the start by the phrase (983)
     e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
     e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
@@ -1247,9 +1297,11 @@ def redo_lfmd(day, window=None):
         # added." A sent-back card needs one receipt line per point. Every point gets one: the rebuild for a point about
         # the clip, and for any other point what the rebuild did and that nothing else changed (7 Oct 2026). Only a
         # card sent back with no note at all has nothing to answer.
-        receipt = lfmd_receipt(card.get("feedback", ""), window)
+        receipt = lfmd_receipt(card.get("feedback", ""), window, intro_at=e.get("intro_at"), unused=(unused or {}).get("full"))
+        placed_how = ("placed on the Learnings line heard at the time on Kevin's note" if note_at else "window read off the captions by hand"
+                      if by_hand else "found by the detector")
         if receipt and not clear_block(day, card, "the Learnings clip of episode %d was rebuilt from %.1f to %.1f s (%s)"
-                                       % (day, window[0], window[1], "window read off the captions by hand" if by_hand else "found by the detector")):
+                                       % (day, window[0], window[1], placed_how)):
             # submit refuses a walled card: the day stays on the rebuild list and the next night tries again
             raise SystemExit("episode %d: the Learnings clip is rebuilt but the card's TOOL wall could not be lifted" % day)
         if receipt:
@@ -1302,17 +1354,74 @@ BULLET_RE = re.compile(r"^\s*(?:[-*•]+|\d+[.)])\s+")
 
 
 JINGLE_RE = re.compile(r"jingle|intro\s+(?:music|sound|clip|sting)", re.I)
-# "at 26 seconds", "at about 33 seconds". The preposition is required: "I leave a pause after the intro of maybe
-# 5 seconds" and "look for that 5-second pause" describe the PAUSE's length, not where the cut goes, and both are
-# in the notes that bounced 2100 three nights running.
-CUT_AT_RE = re.compile(r"\bat\s+(?:about\s+|around\s+|roughly\s+|approximately\s+)?"
-                       r"(\d{1,3}(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b)", re.I)
+# A time as Kevin writes it. Each piece is its own named group, so one function reads all of them (clock_seconds).
+#   "00:00:26", "00:00:26s", "0:26", "4:32"            hours optional, seconds under 60, never "4:30pm"
+_CLOCK = r"(?:(?P<h>\d{1,2}):)?(?P<cm>\d{1,2}):(?P<cs>[0-5]\d(?:\.\d+)?)s?\b(?!\s*[ap]\.?m\b)"
+#   "26 seconds", "26 secs", "26s"
+_SECS = r"(?P<ss>\d{1,3}(?:\.\d+)?)\s*(?:seconds?\b|secs?\b|s\b)"
+#   "4 minutes and 31 seconds", "6 minutes 25 seconds", "4m50s", "7 minutes"   ("4 more" is not "4 m")
+_MINSEC = (r"(?P<mm>\d{1,2})\s*(?:minutes?\b|mins?\b|m(?=\s*\d))\s*(?:and\s+)?"
+           r"(?:(?P<ms>[0-5]?\d(?:\.\d+)?)\s*(?:seconds?\b|secs?\b|s\b))?")
+_HEDGE = r"(?:(?:about|around|roughly|approximately|exactly|precisely|just|the)\s+)*"     # "around about the 6:30 mark" (2062)
+# THE JINGLE: "at 26 seconds", "at about 33 seconds", and since 16 Nov 2026 "at exactly 27 seconds", "at 00:00:26"
+# and "at 00:00:26s". Those last three are Kevin's own wording on 1808 (20 Oct) and 2113 (2 and 5 Nov), proved on
+# 15 Nov to read as nothing, so those redos fell back to the same detector and 2113 came back again (lessons sort,
+# line 59). The preposition is still required: "I leave a pause after the intro of maybe 5 seconds" and "look for
+# that 5-second pause" describe the PAUSE's length, not where the cut goes, and both are in the notes that bounced
+# 2100 three nights running.
+CUT_AT_RE = re.compile(r"\bat\s+" + _HEDGE + r"(?:" + _CLOCK + r"|" + _SECS + r")", re.I)
 CUT_FROM_NOTE_MIN_S = 8.0     # a cut inside the first 8 s is the "jingle leads the episode" case, never a typed figure
+# THE LEARNINGS CLIP: "about 7 minutes and 8 seconds in", "at around 4:32 of the main episode", "at 4m50s",
+# "at exactly 4 minutes and 37 seconds" (2087, 2095, 2096, 2097, 2112, 2121, 2122, 2132, 1799: twelve notes from
+# 5 Oct to 31 Oct 2026, and nothing read any of them). Minutes are required: the section closes the talk, so a
+# seconds-only figure is never its start, and that keeps "a pause of about 5 seconds" out. "About 2 minutes long"
+# is a length, not a time.
+LEARN_AT_RE = re.compile(r"\b(?:at|about|around|roughly|approximately|exactly|precisely|from)\s+" + _HEDGE
+                         + r"(?:" + _CLOCK + r"|" + _MINSEC + r")(?!\s*long\b)", re.I)
+NOTE_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def clock_seconds(m):
+    """Seconds from a CUT_AT_RE or LEARN_AT_RE match, whichever of its forms matched."""
+    g = m.groupdict()
+    if g.get("cs") is not None:
+        return int(g.get("h") or 0) * 3600 + int(g["cm"]) * 60 + float(g["cs"])
+    if g.get("mm") is not None:
+        return int(g["mm"]) * 60 + float(g.get("ms") or 0)
+    return float(g["ss"])
 
 
 def about_jingle(point):
     """Whether one point of Kevin's note is about where the intro jingle goes."""
     return bool(JINGLE_RE.search(point or ""))
+
+
+def note_sentences(feedback):
+    """Every sentence of Kevin's note, his [date] stamps dropped. Unlike feedback_points, a short one counts:
+    "Everyday learnings for my diary." (2097, 8 Oct) is five words and still says what the next sentence is about."""
+    text = re.sub(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", "", str(feedback or ""), flags=re.M)
+    return [s.strip() for s in NOTE_SENTENCE_RE.split(text) if s.strip()]
+
+
+# A sentence about how LONG the clip runs, or where it ENDS, gives no start: "It should end at 8:05", "The learnings
+# clip should run for about 2 minutes" (review of PR 948, 16 Nov 2026).
+LENGTH_WORDS_RE = re.compile(r"\b(?:end|ends|ending|ended|finish\w*|length|lasts?|lasting|runs?\s+for|how\s+long)\b"
+                             r"|\d\s*(?:minutes?|mins?|seconds?|secs?)\s+long\b", re.I)
+
+
+def note_figures(feedback, topic, figure_re):
+    """Every figure figure_re finds in a sentence of Kevin's note that NAMES `topic` itself ('jingle' or
+    'learnings'). A time never carries into or out of a neighbouring sentence (review of PR 948, 16 Nov 2026):
+    "The jingle is in the right place. The thumbnail at 0:45 shows the wrong frame." must not move the jingle to
+    45 s. The price is paid knowingly: 2100's "The jingle is still in the wrong place. It should appear at about 33
+    seconds" now gives no figure and the pause detector decides, as it does for a jingle note with no time. A
+    Learnings sentence about length or the end of the clip gives no start."""
+    out = []
+    for s in note_sentences(feedback):
+        if topic == "jingle" and not about_jingle(s): continue
+        if topic == "learnings" and (not about_learnings(s) or LENGTH_WORDS_RE.search(s)): continue
+        out += [round(clock_seconds(m), 2) for m in figure_re.finditer(s)]
+    return out
 
 
 def jingle_cut_from(feedback):
@@ -1325,16 +1434,124 @@ def jingle_cut_from(feedback):
     the detector runs, because a wrong cut asserted from a guess is the thing that bounced four times."""
     text = feedback or ""
     if not any(about_jingle(pt) for pt in feedback_points(text)): return False, None
-    # Once ANY point names the jingle, the figure is looked for across the WHOLE note, not inside that point:
-    # feedback_points splits on sentences, and on 2100 he put the complaint in one sentence ("still in the wrong
-    # place") and the figure in the next ("it should appear at about 33 seconds"). Scoping the search to the
-    # sentence with the word "jingle" in it found neither figure he gave.
-    found = set()
-    for m in CUT_AT_RE.finditer(text):
-        v = float(m.group(1))
-        if v >= CUT_FROM_NOTE_MIN_S: found.add(round(v, 2))
+    found = {v for v in note_figures(text, "jingle", CUT_AT_RE) if v >= CUT_FROM_NOTE_MIN_S}
     if len(found) != 1: return True, None
     return True, found.pop()
+
+
+def learnings_time_from(feedback):
+    """(about, seconds) for the Learnings clip: whether Kevin's note has a point about it, and the time he gave
+    for where it starts, ON THE FULL EPISODE he watched (master_time puts it on the recording's clock), or None.
+    Two different times is not guessed at: on 2112 (13 Oct 2026) he wrote "about 4:30" for this episode and "about
+    6 minutes and 30 seconds in" for a different one, in the same note."""
+    text = feedback or ""
+    if not any(about_learnings(s) for s in note_sentences(text)): return False, None
+    found = {v for v in note_figures(text, "learnings", LEARN_AT_RE) if v > 0}
+    if len(found) != 1: return True, None
+    return True, found.pop()
+
+
+def master_time(full_s, intro_at, jingle_s=None):
+    """A time on the FULL episode, the video Kevin watches and writes his times against, as a time on the recording
+    the clips are cut from. The full episode has the jingle spliced in at intro_at (insert_intro), so everything
+    after it sits jingle_s later than in the recording. Proved on 2121 (16 Nov 2026): he wrote "exactly 4 minutes
+    and 37 seconds", which is where "the latest on my diet for this day" starts in the full episode's captions; the
+    window placed by hand at 276.74 s on the RECORDING started 7 s after that, and the card came back twice more.
+    None when the render recorded no jingle cut: the shift is not guessed. A time inside the jingle maps to the
+    cut. jingle_s defaults to the measured jingle length (INTRO_SECONDS_FALLBACK), so no file is read here."""
+    if intro_at is None or full_s is None: return None
+    j = INTRO_SECONDS_FALLBACK if jingle_s is None else float(jingle_s)
+    t, at = float(full_s), float(intro_at)
+    if t < at: return round(t, 2)
+    return round(max(at, t - j), 2)
+
+
+def full_time(master_s, intro_at, jingle_s=None):
+    """The other way: a time on the recording as a time on the full episode, for anything Kevin reads (receipts).
+    The recording's own time when no jingle cut is recorded."""
+    if intro_at is None: return float(master_s)
+    j = INTRO_SECONDS_FALLBACK if jingle_s is None else float(jingle_s)
+    return round(float(master_s) + (j if float(master_s) >= float(intro_at) else 0.0), 2)
+
+
+LEARN_SNAP_S = 1.5    # a player shows 4:37 for 277.0 to 277.99, so the phrase starts at most this far before his figure
+
+
+def lfmd_window_at(segments, start, min_len=20.0, max_len=180.0):
+    """(start, end) of a Learnings section whose START is given (Kevin's time, on the recording's clock), or None
+    when it is past the end of the recording. The start moves back to the nearest caption that begins up to
+    LEARN_SNAP_S before it, never further; the end is found exactly the way lfmd_window finds it (the first sign-off after the
+    segment the start falls in, held to the same floor and ceiling). The selftest holds the two together: on the
+    detector's own start this returns the detector's own window."""
+    if not segments: return None
+    start = float(start)
+    if start >= segments[-1][1]: return None
+    snap = [a for a, _, _ in segments if start - LEARN_SNAP_S <= a <= start]
+    if snap: start = max(snap)          # the caption nearest his figure, so dense captions never pull it further back
+    i = max([k for k, (a, _, _) in enumerate(segments) if a <= start] or [0])
+    end = segments[-1][1]
+    for a, b, t in segments[i + 1:]:
+        if SIGNOFF_RE.search(t):
+            end = b; break
+    if end - start < min_len: end = min(segments[-1][1], start + min_len)
+    if end - start > max_len:
+        ends = [b for _, b, _ in segments if start + min_len <= b <= start + max_len]
+        end = ends[-1] if ends else start + max_len
+    return (round(start, 2), round(end, 2))
+
+
+# HIS TIME IS WHERE TO LOOK, NEVER A CUT ON ITS OWN (review of PR 948, 16 Nov 2026). The clip starts at his time only
+# when a Learnings word is heard within NOTE_LOOK_BACK_S before it or NOTE_LOOK_AHEAD_S after it; otherwise the clip
+# is decided as before (a window kept by hand, else the finder, else none) and the 40% rule still judges it. Back-test
+# of the 13 times his notes gave (11 episodes) against the full episodes' captions: 10 sit 0 to 4 s after the spoken
+# line ("about 7 minutes and 8 seconds" on 2096, the line at 7:04.5) and start on it. 2132's "4m50s", the 5:05 given to
+# 2121 on 19 Oct (2122's) and 2095's 5:15 have no Learnings word near them, so they move nothing.
+LEARN_NEAR_RE = re.compile(r"\b(?:learn\w*|lesson\w*|latest|diar\w*|diet|dairy)\b", re.I)
+NOTE_LOOK_BACK_S, NOTE_LOOK_AHEAD_S = 6.0, 2.0
+
+
+def place_from_note(segments, master_s):
+    """(window, heard) for the Learnings start Kevin gave, on the recording's clock: the clip from the Learnings words
+    heard at his time, and those words. (None, None) when no Learnings word is heard near it."""
+    t = float(master_s)
+    near = [(a, x) for a, b, x in segments if a <= t + NOTE_LOOK_AHEAD_S and b >= t - NOTE_LOOK_BACK_S and LEARN_NEAR_RE.search(x)]
+    if not near: return None, None
+    a, heard = min(near)
+    return lfmd_window_at(segments, a), " ".join(heard.split())
+
+
+def note_learnings_at(feedback, entry):
+    """{"full": s, "master": s} for the Learnings start Kevin gave on this note, or None (no time, two times, or a
+    render with no jingle cut recorded, so his figure cannot be put on the recording's clock). Says which."""
+    about, full_s = learnings_time_from(feedback)
+    if not about or full_s is None: return None
+    raw = master_time(full_s, (entry or {}).get("intro_at"))
+    if raw is None:
+        print("episode %s: Kevin gave the Learnings clip at %s of the full episode, but the last render recorded no jingle "
+              "cut, so it cannot be put on the recording's clock; the finder decides" % ((entry or {}).get("episode"), mmss(full_s)),
+              file=sys.stderr)
+        return None
+    return {"full": full_s, "master": raw}
+
+
+def note_record(e, note_at, window, heard=None):
+    """Keep on the ledger that THIS window starts on the Learnings words heard at the time on Kevin's note, and those
+    words. The output gate (qa.lfmd_position) takes the HEARD words as the evidence, never his note alone: 1808's clip
+    starts at 39% of the episode and the share rule would refuse it otherwise. A window carried through a later
+    re-render keeps the record only while it is still the same window."""
+    if note_at and heard:
+        e["lfmd_from_note"] = {"full": note_at["full"], "master": note_at["master"], "window": list(window), "heard": heard}
+    elif window is None or (e.get("lfmd_from_note") or {}).get("window") != list(window):
+        e.pop("lfmd_from_note", None)
+
+
+def note_unused_words(full_s, where):
+    """The receipt clause when his time found nothing (review of PR 948): said plainly, with where the clip came from."""
+    return "your time (%s) found no Learnings line; the clip is from %s" % (mmss(full_s), where)
+
+
+def mmss(s):
+    return "%d:%02d" % (int(s) // 60, int(s) % 60)
 
 
 def about_learnings(point):
@@ -1417,15 +1634,24 @@ def answer_points(points, learnings_change, other_change, code_change=None):
     return "".join("- %s → %s\n" % (p, answer(p)) for p in points)
 
 
-def lfmd_receipt(feedback, window, points=None):
+def window_words(window, intro_at=None):
+    """'4:37 to 5:50 of the full episode' when the jingle cut is known (the clock Kevin reads his times off), else
+    the recording's own '4:30 to 5:43'. Until 16 Nov 2026 every receipt gave the recording's clock, 7 s behind the
+    video he watches, so 2121's said "4:36" while the clip started 7 s after the 4:37 he had asked for."""
+    if intro_at is None: return "%s to %s" % (mmss(window[0]), mmss(window[1]))
+    return "%s to %s of the full episode" % (mmss(full_time(window[0], intro_at)), mmss(full_time(window[1], intro_at)))
+
+
+def lfmd_receipt(feedback, window, points=None, intro_at=None, unused=None):
     """One '- <his point> → <what changed>' line per point after a Learnings rebuild. A point about the clip is answered
     with the rebuild; any other point says what the rebuild did and that nothing else on the episode changed, so he can
     see at once if a point needed more. '' only when he left no note (7 Oct 2026; before, '' whenever any point lacked
-    a Learnings word, and 2062 and 2086 were left for a person)."""
+    a Learnings word, and 2062 and 2086 were left for a person). `unused` is the time on his note that found no
+    Learnings line, said plainly with where the clip came from instead."""
     pts = points if points is not None else receipt_points(feedback)
     if not pts: return ""
-    fmt = lambda s: "%d:%02d" % (int(s) // 60, int(s) % 60)
-    clip = "the Learnings from my diary clip is rebuilt from %s to %s" % (fmt(window[0]), fmt(window[1]))
+    clip = "the Learnings from my diary clip is rebuilt from %s" % window_words(window, intro_at)
+    if unused is not None: clip += " (%s)" % note_unused_words(unused, "the clip finder")
     return answer_points([p.strip() for p in pts], clip + " and goes to the socials and the YouTube Short with this episode",
                          "rebuilt to this note: " + clip + "; nothing else on the episode changed")
 
@@ -1477,17 +1703,57 @@ def redo_line(line):
     return int(m.group(1)), ((float(m.group(2)), float(m.group(3))) if m.group(2) else None)
 
 
+# THE ONE AUTOMATIC RE-SEARCH (review of PR 948, 16 Nov 2026: no hold may wait for a person). A long episode with no
+# Learnings clip, whose words were last searched by an older clip finder than today's, is put on this list ONCE by the
+# approval run (approval.output_gate); the night's Learnings rebuild searches it again with today's finder. Found: the
+# clip is cut and the card goes up with it. Not found: the line comes off the list and the card goes to Kevin with
+# one line at the top saying so. It is never a block, and it never repeats: redo_lfmd records the search.
+RESEARCH_TAG = "auto re-search"
+RESEARCH_LINE_RE = re.compile(r"^\s*(\d{3,4})\s+" + re.escape(RESEARCH_TAG) + r"\s+(\d{4}-\d{2}-\d{2})\b")
+
+
+def queue_research(day, path=None, today=None):
+    """Put the day on the Learnings rebuild list for its one automatic re-search, unless it is already listed.
+    Returns True when it was added. Written whole and renamed over, so a reader never sees half a file."""
+    path = path or REDO_LFMD_FILE
+    try: lines = open(path).read().splitlines()
+    except FileNotFoundError: lines = []
+    if any((redo_line(l) or (None,))[0] == day for l in lines): return False
+    lines.append("%d %s %s: no Learnings line was found when it was cut, by an older clip finder than today's"
+                 % (day, RESEARCH_TAG, (today or dt.date.today()).isoformat()))
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh: fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+    return True
+
+
+def research_queued(day, path=None):
+    """The date the day's automatic re-search was queued, or None when it is not on the list as one."""
+    path = path or REDO_LFMD_FILE
+    try: lines = open(path).read().splitlines()
+    except FileNotFoundError: return None
+    for l in lines:
+        m = RESEARCH_LINE_RE.match(l)
+        if m and int(m.group(1)) == day: return dt.date.fromisoformat(m.group(2))
+    return None
+
+
 def redo_requested(path=None):
     """Nightly: rebuild the Learnings clip for every day listed in content_engine_redo_lfmd (one day per line, an
     optional @start-end window, then the reason). A failure stays listed for the next night and is printed; a success
-    clears the day and its hold."""
+    clears the day and its hold. An automatic re-search that finds nothing comes off the list (see RESEARCH_TAG)."""
     path = path or REDO_LFMD_FILE
-    try: asked = [r for r in (redo_line(l) for l in open(path)) if r]
+    try: asked = [(r[0], r[1], RESEARCH_TAG in l) for r, l in ((redo_line(l), l) for l in open(path)) if r]
     except OSError: asked = []
     if not asked: print("redo: no Learnings rebuilds requested"); return
-    for day, window in asked:
+    for day, window, auto in asked:
         try: redo_lfmd(day, window)
         except (Exception, SystemExit) as ex:
+            if auto and "no diary section" in str(ex):
+                _drop_day(path, day)
+                print("redo: episode %d: the automatic re-search found no Learnings line either; the card goes to Kevin saying so" % day)
+                continue
             print("redo: episode %d Learnings rebuild FAILED, kept for the next night (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
             if "no diary section" in str(ex):
                 # the finder found nothing Kevin says is there: the fixer lane's job, never a person's to stumble on (7 Oct 2026)
@@ -1857,7 +2123,22 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         # rejected (2100, sent back 15, 16 and 17 Oct 2026 for the same cut).
         if e.get("role") == "episode" and about:
             if cut_s is None: e.pop("intro_at_override", None)
-            else: e["intro_at_override"] = check_cut_override(cut_s, e.get("duration"), day)
+            else:
+                # A figure outside the cold open is dropped and said, and the day still queues with the pause detector:
+                # a refusal here left the day unqueued with its clips already set back to new (review of PR 948).
+                try: e["intro_at_override"] = check_cut_override(cut_s, e.get("duration"), day)
+                except SystemExit as ex:
+                    e.pop("intro_at_override", None)
+                    print("episode %d: the jingle figure on Kevin's note was dropped (%s); the pause detector decides" % (day, ex), file=sys.stderr)
+        # The Learnings start Kevin gave on THIS note (lessons sort line 34: twelve notes gave one and nothing read
+        # them). Put on the recording's clock with the jingle cut of the render he watched, which is this entry's
+        # intro_at before the reset; process() places the clip there and the detector is not asked.
+        if e.get("role") == "episode":
+            at = note_learnings_at(card.get("feedback", ""), e)
+            if at:
+                e["lfmd_at_keep"] = at
+                print("episode %d: Learnings clip to start at %s of the full episode (%.2f s on the recording), from Kevin's note"
+                      % (day, mmss(at["full"]), at["master"]))
         e["status"] = "new"; e["reset"] = note
     watch.save_ledger(ledger)
     os.makedirs(root, exist_ok=True)
@@ -1951,13 +2232,18 @@ def concrete_receipt(text, day, ledger, card):
     if REDO_LEARNINGS not in (text or ""): return text
     w = _episode_window(day, ledger)
     if not w: return text
-    fmt = lambda s: "%d:%02d" % (int(s) // 60, int(s) % 60)
+    ep = next((v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode" and v.get("lfmd_window")), {})
+    at = ep.get("intro_at")
     known, before = "redo_lfmd_before" in (card or {}), ((card or {}).get("redo_lfmd_before") or {}).get("window")
     was = ("" if not known else " (there was none before)" if not before
            else " (the same section as before)" if [round(float(x), 1) for x in before] == [round(float(x), 1) for x in w]
-           else " (it ran from %s to %s before)" % (fmt(before[0]), fmt(before[1])))
-    return text.replace(REDO_LEARNINGS, "the episode was re-rendered and its Learnings from my diary clip now runs from %s to %s%s; "
-                        "it goes to the socials and the YouTube Short with this episode" % (fmt(w[0]), fmt(w[1]), was))
+           else " (it ran from %s before)" % window_words(before, at))
+    note, unused = ep.get("lfmd_from_note") or {}, ep.get("lfmd_note_unused") or {}
+    where = "the clip finder" if ep.get("lfmd_window_by") == "detector" else "the window placed by hand before"
+    placed = (", starting on the Learnings line heard at the time on your note" if note.get("window") == list(w) else
+              " (%s)" % note_unused_words(unused["full"], where) if unused.get("full") is not None else "")
+    return text.replace(REDO_LEARNINGS, "the episode was re-rendered and its Learnings from my diary clip now runs from %s%s%s; "
+                        "it goes to the socials and the YouTube Short with this episode" % (window_words(w, at), placed, was))
 
 
 def dispatch_run(*args):
@@ -2472,7 +2758,9 @@ def selftest():
     # Kevin's own words off the 2100 and 2113 cards. The figures he GAVE are taken; the figures that describe the
     # PAUSE's length are not, because taking a 5 there is how a note about the jingle puts the jingle at 5 s.
     assert jingle_cut_from("The intro jingle should happen at 26 seconds of the full episode. It is still not in the right place.") == (True, 26.0)
-    assert jingle_cut_from("The jingle is still in the wrong place. It should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.") == (True, 33.0)
+    # a time counts only in the sentence that names the jingle (review of PR 948): 2100's second sentence gives none
+    assert jingle_cut_from("The jingle is still in the wrong place. It should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.") == (True, None)
+    assert jingle_cut_from("The jingle should appear at about 33 seconds on this episode, but you just need to look for that 5-second pause.") == (True, 33.0)
     assert jingle_cut_from("The jingle still in the wrong place. I leave a pause after the intro of maybe 5 seconds.") == (True, None), "a pause length is not a cut point"
     assert jingle_cut_from("The jingle needs to wait until the pause.") == (True, None), "a jingle point with no figure drops any stored one"
     assert jingle_cut_from("The Learnings clip is the wrong section.") == (False, None), "no jingle point, nothing to act on"
@@ -2488,7 +2776,67 @@ def selftest():
         "a sent-back jingle figure must reach the ledger, or the night re-renders the same cut"
     assert 'e.pop("intro_at_override", None)' in rd, "a jingle point with no figure must drop a stored one"
     assert "intro_at_override" not in RESET_STALE, "his figure must survive a failed-clip reset"
-    print(json.dumps({"checks": 95, "failed": []}))
+    _selftest_note_times()
+    print(json.dumps({"checks": 118, "failed": []}))
+
+
+def _selftest_note_times():
+    """16 Nov 2026, lessons sort lines 59 and 34. Kevin's own sentences, word for word off his cards."""
+    # the jingle: 1808 (20 Oct) and 2113 (2 and 5 Nov), each of which read as nothing before, so the detector ran again
+    assert jingle_cut_from("The intro jingle should go in at exactly 27 seconds of the full video.") == (True, 27.0)
+    assert jingle_cut_from("The intro jingle should happen at 00:00:26 of the full episode.") == (True, 26.0)
+    assert jingle_cut_from("Try again - the instructions are pretty clear - The intro jingle should happen at 00:00:26s of the full episode.") == (True, 26.0)
+    assert jingle_cut_from("The intro jingle should be at 0:26 on the full episode.") == (True, 26.0), "m:ss"
+    # a Learnings time in the same note never moves the jingle, and a jingle figure is never a Learnings start
+    assert jingle_cut_from("The intro jingle is still in the wrong place. The learnings from my diary start at 4:37.") == (True, None)
+    assert learnings_time_from("The intro jingle should happen at 26 seconds of the full episode.") == (False, None)
+    # the Learnings clip: twelve notes gave its start and nothing read one
+    assert learnings_time_from("Learnings from my diary is at exactly 4 minutes and 37 seconds of the main episode.") == (True, 277.0)
+    assert learnings_time_from("Learnings from my diary is wrong. It should kick in at around 4:32 of the main episode.") == (True, None), \
+        "a time never carries out of its own sentence (review of PR 948)"
+    assert learnings_time_from("Learnings from my diary should kick in at around 4:32 of the main episode.") == (True, 272.0)
+    assert learnings_time_from("Learning from my diary is at 4m50s of the episode - please sort and resubmit for approval") == (True, 290.0)
+    assert learnings_time_from("There was a learnings from my diary in this episode, about 7 minutes and 8 seconds in.") == (True, 428.0)
+    assert learnings_time_from('There was a "Learnings for my diary" which was at about 9:50 into the episode.') == (True, 590.0)
+    # 2112, 13 Oct: two times, one of them about a different episode, so neither is taken
+    assert learnings_time_from('"Learnings from my diary" is not correct. I think it kicked in at about 4:30 on the main episode. '
+                               'I gave you feedback on a different episode about 6 minutes and 30 seconds in.') == (True, None)
+    assert learnings_time_from("The learnings clip is about 2 minutes long.") == (True, None), "a length is not a start"
+    assert learnings_time_from("Learning from my diary is still not in the right place") == (True, None)
+    # his times are on the FULL episode, 7 s ahead of the recording after the jingle (2121: 4:37 = 270 s recorded)
+    assert master_time(277.0, 25.65) == 270.0 and master_time(20.0, 25.65) == 20.0
+    assert master_time(28.0, 25.65) == 25.65, "inside the jingle: the cut"
+    assert master_time(277.0, None) is None, "no recorded cut, no guessed shift"
+    assert full_time(270.0, 25.65) == 277.0 and full_time(20.0, 25.65) == 20.0 and full_time(270.0, None) == 270.0
+    assert window_words((269.7, 343.0), 25.65) == "4:36 to 5:50 of the full episode" and window_words((269.7, 343.0)) == "4:29 to 5:43"
+    # the clip from a given start ends where the detector's would, and the two cannot drift apart
+    segs = [(0, 5, "intro"), (381.0, 388.0, "So ultimately, learning from an hour today, that if you're running higher than 2,000 metres"),
+            (440.0, 450.0, "keep it in mind"), (495, 501, "stay positive, see you tomorrow")]
+    assert lfmd_window_at(segs, lfmd_window(segs)[0]) == lfmd_window(segs) == (381.0, 501.0)
+    assert lfmd_window_at(segs, 382.0) == (381.0, 501.0), "a caption starting up to 1.5 s before his figure is its start"
+    assert lfmd_window_at(segs, 384.0) == (384.0, 501.0), "and never further back"
+    assert lfmd_window_at(segs, 600.0) is None and lfmd_window_at([], 10.0) is None
+    # his time is where to LOOK (review of PR 948): the clip starts on Learnings words heard near it, never at his time alone
+    assert place_from_note(segs, 385.0) == ((381.0, 501.0), "So ultimately, learning from an hour today, that if you're running higher than 2,000 metres")
+    assert place_from_note(segs, 445.0) == (None, None) and place_from_note(segs, 900.0) == (None, None)
+    assert learnings_time_from("There are learnings from my diary around about the 6:30 mark of the episode.") == (True, 390.0), "2062"
+    assert learnings_time_from("Everyday learnings for my diary. It's at 6 minutes and 58 seconds of the full episode, then the learnings for my diary.") == (True, 418.0)
+    # a length or an end is never a start
+    for n in ("The learnings clip should run for about 2 minutes.", "The learnings from my diary should end at 8:05.",
+              "The learnings from my diary is around 1 minute and 30 seconds in length."):
+        assert learnings_time_from(n) == (True, None), n
+    entry = {"episode": 2121, "intro_at": 25.65}
+    assert note_learnings_at("Learnings from my diary is at exactly 4 minutes and 37 seconds of the main episode.", entry) == {"full": 277.0, "master": 270.0}
+    import contextlib as _cl2, io as _io2
+    with _cl2.redirect_stderr(_io2.StringIO()):
+        assert note_learnings_at("Learnings from my diary is at 4:37.", {"episode": 2121}) is None, "no recorded cut: not placed"
+    # the record that lets the gate take his time as evidence, kept only while the window is the same one
+    e = {}; note_record(e, {"full": 277.0, "master": 270.0}, (270.0, 343.0))
+    assert "lfmd_from_note" not in e, "no heard words, no record: the note alone is never evidence"
+    note_record(e, {"full": 277.0, "master": 270.0}, (270.0, 343.0), "latest on my diet for")
+    assert e["lfmd_from_note"] == {"full": 277.0, "master": 270.0, "window": [270.0, 343.0], "heard": "latest on my diet for"}
+    note_record(e, None, (270.0, 343.0)); assert "lfmd_from_note" in e, "the same window carried through a re-render"
+    note_record(e, None, (300.0, 380.0)); assert "lfmd_from_note" not in e, "a different window is not his"
 
 
 if __name__ == "__main__":

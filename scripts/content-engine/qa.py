@@ -12,7 +12,7 @@ not a promise.
   qa.py accept-early --day N   # an early Learnings clip has been watched and IS the diary section
   qa.py selftest
 """
-import argparse, json, math, os, re, subprocess, sys, time
+import argparse, datetime as dt, json, math, os, re, subprocess, sys, time
 HERE =os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import watch  # noqa: E402
 
@@ -107,9 +107,14 @@ def frame_rate_check(ep):
 
 
 def ledger_entries(day, ledger):
+    """(episode entry, teaser entry) for the day, the RENDERED one of each when there is one. A second recording of
+    the day that failed ("a second long recording for episode 2108 ... not rendered") keeps the same episode and role
+    on the ledger, and on 2107, 2108 and 2109 it comes first, so the gate read the failed entry's empty Learnings
+    window and missing horizon instead of the episode's own (found 16 Nov 2026 building the Learnings hold)."""
     ep = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode"]
     te = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "teaser"]
-    return (ep[0] if ep else None), (te[0] if te else None)
+    pick = lambda xs: next((v for v in xs if v.get("status") == "rendered"), xs[0] if xs else None)
+    return pick(ep), pick(te)
 
 
 def mmss(seconds_in):
@@ -127,6 +132,100 @@ def accept_early(day, ledger=None, save=None):
     ep["lfmd_early_ok"] = list(window)
     (save or watch.save_ledger)(ledger)
     return ep["lfmd_early_ok"]
+
+
+SIGNOFF_FROM = 0.5     # a sign-off this far into the talk or later closes it; "stay positive" said early on does not
+
+
+def signoff_at(srt_path):
+    """Seconds into the full episode where his sign-off ("thank you as always", "stay positive", "see you tomorrow")
+    starts, read off the JOINED text of the back half of the episode's own captions, or None when it is not there.
+    Matched on the joined text because the captions are five-word chunks: "stay | positive" and "I'll see | you again
+    tomorrow" fall in two cues, and per cue 2082 and 2183 read as having none (review of PR 948, 16 Nov 2026).
+    Raises ValueError naming the file when the captions cannot be read: an unread file is never "no sign-off"."""
+    import render
+    try: segs = render.srt_segments(open(srt_path).read())
+    except (OSError, ValueError, IndexError) as ex: raise ValueError("captions %r could not be read (%s)" % (srt_path, ex))
+    if not segs: raise ValueError("captions %r hold no cues" % srt_path)
+    text, owner = "", []
+    for a, _, t in segs:
+        if a < SIGNOFF_FROM * segs[-1][1]: continue
+        w = render.spoken(t) + " "
+        text += w; owner += [a] * len(w)
+    m = render.SIGNOFF_RE.search(text)
+    return owner[m.start()] if m else None
+
+
+RESEARCH_CHECK = "Learnings re-search"     # a wait the pipeline owns (render.queue_research), never a person
+RESEARCH_WAIT_DAYS = 2                     # past this, a re-search that has not run stops holding the card
+
+
+def no_learnings_check(ep, srt_path, day, today=None):
+    """(name, ok, hard, detail) for a long episode with no Learnings clip, no diary line heard and no near miss.
+
+    Kevin's rule (9 Sep 2026, lessons sort line 34): he says the line in almost every episode. Until 16 Nov 2026 a
+    card with no clip went up as "by design", and 1799, 2095, 2096, 2097, 2130 and 2132 came back for the clip.
+
+    No hold waits for a person (review of PR 948). The checks above have just searched this episode's transcript and
+    full captions again with TODAY's clip finder. When the render's own search was made by an OLDER finder
+    (render.process stamps lfmd_searched), the pipeline also searches the recording's own words once more
+    (render.queue_research, the night's Learnings rebuild: the 25 Oct loose route found 7 of 11 missed days) and the
+    card waits for that, at most RESEARCH_WAIT_DAYS. Otherwise, and after it, the card goes to Kevin as normal, its top
+    line saying no Learnings line was found and where the engine looked (approval.build_card reads this detail).
+    A render with no stamp (before 16 Nov 2026) has no finder to compare, so the gate's own search stands."""
+    import render
+    searched = ep.get("lfmd_searched") if isinstance(ep.get("lfmd_searched"), dict) else {}
+    late = ""
+    if searched.get("finder") and searched["finder"] != render.finder_code():
+        queued = render.research_queued(day)
+        age = ((today or dt.date.today()) - queued).days if queued else None
+        if age is None or age <= RESEARCH_WAIT_DAYS:
+            return (RESEARCH_CHECK, False, "wait",
+                    "no Learnings line was found when this episode was cut, by an older clip finder than today's; tonight's "
+                    "Learnings rebuild searches it once more with today's finder%s, and the card goes up after it"
+                    % (" (queued %s)" % queued.isoformat() if queued else ""))
+        late = "; the automatic re-search queued on %s has not run" % queued.isoformat()
+    try:
+        end = signoff_at(srt_path)
+        span = ("its captions run on to your sign-off at %s" % mmss(end) if end is not None
+                else "its captions end before your sign-off, so the recording may have been cut short")
+    except ValueError as ex:
+        span = "NOT CHECKED: %s" % ex
+    return ("Learnings section", True, False,
+            "NO LEARNINGS LINE FOUND: the clip finder (its exact and loose routes) and the near-miss check looked through this "
+            "episode's transcript and its full captions, and nothing sounds like 'learnings from my diary'; %s%s" % (span, late))
+
+
+def summary_search(ep, ledger):
+    """The card line for a long episode with no Summary clip: where the engine looked and what it found there.
+
+    Kevin, 5 Oct 2026 (2090): "It's very seldom I'd forget to do that... check the raw footage for the day this was
+    recorded and the day after." The summary is sometimes recorded the next morning (2071, 2072). Until 16 Nov 2026
+    the card said only "no teaser clip recorded for this day". Every clip the watcher has seen is on the ledger with
+    its date and folder, so this names the folders searched and every short or unmeasured clip on either day."""
+    import render
+    try: d0 = dt.date.fromisoformat(str(ep.get("date")))
+    except ValueError:
+        return "NO SUMMARY FOUND, and the recording date is not on the ledger (%r), so no other day was searched" % ep.get("date")
+    days = [d0, d0 + dt.timedelta(days=1)]
+    on = [v for v in ledger.values() if v is not ep and v.get("date") in (days[0].isoformat(), days[1].isoformat())]
+    folders = sorted({os.path.basename(os.path.dirname(v.get("path") or "")) for v in on + [ep]} - {""})
+    def short(v):
+        try: return float(v["duration"]) <= render.TEASER_MAX_SECONDS
+        except (KeyError, TypeError, ValueError): return True      # not pulled yet: unmeasured, so it is listed
+    def what(v):
+        d = dt.date.fromisoformat(v["date"]).strftime("%-d %b")
+        try: size = "%.0f s" % float(v["duration"]) if v.get("duration") is not None else "not pulled yet, %.1f GB" % (float(v.get("size") or 0) / 1e9)
+        except (TypeError, ValueError): size = "length on the ledger unreadable (%r)" % v.get("duration")
+        role = (" %s of %s" % (v["role"], v.get("episode"))) if v.get("role") and v.get("episode") else ""
+        return "%s (%s, %s, %s%s)" % (v.get("name") or "?", d, size, v.get("status") or "?", role)
+    cands = sorted((v for v in on if short(v)), key=lambda v: (v.get("date"), v.get("hms") or ""))
+    where = "looked in %s for %s and %s" % (" and ".join(folders) or "the ledger (no folder recorded)",
+                                            days[0].strftime("%-d %b"), days[1].strftime("%-d %b"))
+    if not any(v.get("date") == days[1].isoformat() for v in ledger.values()):
+        where += " (nothing recorded on %s is on the ledger yet)" % days[1].strftime("%-d %b")
+    if not cands: return "NO SUMMARY FOUND: %s; no other short clip was recorded on either day" % where
+    return "NO SUMMARY FOUND: %s; short clips there: %s" % (where, "; ".join(what(v) for v in cands))
 
 
 def lfmd_position(ep, podcast_seconds, day):
@@ -162,6 +261,16 @@ def lfmd_position(ep, podcast_seconds, day):
     # re-render. An episode with no lfmd_window_by at all (rendered before that field) keeps the share rule.
     if ep.get("lfmd_window_by") == "detector":
         return True, True, where + ", placed by the clip finder on the spoken phrase"
+    # Kevin's own time is evidence too (16 Nov 2026): a clip placed where his note said it starts (render.note_record)
+    # passes on that, or his 4:30 on 1808, at 39% of the episode, would be refused by the share rule below.
+    # The evidence is the Learnings words HEARD where his note said to look, never the note alone (review of PR 948).
+    import render
+    note = ep.get("lfmd_from_note") if isinstance(ep.get("lfmd_from_note"), dict) else {}
+    heard = note.get("heard") if isinstance(note.get("heard"), str) else ""
+    try: from_note = [float(x) for x in note.get("window") or []] == [start, end]; said = mmss(float(note.get("full")))
+    except (TypeError, ValueError): from_note = False          # a record that cannot be read is no evidence: the share rule judges
+    if from_note and render.LEARN_NEAR_RE.search(heard):
+        return True, True, where + ', starting on "%s", heard at the time on your note (%s of the full episode)' % (" ".join(heard.split())[:60], said)
     if share >= LFMD_EARLIEST_START: return True, True, where
     if isinstance(by_hand, (list, tuple)) and list(by_hand) == list(window): return True, True, where + ", accepted by hand as the diary section"
     return False, True, ("%s, and no spoken phrase was matched for it (lfmd_phrase is empty, so this clip was cut before "
@@ -236,7 +345,7 @@ def checks(day, ledger=None, files=None):
         add("Learnings caption file", cue_count(files.get("lfmd_srt", "")) >= 3, True, "%d cues" % cue_count(files.get("lfmd_srt", "")))
         if window: add("Learnings clip position", *lfmd_position(ep, d_pod, day))
     else:
-        add("Learnings section", True, False, "no diary phrase spoken in this recording, so no clip (by design)")
+        add(*no_learnings_check(ep, files.get("full_srt", ""), day))
     th = files.get("thumb", "")
     add("thumbnail", os.path.exists(th) and os.path.getsize(th) > 20000, True, "%d KB" % (os.path.getsize(th) // 1024 if os.path.exists(th) else 0))
     hz = ep.get("horizon") or {}
@@ -251,7 +360,7 @@ def checks(day, ledger=None, files=None):
         add("teaser title", (te.get("title") or "") != GENERIC_TITLE, True, "banner reads %s" % (te.get("title") or "?").replace("|", " / "))
         add("teaser file", seconds(files.get("summary", "")) > 10, True, "%.0f s" % seconds(files.get("summary", "")))
     else:
-        add("teaser", True, False, "no teaser clip recorded for this day")
+        add("teaser", True, False, summary_search(ep, ledger))
     return out
 
 
@@ -264,8 +373,9 @@ def gate(day, ledger=None, files=None):
 
 
 def is_wait(failures):
-    """True when the only thing stopping the card is a read this Mac could not make yet."""
-    return bool(failures) and all(n == WAIT_CHECK for n, _ in failures)
+    """True when the only thing stopping the card is a read this Mac could not make yet, or the one automatic
+    Learnings re-search the night's rebuild runs (RESEARCH_CHECK). Neither waits for a person."""
+    return bool(failures) and all(n in (WAIT_CHECK, RESEARCH_CHECK) for n, _ in failures)
 
 
 def card_lines(passed, failures=()):
@@ -333,8 +443,8 @@ def selftest():
     # diary phrase spoken but no clip
     f3 = dict(files, lfmd="/nonexistent", lfmd_yt="/nonexistent"); led3 = {"a full.insv": dict(led["a full.insv"], lfmd_window=None)}
     ok, fails, _ = gate(9, led3, f3); assert not ok and any("Learnings clip" in n for n, _ in fails), fails
-    # no phrase, no clip: fine, soft note only
-    open(files["transcript"], "w").write("no such section today"); ok, fails, passed = gate(9, led3, f3); assert ok and any("by design" in d for n, d in passed)
+    # no phrase, no clip: the card goes up, its line saying no Learnings line was found (was a silent "by design" pass)
+    open(files["transcript"], "w").write("no such section today"); ok, fails, passed = gate(9, led3, f3); assert ok and any(d.startswith("NO LEARNINGS LINE FOUND") for n, d in passed)
     # 2060 (17 Sep 2026): a mis-heard Learnings line in the captions, no clip cut -> the card is REFUSED, never "by design"
     miss_srt = os.path.join(tmp, "miss.srt")
     open(miss_srt, "w").write("1\n00:00:01,000 --> 00:00:02,000\nSo I suppose the learning from\n\n2\n00:00:02,000 --> 00:00:03,000\na diet today is that problems\n\n"
@@ -394,7 +504,60 @@ def selftest():
     led14 = {"a full.insv": dict(led["a full.insv"], intro_at=33.0, intro_at_by="detector")}
     assert any(n == "jingle position" and "pause detector" in d for n, _, _, d in checks(9, led14, files))
     assert not any(n == "jingle position" for n, _, _, _ in checks(9, led, files)), "no recorded cut, no claim about one"
-    shutil.rmtree(tmp); print(json.dumps({"checks": 15, "failed": []}))
+    _selftest_no_learnings(files, led, tmp)
+    shutil.rmtree(tmp); print(json.dumps({"checks": 22, "failed": []}))
+
+
+def _selftest_no_learnings(files, led, tmp):
+    """16 Nov 2026, lessons sort lines 34 and 45, on invented episode data."""
+    signed = os.path.join(tmp, "signed.srt")
+    open(signed, "w").write("".join("%d\n00:00:%02d,000 --> 00:00:%02d,500\nsome of the talk\n\n" % (i, i, i) for i in range(1, 9))
+                            + "9\n00:00:40,000 --> 00:00:41,000\nthank you as always, stay positive\n\n")
+    import render
+    plain = dict(led["a full.insv"], lfmd_window=None)
+    nolf = dict(files, lfmd="/nonexistent", lfmd_yt="/nonexistent", full_srt=signed)
+    open(files["transcript"], "w").write("no such section today")
+    # no clip, nothing heard: the card goes up, its line saying so and where it looked; never a hold (review of PR 948)
+    ok, _, passed = gate(9, {"a full.insv": plain}, nolf)
+    assert ok and any(n == "Learnings section" and d.startswith("NO LEARNINGS LINE FOUND") and "sign-off at 0:40" in d for n, d in passed), passed
+    # searched at render by an OLDER finder: one automatic re-search, a wait the pipeline owns, never a block
+    stale = dict(plain, episode=2187, lfmd_searched={"finder": "older", "found": False})
+    real = render.REDO_LFMD_FILE; render.REDO_LFMD_FILE = os.path.join(tmp, "redo_lfmd")
+    try:
+        ok, fails, _ = gate(2187, {"a full.insv": stale}, nolf)
+        assert not ok and is_wait(fails) and [n for n, _ in fails] == [RESEARCH_CHECK], fails
+        render.queue_research(2187, today=dt.date.today() - dt.timedelta(days=RESEARCH_WAIT_DAYS + 4))   # queued and never run
+        ok, _, passed = gate(2187, {"a full.insv": stale}, nolf)
+        assert ok and any("has not run" in d for n, d in passed), passed
+    finally:
+        render.REDO_LFMD_FILE = real
+    # searched by today's finder: no re-search, the card line at once
+    assert gate(9, {"a full.insv": dict(plain, lfmd_searched={"finder": render.finder_code(), "found": False})}, nolf)[0]
+    # the sign-off split across two caption chunks is still the sign-off (2082 and 2183, review of PR 948)
+    split = os.path.join(tmp, "split.srt")
+    open(split, "w").write("".join("%d\n00:00:%02d,000 --> 00:00:%02d,500\nsome of the talk\n\n" % (i, i, i) for i in range(1, 9))
+                           + "9\n00:00:40,000 --> 00:00:41,000\nI think as always, stay\n\n10\n00:00:41,000 --> 00:00:42,000\npositive, stay happy, I'll see\n\n")
+    assert signoff_at(split) == 40.0, signoff_at(split)
+    # the rendered entry is the episode, not a failed second recording that sits first on the ledger (2107, 2108, 2109)
+    two = {"a 1.insv": {"episode": 9, "role": "episode", "status": "failed"}, "a 2.insv": dict(led["a full.insv"], status="rendered")}
+    assert ledger_entries(9, two)[0] is two["a 2.insv"]
+    # the Learnings words heard at Kevin's time are the evidence for an early clip (1808 at 39%), in the same window
+    early = dict(led["a full.insv"], lfmd_window=[5, 25], lfmd_window_by="operator")
+    assert gate(9, {"a full.insv": dict(early, lfmd_from_note={"full": 12.0, "master": 5.0, "window": [5, 25], "heard": "the latest in my diary"})}, files)[0]
+    assert not gate(9, {"a full.insv": dict(early, lfmd_from_note={"full": 12.0, "master": 5.0, "window": [5, 25]})}, files)[0], \
+        "his note alone is never evidence: no heard Learnings words, the share rule judges (review of PR 948)"
+    assert not gate(9, {"a full.insv": dict(early, lfmd_from_note={"full": 12.0, "master": 5.0, "window": [5, 25], "heard": "and the dog"})}, files)[0]
+    assert not gate(9, {"a full.insv": dict(early, lfmd_from_note={"full": 12.0, "master": 5.0, "window": [6, 26]})}, files)[0]
+    assert not gate(9, {"a full.insv": dict(early, lfmd_from_note={"full": "x", "window": ["a", 25]})}, files)[0], "an unreadable record is no evidence"
+    # no Summary clip: the card says where the engine looked and what short clips are there (2090, 5 Oct)
+    day = {"e": {"episode": 9, "role": "episode", "status": "rendered", "date": "2026-03-01", "path": "/raw/1 March 26 - 9 March 26/e.insv", "duration": 500.0},
+           "s": {"date": "2026-03-02", "hms": "071000", "name": "VID_s.insv", "status": "new", "size": 4.2e8, "path": "/raw/1 March 26 - 9 March 26/s.insv"},
+           "l": {"date": "2026-03-02", "name": "VID_l.insv", "status": "rendered", "role": "episode", "episode": 10, "duration": 600.0, "path": "/raw/1 March 26 - 9 March 26/l.insv"}}
+    line = summary_search(day["e"], day)
+    assert line.startswith("NO SUMMARY FOUND: looked in 1 March 26 - 9 March 26 for 1 Mar and 2 Mar;") and "VID_s.insv (2 Mar, not pulled yet, 0.4 GB, new)" in line and "VID_l" not in line, line
+    alone = {"e": day["e"]}
+    assert "nothing recorded on 2 Mar is on the ledger yet" in summary_search(day["e"], alone) and "no other short clip" in summary_search(day["e"], alone)
+    assert any(n == "teaser" and d.startswith("NO SUMMARY FOUND") for n, _, _, d in checks(9, {"a full.insv": led["a full.insv"]}, files))
 
 
 if __name__ == "__main__":

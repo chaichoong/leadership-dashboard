@@ -127,7 +127,11 @@ def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None, p
     proof_block = "\n".join(proof_lines) if proof_lines else ""
     rating_block = ("YouTube content rating: approving this card also tells YouTube the episode contains none of: " + ", ".join(RATING_CATEGORIES).lower()
                     + ". That answer cannot be changed afterwards, so send the card back if any of these is in the episode.")     # the output gate's checks (qa.py, 10 Sep 2026): proof, not a promise
+    # The output gate's own words when it found no Learnings line: what it searched, and where the talk ends (qa.py
+    # no_learnings_check, review of PR 948). One line at the top, so the card goes to Kevin as normal and says so.
+    looked = next((p[len("- Learnings section: "):] for p in (proof_lines or []) if p.startswith("- Learnings section: NO LEARNINGS LINE FOUND")), "")
     no_lfmd = [] if f.get("Reframed Video URL") else [
+        ("CHECK BEFORE YOU APPROVE: %s. If you said it, send the card back with the time it starts." % looked.rstrip(".")) if looked else
         "CHECK BEFORE YOU APPROVE: this episode has NO Learnings from my diary clip (no diary section was found in the transcript). If you said it, send the card back."]
     out = "\n\n".join([ask] + no_lfmd + ["Watch before you approve:\n" + "\n".join(watch_lines)] + ([pans_block] if pans_block else []) + ["Where it goes if you approve:\n" + "\n".join(where),
                        "The copy, as written (where it shows [ADD YOUTUBE LINK], the engine writes the YouTube link there once the video is up; "
@@ -253,6 +257,10 @@ def output_gate(day, ledger, state, recs=None):
             ok = False; failures = list(failures) + [("copy missing", "%s has its clip but no copy yet; the nightly copy step writes it" % ctype)]
     if not ok:
         waiting = qa.is_wait(failures)
+        if waiting and any(n == getattr(qa, "RESEARCH_CHECK", None) for n, _ in failures):
+            # the one automatic Learnings re-search: the night's rebuild runs it, then this gate lets the card go up
+            import render
+            if render.queue_research(day): print("episode %d: no Learnings clip; one automatic re-search queued for tonight's Learnings rebuild" % day)
         entry = state.setdefault(str(day), {})
         was = entry.get("qa_blocked") or {}
         entry.pop("qa_blocked", None); entry.pop("qa_waiting", None)
@@ -271,7 +279,7 @@ def output_gate(day, ledger, state, recs=None):
         save_state(state)
         # A wait is not an alarm: the hourly publisher runs this step again and the card goes up within the hour
         # (15 Sep 2026: 2057 and 2058 rendered fine and waited a whole day for the next night's run).
-        print("episode %d: card %s: %s" % (day, "waiting for the files to be readable" if waiting else "BLOCKED by the output gate",
+        print("episode %d: card %s: %s" % (day, "waiting (files not readable yet, or tonight's Learnings re-search)" if waiting else "BLOCKED by the output gate",
                                            "; ".join("%s (%s)" % f for f in failures)))
         return None
     state.get(str(day), {}).pop("qa_blocked", None); state.get(str(day), {}).pop("qa_waiting", None)
@@ -566,7 +574,7 @@ def report():
     blocked = {d: e["qa_blocked"] for d, e in state.items() if isinstance(e, dict) and e.get("qa_blocked")}
     holding = {d: e["qa_waiting"] for d, e in state.items() if isinstance(e, dict) and e.get("qa_waiting")}
     if holding:
-        print("content output gate: %d episode%s waiting for the files to be readable (not a fault; the next hourly run raises the card): %s" % (
+        print("content output gate: %d episode%s waiting for the files to be readable or for tonight's Learnings re-search (not a fault; the next hourly run raises the card): %s" % (
             len(holding), "" if len(holding) == 1 else "s", ", ".join(sorted(holding))))
     print("content approvals: %d card%s waiting for Kevin%s; %d approved and waiting for the publishing step" % (
         len(waiting), "" if len(waiting) == 1 else "s", (" (episodes " + ", ".join(sorted(waiting)) + ")") if waiting else "", len(approved)))
