@@ -339,3 +339,74 @@ out["forty"] = mail(w)                        # 40 days ago: the register-now ma
     expect(r.forty[1]).toMatch(/Haverhill: no referrer near it emailed in 30 days/);
   });
 });
+
+// Review of PR 951 (16 Nov 2026), F9: move_hold held rooms it should not and missed moves written other ways.
+// A false hold makes the count too LOW (a free room goes untold); a miss makes it too HIGH, the direction Kevin
+// corrected four times. Back-tested read-only on 16 Nov 2026: the two rooms held today are the same on the old
+// and new code, and none of the 159 move, relocate, transfer or swap tasks on the board (any status, each
+// treated as open) holds a different in-scope room.
+describe('a room kept for a move: what holds it and what does not (review of PR 951, F9)', () => {
+  const held = (tasks) => py(`
+w = world()
+tasks = ${JSON.stringify(tasks)}
+w["moves"] = [mtask("recMreview%07d" % i, t[0], desc=t[1] if len(t) > 1 else "") for i, t in enumerate(tasks)]
+names = {u["id"]: u["fields"][U["name"]] for u in w["units"]}
+props = {"recPLARK": "7 Larkspur Row", "recPQUIL": "12 Quillon Close", "recPFENN": "3 Fennick Way"}
+out["held"] = sorted(names[u["id"]] for u in w["units"]
+                     if u["fields"][U["property"]][0] in props
+                     and tl.move_hold(w, u["id"], names[u["id"]], props[u["fields"][U["property"]][0]]))
+`).held;
+
+  it('never holds the room a tenant moved OUT of when the description names it by record id', () => {
+    expect(held([['Move Sam Fixture from 3 Fennick Way Unit 8 to 12 Quillon Close Unit 4',
+      'Old unit recU8fixture00008. New unit recU4fixture00004.']])).toEqual(['Unit 4 – 12 Quillon Close']);
+    expect(held([['Swap rooms: move Sam Fixture', 'Moved out of recU8fixture00008 into recU6fixture00006.']]))
+      .toEqual(['Unit 6 – 3 Fennick Way']);
+    // Control: a record id with nothing saying it is the room being left still holds it, as on the live board.
+    expect(held([['Swap rooms: move Eli Fixture', 'New unit recU7fixture00007 for Eli.']])).toEqual(['Unit 7 – 3 Fennick Way']);
+  });
+
+  it('never holds a room for furniture or money; control: the tenant moving there holds it', () => {
+    expect(held([['MAINTENANCE: move the spare wardrobe to Unit 4 - 12 Quillon Close']])).toEqual([]);
+    expect(held([['Transfer £500 to the account for 12 Quillon Close Unit 4']])).toEqual([]);
+    expect(held([['Move the tenant from Unit 8 to Unit 4 - 12 Quillon Close']])).toEqual(['Unit 4 – 12 Quillon Close']);
+  });
+
+  it('holds a move written with "at", the street\'s name alone, or "transfers" in a room swap', () => {
+    expect(held([['Move Dana Fixture from Unit 1 to Unit 4 at 12 Quillon Close']])).toEqual(['Unit 4 – 12 Quillon Close']);
+    expect(held([['Dana Fixture moving to Quillon Unit 4 next week']])).toEqual(['Unit 4 – 12 Quillon Close']);
+    expect(held([['Room swap: Dana Fixture transfers from 7 Larkspur Row Unit 1 to 12 Quillon Close Unit 4']]))
+      .toEqual(['Unit 4 – 12 Quillon Close']);
+    // Controls: Unit 20 is not Unit 2, and another house's Unit 4 is not this one.
+    expect(held([['Move Kit Fixture to Larkspur Unit 20']])).toEqual([]);
+    expect(held([['Move Kit Fixture to Fennick Unit 4']])).toEqual([]);
+  });
+
+  it('the read fetches every task name the matcher accepts', () => {
+    const r = py(`
+seen = {}
+class Stop(Exception):
+    pass
+def fake_fetch(table, params=None):
+    seen[len(seen)] = dict(params or {})
+    return [rec("recFILL%010d" % i, {}) for i in range(200)]
+tl.fetch_all = fake_fetch
+def stop(*a, **k):
+    raise Stop()
+tl.sent_threads = stop
+try:
+    tl.load(DAY)
+except Stop:
+    pass
+formula = next(p["filterByFormula"] for p in seen.values() if "mov" in str(p.get("filterByFormula", "")))
+import re
+words = re.findall(r"FIND\\('([a-z]+)', LOWER\\(\\{Task Name\\}\\)\\)", formula)
+names = ["Move X to 12 Quillon Close Unit 4", "Relocate X to 12 Quillon Close Unit 4",
+         "Room swap: X transfers to 12 Quillon Close Unit 4", "Swap rooms with Y", "X moving into Quillon Unit 4"]
+out["accepted"] = [n for n in names if tl.is_move_task(n)]
+out["missed"] = [n for n in out["accepted"] if not any(w in n.lower() for w in words)]
+`);
+    expect(r.accepted.length).toBe(5);
+    expect(r.missed).toEqual([]);
+  });
+});

@@ -160,8 +160,27 @@ FREE_NOW, BEING_READIED = ("Void", "Rent Ready"), ("Not Ready",)
 # out, or a room kept for one of our tenants moving house (14 Wentworth Terrace Unit 3 read Void for
 # weeks while held for a move; Kevin left it out on 11 Nov). With no room ready, a town is told
 # nothing about numbers: it gets the "register now" mail-out every 28 days, as on a day with none.
-MOVE_WORD_RE = re.compile(r"\bmov(?:e|es|ed|ing)\b", re.I)
-MOVE_INTO_RE = re.compile(r"\bmov(?:e|es|ed|ing)\b.*?\b(?:to|into)\s+(.+?)(?=[,;()]|\s+and\s|$)", re.I)
+# A move is written many ways (review of PR 951, F9): "move", "relocate", "transfers to", "room swap". A bare
+# "transfer" counts only beside a room word, because most transfers on the board are money.
+MOVE_VERB = r"\b(?:mov(?:e|es|ed|ing)|relocat(?:e|es|ed|ing)|transfer(?:s|red|ring)?)\b"
+MOVE_WORD_RE = re.compile(MOVE_VERB + r"|\broom[ \t-]+swap|\bswap(?:s|ped|ping)?[ \t]+rooms?\b", re.I)
+MOVE_INTO_RE = re.compile(MOVE_VERB + r"(.*?)\b(?:to|into)\s+(.+?)(?=[,;()]|\s+and\s|$)", re.I)
+TRANSFER_ONLY_RE = re.compile(r"^\W*transfer", re.I)
+ROOM_WORD_RE = re.compile(r"\b(?:unit|room|flat|tenant|house|bedroom)s?\b", re.I)
+# Moving a THING, not a tenant: "move the spare wardrobe to Unit 3". A person is a name, or "the tenant".
+OBJECT_MOVE_RE = re.compile(r"^\s*(?:£|(?:the|a|an|some|all|his|her|their|our|my|its)\s+"
+                            r"(?!(?:tenants?|residents?|lodgers?|occupants?|family|partner|son|daughter|children|kids)\b)[a-z])")
+# Words that only join a place name, so "Unit 3 at 14 Wentworth Terrace" reads as "Unit 3 14 Wentworth Terrace".
+PLACE_FILLER_RE = re.compile(r"\b(?:at|in|of|the|on)\b")
+# A street type and the like: never the word that tells one house from another.
+PLACE_GENERIC = {"road", "street", "avenue", "close", "lane", "drive", "way", "court", "place", "terrace",
+                 "crescent", "gardens", "grove", "park", "house", "building", "row", "mews", "walk", "square"}
+# A unit's record id in a move task's text is its DESTINATION unless the words before it, in its own sentence,
+# say it is the room being left ("from", "out of", "frees", "old unit"): once a move is done and the task stays
+# open for paperwork, the room moved out of was held too (review of PR 951, F9).
+ORIGIN_WORDS_RE = re.compile(r"\b(?:from|out of|leav(?:e|es|ing)|vacat(?:e|es|ed|ing)|frees?|freeing|moved out|"
+                             r"(?:old|current|previous|former) (?:unit|room|flat))\b", re.I)
+DEST_WORDS_RE = re.compile(r"\b(?:to|into|moving in|(?:new|next) (?:unit|room|flat)|destination)\b", re.I)
 REC_ID_RE = re.compile(r"\brec[A-Za-z0-9]{14}\b")
 ROOM_LEVERS = {"Room release", "New room let"}
 LIVE_LEVER_STATUSES = {"Adopted", "In progress"}
@@ -481,8 +500,12 @@ def load(day):
         "tasks": fetch_all(T_TASKS, {"filterByFormula": "LEFT({Task Name}, 7)='TENANT '",
                                      "fields[]": list(TK.values())}),
         # Open tasks that may move a tenant into a unit ("Move X from A Unit 2 to B Unit 3"): a room kept
-        # for a move is not free to tell anyone about (move_hold). Zero is a normal day, so no floor.
-        "moves": fetch_all(T_TASKS, {"filterByFormula": "AND(FIND('mov', LOWER({Task Name})), "
+        # for a move is not free to tell anyone about (move_hold). Zero is a normal day, so no floor. Every word
+        # MOVE_WORD_RE reads is fetched here, or a "Room swap: X transfers to ..." task is never seen.
+        "moves": fetch_all(T_TASKS, {"filterByFormula": "AND(OR(FIND('mov', LOWER({Task Name})), "
+                                                        "FIND('relocat', LOWER({Task Name})), "
+                                                        "FIND('transfer', LOWER({Task Name})), "
+                                                        "FIND('swap', LOWER({Task Name}))), "
                                                         "{Status}!='Completed', {Status}!='Cancelled')",
                                      "fields[]": [TK["name"], TK["status"], TK["desc"]]}),
     }
@@ -572,26 +595,64 @@ def live_tenancy(data, uid, day):
     return ""
 
 
+def _place(s):
+    """_plain, with the joining words taken out: 'Unit 3 at 14 Wentworth Terrace' -> 'unit 3 14 wentworth terrace'."""
+    return " ".join(PLACE_FILLER_RE.sub(" ", _plain(s)).split())
+
+
+def _id_is_origin(text, start):
+    """True when the words before a record id, in its own sentence, last say it is the room being left."""
+    seg = text[max(text.rfind("\n", 0, start), text.rfind(". ", 0, start)) + 1:start]
+    last_o = max((m.end() for m in ORIGIN_WORDS_RE.finditer(seg)), default=-1)
+    last_d = max((m.end() for m in DEST_WORDS_RE.finditer(seg)), default=-1)
+    return last_o > last_d
+
+
+def is_move_task(name):
+    """True when a task name speaks of a tenant changing room: a move word, a bare 'transfer' only beside a
+    room word, and never only things being moved ('move the spare wardrobe to Unit 3')."""
+    if not MOVE_WORD_RE.search(name):
+        return False
+    if TRANSFER_ONLY_RE.match(MOVE_WORD_RE.search(name).group(0)) and not ROOM_WORD_RE.search(name):
+        return False
+    phrases = MOVE_INTO_RE.findall(name)
+    return not phrases or not all(OBJECT_MOVE_RE.match(mover) for mover, _ in phrases)
+
+
 def move_hold(data, uid, unit_name, prop):
     """The name of an open task moving a tenant INTO this unit, or ''. The unit counts as named when its
-    record id is in the task's name or description, or when the task name says the move goes 'to' or
-    'into' it ('Move X from 5 Dalham Place Unit 2 to 14 Wentworth Terrace Unit 3'). Only the place after
-    'to'/'into' is read from the name, so the unit a tenant moves OUT of, or a unit a question merely
-    mentions, is never held. A move is one of our tenants changing room, never a room for someone new."""
+    record id is in the task's name or description (unless the words before it say it is the room being
+    left), or when the task name says the move goes 'to' or 'into' it ('Move X from 5 Dalham Place Unit 2
+    to 14 Wentworth Terrace Unit 3', 'moving to Wentworth Unit 3', 'transfers to Unit 3 at 14 Wentworth
+    Terrace'). Only the place after 'to'/'into' is read from the name, so the unit a tenant moves OUT of,
+    or a unit a question merely mentions, is never held. A move is one of our tenants changing room, never
+    a room for someone new, and never furniture. A question asking whether a tenant is moving INTO a room
+    still holds it: the one such task on 16 Nov 2026 was a true hold."""
     m = re.match(r"^\s*(unit|room|flat)\s+(\w+)\s*[–—\-,:]\s*(.+)$", str(unit_name or ""), re.I)
-    keys = set()
+    keys, short = set(), None
     if m:
-        kind, num, rest = m.group(1).lower(), m.group(2).lower(), _plain(m.group(3))
-        keys = {f"{rest} {kind} {num}", f"{kind} {num} {rest}"} | ({f"{_plain(prop)} {kind} {num}"} if prop else set())
+        kind, num, rest = m.group(1).lower(), m.group(2).lower(), _place(m.group(3))
+        keys = {f"{rest} {kind} {num}", f"{kind} {num} {rest}"} | ({f"{_place(prop)} {kind} {num}"} if prop else set())
+        # The house written by its telling word alone ('Wentworth Unit 3'): every telling word of the house name
+        # must be there, beside the unit. Two houses on one street both read held: the safe direction.
+        telling = [w for w in rest.split() if not w.isdigit() and w not in PLACE_GENERIC]
+        short = (f"{kind} {num}", telling) if telling else None
     for t in data.get("moves") or []:
         f = t["fields"]
         name = str(f.get(TK["name"]) or "")
-        if not is_open(t) or not MOVE_WORD_RE.search(name):
+        if not is_open(t) or not is_move_task(name):
             continue
-        if uid in REC_ID_RE.findall(name + "\n" + str(f.get(TK["desc"]) or "")):
+        text = name + "\n" + str(f.get(TK["desc"]) or "")
+        if any(hit.group(0) == uid and not _id_is_origin(text, hit.start()) for hit in REC_ID_RE.finditer(text)):
             return name
-        for dest in MOVE_INTO_RE.findall(name):
-            if any(re.search(rf"\b{re.escape(k)}\b", _plain(dest)) for k in keys):
+        for mover, dest in MOVE_INTO_RE.findall(name):
+            if OBJECT_MOVE_RE.match(mover):
+                continue
+            place = _place(dest)
+            if any(re.search(rf"\b{re.escape(k)}\b", place) for k in keys):
+                return name
+            if short and re.search(rf"\b{re.escape(short[0])}\b", place) and all(
+                    re.search(rf"\b{re.escape(w)}\b", place) for w in short[1]):
                 return name
     return ""
 
