@@ -1563,9 +1563,36 @@ def ledger_rest_prints():
     return prints
 
 
-# The only ledger step that may follow a rest's own event and still leave that rest the task's last
-# look: `intent`, which a run writes just before it carries the woken task out (cmd_intent).
-REST_LOOK_FOLLOWERS = ("intent",)
+# THE ONE LEDGER STEP THAT ANSWERS A WAKE (16 Nov 2026, review of PR 938, finding 6). A wake used to
+# be dropped by ANY step written after the rest (only `intent` was let through), so a woken task that
+# met a sign-in wall and had it cleared (`parked`, then `unblocked`) came back with no wokeByChange, and
+# a keep-open buried the reply it had woken for. A wall, its clear, a filed certificate or a run's
+# intent answer nothing: the change is still unanswered. Only a Level A carry-out at submit (`handled`)
+# is an answer, and a new rest (`done`, `status`) starts a fresh entry of its own.
+# A WAKE IS ANSWERED ONCE (review of PR 950, finding 3). A card raised after the rest answers it too:
+# the run did what a wake asks, raised the change as its own card, and the card writes no ledger step,
+# so its SUBMITTED stamp in Notes is the record (rest_answered_by_card). Without this, a change that was
+# carded, approved and carried out still asked the closing run for --changed. The cost: a reply that
+# lands after that card and before its close is not a wake (the card is with Kevin by then).
+REST_WAKE_ANSWERS = ("handled",)
+REST_CARD_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4}) (?P<time>\d{2}:\d{2}) — agent-dispatch\] SUBMITTED\b", re.M)
+
+
+def rest_answered_by_card(notes, rest_ts):
+    """True when a SUBMITTED stamp in Notes is later than the rest began. The stamp has minute
+    precision, so a card stamped in the rest's own minute does not count (the safe direction)."""
+    try:
+        began = datetime.fromisoformat(str(rest_ts or "").replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    for mm in REST_CARD_STAMP_RE.finditer(str(notes or "")):
+        try:
+            stamped = datetime.strptime(f"{mm.group('day')} {mm.group('time')}", "%d %b %Y %H:%M").replace(tzinfo=LONDON)
+        except ValueError:
+            continue
+        if stamped > began:
+            return True
+    return False
 
 
 def ledger_rest_events():
@@ -1708,11 +1735,12 @@ def rest_added_text(t, fingerprint, lengths):
 
 def rest_wake(t, rest):
     """What woke a task whose last rest ended because the task changed, or None. `rest` is the task's
-    ledger_rest_events entry. None when no fingerprinted rest was begun, when the task has taken a
-    step of its own since (a wall, a clear: that step, not the change, is what it is waiting on; only
-    a run's `intent` may follow), when nothing changed (the rest ended on its date), or when the rest
-    carried no fingerprint at all (every rest begun before 15 Nov 2026: nothing can be said changed)."""
-    if not rest or not rest.get("fp") or any(a not in REST_LOOK_FOLLOWERS for a in rest.get("after") or []):
+    ledger_rest_events entry. None when no fingerprinted rest was begun, when a step since has answered
+    the change (REST_WAKE_ANSWERS, or a card raised since: a wall and its clear do not), when nothing changed (the rest ended on
+    its date), or when the rest carried no fingerprint at all (every rest begun before 15 Nov 2026:
+    nothing can be said changed)."""
+    if not rest or not rest.get("fp") or any(a in REST_WAKE_ANSWERS for a in rest.get("after") or []) \
+            or rest_answered_by_card(t.get("notes"), rest.get("ts")):
         return None
     changed = rest_print_changes(t, rest["fp"])
     if not changed or changed == ["no fingerprint"]:
@@ -1799,7 +1827,7 @@ def run_window_problem(task_id, live_view, snapshot):
         return ""
     return (f"the task changed while you were working ({', '.join(raced)} changed since the queue you were "
             "handed was read): read it again, and raise what changed as its own card (or carry it out if "
-            "it is approved work) before you rest it")
+            "it is approved work) before you rest or close it")
 
 
 def rest_due_cap(until_day, due_raw, start_day):
@@ -2868,13 +2896,20 @@ def status_changed_problem(task_rec):
     fp = ledger_rest_prints().get(tid, "")
     if not fp:
         return ""
-    changed = rest_print_changes(snap if snap else live, fp)
+    # ONLY THE FIELDS A RUN NEVER WRITES (16 Nov 2026, review of PR 938, finding 8). Notes and Due Date
+    # are written by runs themselves (annotate, `due`), so a note one run left ("Gmail search failed this
+    # run") was "something new" to every later run and refused every status filing on that task for good.
+    # What reaches a task from outside lands in the fields RUN_WINDOW_LABELS names: a reply or a fold in
+    # the Description (a twin closed onto the task writes its dated UPDATE line there too), a verdict, a
+    # holder. Notes and Due Date still end the rest (the fingerprint), so the next run is handed the task
+    # and shown what was added; a NEXT CHECK can never pass the due date (next_look_problem).
+    changed = [label for label in rest_print_changes(snap if snap else live, fp) if label in RUN_WINDOW_LABELS
+               or label == "no fingerprint"]
     if not changed:
         return ""
     return (f"the task has changed since it last rested ({', '.join(changed)} changed), so something new "
             "has reached it: read it, and raise what changed as a card"
-            + ("" if snap else f" (no queue snapshot was found for it: {snap_why}; so the live task was compared, "
-               "and a note you wrote in this run counts as a change)"))
+            + ("" if snap else f" (no queue snapshot was found for it: {snap_why}; so the live task was compared)"))
 
 
 def status_history_terms(body, task_rec):
@@ -6067,6 +6102,519 @@ def sibling_problem(lead, sib, book, coverage_text=""):
     return ""
 
 
+# ─── RULES THE ROBOTS KEPT BREAKING ARE REFUSALS AT SUBMIT (Kevin, "Do it now", 16 Nov 2026) ───
+#
+# The estate review of 13 Nov 2026 sorted every lesson in the agents' files: 21 of 32 testable lessons
+# had been broken again after they were written down. A rule only code can hold is a refusal in code.
+# Each check below was back-tested read-only on the 1,862 stored Agent Outputs (16 Nov 2026) before it
+# was built, and narrowed until it refused no real, correct card in that set: a wrongly refused card
+# stops real work. Every refusal says what it found and what to write instead. Read with the call sites
+# in cmd_submit, after the bought-twice gate.
+
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
+CHECK_NEG_RE = re.compile(r"\b(?:not|never|no|nothing|none|won't|isn't|without|instead of|rather than|already)\b", re.I)
+
+
+def agent_own_text(output):
+    """The output as the agent wrote it: the tier-1 banner submit (or the agent) put on top taken off."""
+    body = str(output or "").strip()
+    while body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
+    return body
+
+
+def _approve_text(output, plain_approve):
+    """The words that say what Approve sets going: the closing line and the --plain-approve line."""
+    return carry_out_tail(output) + "\n" + str(plain_approve or "")
+
+
+def _sentences(text):
+    return [s.strip() for s in SENTENCE_SPLIT_RE.split(str(text or "")) if s.strip()]
+
+
+# 1. THE PAID CHECK (inbound-comms-response lesson of 3 Sep 2026, broken twice in the review and again on
+# 29 and 31 Oct). "Before any invoice or bill reaches Kevin, search Transactions for the payee and the
+# amount. If it is paid, close the task and name the transaction." A card that puts a bill on his Friday
+# list (a MARK FOR PAYMENT block, or a PAY: task's own card) is refused when the bank already shows an
+# outgoing payment of that amount to that payee since PAID_CHECK_DAYS_BEFORE days before the task was
+# made, and otherwise carries the agent's own `PAID CHECK:` line, because the bank is not the only
+# place a bill gets paid (a letting agent takes it from the rent). Back-test: 17 MARK FOR PAYMENT cards
+# and 3 PAY: tasks; the bank match fired on none of them at the moment they were submitted (three
+# matched later, each landing the day after Kevin approved and paid), and for 10 of the 16 cards with
+# a readable amount it found the real payment after approval, so it reads the right thing. Any window
+# from 7 to 60 days gave the same answer. A PAY: email (a question to the supplier) is not a card that
+# lists a bill and is not checked: its PAID CHECK line would go out in the email.
+PAYMENT_CARD_RE = re.compile(r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*MARK FOR PAYMENT\b", re.I | re.M)  # payment-run.py
+PAID_CHECK_RE = re.compile(r"^[ \t*_\-•]*PAID CHECK[ \t*_]*:[ \t*_]*(?P<body>\S.{8,})$", re.I | re.M)
+PAY_MONEY_RE = re.compile(r"£\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?GBP\b", re.I)
+PAYEE_STOP = {"ltd", "limited", "the", "and", "services", "service", "solutions", "group", "company", "plc",
+              "llp", "account", "name", "council", "properties", "property", "invoice", "payment", "pay", "for",
+              "from", "with", "inbound", "follow", "forwards", "labour", "gbp", "due", "trading", "direct",
+              "debit", "faster", "bill", "transfer", "card", "fees", "fee", "online", "bank", "giro", "credit"}
+PAID_CHECK_DAYS_BEFORE = 14
+
+
+def _card_line(text, label):
+    """The value after `LABEL:` on its own line, markdown emphasis stripped (payment-run.py card_field)."""
+    match = re.search(r"^[ \t*_\-•]*%s[ \t*_]*:[ \t*_]*(.+?)[ \t*_]*$" % re.escape(label), text or "", re.I | re.M)
+    return match.group(1).strip() if match else ""
+
+
+def payee_words(text):
+    return {w for w in re.findall(r"[a-z][a-z'&]{3,}", str(text or "").lower()) if w not in PAYEE_STOP}
+
+
+def payment_card(name, output, task_type):
+    """{"amount": float|None, "payee": text} for a card that lists a bill to pay, or None."""
+    if re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I):
+        return None
+    head = PAYMENT_CARD_RE.search(output or "")
+    if head:
+        card, heading = output[head.start():], output[head.end():].split("\n", 1)[0]
+        money = PAY_MONEY_RE.search(_card_line(card, "AMOUNT")) or PAY_MONEY_RE.search(heading)
+        payee = _card_line(card, "PAYEE") or heading
+    elif (str(name or "").upper().startswith("PAY:") and task_type != "Correspondence"
+          and not no_action_declared(carry_out_tail(output))):
+        money, payee = PAY_MONEY_RE.search(name), name
+    else:
+        return None
+    amount = float((money.group(1) or money.group(2)).replace(",", "")) if money else None
+    return {"amount": amount or None, "payee": payee}
+
+
+def fetch_bank_lines(since_iso):
+    """Every bank line dated after since_iso: id, date, signed amount, bank text, tenancy links."""
+    rows = query_records(TRANSACTIONS_TABLE, formula="IS_AFTER({**Date}, '" + since_iso + "')",
+                         fields=[TX_FIELDS["date"], TX_FIELDS["amount"], TX_FIELDS["name"], TX_TENANCY_FIELD])
+    return [{"id": r.get("id"), "date": str((r.get("fields") or {}).get(TX_FIELDS["date"]) or "")[:10],
+             "amount": float((r.get("fields") or {}).get(TX_FIELDS["amount"]) or 0),
+             "name": str((r.get("fields") or {}).get(TX_FIELDS["name"]) or ""),
+             "tenancyIds": links((r.get("fields") or {}).get(TX_TENANCY_FIELD))} for r in rows]
+
+
+PAID_NOT_THIS_COUNT_RE = re.compile(r"not this bill:\s*(\d+)\s+payments?\s+from\s+(\d{4}-\d{2}-\d{2})\s+to\s+"
+                                    r"(\d{4}-\d{2}-\d{2})", re.I)
+
+
+def paid_lines_cover(lines, hits):
+    """True when the agent's "not this bill" line names every matching payment: each id, or how many there
+    are and a date range that holds them all."""
+    text = " ".join(lines)
+    if "not this bill" not in text.lower():
+        return False
+    if all(h["id"] in set(re.findall(r"rec[A-Za-z0-9]{14}", text)) for h in hits):
+        return True
+    for count, lo, hi in PAID_NOT_THIS_COUNT_RE.findall(text):
+        if int(count) == len(hits) and all(lo <= h["date"] <= hi for h in hits):
+            return True
+    return False
+
+
+def paid_check_problem(task_rec, output, task_type):
+    """Why a bill card must not reach Kevin as it stands, or ''."""
+    tf = (task_rec or {}).get("fields", {}) or {}
+    card = payment_card(tf.get(AF["name"], ""), output, task_type)
+    if not card:
+        return ""
+    lines = PAID_CHECK_RE.findall(output or "")
+    add_line = ("add one line to the card: PAID CHECK: none found (searched <where you looked: the bank, "
+                "Gmail, the other tasks on this payee> from <date> to <date>)")
+    if not card["amount"]:
+        if lines:
+            print(f"NOT CHECKED: the bill card on {task_rec.get('id')} has no amount code can read, so code did "
+                  "not search the bank; the agent's PAID CHECK line is all there is.", file=sys.stderr)
+            return ""
+        return ("it lists a bill to pay and code cannot read its amount, so the bank was NOT CHECKED by code. "
+                "Search Transactions and Gmail for the payee yourself; if it is paid, close the task naming the "
+                f"payment; if not, {add_line}")
+    try:
+        made = datetime.fromisoformat(str(task_rec.get("createdTime") or "").replace("Z", "+00:00")).date()
+    except ValueError:
+        made = datetime.now(LONDON).date()
+    since = (min(made, datetime.now(LONDON).date()) - timedelta(days=PAID_CHECK_DAYS_BEFORE)).isoformat()
+    try:
+        bank = fetch_bank_lines(since)
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
+        return (f"the bank lines could not be read to check whether £{card['amount']:,.2f} is already paid "
+                f"({str(exc)[:120]}): NOT CHECKED. Try again; a bill is never listed on a read that failed")
+    if not bank:
+        return (f"the bank read returned no lines at all since {since}, so whether £{card['amount']:,.2f} is "
+                "already paid is NOT CHECKED (the feed or the read is broken). Try again; if it persists, record "
+                "a TOOL wall")
+    words = payee_words(card["payee"])
+    same = lambda b: abs(abs(b["amount"]) - card["amount"]) < 0.005 and bool(words & payee_words(b["name"]))  # noqa: E731
+    hits = [b for b in bank if b["amount"] < 0 and same(b)]
+    # Money that came back (a bounced or refunded payment) cancels the payment it returns, so listing the
+    # bill again never needs a false "not this bill" line (review of PR 950, finding 12).
+    back = sorted((b for b in bank if b["amount"] > 0 and same(b)), key=lambda b: b["date"])
+    for h in sorted(hits, key=lambda b: b["date"]):
+        r = next((b for b in back if b["date"] >= h["date"]), None)
+        if r:
+            back.remove(r)
+            hits.remove(h)
+    if hits:
+        # EVERY MATCH IS SHOWN, AND ONE LINE MAY COVER THEM ALL (review of PR 950, finding 2). The message
+        # once showed five and demanded every one be named, so a sixth instalment looped a robot for ever.
+        if paid_lines_cover(lines, hits):
+            return ""
+        hits.sort(key=lambda b: b["date"])
+        first, last = hits[0]["date"], hits[-1]["date"]
+        shown = "; ".join(f"{h['date']} £{abs(h['amount']):,.2f} \"{h['name'][:50]}\" ({h['id']})" for h in hits)
+        return (f"the bank already shows {len(hits)} payment(s) that match this bill (£{card['amount']:,.2f}, payee "
+                f"words {', '.join(sorted(words)[:4])}): {shown}. If it is this bill, it is paid: take the MARK FOR "
+                "PAYMENT block off and file the task as information only, naming the transaction, with the closing line "
+                "**Carrying this out will involve:** Nothing. Information only. If they are other payments, add one "
+                f"line to the card: PAID CHECK: not this bill: {len(hits)} payments from {first} to {last} (<why they "
+                "are other payments>), or name each id above after \"PAID CHECK: not this bill:\"")
+    if not lines:
+        return (f"it lists a bill to pay (£{card['amount']:,.2f}) with no PAID CHECK line. Code searched the bank "
+                f"from {since} and found no payment of that amount to that payee; you check the rest (Gmail, the "
+                f"letting agent's statement, other tasks on this payee), then {add_line}")
+    return ""
+
+
+# 2. NEVER RENEW, BUY FRESH THROUGH TOPCASHBACK (inbound-comms-response 30 Sep 2026, property-
+# administration 25 Sep 2026; broken three times on Property Administration cards). On a task in the
+# insurance lane (insurance, premium finance or credit in its name), a closing line or approve line that
+# renews the policy, accepts or signs the renewal, or signs its finance agreement is refused unless the
+# card carries the TopCashback comparison (`TOPCASHBACK QUOTE: <insurer> £<net>` lines) or the reason
+# there is none (`NO TOPCASHBACK QUOTE: <why>`). Back-test: 84 insurance-lane outputs, one refused, a
+# renewal Kevin approved whose card already said in words why no TopCashback quote could be reached;
+# with the line it passes. Asking an insurer to CONFIRM a renewal date is not accepting it.
+INSURANCE_LANE_RE = re.compile(r"insurance|premium\s+(?:finance|credit)|close\s+brothers", re.I)
+RENEWAL_ACCEPT_RE = re.compile(
+    r"\brenew(?:s|ing)?\s+(?:the|this|your|our|its|their)\s+(?:\w+\s+){0,2}(?:policy|policies|cover|insurance)\b"
+    r"|\b(?:accept|accepts|accepting|take|takes|taking|proceed with|proceeds with|go ahead with|goes ahead with"
+    r"|sign|signs|signing|agree to|agrees to|keep|keeps)\b[^.\n;]{0,40}\brenewal\b"
+    r"|\b(?:telling|tells|asking|asks|instructing|instructs)\s+(?!not\b)\w+(?:\s+(?!not\b)\w+)?\s+to\s+renew\b", re.I)
+FINANCE_SIGN_RE = re.compile(r"\bsigns?\b[^.\n;]{0,50}\b(?:credit|finance)\s+agreement\b", re.I)
+# Read anywhere in the output, the closing line included: on an email card any other line would be
+# sent to the insurer, and the closing line never is (the send path takes it off).
+TOPCASHBACK_LINE_RE = re.compile(r"\b(?:TOPCASHBACK QUOTE[ \t*_]*:[^\n]*£\s?\d|NO TOPCASHBACK QUOTE[ \t*_]*:"
+                                 r"[ \t*_]*\S[^\n]{9,})", re.I)
+
+
+def renewal_problem(name, output, plain_approve):
+    if not INSURANCE_LANE_RE.search(str(name or "")) or TOPCASHBACK_LINE_RE.search(output or ""):
+        return ""
+    for s in _sentences(_approve_text(output, plain_approve)):
+        hit = RENEWAL_ACCEPT_RE.search(s) or (FINANCE_SIGN_RE.search(s) if re.search(r"renew", s, re.I) else None)
+        if hit and not CHECK_NEG_RE.search(s[:hit.end()]):
+            return (f"what Approve sets going renews an insurance policy or signs its renewal (\"{s[:160]}\"). "
+                    "Kevin's rule (30 Sep 2026): never renew an existing policy; buy a new one from a fresh quote "
+                    "through TopCashback. Get the TopCashback quotes and put each on the card as TOPCASHBACK QUOTE: "
+                    "<insurer> £<net cost after cashback>, or, if none can be reached, say why: NO TOPCASHBACK QUOTE: "
+                    "<what stopped the quotes>. On an email card write it in the closing line, which is never sent")
+    return ""
+
+
+# 3. A BOOKED VISIT TELLS THE TENANTS (inbound-comms-response 29 Oct 2026, after a tenant reported a
+# contractor arriving unannounced; the 22 Oct fire alarm test went ahead with no notice). An email on a
+# property task that books or confirms a contractor visit on a named day is refused unless the submit
+# says how the tenants are told: --tenant-notice "<visit date>: <who is told and how>", or
+# "none needed: <why>" (an empty house). Inside 24 hours the notice is a ClickSend text. A flag, not a
+# line, because a line in an email would be sent to the contractor. Back-test: 35 emails on property
+# tasks name a booking-shaped date; the narrow booking words below fire on 5, one already carrying a
+# notice, one the 22 Oct incident itself, one an empty house (passes with "none needed").
+VISIT_DAY = (r"(?:(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\.?,?\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?"
+             r"(?:\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?"
+             r"|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)")
+VISIT_BOOK_RE = re.compile(r"\b(?:please book(?: us| it| him| her| them)?(?: in)?|book us in|i confirm|we confirm"
+                           r"|(?:is|are) booked(?: in)?(?: for| to)?|booked (?:in )?for)\b[^.\n]{0,100}?" + VISIT_DAY, re.I)
+PROPERTY_TASK_RE = re.compile(r"^\s*(?:COMPLIANCE|MAINTENANCE|INSURANCE|PROPERTY)\b", re.I)
+
+
+def tenant_notice_problem(name, output, task_type, notice):
+    if not (PROPERTY_TASK_RE.search(str(name or "")) or property_match(str(name or ""))):
+        return ""
+    try:
+        mail = parse_email_output(output or "")
+    except EmailFormatError:
+        mail = None
+    body = (mail or {}).get("body") or ""
+    hit = next((s for s in _sentences(body) if VISIT_BOOK_RE.search(s) and not re.search(r"\bcancel", s, re.I)), "")
+    if not hit:
+        return ""
+    notice = " ".join(str(notice or "").split())
+    how = ("--tenant-notice \"<visit date>: <who is told and how, e.g. every tenant by text and email from "
+           "info@ on 18 Nov>\", or --tenant-notice \"none needed: <why, e.g. the house is empty>\"")
+    if not notice:
+        return (f"it books a contractor visit (\"{hit[:140]}\") and does not say how the tenants are told. Kevin's "
+                f"rule (29 Oct 2026): every tenant in the house gets a text and an email at least 24 hours before; "
+                f"inside 24 hours, a ClickSend text. Add {how}")
+    if re.match(r"none needed\s*:\s*\S", notice, re.I):
+        return ""
+    when = None
+    for fmt_re, fmt in ((r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"), (r"\b(\d{1,2} [A-Za-z]{3})[a-z]* (\d{4})\b", None)):
+        m_ = re.search(fmt_re, notice)
+        if m_:
+            try:
+                when = (datetime.strptime(m_.group(1), fmt).date() if fmt
+                        else datetime.strptime(f"{m_.group(1)} {m_.group(2)}", "%d %b %Y").date())
+            except ValueError:
+                when = None
+            break
+    if when is None:
+        return f"its --tenant-notice names no visit date (YYYY-MM-DD or 12 Nov 2026). Write {how}"
+    if when < datetime.now(LONDON).date():
+        return f"its --tenant-notice date {when.isoformat()} is already past: give the visit's own date. Write {how}"
+    if when <= datetime.now(LONDON).date() + timedelta(days=1) and not re.search(r"\btext|clicksend", notice, re.I):
+        return ("the visit is within 24 hours, so the tenants are told by a ClickSend text (Kevin, 29 Oct 2026): "
+                "say so in --tenant-notice")
+    return ""
+
+
+# 4. CHECK THE BANK AGAIN BEFORE A LATE-RENT CARD (cash-flow-voids 30 Oct 2026: a chase reached Kevin
+# for rent he had already seen arrive). A RENT LATE: card is refused when the bank lines matched to the
+# tenancy for the owed cycle (from EARLY_RENT_DAYS before its due day, net of money out) add up to the rent. It
+# cannot see money the feed has not brought in yet (the 30 Oct incident was exactly that, so a
+# send-time check is still owed in the send scripts), but it stops a card for rent that landed
+# between the morning rent check and the agent's submit. Back-test: 10 keyed RENT LATE cards, none
+# refused (nothing had landed for the owed cycle when each was submitted).
+RENT_KEY_RE = re.compile(r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):\d")
+RENT_FIELD = "fldDMyfZLFMeONPq8"               # Tenancies: monthly rent (rent-check.py TY["rent"])
+TX_TENANCY_FIELD = "fldPmAMmxwqs4SdPa"         # Transactions: Tenancy link (rent-check.py TX["tenancy"])
+EARLY_RENT_DAYS = 5                            # rent-check.py EARLY_PAY_DAYS
+RENT_SLACK = 1.00                              # rent-check.py SHORT_SLACK
+RENT_DUE_DAY_FIELD = "fldhy2U0CQmM2oS4P"       # Tenancies: Due Day of Month (rent-check.py TY["dueDay"])
+
+
+def rent_next_due(due, due_day):
+    """rent-check.py next_due: the due date a month on, a day the month lacks falling on its last day."""
+    import calendar
+    year, month = (due.year, due.month + 1) if due.month < 12 else (due.year + 1, 1)
+    return due.replace(year=year, month=month, day=min(int(due_day), calendar.monthrange(year, month)[1]))
+
+
+def rent_paid_problem(name, notes, description):
+    if not str(name or "").startswith("RENT LATE: "):
+        return ""
+    key = RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")
+    if not key:
+        return ""
+    tenancy, owed = key.group(1), datetime.strptime(key.group(2), "%Y-%m-%d").date()
+    try:
+        rows = query_records(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'", fields=[RENT_FIELD, RENT_DUE_DAY_FIELD])
+        ten = (rows[0].get("fields") or {}) if rows else {}
+        rent = float(ten.get(RENT_FIELD) or 0)
+        due_day = int(ten.get(RENT_DUE_DAY_FIELD) or owed.day)
+        bank = fetch_bank_lines((owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat())
+    except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
+        return (f"the bank could not be read again for this tenancy ({str(exc)[:120]}): NOT CHECKED. Try again; "
+                "a late-rent card goes only on a fresh read")
+    # The owed cycle's money, as rent-check.py's cycle_money counts it: every line matched to the tenancy
+    # from EARLY_RENT_DAYS before the due day to that point before the NEXT due day (rent-check's next_due,
+    # the tenancy's own due day; review of PR 950, finding 9: a flat 30 days took March's early rent as
+    # February's), money out included, so a payment that bounced back nets to nothing.
+    hi = (rent_next_due(owed, due_day) - timedelta(days=EARLY_RENT_DAYS)).isoformat()
+    cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] < hi]
+    paid = [b for b in cycle if b["amount"] > 0]
+    total = sum(b["amount"] for b in cycle)
+    if not rent:
+        print(f"NOT CHECKED: tenancy {tenancy} has no rent on its record, so the paid-again check on {name[:60]} "
+              "could not compare a total.", file=sys.stderr)
+        return ""
+    if total < rent - RENT_SLACK:
+        return ""
+    shown = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in paid[:4])
+    return (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: {shown}, "
+            f"£{total:,.2f} against rent of £{rent:,.2f}. Do not chase it (Kevin, 30 Oct 2026): file the task as "
+            "information only, naming the payment, with the closing line **Carrying this out will involve:** "
+            "Nothing. Information only")
+
+
+# 5. A COST THAT CHANGES IS WRITTEN ON THE SAME CARD (creditor-management 3 Oct 2026; BINDING "FIXED COSTS
+# STAY TRUE", 14 Oct 2026). A creditor or FIXED COST card whose closing line or approve line says the
+# cost record changes (a cost added, changed, ended, marked inactive) carries the exact RECORD NEW COST /
+# RECORD CHANGE line cost-record.py writes, or says why none is owed: NO COST CHANGE: <why>. Back-test:
+# 355 creditor and fixed-cost outputs, 24 say the cost record changes, 14 carry the line; the 10 left
+# narrowed to 6 once a TASK: line and "already in your costs" are read as no change, every one of
+# them a real cost change written before the 14 Oct rule, none since.
+COST_BOOK_RE = re.compile(r"\b(?:cost list|costs list|cost record|costs record|costs table|cost line|fixed costs?"
+                          r"|your costs)\b", re.I)
+COST_CHANGE_RE = re.compile(r"\b(?:changes?|changed|is added|are added|added|marked inactive|is closed|ends?|ended"
+                            r"|new (?:monthly |yearly )?(?:cost|line)|goes to|moves? to|updated?|rises?|drops?)\b", re.I)
+# A RECORD line stands on its own line, the shape cost-record.py writes from; the reason none is owed
+# may sit anywhere, the closing line included (on an email card any other line would be sent).
+COST_LINE_RE = re.compile(r"^[ \t*_\-•]*(?:RECORD NEW COST|RECORD CHANGE)[ \t*_]*:\s*\S|\bNO COST CHANGE[ \t*_]*:\s*\S",
+                          re.I | re.M)
+
+
+def cost_line_problem(creditor, name, output, plain_approve):
+    if not (creditor or str(name or "").upper().startswith("FIXED COST")) or COST_LINE_RE.search(output or ""):
+        return ""
+    for s in _sentences(_approve_text(output, plain_approve)):
+        if s.upper().startswith("TASK:"):
+            continue
+        if COST_BOOK_RE.search(s) and COST_CHANGE_RE.search(s) and not CHECK_NEG_RE.search(s):
+            return (f"it says the cost record changes (\"{s[:160]}\") with no line to write it. Every report reads "
+                    "the Costs table, so the change goes on the same card as the line cost-record.py writes: "
+                    "RECORD NEW COST: <name> | <amount> | <frequency> | due <day> | first <YYYY-MM-DD> | ends "
+                    "<YYYY-MM-DD> (or | no end date), or RECORD CHANGE: <cost id> <field> = <value>. If no cost "
+                    "changes after all, say why: NO COST CHANGE: <why> (on an email card, in the closing line)")
+    return ""
+
+
+# 6. BEDROOMS ARE NOT ROOMS LET (property-administration 4 Sep 2026, broken six times). An email on a
+# property task that states a house's SIZE in bedrooms ("a three-bedroom house", "a 4-bed terraced
+# house", "it has 2 bedrooms") is compared with that house's "No. of Bedrooms" on the Properties table; a
+# different number is refused, naming both. Only those size shapes are read (review of PR 950, finding 4:
+# "the carpet in two bedrooms", "mould in one bedroom" and "£150 for 1-3 bed houses" are not a house's
+# size), a quoted reply line (">") is not the agent's statement, the count is matched to the house named
+# before it in the same sentence (with no "the other" between them), and a block is never judged (its
+# flats differ). Back-test: 35 emails state a count; one is refused ("three-bedroom shared house let as
+# three rooms" at a house of two bedrooms, the lesson's exact mistake).
+WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                "nine": 9, "ten": 10}
+_BED_N = r"(?<![-–\d])(?<!unit )(?<!flat )(?<!apartment )(?<!room )(?<!no\. )(?<!number )\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)"
+BEDROOM_RE = re.compile(
+    r"\b(?:has|have|had)\s+" + _BED_N + r"\s+(?:double\s+|single\s+)?bed(?:room)?s?\b"
+    r"|" + _BED_N.replace("(\\d{1,2}|", "(?P<n2>\\d{1,2}|", 1) +
+    r"[\s-]*bed(?:room)?(?:ed)?\s+(?:[a-z]+[\s-]+){0,2}?(?:house|flat|property|home|apartment|bungalow|maisonette"
+    r"|terrace|cottage)\b(?!s)", re.I)
+BEDROOM_OTHER_RE = re.compile(r"\b(?:other|another|second|neighbour|next door|each|both)\b", re.I)
+
+
+def bedroom_problem(name, output):
+    try:
+        mail = parse_email_output(output or "")
+    except EmailFormatError:
+        return ""
+    body = "\n".join(ln for ln in ((mail or {}).get("body") or "").splitlines() if not ln.lstrip().startswith(">"))
+    if not BEDROOM_RE.search(body):
+        return ""
+    props = [p for p in fetch_properties() if str(p.get("short") or "").strip()]
+
+    def named(text):
+        out = []
+        for p in props:
+            for mm in re.finditer(r"(?<![0-9A-Za-z])" + re.escape(str(p["short"]).strip()), text, re.I):
+                out.append((mm.end(), p))
+        return sorted(out, key=lambda x: x[0])
+    in_body = {p["id"]: p for _, p in named(body)}
+    task_p = task_property_id(name, props)
+    for sentence in _sentences(body):
+        here = named(sentence)
+        for mm in BEDROOM_RE.finditer(sentence):
+            if sentence[:mm.start()].count('"') % 2 or sentence[:mm.start()].count("“") > sentence[:mm.start()].count("”"):
+                continue
+            before = [(end, p) for end, p in here if end <= mm.start()]
+            if before:
+                end, house = before[-1]
+                if BEDROOM_OTHER_RE.search(sentence[end:mm.start()]):
+                    continue
+            elif len({p["id"] for _, p in here}) == 1:
+                house = here[0][1]                 # "a three-bedroom house at <house>": the one house named
+            elif here:
+                continue
+            else:
+                house = (next(iter(in_body.values())) if len(in_body) == 1
+                         else next((p for p in props if p["id"] == task_p), None) if not in_body else None)
+            if not house or house.get("kind") == "Block" or house.get("bedrooms") in (None, ""):
+                continue
+            word = mm.group(1) or mm.group("n2")
+            said = int(WORD_NUMBERS.get(word.lower(), word))
+            if said != int(house["bedrooms"]):
+                return (f"its email gives {house['short']} {said} bedroom(s) (\"{mm.group(0).strip()}\"), but the "
+                        f"Properties table says {int(house['bedrooms'])} (No. of Bedrooms). Bedrooms are not rooms let "
+                        "(Kevin, 4 Sep 2026): if it is the house's size, use the table's number; if the number means "
+                        "something else (rooms let, rooms worked on, a price band), reword it so it does not read as "
+                        "the house's size; if the table is wrong, correct it first")
+    return ""
+
+
+# 7. NO LICENCE WITHOUT IN-DATE GAS AND ELECTRICAL CERTIFICATES (property-administration 24 Sep 2026).
+# A card on a licence task (selective, HMO or landlord licence in its name, not a certificate task) that
+# pays a licence fee or puts an application in now (a SPEND line over £0, a MARK FOR PAYMENT block, or
+# a closing line that pays or submits) is refused unless the book holds an in-date EICR for the house,
+# and an in-date gas safety certificate where the house has gas (required, or one ever filed). Saying
+# the fee comes "once the certificates are done" is not paying it. Back-test: 9 licence tasks, one
+# refused (a licence fee for a house with neither certificate, before the rule was written).
+LICENCE_TASK_RE = re.compile(r"selective\s+licen[cs]|hmo\s+licen[cs]|landlord\s+licen[cs]|additional\s+licen[cs]"
+                             r"|licen[cs]ing", re.I)
+CERT_TASK_RE = re.compile(r"\b(?:eicr|gsc|gas|electrical|epc|fire|cp12)\b", re.I)
+SPEND_AMOUNT_RE = re.compile(r"^\s*SPEND\s*:\s*£?\s*([0-9][0-9,]*(?:\.\d+)?)", re.I | re.M)
+# The fee paid, or the APPLICATION itself sent: "sends the floor plan for the application" sends a document,
+# not the application (review of PR 950, finding 7).
+LICENCE_ACT_RE = re.compile(r"\b(?:pay|pays|paying)\s+(?:the\s+|our\s+|a\s+)?(?:[\w£.,]+\s+){0,3}?licen[cs]e(?:\s+fee)?\b"
+                            r"|\b(?:submit|submits|submitting|send|sends|sending|lodge|lodges|lodging|file|files|filing"
+                            r"|make|makes|making|put|puts|putting)\s+(?:in\s+)?(?:the\s+|our\s+|a\s+|this\s+|your\s+)?"
+                            r"(?:\w+\s+)?(?:licen[cs]e\s+)?application\b(?!\s+(?:form\s+)?(?:documents?|plan|pack|papers))"
+                            r"|\bappl(?:y|ies|ying)\s+for\s+(?:the\s+|a\s+)?(?:\w+\s+)?licen[cs]e\b"
+                            r"|\bapplication\s+(?:goes in|is submitted|is sent)\b", re.I)
+LICENCE_LATER_RE = re.compile(r"\b(?:once|after|until|when|then|later|separately|not|no|never|nothing|before)\b", re.I)
+
+
+def licence_cert_problem(name, output, plain_approve):
+    name = str(name or "")
+    if not LICENCE_TASK_RE.search(name) or CERT_TASK_RE.search(name) \
+            or re.match(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", output or "", re.I):
+        return ""
+    spend = SPEND_AMOUNT_RE.search(output or "")
+    acts = (spend and float(spend.group(1).replace(",", "")) > 0) or PAYMENT_CARD_RE.search(output or "")
+    if not acts:
+        for s in _sentences(_approve_text(output, plain_approve)):
+            hit = LICENCE_ACT_RE.search(s)
+            if hit and not LICENCE_LATER_RE.search(s[:hit.start()]):
+                acts = True
+                break
+    if not acts:
+        return ""
+    props = fetch_properties()
+    pid = task_property_id(name, props)
+    if not pid:
+        return ""
+    house = next(p for p in props if p["id"] == pid)
+    certs, today = fetch_certificates(), today_london()
+    gas = "GSC" in house["required"] or any(c["type"] == "GSC" and pid in c["propertyIds"] for c in certs)
+    missing = [t for t in (["EICR"] + (["GSC"] if gas else []))
+               if not any(c["type"] == t and pid in c["propertyIds"] and c["status"] != "Expired"
+                          and c["renewalDate"] and c["renewalDate"] >= today for c in certs)]
+    if not missing:
+        return ""
+    return (f"it pays a licence fee or puts a licence application in for {house['short']}, and the book holds no "
+            f"in-date {' or '.join(missing)} for it. Kevin's rule (24 Sep 2026): no licence application or fee "
+            "until the house holds an in-date gas safety certificate and EICR. File the certificates if they exist; "
+            "if not, make this card get them (no SPEND line for the fee) and say the fee or application comes back "
+            "as its own card once they are filed")
+
+
+# 8. A HOUSE ROB JACKSON'S AGENCY MANAGES IS NOT OURS TO CERTIFY (property-administration 19 Oct 2026).
+# "Rob Jackson arranges all compliance for the houses he manages. We only ask him yearly for the latest
+# gas certificate, and the EICR when due. We arrange the insurance." A quote request or a PASS TO ROY
+# booking for a certificate at such a house is refused: ask the managing agent for the copy. Narrowed
+# to the agency the ruling names: the code check proposed every house with a managing agent, and the
+# back-test found the one such purchase in the set was a Duckworth EPC quote Kevin approved (we arrange
+# Duckworth's certificates). 16 purchases back-tested, none refused.
+MANAGER_ARRANGES_COMPLIANCE = ("Roc Immo",)   # Properties "Agent/Landlord": Rob Jackson's agency
+
+
+# Kevin's own words on the task asking for the booking override the rule (review of PR 950, finding 10):
+# his instruction outranks a standing ruling, and the robot must not be left with no route.
+KEVIN_ASKS_BOOKING_RE = re.compile(r"\b(?:book|books|booking|booked|arrange|arranged|go ahead|get (?:it|this|one) done"
+                                   r"|get (?:a |some )?quotes?)\b", re.I)
+
+
+def managed_compliance_problem(name, output, mail_subject, task_fields=None):
+    if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX) or certificate_type(name) in ("", "INSURANCE"):
+        return ""
+    if not (re.search(r"^\s*PASS TO ROY:", output or "", re.I | re.M) or "quote" in str(mail_subject or "").lower()):
+        return ""
+    tf = task_fields or {}
+    if KEVIN_ASKS_BOOKING_RE.search(f"{tf.get(AF['approvalFeedback']) or ''}\n{tf.get(AF['feedbackHistory']) or ''}"):
+        return ""
+    props = fetch_properties()
+    pid = task_property_id(name, props)
+    house = next((p for p in props if p["id"] == pid), None)
+    if not house or house.get("manager") not in MANAGER_ARRANGES_COMPLIANCE:
+        return ""
+    return (f"{house['short']} is managed by {house['manager']}, who arranges all its compliance (Kevin, 19 Oct "
+            "2026). Do not buy the certificate: send the managing agent an email asking for the latest copy (the gas "
+            "certificate yearly, the EICR when due), with no quote in its subject and no PASS TO ROY line, and file "
+            "the copy when it comes. We arrange only the insurance. If Kevin has asked on this task for the booking, "
+            "his own words in Approval Feedback let it through")
+
+
 def cmd_submit_group(args):
     """`submit`, with --siblings: a property group submitted once on its lead."""
     siblings = [i.strip() for i in (getattr(args, "siblings", None) or "").split(",") if i.strip()]
@@ -6280,7 +6828,8 @@ def cmd_submit(args):
     # THE REPORT GATE (Kevin, 7 Sep 2026): a report on an inbound item shows
     # the five questions were asked and names its trigger, or it is refused.
     # Read early so a report with nothing to decide can file itself below.
-    tf_early = (get_task(args.task).get("fields", {}) or {})
+    rec_early = get_task(args.task) or {}
+    tf_early = (rec_early.get("fields", {}) or {})
     held = held_card_problem(tf_early)
     if held:
         sys.exit(f"ERROR: refusing to submit {args.task}: {held}.")
@@ -6331,6 +6880,7 @@ def cmd_submit(args):
     # output IS a purchase step on a COMPLIANCE task. A check that cannot run
     # warns and lets the card through: Kevin still sees it, and the daily
     # paid-but-not-filed check is the backstop.
+    _subject = ""
     try:
         try:
             _subject = (parse_email_output(output) or {}).get("subject") or ""
@@ -6347,6 +6897,33 @@ def cmd_submit(args):
             f"ERROR: refusing to submit {args.task}: {bought}\n"
             "       Check with: python3 scripts/agent-dispatch.py certificate-gaps "
             "--property <rec> --type <type>")
+
+    # THE RULES THE ROBOTS KEPT BREAKING (16 Nov 2026), each a refusal that says what it found and what
+    # to write instead. The bank and the book are read only when the output is the shape a rule is about.
+    _name = tf_early.get(AF["name"], "") or ""
+    _creditor_agent = ALL_AGENTS.get(args.agent, {}).get("agent") == "creditor-management"
+    # A STATUS ONLY update is judged by its own gate below (it carries nothing to carry out), and a
+    # report that files itself with the Nothing line acts on nothing.
+    # Every rule reads the agent's OWN words: the tier-1 banner submit put on top is taken off first, or a
+    # CLOSE PROPOSAL under it reads as a bill card (review of PR 950, finding 1).
+    own = agent_own_text(output)
+    _acts = not status_only_line(own) and not no_action_declared(carry_out_tail(own))
+    rules = (lambda: paid_check_problem(rec_early, own, args.type),
+             lambda: renewal_problem(_name, own, plain_approve),
+             lambda: tenant_notice_problem(_name, own, args.type, getattr(args, "tenant_notice", None)),
+             lambda: rent_paid_problem(_name, tf_early.get(AF["notes"]), tf_early.get(AF["description"])),
+             lambda: cost_line_problem(_creditor_agent, _name, own, plain_approve),
+             lambda: bedroom_problem(_name, own),
+             lambda: licence_cert_problem(_name, own, plain_approve),
+             lambda: managed_compliance_problem(_name, own, _subject, tf_early))
+    for rule in rules if _acts else ():
+        try:
+            problem = rule()
+        except (Exception, SystemExit) as exc:               # noqa: BLE001 — refused, never passed
+            problem = (f"a submit check could not run ({type(exc).__name__}: {str(exc)[:160]}), so it is NOT "
+                       "CHECKED. Try again; if it fails again, record a TOOL wall")
+        if problem:
+            sys.exit(f"ERROR: refusing to submit {args.task}: {problem}.")
 
     # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
     # the card, from this round, or the submit is refused.
@@ -6667,6 +7244,9 @@ def cmd_submit(args):
     stamps = ([superseded_stamp(n) for n in dropped]
               + [attached_stamp(n, f"with this submission (round {round_no})") for n in uploaded]
               + [submitted_stamp(round_no, args.type, round_files)])
+    tenant_notice = " ".join(str(getattr(args, "tenant_notice", "") or "").split())
+    if tenant_notice:
+        stamps.append(note_line("agent-dispatch", f"TENANT NOTICE (round {round_no}): {tenant_notice[:300]}"))
     # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
     if is_sourcing(output):
         stamps.append(note_line("agent-dispatch", f"{SOURCING_SUBMITTED_MARK} (round {round_no}): "
@@ -9297,31 +9877,78 @@ def demote_for_cost(level, cost_owed):
 VERDICT_LABELS = {"Approval Outcome", "Approved At"}
 
 
-def kept_open_woke(task_id, t):
-    """([labels of what woke the task by a change], a note for the refusal) before a keep-open writes.
-    Exits when the task changed while the run worked (run_window_problem). With the run's queue
-    snapshot, the wake is what the queue told the run (its wokeByChange). With none, it is read from
-    the ledger's last rest against the task as it is now, Notes included."""
+def kept_open_woke(task_id, t, what=None):
+    """(the task's wokeByChange, or {} when nothing it has not answered changed, and a note for the
+    refusal) before a keep-open or a close writes. Exits when the task changed while the run worked
+    (run_window_problem). With the run's queue snapshot, the wake is what the queue told the run (its
+    wokeByChange). With none, it is read from the ledger's last rest against the task as it is now,
+    Notes included."""
     snap, why = run_snapshot(task_id)
     window = run_window_problem(task_id, t, snap)
     if window:
-        sys.exit(f"ERROR: refusing to keep {task_id} open: {window}.")
+        sys.exit(f"ERROR: refusing to {what or f'keep {task_id} open'}: {window}.")
     if snap is not None:
-        labels = list(((snap.get("wokeByChange") or {}).get("changed")) or [])
+        woke = dict(snap.get("wokeByChange") or {})
         # Kevin's own verdict alone is the instruction this carry-out acts on, not news it could bury.
-        return ([] if set(labels) <= VERDICT_LABELS else labels), ""
+        return ({} if set(woke.get("changed") or []) <= VERDICT_LABELS else woke), ""
     # No snapshot (a run by hand, a run suspended past the age limit, a runner without the variable):
     # every change since the last rest counts, Notes included (review of PR 938, finding 3). A note
     # this run wrote itself then costs one --changed sentence, the safe direction: a twin folded into
     # Notes is never let through unasked.
-    woke = rest_wake(t, ledger_rest_events().get(task_id))
-    labels = list((woke or {}).get("changed", []))
-    if set(labels) <= VERDICT_LABELS:
-        labels = []
+    woke = rest_wake(t, ledger_rest_events().get(task_id)) or {}
+    if set(woke.get("changed") or []) <= VERDICT_LABELS:
+        return {}, ""
     print(f"INFO: no queue snapshot for {task_id} ({why}); its last rest was compared with the task as it is "
           "now, Notes included.", file=sys.stderr)
-    return labels, (f"\n       (No queue snapshot was found for it: {why}. Compared with its last rest instead, "
-                    "Notes included, so a note you wrote yourself in this run counts too: say so in --changed.)")
+    return woke, (f"\n       (No queue snapshot was found for it: {why}. Compared with its last rest instead, "
+                  "Notes included, so a note you wrote yourself in this run counts too: say so in --changed.)")
+
+
+# A --changed SENTENCE MUST BE ABOUT THE CHANGE (16 Nov 2026, review of PR 938, finding 4). Any
+# sentence used to pass, "x" included, and rested a woken task for up to 14 days. Nothing cleverer than
+# this: it names at least one field the wake names, or it quotes CHANGED_QUOTE_WORDS words in a row from
+# the text the wake shows as added (all of it, when shorter). It cannot prove the agent acted; it does
+# prove the agent read what woke the task.
+CHANGED_QUOTE_WORDS = 4
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9£]+", str(text or "").lower())
+
+
+def changed_sentence_problem(sentence, woke):
+    """'' when --changed names a field that changed or quotes the text added, else why not."""
+    labels = list(woke.get("changed") or [])
+    said = " ".join(_words(sentence))
+    if any(re.search(r"(?<![a-z0-9])" + re.escape(" ".join(_words(label))) + r"(?![a-z0-9])", said)
+           for label in labels if _words(label)):
+        return ""
+    for text in (woke.get("added") or {}).values():
+        words = _words(text)
+        n = min(CHANGED_QUOTE_WORDS, len(words))
+        if n and any(" ".join(words[i:i + n]) in said for i in range(len(words) - n + 1)):
+            return ""
+    return (f"--changed must say what changed: name at least one of the fields that changed "
+            f"({', '.join(labels) or 'none named'}), or quote {CHANGED_QUOTE_WORDS} words in a row from the "
+            "text added since the last rest (wokeByChange.added)")
+
+
+def woke_close_problem(task_id, t, changed_said, what):
+    """The --changed rule shared by a keep-open and a close: '' when the task did not wake by a change,
+    or --changed is about the change; else the refusal text (without the leading ERROR). `what` is the
+    act refused, "keep <id> open" or "close <id>"."""
+    woke, snap_note = kept_open_woke(task_id, t, what=what)
+    if not woke:
+        return ""
+    labels = ", ".join(woke.get("changed") or [])
+    if not changed_said:
+        return (f"refusing to {what}: it woke because something on it changed since its last rest "
+                f"({labels} changed). Read the whole task again and raise what changed as its own card (or carry "
+                "it out if it is already approved work) first. Then add --changed \"<one sentence: what changed "
+                "on the task and what you did about it>\", naming the field that changed or quoting what was "
+                "added, which goes on its Notes for Kevin to read." + snap_note)
+    problem = changed_sentence_problem(changed_said, woke)
+    return f"refusing to {what}: {problem}." + snap_note if problem else ""
 
 
 def cmd_complete(args):
@@ -9411,13 +10038,9 @@ def cmd_complete(args):
         if problem:
             sys.exit(f"ERROR: refusing to keep {args.task} open: {problem}.\n" + KEPT_OPEN_UNTIL_HELP)
         changed_said = " ".join(str(getattr(args, "changed", "") or "").split())
-        woke, snap_note = kept_open_woke(args.task, t)
-        if woke and not changed_said:
-            sys.exit(f"ERROR: refusing to keep {args.task} open: it woke because something on it changed "
-                     f"since its last rest ({', '.join(woke)} changed). Read the whole task again and raise what "
-                     "changed as its own card (or carry it out if it is already approved work) first. Then keep "
-                     "it open with --changed \"<one sentence: what changed on the task and what you did about "
-                     "it>\", which goes on the CARRIED OUT line for Kevin to read." + snap_note)
+        problem = woke_close_problem(args.task, t, changed_said, f"keep {args.task} open")
+        if problem:
+            sys.exit("ERROR: " + problem)
         holder = next(iter(t.get("teamMemberIds") or []), "")
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         # One line: a note with line breaks could otherwise forge a stamped line of its own.
@@ -9594,6 +10217,24 @@ def cmd_complete(args):
                     "--bought-as <new|second-hand> --price <n> --supplier \"<who>\" --link <url>\n"
                     "       or, if nothing was bought, say why on the record:\n"
                     f"         python3 scripts/agent-dispatch.py complete {args.task} --not-bought \"<why>\"")
+
+    # A CLOSE ON A TASK WOKEN BY A CHANGE ASKS THE SAME QUESTION A KEEP-OPEN DOES (16 Nov 2026, review
+    # of PR 938, finding 5). A plain `complete` closed it with nothing asked, and a Completed task never
+    # wakes again, so the reply that woke it was buried for good. Checked last, so the refusal only
+    # comes when the close would otherwise go through.
+    changed_said = " ".join(str(getattr(args, "changed", "") or "").split())
+    # Two code callers close a card for a reason they record and cannot write a sentence: a MERGE card on
+    # its merge (merge-approved.py, the merge commit checked above) and an episode card once it is out
+    # (content-engine/publish.py). A MERGE card can never rest (keep-open is refused above, submit refuses
+    # to rewrite it), and an episode card rests only by a hand keep-open, so their close is exempt.
+    code_close = merge_pr is not None or str(t.get("name") or "").startswith(EPISODE_CARD_PREFIX)
+    problem = "" if code_close else woke_close_problem(args.task, t, changed_said, f"close {args.task}")
+    if problem:
+        sys.exit("ERROR: " + problem)
+    if changed_said:
+        sign_note = ((sign_note + "\n\n") if sign_note else "") + (
+            f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] What changed since the last look: "
+            f"{changed_said[:600].rstrip('.')}.")
 
     # Written with the close, never before it: a refused close leaves no mark.
     evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
@@ -13580,6 +14221,7 @@ PROPERTY_FIELDS = {
     "required":   "flduFyaQBD4duhR3l",   # Certificates Required (multi)
     "active":     "fldBUeSJQZZSnFrFW",   # Active? (from Business), lookup
     "units":      "fldLoWcv40Ag5sHRF",   # Units (link to Rental Units)
+    "bedrooms":   "fldeXUMcC6O4AcvRG",   # No. of Bedrooms (the bedroom check at submit, 16 Nov 2026)
 }
 CERT_FIELDS = {
     "type":        "fld00ZuxT8uKagM0b",
@@ -13672,6 +14314,7 @@ def property_view(rec):
         "postcode": f.get(PROPERTY_FIELDS["postcode"], ""),
         "required": required,
         "units": links(f.get(PROPERTY_FIELDS["units"])),
+        "bedrooms": f.get(PROPERTY_FIELDS["bedrooms"]),
         "active": bool(active[0]) if isinstance(active, list) and active else bool(active),
     }
 
@@ -14769,6 +15412,10 @@ def main():
                    help="property work only: the sibling ids the queue grouped under this "
                         "lead (same certificate type and postcode district); refused "
                         "before any write if one does not belong (17 Sep 2026)")
+    s.add_argument("--tenant-notice", default="", metavar="TEXT",
+                   help="REQUIRED when an email books or confirms a contractor visit at a house: '<visit date "
+                        "YYYY-MM-DD>: <who is told and how>' (inside 24 hours a ClickSend text), or 'none needed: "
+                        "<why>'. Stamped on the task's Notes, never put in the email.")
     s.add_argument("--coverage", metavar="PATH",
                    help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
                         "covers ... (source: url) lines; refused without it (7 Sep 2026)")
@@ -14844,9 +15491,9 @@ def main():
                         "hearing), after today and at most %d days ahead; the task rests until then"
                         % KEPT_OPEN_MAX_DAYS)
     c.add_argument("--changed", default="", metavar="SENTENCE",
-                   help="REQUIRED with --keep-open when the task woke because something on it changed "
-                        "(the queue entry's wokeByChange): one sentence, what changed and what you did "
-                        "about it; written on the CARRIED OUT line")
+                   help="REQUIRED, with or without --keep-open, when the task woke because something on it "
+                        "changed (the queue entry's wokeByChange): one sentence that names the field that "
+                        "changed or quotes the text added, and says what you did about it; written to Notes")
     c.add_argument("--no-certificate", default="", metavar="REASON",
                    help="the file that arrived on this task is not a certificate "
                         "(say what it is); recorded in Notes")
