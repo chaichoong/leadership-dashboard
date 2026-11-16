@@ -139,6 +139,21 @@ def crossed_record(day, fields, ledger):
     return out
 
 
+CHILD_TYPES = ("Learnings From My Diary", "Short Form Video")
+
+
+def crossed_records(day, recs, ledger):
+    """crossed_record over ALL the day's records: the Full record, and the Learnings and Short records whose clips the
+    card shows and the publisher posts (review of PR 953, F4: "Episode 2137 Learnings from My Diary", recYOWMwJmiMQthYG,
+    holds 2136's Learnings clip, and a guard reading only the Full record would let it through once the Full record is
+    put right). A child record's line names the record; the Full record's lines read as before."""
+    out = []
+    for ctype in ("Long Form Video",) + CHILD_TYPES:
+        fields = (((recs or {}).get(ctype) or {}).get("fields")) or {}
+        out += [line if ctype == "Long Form Video" else "the %s record's %s" % (ctype, line) for line in crossed_record(day, fields, ledger)]
+    return out
+
+
 def ledger_entries(day, ledger):
     """(episode entry, teaser entry) for the day, the RENDERED one of each when there is one. A second recording of
     the day that failed ("a second long recording for episode 2108 ... not rendered") keeps the same episode and role
@@ -303,10 +318,22 @@ def lfmd_position(ep, podcast_seconds, day):
         if not (math.isfinite(start) and math.isfinite(end) and math.isfinite(length) and 0 <= start <= length and length > 0): raise ValueError
     except (TypeError, ValueError, OverflowError):
         return False, True, "cannot be checked: the ledger holds window %r and length %r for this episode. Put the entry right, or rebuild the clip: render.py redo --day %d --only lfmd" % (window, ep.get("duration"), day)
+    import render
     noun = "episode"
     if ep.get("lfmd_closes_talk") is True and start < end < length: length, noun = end, "talk"
     share = start / length
     where = "starts at %s of the %s %s (%d%%)" % (mmss(start), mmss(length), noun, int(share * 100 + 1e-9))
+    # On the FULL episode's clock when the render recorded its jingle cut: the video Kevin watches and writes his times
+    # against runs a jingle ahead of the recording after the cut, so "4:30" here was 4:37 to him (review of PR 948, F6).
+    # The share is still measured on the recording, where the clip is cut.
+    try:
+        cut = ep.get("intro_at")
+        if cut is not None and not isinstance(cut, bool) and math.isfinite(float(cut)):
+            where = "starts at %s of the full episode (%s of the %s %s, %d%%)" % (
+                mmss(render.full_time(start, float(cut), render.jingle_of(ep))), mmss(start), mmss(length),
+                "recording" if noun == "episode" else "talk on the recording", int(share * 100 + 1e-9))
+    except (TypeError, ValueError, OverflowError):
+        pass                                              # an unreadable cut keeps the recording's clock, said as such
     # THE SPOKEN PHRASE DECIDES, NOT THE SHARE (finding 20261019-phase-3-983). The share rule below is a proxy for
     # "the diary section closes the episode", and it blocks a correct clip whenever Kevin reaches his diary early:
     # 1808's clip starts at 4:30 of an 11:30 episode (39%, just under the 40% rule) and sat blocked with no card,
@@ -326,7 +353,6 @@ def lfmd_position(ep, podcast_seconds, day):
     # Kevin's own time is evidence too (16 Nov 2026): a clip placed where his note said it starts (render.note_record)
     # passes on that, or his 4:30 on 1808, at 39% of the episode, would be refused by the share rule below.
     # The evidence is the Learnings words HEARD where his note said to look, never the note alone (review of PR 948).
-    import render
     note = ep.get("lfmd_from_note") if isinstance(ep.get("lfmd_from_note"), dict) else {}
     heard = note.get("heard") if isinstance(note.get("heard"), str) else ""
     try: from_note = [float(x) for x in note.get("window") or []] == [start, end]; said = mmss(float(note.get("full")))

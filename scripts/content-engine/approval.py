@@ -253,7 +253,7 @@ def output_gate(day, ledger, state, recs=None):
         failures = list(failures) + [("copy holds session text", "%s %s (%s); remove it: platform_copy.py clean --day %d" % (c, f, m, day)) for c, f, m in leak]
     # A record holding ANOTHER episode's files is never put in front of Kevin: his Approve would publish the wrong
     # episode under this one's name (16 Nov 2026: 2137 and 2144 hold 2136's and 2143's). Refused, and said exactly.
-    crossed = qa.crossed_record(day, (((recs or {}).get("Long Form Video") or {}).get("fields") or {}), ledger) if recs else []
+    crossed = qa.crossed_records(day, recs, ledger) if recs else []      # the Learnings and Short records too (PR 953 review, F4)
     if crossed:
         ok = False
         failures = list(failures) + [("record holds another episode", "; ".join(crossed) + ". The record must be put right before any card")]
@@ -279,7 +279,11 @@ def output_gate(day, ledger, state, recs=None):
             # the back — never out. Day 2144 sat at 'no long clip rendered for this day' from 29 Oct to 10 Nov 2026
             # with no card, no receipt and nothing naming it: 12 days of a verdict re-running the same render can
             # never change. `since` survives while the failure text is the same, so the age is real.
-            same = (was.get("failures") or []) == texts
+            # And while ANY check that blocked it before still blocks it (review of PR 953, F3): a new check added to the
+            # gate (the crossed-record line) restarted 2137's clock on 12 Nov's block, so an old stall read as new.
+            # Only a block whose every earlier check has cleared is a new block.
+            name = lambda t: str(t).split(": ", 1)[0]
+            same = (was.get("failures") or []) == texts or bool({name(t) for t in was.get("failures") or []} & {name(t) for t in texts})
             rec["since"] = (was.get("since") or was.get("at") or rec["at"]) if same else rec["at"]
             rec["reads"] = (int(was.get("reads") or 1) + 1) if same else 1
         entry["qa_waiting" if waiting else "qa_blocked"] = rec
@@ -611,6 +615,7 @@ def _selftest_gate_wait():
     fake.WAIT_CHECK = "files readable"
     fake.is_wait = lambda f: bool(f) and all(n == fake.WAIT_CHECK for n, _ in f)
     fake.crossed_record = lambda day, fields, ledger: []      # the crossed-record guard has its own tests
+    fake.crossed_records = lambda day, recs, ledger: []
     fake.card_lines = lambda passed, failures=(): ["ok"]
     real = _s.modules.get("qa")
     state = {}

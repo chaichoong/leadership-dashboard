@@ -940,7 +940,11 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode", 
     at, resume = find_pause(masters["16:9"], cap_segs, srt_segments(open(srt).read())[-1][1])
     at, resume, cut_by = cut_with_override(at, resume, cut_at, media_seconds(masters["16:9"]), day)
     if cut_by == "operator": print("intro: jingle cut taken from the figure on the card: %.2f s" % at)
-    LAST_CUT.update({"at": at, "resume": resume, "by": cut_by})
+    # The jingle length this render shifts the captions by, measured once and kept on the ledger (jingle_seconds), so
+    # a time Kevin reads off this episode is put back on the recording's clock with THIS render's jingle, not a fixed
+    # 7.0 s that is wrong the day the jingle file changes (review of PR 948, F4).
+    jingle_s = intro_seconds()
+    LAST_CUT.update({"at": at, "resume": resume, "by": cut_by, "jingle_s": jingle_s})
     clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
     with open(caps, "w") as fh: fh.write(clipped)
     check_captions(caps, "episode %s full" % day)
@@ -952,7 +956,7 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode", 
     # YouTube gets the same cut without burnt-in captions, plus the caption file lined up with the jingle
     paths["full_yt"] = insert_intro(masters["16:9"], at, os.path.join(workdir, names["full_yt"]))
     paths["full_srt"] = os.path.join(workdir, names["full_srt"])
-    with open(paths["full_srt"], "w") as fh: fh.write(shift_after(clipped, at, intro_seconds()))
+    with open(paths["full_srt"], "w") as fh: fh.write(shift_after(clipped, at, jingle_s))
     check_captions(paths["full_srt"], "episode %s YouTube captions" % day)
     if lfmd:   # the "Learnings from my diary" section only (Kevin, 3 Sep 2026)
         assert_has_video(masters["9:16"], "episode %s 9:16 master" % day)
@@ -1063,7 +1067,15 @@ def process(key, ledger, keep=False):
     # this a day sent back for anything else — a thumbnail title, a line of copy — could only
     # be answered by losing its Learnings clip. A kept window that no longer fits the clip is
     # said and dropped; it never stops the render.
-    kept, by_hand = e.pop("lfmd_window_keep", None), False
+    # READ, not popped: Kevin's time and a hand window stay on the entry until this render succeeds. A render that
+    # fails later (an upload, an overlay) is put back by watch.requeue_failed and re-cut, and popping them here lost
+    # his time and brought back the clip he had rejected (review of PR 948, F2). Popped once the render has landed.
+    kept, by_hand = e.get("lfmd_window_keep"), False
+    # A hand window his newest note says is in the wrong place, with no time for where it should start (redo_day parks
+    # it as lfmd_window_doubted): the clip finder decides, and this window is used only when the finder finds nothing,
+    # so the episode never loses a clip it had (gap left by PR 948: 2121 came back "(the same section as before)").
+    doubted = e.get("lfmd_window_doubted")
+    e.pop("lfmd_doubted_kept", None)
     # Which clip finder searched this render's own words, and whether it found the line. The output gate asks for one
     # automatic re-search only when the finder that searched an episode is older than today's (qa.no_learnings_check):
     # the same finder on the same words gives the same answer.
@@ -1072,7 +1084,7 @@ def process(key, ledger, keep=False):
     # LOOK: the clip starts there only when a Learnings word is heard at that time, and then it beats a window kept by
     # hand and the detector, as his newest word on this clip. Nothing heard: the clip is decided as before, and the
     # receipt says his time found no Learnings line. A time that makes no allowed clip is said and dropped.
-    at_keep = e.pop("lfmd_at_keep", None)
+    at_keep = e.get("lfmd_at_keep")
     note_at, heard = None, None
     e.pop("lfmd_note_unused", None)
     if at_keep:
@@ -1084,12 +1096,28 @@ def process(key, ledger, keep=False):
                       % (key, mmss(at_keep["full"]), "the kept window" if kept else "the detector"), file=sys.stderr)
             else:
                 window, by_hand = check_lfmd_window(placed, duration, e.get("episode") or date_day), True
-                kept, note_at = None, at_keep
+                kept, doubted, note_at = None, None, at_keep
                 print("%s: Learnings clip placed on \"%s\", heard at the time on Kevin's note (%s of the full episode), %.2f to %.2f s"
                       % (key, heard[:60], mmss(at_keep["full"]), window[0], window[1]))
         except (SystemExit, KeyError, TypeError, ValueError) as ex:
+            heard = None
+            if isinstance(ex, SystemExit):           # a line was heard, but the rules refuse the clip: the receipt says why
+                try: e["lfmd_note_unused"] = {"full": float(at_keep["full"]), "why": unused_why(ex)}
+                except (KeyError, TypeError, ValueError): pass
             print("%s: the Learnings time on Kevin's note was dropped (%s); %s decides this render"
                   % (key, str(ex)[-160:], "the kept window" if kept else "the detector"), file=sys.stderr)
+    if doubted and not kept and not by_hand:
+        if window:
+            print("%s: Kevin's note says the Learnings clip placed by hand is in the wrong place; the clip finder's start is used, %.2f to %.2f s"
+                  % (key, window[0], window[1]))
+        else:
+            try:
+                window, by_hand = check_lfmd_window(doubted, duration, e.get("episode") or date_day), True
+                e["lfmd_doubted_kept"] = True
+                print("%s: the clip finder found no other Learnings start, so the section placed by hand before is kept, %.2f to %.2f s"
+                      % (key, window[0], window[1]))
+            except SystemExit as ex:
+                print("%s: the hand-placed Learnings window was dropped (%s); the detector found none either" % (key, str(ex)[-160:]), file=sys.stderr)
     if kept:
         try:
             window, by_hand = check_lfmd_window(kept, duration, e.get("episode") or date_day), True
@@ -1193,6 +1221,7 @@ def process(key, ledger, keep=False):
     e["render_fps"] = source_fps(paths.get("full") or masters.get("16:9") or "")
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume"); e["intro_at_by"] = LAST_CUT.get("by")
+        e["jingle_seconds"] = LAST_CUT.get("jingle_s")     # the clock his note times are read on (jingle_of)
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"), role)
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
@@ -1204,6 +1233,7 @@ def process(key, ledger, keep=False):
     e.update({"status": "rendered", "record_id": rid, "outputs": links, "edited_folder": folder, "title": title,
               "render_seconds": round(time.time() - t0), "rendered": dt.datetime.now().isoformat(timespec="seconds")})
     e.pop("render_failed", None)      # it rendered, so it no longer steps aside in the redo queue (982)
+    for k2 in ("lfmd_window_keep", "lfmd_at_keep", "lfmd_window_doubted"): e.pop(k2, None)   # used: the render has landed (F2)
     if base:
         # the joined episode is the day's episode from now on; part 1 is kept on the ledger as a part (qa, the publisher
         # and the Learnings redo all read the day's "episode" entry)
@@ -1263,11 +1293,19 @@ def redo_lfmd(day, window=None):
         e["lfmd_retried"] = dict(e["lfmd_searched"])
         if note_at:
             placed, heard = place_from_note(segs, note_at["master"])
+            try: placed = placed and check_lfmd_window(placed, e.get("duration"), day)
+            except SystemExit as ex:
+                # A clip the rules refuse (his time inside the last 20 s of the talk gives one under 20 s) is said and
+                # dropped, and the finder decides, as process() does. Uncaught, the rebuild died and redo_requested kept
+                # the day and failed it the same way every night (review of PR 948, F1).
+                placed, heard, note_at, unused = None, None, None, dict(note_at, why=unused_why(ex))
+                print("episode %d: the Learnings time on Kevin's note (%s of the full episode) gave no clip the rules allow (%s); the finder decides"
+                      % (day, mmss(unused["full"]), unused["why"]), file=sys.stderr)
             if placed:
-                window, by_hand = check_lfmd_window(placed, e.get("duration"), day), True
+                window, by_hand = placed, True
                 print("episode %d: Learnings clip placed on \"%s\", heard at the time on Kevin's note (%s of the full episode), %.2f to %.2f s"
                       % (day, heard[:60], mmss(note_at["full"]), window[0], window[1]))
-            else:
+            elif note_at:
                 unused, note_at = note_at, None
                 print("episode %d: the Learnings time on Kevin's note (%s of the full episode) found no Learnings line; the finder decides"
                       % (day, mmss(unused["full"])), file=sys.stderr)
@@ -1287,8 +1325,9 @@ def redo_lfmd(day, window=None):
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window)
     e["lfmd_window_by"] = "operator" if by_hand else "detector"
     note_record(e, note_at, window, heard)
-    if unused: e["lfmd_note_unused"] = {"full": unused["full"]}
+    if unused: e["lfmd_note_unused"] = {k: v for k, v in (("full", unused["full"]), ("why", unused.get("why"))) if v is not None}
     else: e.pop("lfmd_note_unused", None)
+    e.pop("lfmd_doubted_kept", None)      # this rebuild decided the clip afresh
     e["lfmd_phrase"] = None if by_hand else lfmd_phrase()      # the gate judges the start by the phrase (983)
     e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
     e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
@@ -1308,7 +1347,8 @@ def redo_lfmd(day, window=None):
         # added." A sent-back card needs one receipt line per point. Every point gets one: the rebuild for a point about
         # the clip, and for any other point what the rebuild did and that nothing else changed (7 Oct 2026). Only a
         # card sent back with no note at all has nothing to answer.
-        receipt = lfmd_receipt(card.get("feedback", ""), window, intro_at=e.get("intro_at"), unused=(unused or {}).get("full"))
+        receipt = lfmd_receipt(card.get("feedback", ""), window, intro_at=e.get("intro_at"), unused=(unused or {}).get("full"),
+                               why_unused=(unused or {}).get("why"), jingle_s=jingle_of(e))
         placed_how = ("placed on the Learnings line heard at the time on Kevin's note" if note_at else "window read off the captions by hand"
                       if by_hand else "found by the detector")
         if receipt and not clear_block(day, card, "the Learnings clip of episode %d was rebuilt from %.1f to %.1f s (%s)"
@@ -1462,6 +1502,26 @@ def learnings_time_from(feedback):
     return True, found.pop()
 
 
+# A Learnings sentence saying the clip is in the WRONG PLACE (gap left by PR 948, 16 Nov 2026). His real wordings:
+# "Learning from my diary is still not in the right place." (2121, 2112, 2122), "Learnings from my diary is wrong."
+# (2112), "is not correct" (2112), "you've clipped the wrong section" (2081), "find the learnings from my diary again"
+# (2130). A sentence about how the clip LOOKS or sounds is not about where it is: "The title card on the learnings for
+# my diary clips doesn't fit" (2114), "the text doesn't fit, and it's missing words" (2087).
+LEARN_DOUBT_RE = re.compile(r"\b(?:wrong|incorrect|again|re-?do(?:ne)?|re-?cut|re-?clip\w*)\b"
+                            r"|(?:\bnot|n['’]t)\s+(?:in\s+)?(?:the\s+)?(?:right|correct)\b", re.I)
+LEARN_LOOK_RE = re.compile(r"\b(?:title|banner|subtitle\w*|caption\w*|text|wording|words?|font|spell\w*|thumbnail|audio|sound|"
+                           r"volume|music|fit|fits)\b", re.I)
+
+
+def learnings_doubted(feedback):
+    """Whether Kevin's note says the Learnings clip is in the wrong place WITHOUT a time for where it starts. Then the
+    hand-placed window is not carried through the re-render as the answer (redo_day parks it as lfmd_window_doubted):
+    2121's 31 Oct note re-rendered the same window and the card came back "(the same section as before)"."""
+    about, t = learnings_time_from(feedback)
+    if not about or t is not None: return False
+    return any(about_learnings(s) and LEARN_DOUBT_RE.search(s) and not LEARN_LOOK_RE.search(s) for s in note_sentences(feedback))
+
+
 def master_time(full_s, intro_at, jingle_s=None):
     """A time on the FULL episode, the video Kevin watches and writes his times against, as a time on the recording
     the clips are cut from. The full episode has the jingle spliced in at intro_at (insert_intro), so everything
@@ -1475,6 +1535,19 @@ def master_time(full_s, intro_at, jingle_s=None):
     t, at = float(full_s), float(intro_at)
     if t < at: return round(t, 2)
     return round(max(at, t - j), 2)
+
+
+def jingle_of(entry):
+    """The jingle length the render of this ledger entry spliced in (jingle_seconds, recorded from 16 Nov 2026), else
+    INTRO_SECONDS_FALLBACK, which is what every earlier render used. A value that is not a plausible length is not
+    trusted. Every reader of his times goes through this, so the clock follows the jingle file (review of PR 948, F4)."""
+    try:
+        raw = (entry or {}).get("jingle_seconds")
+        j = None if isinstance(raw, bool) else float(raw)
+        if j is not None and math.isfinite(j) and 0 < j < 60: return j
+    except (TypeError, ValueError):
+        pass
+    return INTRO_SECONDS_FALLBACK
 
 
 def full_time(master_s, intro_at, jingle_s=None):
@@ -1521,13 +1594,26 @@ LEARN_NEAR_RE = re.compile(r"\b(?:learn\w*|lesson\w*|latest|diar\w*|diet|dairy)\
 NOTE_LOOK_BACK_S, NOTE_LOOK_AHEAD_S = 6.0, 2.0
 
 
+SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)\]]*\s*$")
+STRONG_LEARN_RE = re.compile(r"\b(?:learn\w*|lesson\w*)\b", re.I)
+
+
 def place_from_note(segments, master_s):
     """(window, heard) for the Learnings start Kevin gave, on the recording's clock: the clip from the Learnings words
-    heard at his time, and those words. (None, None) when no Learnings word is heard near it."""
+    heard at his time, and those words. (None, None) when no Learnings word is heard near it.
+
+    The earliest caption with a Learnings word near his time starts the clip, EXCEPT a caption that closes a sentence,
+    carries no learn/lesson word, and has another such caption after it in the same look: that is the sentence before
+    the line ("...watching my diet." then "So the latest on my diary"), which started the clip a few seconds early
+    (review of PR 948, F5). A caption that carries "learnings" is never stepped past, and the result moves only when two
+    or more captions sit in his look."""
     t = float(master_s)
-    near = [(a, x) for a, b, x in segments if a <= t + NOTE_LOOK_AHEAD_S and b >= t - NOTE_LOOK_BACK_S and LEARN_NEAR_RE.search(x)]
+    near = [k for k, (a, b, x) in enumerate(segments) if a <= t + NOTE_LOOK_AHEAD_S and b >= t - NOTE_LOOK_BACK_S and LEARN_NEAR_RE.search(x)]
     if not near: return None, None
-    a, heard = min(near)
+    i = 0
+    while i + 1 < len(near) and SENTENCE_END_RE.search(segments[near[i]][2]) and not STRONG_LEARN_RE.search(segments[near[i]][2]):
+        i += 1
+    a, _, heard = segments[near[i]]
     return lfmd_window_at(segments, a), " ".join(heard.split())
 
 
@@ -1536,7 +1622,7 @@ def note_learnings_at(feedback, entry):
     render with no jingle cut recorded, so his figure cannot be put on the recording's clock). Says which."""
     about, full_s = learnings_time_from(feedback)
     if not about or full_s is None: return None
-    raw = master_time(full_s, (entry or {}).get("intro_at"))
+    raw = master_time(full_s, (entry or {}).get("intro_at"), jingle_of(entry))
     if raw is None:
         print("episode %s: Kevin gave the Learnings clip at %s of the full episode, but the last render recorded no jingle "
               "cut, so it cannot be put on the recording's clock; the finder decides" % ((entry or {}).get("episode"), mmss(full_s)),
@@ -1556,9 +1642,16 @@ def note_record(e, note_at, window, heard=None):
         e.pop("lfmd_from_note", None)
 
 
-def note_unused_words(full_s, where):
-    """The receipt clause when his time found nothing (review of PR 948): said plainly, with where the clip came from."""
+def note_unused_words(full_s, where, why=None):
+    """The receipt clause when his time found nothing (review of PR 948): said plainly, with where the clip came from.
+    `why` is set when a Learnings line WAS heard there but the clip it gives is one the rules refuse (F1)."""
+    if why: return "your time (%s) gave no clip the rules allow (%s); the clip is from %s" % (mmss(full_s), why, where)
     return "your time (%s) found no Learnings line; the clip is from %s" % (mmss(full_s), where)
+
+
+def unused_why(ex):
+    """check_lfmd_window's refusal in his words, without the 'episode N:' it starts with."""
+    return re.sub(r"^episode \S+:\s*", "", str(ex)).strip()[:160]
 
 
 def mmss(s):
@@ -1645,15 +1738,16 @@ def answer_points(points, learnings_change, other_change, code_change=None):
     return "".join("- %s → %s\n" % (p, answer(p)) for p in points)
 
 
-def window_words(window, intro_at=None):
+def window_words(window, intro_at=None, jingle_s=None):
     """'4:37 to 5:50 of the full episode' when the jingle cut is known (the clock Kevin reads his times off), else
     the recording's own '4:30 to 5:43'. Until 16 Nov 2026 every receipt gave the recording's clock, 7 s behind the
-    video he watches, so 2121's said "4:36" while the clip started 7 s after the 4:37 he had asked for."""
+    video he watches, so 2121's said "4:36" while the clip started 7 s after the 4:37 he had asked for. jingle_s is
+    the entry's own jingle length (jingle_of)."""
     if intro_at is None: return "%s to %s" % (mmss(window[0]), mmss(window[1]))
-    return "%s to %s of the full episode" % (mmss(full_time(window[0], intro_at)), mmss(full_time(window[1], intro_at)))
+    return "%s to %s of the full episode" % (mmss(full_time(window[0], intro_at, jingle_s)), mmss(full_time(window[1], intro_at, jingle_s)))
 
 
-def lfmd_receipt(feedback, window, points=None, intro_at=None, unused=None):
+def lfmd_receipt(feedback, window, points=None, intro_at=None, unused=None, why_unused=None, jingle_s=None):
     """One '- <his point> → <what changed>' line per point after a Learnings rebuild. A point about the clip is answered
     with the rebuild; any other point says what the rebuild did and that nothing else on the episode changed, so he can
     see at once if a point needed more. '' only when he left no note (7 Oct 2026; before, '' whenever any point lacked
@@ -1661,8 +1755,8 @@ def lfmd_receipt(feedback, window, points=None, intro_at=None, unused=None):
     Learnings line, said plainly with where the clip came from instead."""
     pts = points if points is not None else receipt_points(feedback)
     if not pts: return ""
-    clip = "the Learnings from my diary clip is rebuilt from %s" % window_words(window, intro_at)
-    if unused is not None: clip += " (%s)" % note_unused_words(unused, "the clip finder")
+    clip = "the Learnings from my diary clip is rebuilt from %s" % window_words(window, intro_at, jingle_s)
+    if unused is not None: clip += " (%s)" % note_unused_words(unused, "the clip finder", why_unused)
     return answer_points([p.strip() for p in pts], clip + " and goes to the socials and the YouTube Short with this episode",
                          "rebuilt to this note: " + clip + "; nothing else on the episode changed")
 
@@ -2121,6 +2215,7 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
     # every refusal is behind us: only now is a stale receipt set aside (kept beside it, never deleted)
     if stale: os.replace(dest, dest + ".stale-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
     note = "%s: %s" % ((today or dt.date.today()).strftime("%-d %b %Y"), why)
+    doubt = learnings_doubted(card.get("feedback", ""))
     for k in mine:
         e = ledger[k]
         # Carried across the reset, so the re-render reuses it rather than asking the
@@ -2128,7 +2223,15 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         hand = e.get("lfmd_window") if e.get("lfmd_window_by") == "operator" else None
         if e.get("status") == "failed":
             for f in RESET_STALE: e.pop(f, None)
-        if hand: e["lfmd_window_keep"] = hand
+        if doubt and e.get("role") == "episode" and (hand or e.get("lfmd_window_keep") or e.get("lfmd_at_keep")):
+            # His note says the clip is in the wrong place and gives no time: the window he rejected is not carried as
+            # the answer. The finder decides, and the window is the fallback only (process), so no clip is lost.
+            e["lfmd_window_doubted"] = hand or e.get("lfmd_window_keep") or e.get("lfmd_window_doubted")
+            if not e["lfmd_window_doubted"]: e.pop("lfmd_window_doubted")
+            e.pop("lfmd_window_keep", None); e.pop("lfmd_at_keep", None)
+            print("episode %d: Kevin's note says the Learnings clip is in the wrong place and gives no time, so the clip finder "
+                  "decides; the window placed by hand is used only if the finder finds none" % day)
+        elif hand: e["lfmd_window_keep"] = hand
         # The jingle figure Kevin gave on THIS note, acted on rather than read and dropped. A jingle point with no
         # figure drops any stored one, so the detector gets another go instead of repeating the cut he just
         # rejected (2100, sent back 15, 16 and 17 Oct 2026 for the same cut).
@@ -2244,17 +2347,20 @@ def concrete_receipt(text, day, ledger, card):
     w = _episode_window(day, ledger)
     if not w: return text
     ep = next((v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode" and v.get("lfmd_window")), {})
-    at = ep.get("intro_at")
+    at, j = ep.get("intro_at"), jingle_of(ep)
     known, before = "redo_lfmd_before" in (card or {}), ((card or {}).get("redo_lfmd_before") or {}).get("window")
     was = ("" if not known else " (there was none before)" if not before
            else " (the same section as before)" if [round(float(x), 1) for x in before] == [round(float(x), 1) for x in w]
-           else " (it ran from %s before)" % window_words(before, at))
+           else " (it ran from %s before)" % window_words(before, at, j))
     note, unused = ep.get("lfmd_from_note") or {}, ep.get("lfmd_note_unused") or {}
     where = "the clip finder" if ep.get("lfmd_window_by") == "detector" else "the window placed by hand before"
     placed = (", starting on the Learnings line heard at the time on your note" if note.get("window") == list(w) else
-              " (%s)" % note_unused_words(unused["full"], where) if unused.get("full") is not None else "")
+              " (%s)" % note_unused_words(unused["full"], where, unused.get("why")) if unused.get("full") is not None else
+              # his note said the hand-placed section was wrong and gave no time, and the finder found no other start
+              " (the clip finder found no other start, so this is the section placed by hand before; send it back with "
+              "the time it starts and the clip moves there)" if ep.get("lfmd_doubted_kept") else "")
     return text.replace(REDO_LEARNINGS, "the episode was re-rendered and its Learnings from my diary clip now runs from %s%s%s; "
-                        "it goes to the socials and the YouTube Short with this episode" % (window_words(w, at), placed, was))
+                        "it goes to the socials and the YouTube Short with this episode" % (window_words(w, at, j), placed, was))
 
 
 def dispatch_run(*args):

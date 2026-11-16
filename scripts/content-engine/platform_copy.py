@@ -293,17 +293,27 @@ SEO_TITLE_RE = re.compile(r"^(?P<lead>[ \t*_#]*SEO Title[ \t*_]*:[ \t*_]*)(?P<ti
 _TITLE_SEP = r"(?:\s*[:|,–—]|\s+-\s)"
 LABEL_FIRST_RE = re.compile(
     r"^[\s(\[]*(?P<label>(?:day|ep|episode|part|week)\.?\s*#?\s*\d+(?:,\d{3})*(?:\s+of\s+[^\n]{1,60}?(?=" + _TITLE_SEP + r"))?"
-    r"|#\d+(?:,\d{3})*|\d+(?:,\d{3})*(?=" + _TITLE_SEP + r"))[\s)\]]*(?:[:|,–—]|-(?=\s))?\s*(?P<rest>.*)$", re.I)
+    r"|#\d+(?:,\d{3})*|\d+(?:,\d{3})*(?=" + _TITLE_SEP + r"))[\s)\]]*(?P<sep>[:|,–—]|-(?=\s))?\s*(?P<rest>.*)$", re.I)
+# Not a label: the label is half of a comparison or a span ("Day 1 vs Day 2100: What Changed", "Day 1 to Day 2100"),
+# or the first of a countdown or list ("3, 2, 1: Race Day Nerves", "Day 1, Day 2, Day 3: ..."). Review of PR 948, F3:
+# those became "vs Day 2100: What Changed (Day 1)" and "2, 1: Race Day Nerves (3)".
+_JOINED_RE = re.compile(r"(?:vs\.?|versus|v\.|to|and|or|&|\+|through|thru|until|till|then|minus|plus)(?=\s|$)", re.I)
+_LIST_NEXT_RE = re.compile(r"(?:(?:day|ep|episode|part|week)\.?\s*)?#?\d+(?:,\d{3})*\s*[,:|]", re.I)
 
 
 def title_day_first(title):
     """(label, title with the label moved to the end) when the title STARTS with a day or number label, else None.
     'Day 2079: Running in the Rain' -> ('Day 2079', 'Running in the Rain (Day 2079)'). A count is a topic, not a
-    label: '3 Lessons From the Run' and '2100 Days Barefoot' are left alone. The rest is None when the title is
-    nothing but the label, which is reported and not rewritten."""
+    label: '3 Lessons From the Run' and '2100 Days Barefoot' are left alone, and so is a ranking with nothing after
+    it ('#1 Mistake Every Barefoot Runner Makes'), a comparison ('Day 1 vs Day 2100: What Changed') and a countdown
+    ('3, 2, 1: Race Day Nerves'). The rest is None when the title is nothing but the label, which is reported and not
+    rewritten."""
     m = LABEL_FIRST_RE.match(title or "")
     if not m: return None
-    label, rest = " ".join(m.group("label").split()), m.group("rest").strip()
+    label, rest, sep = " ".join(m.group("label").split()), m.group("rest").strip(), m.group("sep")
+    if label.startswith("#") and not sep: return None             # "#1 Mistake...": the number is part of the topic
+    if not sep and _JOINED_RE.match(rest): return None            # "Day 1 vs Day 2100": both days are the topic
+    if sep == "," and _LIST_NEXT_RE.match(rest): return None      # "3, 2, 1:" and "Day 1, Day 2:": a list, not a label
     return label, (("%s (%s)" % (rest, label)) if rest else None)
 
 
