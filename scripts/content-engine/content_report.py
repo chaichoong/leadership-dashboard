@@ -103,7 +103,7 @@ CARD_DUE_HOURS = 24      # the night that renders an episode writes its copy and
 
 def no_card_words(rendered, now=None):
     """Why a rendered episode has no card. 'Not raised yet' only while its render is recent: the night that renders it
-    raises its card. Past that, saying 'not raised yet' sounds like a card is coming when nothing will raise one (review
+    raises its card. Past that, saying 'not raised yet' sounds like a card is on its way when nothing is moving (review
     of PR 953, F1: 2156 and 2186 rendered on 4 and 15 Nov, and their records hold no video, so approval.pending never
     picks them up). This report reads no Airtable record, so it says where to look, not what is missing."""
     try:
@@ -114,9 +114,9 @@ def no_card_words(rendered, now=None):
     now = now or dt.datetime.now(dt.timezone.utc)
     if (now - t).total_seconds() < CARD_DUE_HOURS * 3600: return "rendered, its card is not raised yet"
     days = max(1, (now.astimezone(LONDON).date() - t.astimezone(LONDON).date()).days)
-    return ("rendered on %s and still no card after %d day(s): nothing will raise one, because the card step takes an "
-            "episode only once its own record holds the video, the thumbnail and the YouTube copy. Its record is the place "
-            "to look (NOT CHECKED here: this report reads no record)" % (t.astimezone(LONDON).strftime("%-d %b"), days))
+    return ("rendered on %s and still no card after %d day(s): the card step raises one on its next run once the "
+            "episode's own record holds the video, the thumbnail and the YouTube copy, so its record is the place to look "
+            "(NOT CHECKED here: this report reads no record)" % (t.astimezone(LONDON).strftime("%-d %b"), days))
 
 
 def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_only, no_card, failed, no_card_at=None, now=None):
@@ -855,11 +855,11 @@ def _selftest():
     assert [s["day"] for s in gp["sentBack"]] == [1841], "a published day drops out of the sent-back list"
     assert why58({"2058": {"task": "t"}}) == {"day": 2058, "why": "its card waits for your approval"}
     assert why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "rendered, its card is not raised yet"}
-    # rendered last night: the card is coming; rendered 12 days ago with none: nothing will raise it (PR 953 review, F1)
+    # rendered last night: the card is coming; rendered 12 days ago with none: say where to look (PR 953 review, F1)
     assert why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered", "rendered": "2026-09-16T02:10:00+01:00"}, "y": {"episode": 2059}})["why"] \
         == "rendered, its card is not raised yet"
     stale = why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered", "rendered": "2026-09-04T02:10:00+01:00"}, "y": {"episode": 2059}})["why"]
-    assert stale.startswith("rendered on 4 Sep and still no card after 12 day(s): nothing will raise one"), stale
+    assert stale.startswith("rendered on 4 Sep and still no card after 12 day(s): the card step raises one"), stale
     assert why58({"2058": {"qa_waiting": {"at": "x"}}}) == {"day": 2058, "why": "its card waits for the files to be readable"}
     assert why58({"2058": {"qa_blocked": {"failures": ["no Learnings clip"]}}}) == {"day": 2058, "why": "it failed its output check"}
     assert why58({}, {"x": {"day": 2058, "status": "failed"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "its render failed"}

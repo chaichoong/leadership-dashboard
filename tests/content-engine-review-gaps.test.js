@@ -35,10 +35,12 @@ print(json.dumps({"res": res, "out": out.getvalue(), "err": err.getvalue()}))
 }
 
 // The night render on an invented recording: one caption a second, a Learnings line at 200 s (the finder hears it only
-// when `line` is a real one), a sign-off at 280 s. ffprobe answers 400 s. `mode` "stop" fails the render right after the
-// clip is decided (the shape of an upload or overlay failure); "land" mocks every later step so the render succeeds.
+// when `line` is a real one), a sign-off at 280 s. ffprobe answers 400 s, except for the local jingle copy, which runs
+// `jingle` + the 1 s trim. `mode` "stop" fails the render right after the clip is decided (the shape of an upload or
+// overlay failure); "land" runs the REAL build_outputs with only ffmpeg, the overlays and the uploads stubbed.
 const NIGHT = String.raw`
-def night(seed, line="so the latest word I say is rest", mode="stop", jingle=7.0):
+SEEN = {}
+def night(seed, line="so the latest word I say is rest", mode="stop", jingle=7.0, resolve=2122):
     talk = ["some of the talk goes here"] * 200 + [line] + ["that you should rest more"] * 79 + ["thank you as always, see you tomorrow"] + ["[BLANK_AUDIO]"] * 3
     cues = "".join("%d\n00:%02d:%02d,000 --> 00:%02d:%02d,900\n%s\n\n" % (i + 1, i // 60, i % 60, i // 60, i % 60, t) for i, t in enumerate(talk))
     tmp = tempfile.mkdtemp(); clip = os.path.join(tmp, "VID_X.insv"); open(clip, "w").write("x")
@@ -47,14 +49,18 @@ def night(seed, line="so the latest word I say is rest", mode="stop", jingle=7.0
     class P:
         def __init__(self, o): self.stdout, self.returncode = o, 0
     real = subprocess.run
-    subprocess.run = lambda cmd, *a, **k: P("400") if os.path.basename(cmd[0]) == "ffprobe" else real(cmd, *a, **k)
+    local_intro = os.path.join(tmp, "intro_local.mp4")
+    def probe(cmd, *a, **k):
+        if os.path.basename(cmd[0]) != "ffprobe": return real(cmd, *a, **k)
+        return P(str(jingle + render.INTRO_TRIM_START) if cmd[-1] == local_intro else "400")
+    subprocess.run = probe
     render.transcribe = transcribe
     render.clip_role = lambda d, has: "episode"
     sys.modules["pointing"] = types.SimpleNamespace(pans_arg=lambda p: "")
     saved = []
     watch.save_ledger = lambda l: saved.append(json.loads(json.dumps(l)))
     watch.spoken_day = lambda t: 2122
-    watch.resolve_episode = lambda d, s, prev_day_has_talk=False: (2122, "test")
+    watch.resolve_episode = lambda d, s, prev_day_has_talk=False: (resolve, "test")
     if mode == "stop":
         def stop(*a, **k): raise RuntimeError("the upload failed after the clip was placed")
         render.find_pans_for = stop
@@ -63,9 +69,21 @@ def night(seed, line="so the latest word I say is rest", mode="stop", jingle=7.0
         render.render_masters = lambda *a, **k: {"16:9": "m169.mp4", "9:16": "m916.mp4"}
         render.thumb_lines = lambda t: ("A", "B", "fallback")
         render.title_from_transcript = lambda t: "T"
-        def bo(*a, **k):
-            render.LAST_CUT.update({"at": 30.0, "resume": 31.0, "by": "detector", "jingle_s": jingle}); return {"full": "f.mp4"}
-        render.build_outputs = bo
+        def overlay(ov, args, what):
+            if args[0] == "captions": open(args[2], "w").write(open(args[1]).read())
+            else: open(args[3], "w").write("x")
+        render.overlay = overlay
+        render.check_captions = lambda p, w: None
+        render.find_pause = lambda m, segs, end: (30.0, 31.0)
+        render.media_seconds = lambda p: 400.0
+        SEEN["intros"] = []
+        render.insert_intro = lambda src, at, out, intro=None: SEEN["intros"].append(intro) or open(out, "w").write("x") and out
+        render.podcast_audio = lambda c, out, at=0.0, resume=0.0: out
+        render.intro_clip = lambda: local_intro
+        render.trim = lambda src, a, b, dest: dest
+        render.clean_short = lambda *a, **k: None
+        render.assert_has_video = lambda p, w: None
+        SEEN["workdir"] = os.path.join(tmp, "render_VID_X")
         render.horizon_for = lambda m: {}
         render.source_fps = lambda p: 30.0
         render.make_thumbnail = lambda *a, **k: ("t.png", ["A", "B"])
@@ -75,7 +93,7 @@ def night(seed, line="so the latest word I say is rest", mode="stop", jingle=7.0
         render.copy_goes_with_render = lambda d: False
         render.keep_for_next_part = lambda *a, **k: False
         watch._airtable = lambda *a, **k: {}
-    led = {"VID_X.insv": dict({"local": clip, "date": "2026-02-19", "day": 2122, "status": "pulled"}, **seed)}
+    led = dict({"VID_X.insv": dict({"local": clip, "date": "2026-02-19", "day": 2122, "status": "pulled"}, **seed)}, **SEEN.pop("others", {}))
     try: render.process("VID_X.insv", led, keep=True); failed = None
     except RuntimeError as ex: failed = str(ex)
     return led["VID_X.insv"], (saved[-1]["VID_X.insv"] if saved else {}), failed
@@ -110,11 +128,18 @@ res = {"failed2": failed2, "status": e2["status"], "window": e2["lfmd_window"], 
 });
 
 describe('F4: his note times are put back by the jingle the render spliced in, not a fixed 7 s', () => {
-  it('a render records the jingle length it shifted the captions by', () => {
+  it('the real build_outputs measures the jingle file it splices in, shifts the captions by it, and the ledger keeps it', () => {
     const r = py(`${NIGHT}
 e, disk, failed = night({}, mode="land", jingle=9.0)
-res = [disk.get("jingle_seconds"), disk.get("intro_at")]`).res;
-    expect(r).toEqual([9, 30]);
+caps = render.srt_segments(open(os.path.join(SEEN["workdir"], "Episode_2122_Full_Episode_YT.srt")).read())
+res = {"failed": failed, "jingle": disk.get("jingle_seconds"), "cut": disk.get("intro_at"), "local": SEEN["intros"],
+       "line": [a for a, b, t in caps if t == "so the latest word I say is rest"]}`).res;
+    expect(r.failed).toBe(null);
+    expect(r.jingle).toBe(9);              // the previous head measured the Drive mount's copy (399 here), never this file
+    expect(r.cut).toBe(30);
+    expect(r.local).toHaveLength(2);       // both the full episode and the clean YouTube copy get the measured file
+    expect(r.local.every((x) => x.endsWith('intro_local.mp4'))).toBe(true);
+    expect(r.line).toEqual([209]);         // the line at 200 s on the recording sits 9 s later in the captions
   });
 
   it('BACK-TEST: 2121\'s "exactly 4 minutes and 37 seconds" lands on 270 s with the 7 s jingle, and moves with a longer one', () => {
@@ -172,9 +197,21 @@ describe('F5: the sentence before the Learnings line never starts the clip', () 
   const SEGS = (first, second) => `[(260.0, 265.0, "and that is the run for today"), (266.0, 270.5, ${JSON.stringify(first)}),
         (270.8, 276.0, ${JSON.stringify(second)}), (276.2, 300.0, "that I need to rest more"), (300.0, 305.0, "stay positive, see you tomorrow")]`;
 
-  it('BACK-TEST: "...watching my diet." then "So the latest on my diary": the clip starts on the line', () => {
+  it('BACK-TEST: "...watching my diet." then "So the learnings from my diary today": the clip starts on the line', () => {
+    const r = py(`res = render.place_from_note(${SEGS("I have been watching my diet.", "So the learnings from my diary today are")}, 272.0)`).res;
+    expect(r).toEqual([[270.8, 305], 'So the learnings from my diary today are']);   // main started at 266.0, on the diet sentence
+  });
+
+  it('review of PR 957: the line misheard as weak words is never stepped past ("The latest from my diary." then "Diet wise...")', () => {
+    const r = py(`segs = [(260.0, 265.5, "and that is the run"), (266.0, 268.4, "The latest from my diary."), (268.6, 275.0, "Diet wise I have been good."),
+        (276.0, 300.0, "that I need to rest more"), (300.0, 305.0, "stay positive, see you tomorrow")]
+res = render.place_from_note(segs, 267.0)`).res;
+    expect(r).toEqual([[266, 305], 'The latest from my diary.']);   // the previous head started at 268.6 and lost the line
+  });
+
+  it('CONTROL: a next caption the clip finder does not read as the line never pulls the start forward', () => {
     const r = py(`res = render.place_from_note(${SEGS("I have been watching my diet.", "So the latest on my diary today is")}, 272.0)`).res;
-    expect(r).toEqual([[270.8, 305], 'So the latest on my diary today is']);   // main started at 266.0, on the diet sentence
+    expect(r).toEqual([[266, 305], 'I have been watching my diet.']);   // as origin/main: no step without the finder's own reading
   });
 
   it('CONTROL: a closing sentence that carries "learnings" is the line itself, so it still starts the clip', () => {
@@ -200,7 +237,8 @@ describe('F1: a note time the rules refuse never fails the Learnings rebuild nig
 tmp = tempfile.mkdtemp(); clip = os.path.join(tmp, "c.insv"); open(clip, "w").write("x")
 note = ${JSON.stringify(note)}
 led = {"c.insv": {"episode": 2132, "role": "episode", "status": "rendered", "local": clip, "date": "2026-02-02", "drive_id": "d",
-                  "duration": 600.0, "intro_at": 27.27}}
+                  "duration": 600.0, "intro_at": 27.27, "lfmd_at_keep": {"full": 300.0, "master": 293.0}, "lfmd_window_keep": [100.0, 150.0],
+                  "lfmd_window_doubted": [100.0, 150.0]}}
 watch.load_ledger = lambda: led; watch.save_ledger = lambda l: None
 srt = os.path.join(tmp, "s.srt"); open(srt, "w").write(${JSON.stringify(SRT)})
 render.transcribe = lambda c, w: ("text", srt)
@@ -217,7 +255,8 @@ approval.refresh_card = lambda day, receipt=None: sent.append(open(receipt).read
 try: render.redo_lfmd(2132); died = None
 except SystemExit as ex: died = str(ex)
 e = led["c.insv"]
-res = {"died": died, "window": e["lfmd_window"], "by": e["lfmd_window_by"], "unused": e.get("lfmd_note_unused"), "receipt": sent}`;
+res = {"died": died, "window": e["lfmd_window"], "by": e["lfmd_window_by"], "unused": e.get("lfmd_note_unused"), "receipt": sent,
+       "keeps": sorted(k for k in ("lfmd_at_keep", "lfmd_window_keep", "lfmd_window_doubted") if k in e)}`;
 
   it('BACK-TEST: his time inside the last 20 s (a 5 s clip) is said and dropped, and the finder\'s clip is rebuilt', () => {
     const r = py(REBUILD('Learnings from my diary is at 9 minutes and 57 seconds of the episode.')).res;
@@ -236,6 +275,28 @@ res = {"died": died, "window": e["lfmd_window"], "by": e["lfmd_window_by"], "unu
     expect(r.window).toEqual([418, 580]);
     expect(r.by).toBe('operator');
     expect(r.unused).toBe(null);
+    expect(r.keeps).toEqual([]);           // F2 leftover: the rebuild that lands uses them up, as a full render does
+  });
+});
+
+describe('PR 953 review F5: a clip resolved to another episode drops the old episode\'s file links', () => {
+  const OLD_OUT = { full: 'https://drive.google.com/file/d/FULL2121aaaaaa/view', thumb: 'https://drive.google.com/file/d/THUMB2121aaaaa/view' };
+  it('BACK-TEST: a redo that moves the clip from 2121 to 2122 and then stops leaves 2121\'s own record clean', () => {
+    const r = py(`${NIGHT}
+e, disk, failed = night({"episode": 2121, "role": "episode", "outputs": ${J(OLD_OUT)}})
+rec = {"Video Edited URL": ${J(OLD_OUT.full)}, "Thumbnail URL": ${J(OLD_OUT.thumb)}}
+res = {"failed": failed, "episode": disk.get("episode"), "outputs": disk.get("outputs"), "crossed": qa.crossed_record(2121, rec, {"VID_X.insv": disk})}`).res;
+    expect(r.failed).toContain('upload failed');
+    expect(r.episode).toBe(2122);
+    expect(r.outputs).toBe(null);
+    expect(r.crossed).toEqual([]);         // the previous head flagged 2121's correct record as holding 2122's files
+  });
+
+  it('CONTROL: a clip that stays on its episode keeps its links until its own render replaces them', () => {
+    const r = py(`${NIGHT}
+e, disk, failed = night({"episode": 2122, "role": "episode", "outputs": ${J(OLD_OUT)}})
+res = disk.get("outputs")`).res;
+    expect(r).toEqual(OLD_OUT);
   });
 });
 
@@ -253,11 +314,17 @@ notes = ["Learning from my diary is still not in the right place.",
          "Learnings from my diary is fine. The title is wrong.",
          "Learnings from my diary is wrong. It should kick in at around 4:32 of the main episode.",
          "Learnings from my diary is wrong, it should kick in at around 4:32 of the main episode.",
-         "The jingle is in the wrong place."]
+         "The jingle is in the wrong place.",
+         "The learnings from my diary is fine but please redo the jingle.",
+         "Nothing wrong with the learnings from my diary.",
+         "Learnings from my diary is spot on again.",
+         "Learnings from my diary is cut off too early again.",
+         "The title card on the learnings clip is wrong."]
 res = [render.learnings_doubted(n) for n in notes]`).res;
     // 2112's 26 Oct note gives its time in the NEXT sentence, which PR 948's M2 rule does not read, so it counts as
     // "wrong, no time": the finder decides and the hand window is the fallback. The same words in one sentence give a time.
-    expect(r).toEqual([true, true, true, true, true, false, false, false, false, true, false, false]);
+    // The last five must never fire (review of PR 957): praise, a note about another part, the clip's end, its banner.
+    expect(r).toEqual([true, true, true, true, true, false, false, false, false, true, false, false, false, false, false, false, false]);
   });
 
   const REDO = (note) => `
@@ -322,7 +389,7 @@ describe('F3: the title rule leaves a ranking, a comparison and a countdown alon
   });
 });
 
-describe('PR 953 review F1: the morning report never promises a card nothing will raise', () => {
+describe('PR 953 review F1: the morning report never says a card is on its way when nothing is moving', () => {
   it('BACK-TEST: 2156, rendered on 4 Nov with no card on 16 Nov, is named as stuck, not "not raised yet"', () => {
     const r = py(`
 now = dt.datetime(2026, 11, 16, 9, 0, tzinfo=dt.timezone.utc)
@@ -330,7 +397,7 @@ now = dt.datetime(2026, 11, 16, 9, 0, tzinfo=dt.timezone.utc)
 res = [content_report.no_card_words("2026-11-04T01:12:38+00:00", now), content_report.no_card_words("2026-11-16T02:42:12+00:00", now),
        content_report.no_card_words(None, now),
        content_report.blocker_why(2156, [], {}, [], set(), set(), [], [2156], set(), no_card_at={2156: "2026-11-04T01:12:38+00:00"}, now=now)]`).res;
-    expect(r[0]).toMatch(/^rendered on 4 Nov and still no card after 12 day\(s\): nothing will raise one/);
+    expect(r[0]).toMatch(/^rendered on 4 Nov and still no card after 12 day\(s\): the card step raises one on its next run once/);
     expect(r[0]).toContain('NOT CHECKED here');
     expect(r[1]).toBe('rendered, its card is not raised yet');   // rendered last night: the card is genuinely on its way
     expect(r[2]).toBe('rendered, its card is not raised yet');   // no render time on the ledger: nothing to judge by

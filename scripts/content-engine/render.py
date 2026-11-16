@@ -942,8 +942,10 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode", 
     if cut_by == "operator": print("intro: jingle cut taken from the figure on the card: %.2f s" % at)
     # The jingle length this render shifts the captions by, measured once and kept on the ledger (jingle_seconds), so
     # a time Kevin reads off this episode is put back on the recording's clock with THIS render's jingle, not a fixed
-    # 7.0 s that is wrong the day the jingle file changes (review of PR 948, F4).
-    jingle_s = intro_seconds()
+    # 7.0 s that is wrong the day the jingle file changes (review of PR 948, F4). Measured on the very file spliced in
+    # below (intro_clip's local copy), not the Drive mount's copy (review of PR 957).
+    intro = intro_clip()
+    jingle_s = intro_seconds(intro)
     LAST_CUT.update({"at": at, "resume": resume, "by": cut_by, "jingle_s": jingle_s})
     clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
     with open(caps, "w") as fh: fh.write(clipped)
@@ -951,10 +953,10 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode", 
     captioned = os.path.join(workdir, "full_captioned.mp4")
     overlay(ov, ["full", masters["16:9"], caps, captioned], "episode %s full" % day)
     paths["full"] = os.path.join(workdir, names["full"])
-    insert_intro(captioned, at, paths["full"])
+    insert_intro(captioned, at, paths["full"], intro)
     paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
     # YouTube gets the same cut without burnt-in captions, plus the caption file lined up with the jingle
-    paths["full_yt"] = insert_intro(masters["16:9"], at, os.path.join(workdir, names["full_yt"]))
+    paths["full_yt"] = insert_intro(masters["16:9"], at, os.path.join(workdir, names["full_yt"]), intro)
     paths["full_srt"] = os.path.join(workdir, names["full_srt"])
     with open(paths["full_srt"], "w") as fh: fh.write(shift_after(clipped, at, jingle_s))
     check_captions(paths["full_srt"], "episode %s YouTube captions" % day)
@@ -1132,6 +1134,13 @@ def process(key, ledger, keep=False):
         day, reason = spoken, "teaser for day %d, recorded the next day (it says day %d)" % (spoken, spoken)
     else:
         day, reason = watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)
+    if e.get("outputs") and e.get("episode") is not None and e.get("episode") != day:
+        # The files on the entry are the OLD episode's. Kept under the new number, a render that stops before writing
+        # its own made the old episode's correct record read as crossed (qa.crossed_record) and its card was refused
+        # (review of PR 953, F5). Its record still holds the links; this render writes the new episode's own.
+        print("%s: now episode %d (was %s); the previous episode's file links are dropped from this clip's entry"
+              % (key, day, e.get("episode")))
+        e.pop("outputs")
     e["episode"] = day; e["episode_reason"] = reason; e["status"] = "rendering"; watch.save_ledger(ledger)
     e.pop("lfmd_early_ok", None)      # a clip cut again is watched again before an early start is accepted (qa.py accept-early)
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window); e["role"] = role; e["duration"] = round(duration, 1)
@@ -1328,6 +1337,7 @@ def redo_lfmd(day, window=None):
     if unused: e["lfmd_note_unused"] = {k: v for k, v in (("full", unused["full"]), ("why", unused.get("why"))) if v is not None}
     else: e.pop("lfmd_note_unused", None)
     e.pop("lfmd_doubted_kept", None)      # this rebuild decided the clip afresh
+    for k2 in ("lfmd_window_keep", "lfmd_at_keep", "lfmd_window_doubted"): e.pop(k2, None)   # used, as a full render uses them (F2)
     e["lfmd_phrase"] = None if by_hand else lfmd_phrase()      # the gate judges the start by the phrase (983)
     e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
     e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
@@ -1502,15 +1512,19 @@ def learnings_time_from(feedback):
     return True, found.pop()
 
 
-# A Learnings sentence saying the clip is in the WRONG PLACE (gap left by PR 948, 16 Nov 2026). His real wordings:
-# "Learning from my diary is still not in the right place." (2121, 2112, 2122), "Learnings from my diary is wrong."
-# (2112), "is not correct" (2112), "you've clipped the wrong section" (2081), "find the learnings from my diary again"
-# (2130). A sentence about how the clip LOOKS or sounds is not about where it is: "The title card on the learnings for
-# my diary clips doesn't fit" (2114), "the text doesn't fit, and it's missing words" (2087).
-LEARN_DOUBT_RE = re.compile(r"\b(?:wrong|incorrect|again|re-?do(?:ne)?|re-?cut|re-?clip\w*)\b"
-                            r"|(?:\bnot|n['’]t)\s+(?:in\s+)?(?:the\s+)?(?:right|correct)\b", re.I)
-LEARN_LOOK_RE = re.compile(r"\b(?:title|banner|subtitle\w*|caption\w*|text|wording|words?|font|spell\w*|thumbnail|audio|sound|"
-                           r"volume|music|fit|fits)\b", re.I)
+# A Learnings sentence saying the clip is in the WRONG PLACE (gap left by PR 948, 16 Nov 2026), matched on his own
+# phrases only: "is still not in the right place" (2121, 2112, 2122), "is wrong" (2112), "is not correct" (2112),
+# "clipped the wrong section" (2081), "find the learnings from my diary again" (2130). Bare words ("wrong", "redo",
+# "again") fired on praise and on notes about something else (review of PR 957: "is fine but please redo the jingle",
+# "Nothing wrong with the learnings", "spot on again", "cut off too early again"), so a sentence that praises, names
+# another part of the episode, or talks about the clip's end or look never fires. Missing one keeps the old behaviour.
+LEARN_DOUBT_RE = re.compile(r"\b(?:wrong\s+(?:place|section|part|bit|spot)|(?:is|are|was|were)\s+(?:still\s+)?(?:wrong|incorrect)"
+                            r"|(?:is|are|was|were)(?:\s+still)?\s+not\s+(?:in\s+the\s+right\s+place|correct|right)"
+                            r"|(?:is|are|was|were)n['’]t\s+(?:in\s+the\s+right\s+place|correct|right)"
+                            r"|find\s+(?:the\s+)?learn\w*\b.*\bagain)\b", re.I)
+LEARN_LOOK_RE = re.compile(r"\b(?:nothing|fine|good|great|spot\s+on|perfect|jingle|intro|title|banner|subtitle\w*|caption\w*|text|"
+                           r"wording|words?|font|spell\w*|thumbnail|summary|teaser|audio|sound|volume|music|fit|fits|cut\s+off|"
+                           r"cuts\s+off|too\s+(?:early|late|short|long)|end\w*|length)\b", re.I)
 
 
 def learnings_doubted(feedback):
@@ -1602,16 +1616,18 @@ def place_from_note(segments, master_s):
     """(window, heard) for the Learnings start Kevin gave, on the recording's clock: the clip from the Learnings words
     heard at his time, and those words. (None, None) when no Learnings word is heard near it.
 
-    The earliest caption with a Learnings word near his time starts the clip, EXCEPT a caption that closes a sentence,
-    carries no learn/lesson word, and has another such caption after it in the same look: that is the sentence before
-    the line ("...watching my diet." then "So the latest on my diary"), which started the clip a few seconds early
-    (review of PR 948, F5). A caption that carries "learnings" is never stepped past, and the result moves only when two
-    or more captions sit in his look."""
+    The earliest caption with a Learnings word near his time starts the clip. It is stepped past ONLY when it closes a
+    sentence, is not the line itself (no learn/lesson word, and the clip finder does not read it as the line), and the
+    next caption in his look IS the line by the finder's own reading (lfmd_said): "...watching my diet." then "So the
+    learnings from my diary today" (review of PR 948, F5). A line the transcriber turned into weak words ("The latest
+    from my diary." then "Diet wise I have been good.") is never stepped past: the finder reads the first as the line
+    and the second as nothing (review of PR 957)."""
     t = float(master_s)
     near = [k for k, (a, b, x) in enumerate(segments) if a <= t + NOTE_LOOK_AHEAD_S and b >= t - NOTE_LOOK_BACK_S and LEARN_NEAR_RE.search(x)]
     if not near: return None, None
-    i = 0
-    while i + 1 < len(near) and SENTENCE_END_RE.search(segments[near[i]][2]) and not STRONG_LEARN_RE.search(segments[near[i]][2]):
+    i, text = 0, lambda j: segments[near[j]][2]
+    while (i + 1 < len(near) and SENTENCE_END_RE.search(text(i)) and not STRONG_LEARN_RE.search(text(i))
+           and not lfmd_said(text(i)) and lfmd_said(text(i + 1))):
         i += 1
     a, _, heard = segments[near[i]]
     return lfmd_window_at(segments, a), " ".join(heard.split())
