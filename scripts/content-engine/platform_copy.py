@@ -297,8 +297,11 @@ LABEL_FIRST_RE = re.compile(
 # Not a label: the label is half of a comparison or a span ("Day 1 vs Day 2100: What Changed", "Day 1 to Day 2100"),
 # or the first of a countdown or list ("3, 2, 1: Race Day Nerves", "Day 1, Day 2, Day 3: ..."). Review of PR 948, F3:
 # those became "vs Day 2100: What Changed (Day 1)" and "2, 1: Race Day Nerves (3)".
-_JOINED_RE = re.compile(r"(?:vs\.?|versus|v\.|to|and|or|&|\+|through|thru|until|till|then|minus|plus)(?=\s|$)", re.I)
-_LIST_NEXT_RE = re.compile(r"(?:(?:day|ep|episode|part|week)\.?\s*)?#?\d+(?:,\d{3})*\s*[,:|]", re.I)
+_JOINED_RE = re.compile(r"(?:vs\.?|versus|v\.?|to|and|or|&|\+|through|thru|until|till|then|minus|plus)(?=\s|$)", re.I)
+_LIST_NEXT_RE = re.compile(r"(?:(?:day|ep|episode|part|week)\.?\s*)?#?\d+(?:,\d{3})*\s*(?:[,:|]|(?:and|or|to|&)(?=\s))", re.I)
+# "Day 1 - Day 2100: What Changed": a second label straight after a dash (or no separator) makes the first one half of
+# a span, not a label (Kevin, 16 Nov 2026, on PR 957). "Day 2100 - 5 Lessons" still moves: a count is not a label.
+_SPAN_NEXT_RE = re.compile(r"(?:day|ep|episode|part|week)\.?\s*#?\d+", re.I)
 
 
 def title_day_first(title):
@@ -306,14 +309,15 @@ def title_day_first(title):
     'Day 2079: Running in the Rain' -> ('Day 2079', 'Running in the Rain (Day 2079)'). A count is a topic, not a
     label: '3 Lessons From the Run' and '2100 Days Barefoot' are left alone, and so is a ranking with nothing after
     it ('#1 Mistake Every Barefoot Runner Makes'), a comparison ('Day 1 vs Day 2100: What Changed') and a countdown
-    ('3, 2, 1: Race Day Nerves'). The rest is None when the title is nothing but the label, which is reported and not
-    rewritten."""
+    ('3, 2, 1: Race Day Nerves', 'Day 1, 2 and 3: Recovery'), a span ('Day 1 - Day 2100: What Changed') and 'Week 1 v
+    Week 2'. The rest is None when the title is nothing but the label, which is reported and not rewritten."""
     m = LABEL_FIRST_RE.match(title or "")
     if not m: return None
     label, rest, sep = " ".join(m.group("label").split()), m.group("rest").strip(), m.group("sep")
     if label.startswith("#") and not sep: return None             # "#1 Mistake...": the number is part of the topic
     if not sep and _JOINED_RE.match(rest): return None            # "Day 1 vs Day 2100": both days are the topic
-    if sep == "," and _LIST_NEXT_RE.match(rest): return None      # "3, 2, 1:" and "Day 1, Day 2:": a list, not a label
+    if sep == "," and _LIST_NEXT_RE.match(rest): return None      # "3, 2, 1:", "Day 1, Day 2:", "Day 1, 2 and 3:": a list
+    if sep in (None, "-", "–", "—") and _SPAN_NEXT_RE.match(rest): return None   # "Day 1 - Day 2100": a span
     return label, (("%s (%s)" % (rest, label)) if rest else None)
 
 

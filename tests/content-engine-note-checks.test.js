@@ -143,7 +143,9 @@ describe('line 34: the Learnings clip start Kevin gives is read, put on the righ
       'Learning from my diary is still not in the right place',
       'The intro jingle should happen at 26 seconds of the full episode.',
     ])}]`).res;
-    expect(r).toEqual([[true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [false, null]]);
+    // The first is 2112's 26 Oct note: since 16 Nov 2026 the ONE sentence straight after a Learnings sentence is read
+    // when it is plainly about the same clip ("It should kick in at..."), so it gives 4:32. Every other shape still gives none.
+    expect(r).toEqual([[true, 272], [true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [true, null], [false, null]]);
   });
 
   it('his time is on the full episode, so it moves back by the jingle once past the cut (the 7 s 2121 lost)', () => {
