@@ -131,6 +131,16 @@ def git(args, cwd=None, timeout=300):
     return fm.sh(["git"] + args, cwd=cwd or REPO, timeout=timeout)
 
 
+def tree_head(tree, base):
+    """The PR head merged into TREE, read off the tree itself with merge-pr.py's own reader (second
+    review C2), never from refs/fixer/pr-N, which merge-pr.py fetches into too: a pass is only ever
+    recorded for the code the reviewer was shown. '' when the tree was not built on BASE or cannot say."""
+    mp = _load("merge_pr", "merge-pr.py")
+    mp.REPO = REPO
+    built_on, head, err = mp.tree_shas(tree)
+    return head if not err and built_on == base and SHA_RE.fullmatch(head or "") else ""
+
+
 def resolve(ref):
     r = git(["rev-parse", "--verify", "--quiet", ref + "^{commit}"])
     sha = (r.stdout or "").strip()
@@ -281,7 +291,8 @@ def summary(res):
         return "not run"
     r = runs(res)
     if not r:
-        return "failed to load" if res.get("status") == "failed" else "no tests"
+        return ("did not finish" if res.get("timedOut") else "failed to load" if res.get("status") == "failed"
+                else "no tests")
     failed = sum(1 for v in r.values() if "failed" in v)
     return "%d ran, %d failed" % (len(r), failed)
 
@@ -327,6 +338,10 @@ def file_verdict(path, kind, base_res, head_res, list_edit, added):
     return dict(row, verdict=NOTHING)
 
 
+class TimedOut(str):
+    """run_vitest's why when vitest ran past BACKTEST_TIMEOUT and was stopped."""
+
+
 def run_vitest(tree, files, trees):
     """(per-file results keyed by repo path, None) or (None, why). Never a guess. `trees` are the
     throwaway trees in use, removed by the watchdog if this process dies mid-run."""
@@ -337,7 +352,7 @@ def run_vitest(tree, files, trees):
             rc, out, err = run_group(["npx", "vitest", "run", "--reporter=json", "--outputFile.json=" + report]
                                      + files, cwd=tree, timeout=BACKTEST_TIMEOUT, trees=trees)
         except subprocess.TimeoutExpired:
-            return None, "the back-test timed out after %d seconds and was stopped" % BACKTEST_TIMEOUT
+            return None, TimedOut("the back-test timed out after %d seconds and was stopped" % BACKTEST_TIMEOUT)
         d = fm._read_json(report)
         if not isinstance(d, dict) or not isinstance(d.get("testResults"), list):
             return None, "vitest wrote no report (exit %s): %s" % (rc, (out or err).strip()[-300:])
@@ -367,7 +382,7 @@ def back_test(pr, base, tree=None):
             return out
     base_tree = None
     try:
-        out["head"] = fm.tested_head(pr)
+        out["head"] = tree_head(tree, base)
         if not resolve(base):
             out["error"] = "the base commit %s is not in this repository" % base
             return out
@@ -421,14 +436,40 @@ def back_test(pr, base, tree=None):
                 out["error"] = "the back-test could not run: %s" % cannot
                 return out
             files = [p for _, p in vitest_files]
-            on_base, why = run_vitest(base_tree, files, [base_tree, tree])
+            trees = [base_tree, tree]
+            on_base, why = run_vitest(base_tree, files, trees)
+            if isinstance(why, TimedOut):
+                # The old code ran past the limit (second review C9: a fix for a hang). Each file is timed
+                # on its own, so a hang is pinned to its file; a file that does not finish on the old code
+                # is judged as one that did not load there (a new one proves, a changed one proves nothing).
+                on_base, why = {}, None
+                for p in files:
+                    res, w = run_vitest(base_tree, [p], trees) if len(files) > 1 else (None, TimedOut())
+                    if w and not isinstance(w, TimedOut):
+                        out["error"] = w
+                        return out
+                    on_base[p] = (res or {}).get(p) if res else {
+                        "status": "failed", "assertionResults": [], "timedOut": True,
+                        "message": "it did not finish on the old code within %d seconds" % BACKTEST_TIMEOUT}
             if why:
                 out["error"] = why
                 return out
-            on_head, why = run_vitest(tree, files, [base_tree, tree])
+            on_head, why = run_vitest(tree, files, trees)
             if why:
                 out["error"] = why
                 return out
+            # The gate ran these same files green minutes ago, so a failure here is run once more before
+            # it is called a test that fails with the fix (second review C10: a flaky test was a counted
+            # send-back). A second failure is real.
+            again = [p for p in files if on_head.get(p) is not None and (
+                on_head[p].get("status") == "failed" or any("failed" in v for v in runs(on_head[p]).values()))]
+            if again:
+                retry, why = run_vitest(tree, again, trees)
+                if why:
+                    out["error"] = why
+                    return out
+                on_head.update({p: retry.get(p) for p in again})
+                out["retried"] = again
             for kind, path in vitest_files:
                 listed = kind == "changed" and is_list_edit(tree, base, path, added)
                 out["files"].append(file_verdict(path, kind, on_base.get(path), on_head.get(path), listed, added))
@@ -490,8 +531,31 @@ def expected_findings(pr):
     for fid, r in findings.current_state().items():
         if str(r.get("pr") or "") == str(pr) and r.get("status") in ("pending", "fixed"):
             out[fid] = {k: str(r.get(k) or "")[:1500]
-                        for k in ("severity", "title", "where", "fix", "close_note")}
+                        for k in ("severity", "title", "where", "fix", "close_note", "routine")}
     return out
+
+
+def findings_left(pr, expected):
+    """Ids the ledger ever closed against this PR (`close --pr N`) that are not on it now: reopened,
+    closed another way, or moved to another PR, while their code may still be in its branch (second
+    review C1). Read from the ledger's own history, so a finding that left before any round is caught
+    as surely as one that left between rounds (V2)."""
+    findings = _load("findings", "findings.py")
+    ever = {r.get("id") for r in findings.read_all()
+            if r.get("op") == "close" and r.get("id") and str(r.get("pr") or "") == str(pr)}
+    return sorted(ever - set(expected))
+
+
+def is_kevin_edit(t):
+    """A change Kevin asked for on this PR's MERGE card (merge-approved.py note_edit files it)."""
+    return t.get("routine") == "merge-approved" and str(t.get("title") or "").startswith("Kevin asked for a change")
+
+
+def no_findings_why(pr):
+    """Why review() does not run on a PR the ledger records no finding against. fixer-merge.py says the
+    same before its gate (second review C11), so the fixer never waits ten minutes to learn it."""
+    return ("no finding is recorded against PR #%d in the findings ledger: close each one --outcome pending "
+            "--pr %d and run the merge again (this was not a round)" % (pr, pr))
 
 
 def gh_pr(pr):
@@ -754,7 +818,21 @@ def judge(obj, bt, expected):
     names = {}
     for p in bt["proven"]:
         names[_norm(p["name"])] = names.get(_norm(p["name"]), 0) + 1
+    by_name = {_norm(p["name"]): _norm(p["test"]) for p in bt["proven"] if names[_norm(p["name"])] == 1}
     checks = set(bt.get("checkFiles") or [])
+
+    def cited(f):
+        """The PROVES tests a "yes" names, each as its full name."""
+        return {_norm(c) if _norm(c) in proven else by_name[_norm(c)] for c in f["tests"]
+                if _norm(c) in proven or _norm(c) in by_name}
+
+    # One proving test proves one finding at most (second review C3): a test named for two findings
+    # cannot say which fix it checks, so it counts for neither.
+    owners = {}
+    for f in obj["findings"]:
+        if f["test_fails_without_fix"] == "yes":
+            for test in cited(f):
+                owners.setdefault(test, set()).add(f["id"])
     send = []
     for f in obj["findings"]:
         why, reasons = f["why"].strip()[:500], []
@@ -765,9 +843,15 @@ def judge(obj, bt, expected):
             reasons.append("the same bug is elsewhere" + (": " + places if places else ""))
         t = f["test_fails_without_fix"]
         if t == "yes":
-            if not any(_norm(c) in proven or names.get(_norm(c)) == 1 for c in f["tests"]):
+            mine = cited(f)
+            if not mine:
                 reasons.append("none of the tests it names fails on the code before the fix and passes "
                                "with it (named: %s)" % (", ".join(f["tests"][:4]) or "none"))
+            elif all(len(owners[test]) > 1 for test in mine):
+                others = sorted(set().union(*(owners[test] for test in mine)) - {f["id"]})
+                reasons.append("every test it names is also named for %s, and one test proves one finding at "
+                               "most: give each finding its own test (named: %s)"
+                               % (", ".join(others), ", ".join(sorted(mine)[:4])))
         elif t == "not-needed":
             named = [c for c in f["tests"] if (c.split() or [""])[0] in checks]
             if not doc_only(expected.get(f["id"]) or {}) and not named:
@@ -880,14 +964,27 @@ def records_for(st, pr):
     return [r for r in st["records"] if str(r.get("pr")) == str(pr)]
 
 
+def is_pass(rec, head):
+    """True only for a record review() writes when a back-test and a reviewer both RAN and passed exactly
+    HEAD (second review C4): a hand-written {"pass": true, "head": ...} is not one. The limit is the
+    one approval_evidence.py states: a robot running as the same user can still forge every field."""
+    if not (isinstance(rec, dict) and head):
+        return False
+    rv = rec.get("review") if isinstance(rec.get("review"), dict) else {}
+    bt = rec.get("backTest") if isinstance(rec.get("backTest"), dict) else {}
+    return (rec.get("pass") is True and rec.get("refusedBy") is None and rec.get("counted") is True
+            and rec.get("head") == head and rv.get("ran") is True and rv.get("pass") is True
+            and rv.get("head") == head and bt.get("ran") is True and not bt.get("refuse"))
+
+
 def passed(pr, head):
-    """True only when the newest record for this PR is a pass for exactly this head."""
+    """True only when the newest record for this PR is a pass review() wrote for exactly this head."""
     try:
         recs = records_for(load_state(), pr)
     except StateError as e:
         print("SECOND REVIEW UNREADABLE: %s" % e, file=sys.stderr)
         return False
-    return bool(recs and head and recs[-1].get("head") == head and recs[-1].get("pass") is True)
+    return bool(recs) and is_pass(recs[-1], head)
 
 
 def _map_findings(files, expected, body):
@@ -945,32 +1042,42 @@ def _review(pr, base, tree, result):
     except StateError as e:
         result.update(refusedBy="cannot-run", why=str(e))
         return result   # nothing is written over a state file nobody can read
-    counted = [r for r in records_for(st, pr) if r.get("counted")]
-    result["round"] = len(counted) + 1
-    if len(counted) >= MAX_ROUNDS:
-        return _finish(result, "rounds", ROUNDS_USED)     # before anything is built or run
+    recs = records_for(st, pr)
+    newest = recs[-1] if recs else None
     expected = expected_findings(pr)
     result["findings"] = sorted(expected)
-    left = sorted({fid for r in counted for fid in r.get("findings") or []} - set(expected))
+    # A round counts against the two only once it has seen every change Kevin asked for on this PR's
+    # MERGE card (second review C7): his own change request never closes the PR for want of a round.
+    edits = {fid for fid, t in expected.items() if is_kevin_edit(t)}
+    counted = [r for r in recs if r.get("counted") and edits <= set(r.get("findings") or [])]
+    result["round"] = len(counted) + 1
+    if len(counted) >= MAX_ROUNDS and not (isinstance(newest, dict) and newest.get("pass") is True):
+        return _finish(result, "rounds", ROUNDS_USED)     # before anything is built or run
+    left = findings_left(pr, expected)
     if left:
-        # A finding cannot leave the review while its code stays (second review V2, first review A3).
-        return _finish(result, "rounds", "finding(s) %s were reviewed in an earlier round and are no longer on "
-                                         "this PR, while their code may still be in it: close this PR with a "
-                                         "comment and reopen every one of its findings" % ", ".join(left))
+        # A finding cannot leave the review while its code stays (second review C1, V2, first review A3).
+        return _finish(result, "rounds", "finding(s) %s were recorded against this PR and are no longer on it, "
+                                         "while their code may still be in it: close this PR with a comment and "
+                                         "reopen every one of its findings" % ", ".join(left))
     if not expected:
-        return _finish(result, "cannot-run", "no finding is recorded against PR #%d in the findings ledger: "
-                                             "close each one --outcome pending --pr %d and run the merge "
-                                             "again (this was not a round)" % (pr, pr))
+        return _finish(result, "cannot-run", no_findings_why(pr))
     own = tree is None
     if own:
         tree, err = fm.build_merge_result(pr, base)
         if err:
-            result["head"] = fm.tested_head(pr)
             return _finish(result, "cannot-run", "could not build the merge result: %s" % err)
     try:
-        result["head"] = fm.tested_head(pr)
+        # The head is the one in THIS tree (second review C2), never a fresh read of the shared ref.
+        result["head"] = tree_head(tree, base)
         if not result["head"]:
-            return _finish(result, "cannot-run", "could not read the PR head")
+            return _finish(result, "cannot-run", "could not read the PR head off the merge tree built on %s" % base[:12])
+        if (is_pass(newest, result["head"]) and newest.get("base") == base
+                and sorted(newest.get("findings") or []) == sorted(expected)):
+            # The same code, base and findings already passed (second review C8): a re-run after a failed
+            # merge call or card write is that pass, never a new round. Nothing new is recorded.
+            return dict(newest, reused=True)
+        if len(counted) >= MAX_ROUNDS:
+            return _finish(result, "rounds", ROUNDS_USED)
         bt = back_test(pr, base, tree=tree)
         result["backTest"] = bt
         if bt["error"] or not bt["ran"]:

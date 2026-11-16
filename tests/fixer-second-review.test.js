@@ -239,6 +239,10 @@ function py(s, code) {
 import importlib.util, json, os, sys
 spec = importlib.util.spec_from_file_location("fr", ${JSON.stringify(SCRIPT)})
 fr = importlib.util.module_from_spec(spec); spec.loader.exec_module(fr)
+def full_pass(pr, head, base="b" * 40):
+    """A record shaped as review() writes one for a pass: passed() reads nothing less (second review C4)."""
+    return {"pr": pr, "head": head, "base": base, "date": "2026-11-15", "pass": True, "counted": True, "refusedBy": None,
+            "findings": [], "backTest": {"ran": True, "refuse": False}, "review": {"ran": True, "pass": True, "head": head}}
 ${code}
 `], { env: s.env, encoding: 'utf8' });
   return JSON.parse(out.trim().split('\n').pop());
@@ -493,24 +497,60 @@ print(json.dumps({"base": bt["base"], "files": [f["file"] for f in bt["files"]],
     expectClean(repo, s);
   }, SLOW);
 
-  it('C1/I8: a back-test that times out stops the whole vitest process group', async () => {
-    // The old code's "hang" is a busy loop of at most 60 s, so even an interrupted run can never
-    // leave a worker spinning for ever (one did, for an hour, on 15 Nov 2026).
-    const repo = miniRepo({ base: { 'spin.js': 'export function spin() { for (const t = Date.now(); Date.now() - t < 60000;) {} }\n' }, fix: {
-      'spin.js': 'export function spin() { return 1; }\n',
-      'tests/spin.test.js': "import { it, expect } from 'vitest';\nimport { appendFileSync } from 'node:fs';\n"
-        + "import { spin } from '../spin.js';\nappendFileSync(process.env.SPIN_PIDS, process.pid + ' ' + process.ppid + '\\n');\n"
-        + "it('returns', () => { expect(spin()).toBe(1); });\n",
-    } });
+  // The old code's "hang" is a busy loop of at most 60 s, so even an interrupted run can never
+  // leave a worker spinning for ever (one did, for an hour, on 15 Nov 2026).
+  const SPIN_OLD = 'export function spin() { for (const t = Date.now(); Date.now() - t < 60000;) {} }\n';
+  const SPIN_TEST = "import { it, expect } from 'vitest';\nimport { appendFileSync } from 'node:fs';\n"
+    + "import { spin } from '../spin.js';\nappendFileSync(process.env.SPIN_PIDS, process.pid + ' ' + process.ppid + '\\n');\n"
+    + "it('returns', () => { expect(spin()).toBe(1); });\n";
+
+  it('C1/I8, C9: a fix for a hang proves its new test, and the timed-out run on the old code leaves no vitest behind', async () => {
+    const repo = miniRepo({ base: { 'spin.js': SPIN_OLD }, fix: {
+      'spin.js': 'export function spin() { return 1; }\n', 'tests/spin.test.js': SPIN_TEST } });
     const s = scenario(repo, { env: { FIXER_REVIEW_BACKTEST_TIMEOUT: '10' } });
     s.env.SPIN_PIDS = join(s.dir, 'spin-pids.txt');
     spinPidFiles.push(s.env.SPIN_PIDS);
-    const r = cli(s, 'backtest', '--pr', '1');
-    expect(r.code, r.out + r.err).toBe(1);
-    expect(r.out).toMatch(/COULD NOT RUN: the back-test timed out after 10 seconds and was stopped/);
+    const r = cli(s, 'backtest', '--pr', '1', '--json');
+    expect(r.code, r.out + r.err).toBe(0);
+    expect(r.json.files[0]).toMatchObject({ file: 'tests/spin.test.js', kind: 'new', oldCode: 'did not finish', verdict: 'proves' });
+    expect(r.json.proven).toEqual([{ test: 'tests/spin.test.js > returns', name: 'returns',
+      oldCode: 'it did not finish on the old code within 10 seconds' }]);
     const pids = readFileSync(s.env.SPIN_PIDS, 'utf8').trim().split(/\s+/).map(Number);
     expect(pids.length).toBeGreaterThanOrEqual(2);
     for (const pid of pids) await expectDead(pid, 'a vitest process from the timed-out back-test');
+    expectClean(repo, s);
+  }, SLOW);
+
+  it('C9: beside a hang, each file is timed on its own: a new test that passes on the old code is still refused', async () => {
+    const repo = miniRepo({ base: { 'spin.js': SPIN_OLD, 'lib.js': LIB_OLD }, fix: {
+      'spin.js': 'export function spin() { return 1; }\n', 'tests/spin.test.js': SPIN_TEST, 'tests/zero.test.js': PASSES_ON_OLD } });
+    const s = scenario(repo, { env: { FIXER_REVIEW_BACKTEST_TIMEOUT: '10' } });
+    s.env.SPIN_PIDS = join(s.dir, 'spin-pids.txt');
+    spinPidFiles.push(s.env.SPIN_PIDS);
+    const r = cli(s, 'backtest', '--pr', '1', '--json');
+    expect(r.code, r.out + r.err).toBe(3);
+    const byFile = Object.fromEntries(r.json.files.map(f => [f.file, f]));
+    expect(byFile['tests/spin.test.js']).toMatchObject({ oldCode: 'did not finish', verdict: 'proves' });
+    expect(byFile['tests/zero.test.js']).toMatchObject({ oldCode: '1 ran, 0 failed', verdict: 'new-file-passes-without-fix' });
+    for (const pid of readFileSync(s.env.SPIN_PIDS, 'utf8').trim().split(/\s+/).map(Number)) {
+      await expectDead(pid, 'a vitest process from the timed-out back-test');
+    }
+    expectClean(repo, s);
+  }, SLOW);
+
+  it('C10: a test that fails once with the fix and passes when run again is judged by the second run, never a send-back', () => {
+    const FLAKY = "import { it, expect } from 'vitest';\nimport { readFileSync, writeFileSync, existsSync } from 'node:fs';\n"
+      + "import { add } from '../lib.js';\nconst C = process.env.FLAKY_COUNT;\n"
+      + "it('adds', () => { const n = existsSync(C) ? Number(readFileSync(C, 'utf8')) : 0; writeFileSync(C, String(n + 1));\n"
+      + "  if (n === 1) throw new Error('an invented flake on the first run with the fix');\n  expect(add(2, 2)).toBe(4); });\n";
+    const repo = miniRepo({ base: { 'lib.js': LIB_OLD }, fix: { 'lib.js': LIB_FIX, 'tests/add.test.js': FLAKY } });
+    const s = scenario(repo);
+    s.env.FLAKY_COUNT = join(s.dir, 'flaky-count.txt');
+    const r = cli(s, 'backtest', '--pr', '1', '--json');
+    expect(r.code, r.out + r.err).toBe(0);
+    expect(r.json.files[0]).toMatchObject({ file: 'tests/add.test.js', verdict: 'proves' });
+    expect(r.json.retried).toEqual(['tests/add.test.js']);
+    expect(readFileSync(s.env.FLAKY_COUNT, 'utf8')).toBe('3');     // old code, with the fix, once more
     expectClean(repo, s);
   }, SLOW);
 });
@@ -885,7 +925,7 @@ describe('review() records each verdict and passed() answers only for the exact 
     const r = cli(s, 'run', '--pr', '1');
     expect(r.code).toBe(3);
     expect(r.json).toMatchObject({ round: 2, pass: false, refusedBy: 'rounds', counted: false });
-    expect(r.json.why).toMatch(new RegExp(`finding\\(s\\) ${F2} were reviewed in an earlier round and are no longer on this PR`));
+    expect(r.json.why).toMatch(new RegExp(`finding\\(s\\) ${F2} were recorded against this PR and are no longer on it`));
     expect(s.claudeCalls(), 'round 2 was reviewed without the finding that left').toHaveLength(1);
     expectClean(repo, s);
   }, SLOW);
@@ -949,7 +989,7 @@ print(json.dumps({"rv": [rv["refusedBy"], rv["why"], rv["counted"]], "recorded":
     const repo = codeOnly();
     const s = scenario(repo);
     const r = py(s, `
-rec = {"pr": 1, "head": "a" * 40, "date": fr.london_today(), "pass": True, "counted": True}
+rec = full_pass(1, "a" * 40)
 fr.write_record(rec)
 before = open(fr.STATE_FILE).read()
 real = fr.os.replace
@@ -1062,7 +1102,7 @@ fm.second_reviewer = broken` });
     const r = cmdMerge(repo, s, { prelude: `
 rspec = importlib.util.spec_from_file_location("fr2", ${JSON.stringify(SCRIPT)})
 fr2 = importlib.util.module_from_spec(rspec); rspec.loader.exec_module(fr2)
-fr2.write_record({"pr": 1, "head": ${JSON.stringify(repo.head)}, "date": "2026-11-15", "pass": True, "counted": True})
+fr2.write_record(full_pass(1, ${JSON.stringify(repo.head)}, ${JSON.stringify(repo.base)}))
 fm.run_second_review = lambda pr, base, tree: {"pr": pr, "pass": False, "refusedBy": "cannot-run", "why": "invented: this run's review failed"}` });
     expect(r.out.merged).toBe(false);
     expect(r.mergeCall).toBe(null);
@@ -1076,6 +1116,10 @@ fm.run_second_review = lambda pr, base, tree: {"pr": pr, "pass": False, "refused
     const red = cmdMerge(repo, s, { green: false });
     expect(red.out).toHaveProperty('secondReview', null);
     expect(red.out.why).toMatch(/the gate is RED/);
+    // PR 2 has a finding of its own on the ledger, so the run gets as far as building it (it does not exist).
+    appendFileSync(s.ledger, JSON.stringify({ op: 'add', id: '20261115-invented-9', ts: '2026-11-15T07:00:00Z', routine: 'invented',
+      severity: 'high', title: 'An invented fault on PR 2', where: 'lib.js', fix: 'x' }) + '\n'
+      + JSON.stringify({ op: 'close', id: '20261115-invented-9', ts: '2026-11-15T07:30:00Z', outcome: 'pending', pr: 2, note: 'x' }) + '\n');
     const unbuilt = cmdMerge(repo, s, { pr: 2 });
     expect(unbuilt.out).toHaveProperty('secondReview', null);
     expect(unbuilt.out.why).toMatch(/could not build the merge result/);
@@ -1135,7 +1179,7 @@ ma.refresh_card = lambda card, head, res: REFRESHED.append(head)
 ma.card_moved_on = lambda card: None
 ma.annotate = lambda task, note: NOTES.append(note)
 NEW = "f0e1d2c3" * 5
-${record ? `fr.write_record({"pr": 1, "head": NEW, "date": "2026-11-15", "pass": ${record === 'pass' ? 'True' : 'False'}, "counted": True})` : ''}
+${record === 'pass' ? 'fr.write_record(full_pass(1, NEW))' : record ? 'fr.write_record({"pr": 1, "head": NEW, "date": "2026-11-15", "pass": False, "counted": True})' : ''}
 ${corrupt ? 'os.makedirs(fr.STATE_DIR, exist_ok=True); open(fr.STATE_FILE, "w").write("{ half")' : ''}
 card = {"pr": 1, "id": "recInventedCard01", "head": "a1b2c3d4" * 5, "approvedAt": "2026-11-15T08:30:00.000Z"}
 res = ma.changed(card, {}, NEW)
@@ -1157,9 +1201,10 @@ def run_merge_pr(pr, head, dry_run=False, card=None):
     MERGES.append([pr, head, dry_run])
     return subprocess.CompletedProcess(["merge-pr.py"], 1, json.dumps({"merged": False, "why": "stub: the merge itself is not this test"}), "")
 ma.run_merge_pr = run_merge_pr
-${record ? 'fr.write_record({"pr": 1, "head": HEAD, "date": "2026-11-15", "pass": True, "counted": True})' : ''}
+${record === 'hand' ? 'fr.write_record({"pr": 1, "head": HEAD, "date": "2026-11-15", "pass": True, "counted": True})'
+    : record ? 'fr.write_record(full_pass(1, HEAD))' : ''}
 attempts = {}
-card = {"pr": 1, "id": "recInventedCard01", "head": HEAD, "approvedAt": "2026-11-15T08:30:00.000Z"}
+card = {"pr": 1, "id": "recInventedCard01", "head": HEAD, "approvedAt": "2026-11-15T08:30:00.000Z", "outcome": "Approved as-is"}
 res = ma._merge_locked(card, attempts)
 print(json.dumps({"res": res, "merges": MERGES, "attempts": attempts}))`);
 }
@@ -1210,5 +1255,123 @@ describe('STEP 2: merge-approved.py never refreshes a MERGE card to a head the r
     expect(r.dry).toEqual([[1, 'f0e1d2c3'.repeat(5), true]]);
     expect(r.refreshed).toEqual(['f0e1d2c3'.repeat(5)]);
     expect(r.res.result).toBe('refreshed');
+  }, SLOW);
+});
+
+// ── THE THIRD ROUND (16 Nov 2026): the open findings of the second review of PR 941 ─────────────
+describe('C1 to C4, C7, C8, C11: what the record says and when the review runs', () => {
+  it('C1: a finding reopened before the first round, its code left in the branch, ends the review before anything runs', () => {
+    const repo = miniRepo({ base: { 'lib.js': LIB_OLD, 'other.js': 'export const limit = 10;\n' },
+      fix: { 'lib.js': LIB_FIX, 'other.js': 'export const limit = 1000000; // widened\n', 'tests/add.test.js': FAILS_ON_OLD } });
+    const s = scenario(repo, { findings: [F1, F2] });
+    appendFileSync(s.ledger, JSON.stringify({ op: 'reopen', id: F2, ts: '2026-11-15T08:00:00Z', note: 'not today' }) + '\n');
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    const r = cli(s, 'run', '--pr', '1');
+    expect(r.code, r.out + r.err).toBe(3);
+    expect(r.json).toMatchObject({ round: 1, pass: false, refusedBy: 'rounds', counted: false });
+    expect(r.json.why).toMatch(new RegExp(`finding\\(s\\) ${F2} were recorded against this PR and are no longer on it`));
+    expect(s.claudeCalls(), 'the PR was reviewed without the finding whose code it still carries').toHaveLength(0);
+  }, SLOW);
+
+  it('C2: the PR moves and the shared ref is fetched again during the gate: no pass is ever recorded for the head nobody reviewed', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    const first = repo.head;
+    const answerFor = answer('HEADX', [ok(F1, { tests: [ADD_TEST] })]);
+    const r = cmdMerge(repo, s, { hook: `
+def g(cwd2, *a):
+    return subprocess.run(["git"] + list(a), cwd=cwd2, check=True, capture_output=True, text=True).stdout.strip()
+WORK, MAIN = ${JSON.stringify(repo.work)}, ${JSON.stringify(repo.main)}
+open(os.path.join(WORK, "lib.js"), "a").write("// a commit pushed while the gate ran\\n")
+g(WORK, "add", "-A"); g(WORK, "commit", "--quiet", "-m", "pushed during the gate")
+g(WORK, "push", "--quiet", "--force", "origin", "fix:refs/pull/1/head")
+new = g(WORK, "rev-parse", "HEAD")
+g(MAIN, "fetch", "--force", "--quiet", "origin", "pull/1/head:refs/fixer/pr-1")    # what merge-pr.py's own build does
+json.dump({"body": "Fixes it.", "heads": [new]}, open(${JSON.stringify(s.ghSpec)}, "w"))
+json.dump({"stdout": ${JSON.stringify(answerFor)}.replace("HEADX", new)}, open(${JSON.stringify(s.claudeSpec)}, "w"))` });
+    const moved = git(repo.work, 'rev-parse', 'HEAD');
+    expect(moved).not.toBe(first);
+    expect(r.out.merged).toBe(false);
+    expect(r.out.secondReview.head).toBe(first);                  // the head in the tree it was shown
+    expect(r.out.secondReview.pass).toBe(false);
+    expect(py(s, `print(json.dumps([fr.passed(1, ${JSON.stringify(moved)}), fr.passed(1, ${JSON.stringify(first)})]))`)).toEqual([false, false]);
+  }, SLOW);
+
+  it('C3: two findings naming one proving test are both sent back; a test for each passes', () => {
+    const two = "import { it, expect } from 'vitest';\nimport { add } from '../lib.js';\n"
+      + "it('adds', () => { expect(add(2, 2)).toBe(4); });\nit('adds again', () => { expect(add(3, 3)).toBe(6); });\n";
+    const repo = miniRepo({ base: { 'lib.js': LIB_OLD }, fix: { 'lib.js': LIB_FIX, 'tests/add.test.js': two } });
+    const s = scenario(repo, { findings: [F1, F2] });
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] }), ok(F2, { tests: [ADD_TEST] })]) });
+    const shared = cli(s, 'run', '--pr', '1');
+    expect(shared.code, shared.out + shared.err).toBe(3);
+    expect(shared.json.refusedBy).toBe('reviewer');
+    expect(shared.json.sendBack.map(x => x.id)).toEqual([F1, F2]);
+    expect(shared.json.sendBack[1].why).toMatch(new RegExp(`every test it names is also named for ${F1}, and one test proves one finding at most`));
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] }), ok(F2, { tests: ['tests/add.test.js > adds again'] })]) });
+    const own = cli(s, 'run', '--pr', '1');
+    expect(own.code, own.out + own.err).toBe(0);
+    expect(own.json).toMatchObject({ pass: true, round: 2 });
+  }, SLOW);
+
+  it('C4: a hand-written pass record is not a pass: passed() says no and merge-approved will not merge on it', () => {
+    const s = scenario(codeOnly());
+    const r = py(s, `
+H = "a1b2c3d4" * 5
+fr.write_record({"pr": 1, "head": H, "date": "2026-11-15", "pass": True, "counted": True})
+hand = fr.passed(1, H)
+fr.write_record(full_pass(1, H))
+print(json.dumps([hand, fr.passed(1, H)]))`);
+    expect(r).toEqual([false, true]);
+    const m = mergeLocked(scenario(codeOnly()), 'hand');
+    expect(m.merges).toEqual([]);
+    expect(m.res.why).toMatch(/^waiting for the second review of this code/);
+  }, SLOW);
+
+  it('C7: a round started by Kevin\'s own change request on the MERGE card is never refused for want of a round', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST], cause: 'fail' })], 'send-back') });
+    expect(cli(s, 'run', '--pr', '1').json).toMatchObject({ round: 1, refusedBy: 'reviewer' });
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    expect(cli(s, 'run', '--pr', '1').json).toMatchObject({ round: 2, pass: true });
+    // He asks for a change on the card; merge-approved files it and the fixer takes it onto this PR.
+    const E = '20261116-merge-approved-001';
+    appendFileSync(s.ledger, JSON.stringify({ op: 'add', id: E, ts: '2026-11-16T08:00:00Z', routine: 'merge-approved', severity: 'high',
+      title: 'Kevin asked for a change to PR #1', where: 'PR #1 (its branch), from its MERGE card', fix: 'rename the helper' }) + '\n'
+      + JSON.stringify({ op: 'close', id: E, ts: '2026-11-16T09:00:00Z', outcome: 'pending', pr: 1, note: 'renamed in lib.js' }) + '\n');
+    s.setHead(pushNewHead(repo, { 'lib.js': LIB_FIX + '// renamed, as he asked\n' }));
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] }), ok(E, { test_fails_without_fix: 'no' })], 'send-back') });
+    const r = cli(s, 'run', '--pr', '1');
+    expect(r.json.refusedBy, r.json.why).toBe('reviewer');        // reviewed, never "two rounds used"
+    expect(r.json.round).toBe(1);
+    expect(s.claudeCalls()).toHaveLength(3);
+  }, SLOW);
+
+  it('C8: a re-run on the same head and base after a pass is that pass: no new round, no reviewer, even after two rounds', () => {
+    const repo = withTest();
+    const s = scenario(repo);
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST], cause: 'fail' })], 'send-back') });
+    expect(cli(s, 'run', '--pr', '1').json).toMatchObject({ round: 1, refusedBy: 'reviewer' });
+    s.setClaude({ stdout: answer(repo.head, [ok(F1, { tests: [ADD_TEST] })]) });
+    expect(cli(s, 'run', '--pr', '1').json).toMatchObject({ round: 2, pass: true });
+    const again = cli(s, 'run', '--pr', '1');                    // the merge call or the card write failed
+    expect(again.code, again.out + again.err).toBe(0);
+    expect(again.json).toMatchObject({ pass: true, round: 2, reused: true, head: repo.head });
+    expect(s.claudeCalls()).toHaveLength(2);
+    expect(cli(s, 'status', '--pr', '1').json.rounds).toBe(2);
+    expectClean(repo, s);
+  }, SLOW);
+
+  it('C11: a PR with no finding on the ledger is told so before the gate runs, in the reviewer\'s own words', () => {
+    const repo = withTest();
+    const s = scenario(repo, { findings: [] });
+    const r = cmdMerge(repo, s);
+    expect(r.gates).toBe(0);
+    expect(r.mergeCall).toBe(null);
+    expect(r.out.merged).toBe(false);
+    expect(r.out.secondReview).toMatchObject({ refusedBy: 'cannot-run', counted: false,
+      why: expect.stringMatching(/^no finding is recorded against PR #1 in the findings ledger: .*this was not a round/) });
+    expect(s.claudeCalls()).toHaveLength(0);
   }, SLOW);
 });
