@@ -576,7 +576,16 @@ ATTACH_DIR = os.path.realpath(os.path.expanduser(
 # still refused below by the isfile check, with the message that says to use ATTACH_DIR.
 ATTACH_RUN_ROOT = os.path.realpath(os.path.expanduser(
     os.environ.get("AGENT_DISPATCH_DIR") or "~/knowledge-os/logs/agent-dispatch"))
-ATTACH_ROOTS = (ATTACH_DIR, ATTACH_RUN_ROOT)
+
+
+def attach_roots():
+    """The directories an ATTACH file may be read from, read LIVE.
+
+    A function, not a constant: the selftest below reassigns ATTACH_DIR to a temp directory to
+    exercise the real guards, and a tuple frozen at import would have kept pointing at the real
+    attachments folder and refused every one of its own cases.
+    """
+    return (ATTACH_DIR, ATTACH_RUN_ROOT)
 # .docx added 16 Nov 2026 (finding 20261014-agent-dispatch-862): an approved email to Roy
 # attached a police form as a fillable Word file, the gate allowed only PDF and images, and
 # sending it as a PDF would have changed what Kevin approved and taken the fillable form away.
@@ -614,7 +623,7 @@ def load_attachment(attach, task_id):
     """Path from the approved ATTACH header → worker payload dict, or refuse."""
     import base64
     real = os.path.realpath(os.path.expanduser(attach))
-    if not any(real.startswith(root + os.sep) for root in ATTACH_ROOTS):
+    if not any(real.startswith(root + os.sep) for root in attach_roots()):
         sys.exit(f"REFUSED: task {task_id} ATTACH is outside the attachments "
                  f"directory ({ATTACH_DIR}) and the dispatcher's run folders "
                  f"({ATTACH_RUN_ROOT}). Files are only ever sent from there — "

@@ -228,25 +228,30 @@ TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*
 # reason: "kevin only wanted the short version" is the email's own words, and this pattern carries no
 # re.I so it cannot reach them.
 KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
-# WHAT THE CARD DECLARES IS NOT WHAT THE RECIPIENT READS (16 Nov 2026, findings
-# 20261019-agent-dispatch-979 and 20261109-agent-dispatch-1251). Two approved emails sat
-# unsent for 28 and 7 days: one would have ended with the internal gate line "SPEND: up to
-# £1,188 … taken from the rent by Intus" after Roy's signature, the other with the KEVIN ONLY
-# payment block (payee, amount, reference) after "Roy, Agile Lets". The send path stripped the
-# Carrying-this-out line and nothing else, so the only ways out were to send Kevin's bank steps
-# to a tenant or to redraft a card he had already approved. Both lines are the approval box's,
-# exactly like CARRY_OUT_MARKER, so both are stripped in the same place and by the same rule:
-# only when the marker CLOSES the text (at most CARRY_OUT_TAIL_MAX characters follow it). A
-# marker in the middle of a long email is the email's own words and stays, where the
-# KEVIN_ONLY_STEP_RE refusal below still catches it rather than guessing where to cut.
-INTERNAL_DECLARATION_RE = re.compile(r"^[ \t>*_#]*\**(?:SPEND|KEVIN ONLY)[ \t]*:", re.M)
+# A SPEND DECLARATION IS THE CARD'S, NOT THE EMAIL'S (16 Nov 2026, finding
+# 20261019-agent-dispatch-979). An approved email to a letting agent would have ended with the
+# internal gate line "SPEND: up to £1,188 … taken from the rent" after Roy's signature. The send
+# path stripped the Carrying-this-out line and nothing else, so the only way out was to redraft a
+# card Kevin had already approved, and the email sat unsent for 28 days. A SPEND line is the
+# approval box's, exactly like CARRY_OUT_MARKER, so it is stripped in the same place and by the
+# same rule: only when it CLOSES the text (at most CARRY_OUT_TAIL_MAX characters follow it). A
+# SPEND line in the middle of a long email is the email's own words and stays.
+#
+# NOT KEVIN ONLY. Finding 20261109-agent-dispatch-1251 asks for the same treatment of a trailing
+# KEVIN ONLY payment block, and it is deliberately NOT given it: Kevin ruled on 7 Oct 2026
+# (finding 20261007-agent-dispatch-780) that what is his is REFUSED and never cut, "because a cut
+# sends a stub of what Kevin approved and a guess sends the note", and
+# tests/agent-email-kevin-only.test.js holds him to it. The declared route is unchanged: the
+# KEVIN ONLY line goes under the Carrying-this-out line, which this path already takes off.
+# Overturning that is Kevin's call, not the fix queue's.
+INTERNAL_DECLARATION_RE = re.compile(r"^[ \t>*_#]*\**SPEND[ \t]*:", re.M)
 
 
 def strip_internal_declarations(body):
-    """Remove a trailing SPEND or KEVIN ONLY declaration block from a body.
+    """Remove a trailing SPEND declaration block from a body.
 
     Cuts at the FIRST such marker that closes the text, so a block of several lines goes
-    whole. Anything earlier, with a real email after it, is left for the refusal above.
+    whole. Anything earlier, with a real email after it, is left alone.
     """
     text = body or ""
     for m in INTERNAL_DECLARATION_RE.finditer(text):

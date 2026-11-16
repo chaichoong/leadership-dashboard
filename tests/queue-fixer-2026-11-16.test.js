@@ -8,7 +8,8 @@
 //   20261030-agent-dispatch-1143 an approved ATTACH in the agent's own run folder refused
 //   20261113-agent-dispatch-1301 the same wall, reported again 14 days later
 //   20261019-agent-dispatch-979  a SPEND declaration left in the body after the signature
-//   20261109-agent-dispatch-1251 a KEVIN ONLY payment block left in the body
+// (20261109-agent-dispatch-1251 asked for the same strip of a KEVIN ONLY block and was reopened
+//  instead: Kevin ruled on 7 Oct 2026 that what is his is refused, never cut.)
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
 import { resolve, dirname } from 'path';
@@ -106,9 +107,13 @@ spec.loader.exec_module(se)
 print(json.dumps({
     "exts": sorted(se.ATTACH_EXTENSIONS),
     "mimeKeys": sorted(se.ATTACH_MIME),
-    "roots": sorted(se.ATTACH_ROOTS),
+    "roots": sorted(se.attach_roots()),
     "runRoot": se.ATTACH_RUN_ROOT,
 }))
+# The roots are read LIVE, so the selftest's own temp directory is honoured: a tuple frozen at
+# import refused every case of send-email.py's selftest (caught by the full suite, 16 Nov 2026).
+se.ATTACH_DIR = "/tmp/example-moved-attachments"
+assert "/tmp/example-moved-attachments" in se.attach_roots(), "attach_roots() must re-read ATTACH_DIR"
 `;
     return JSON.parse(execFileSync('python3', ['-c', src], {
       encoding: 'utf8',
@@ -243,11 +248,13 @@ except EmailFormatError as e:
     expect(r.mail.body).not.toMatch(/SPEND/);
   });
 
-  it('a KEVIN ONLY payment block under the signature is taken off, not sent', () => {
-    const r = parse(`${HEAD}${BODY}\n\nKEVIN ONLY: payment: pay the agency £93.00,\nreference EXAMPLEREF, from the current account.`);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body).toBe(BODY);
-    expect(r.mail.body).not.toMatch(/KEVIN ONLY|EXAMPLEREF/);
+  it('a KEVIN ONLY block is still REFUSED, not stripped: Kevin ruled that on 7 Oct 2026', () => {
+    // Finding 20261109-agent-dispatch-1251 asked for a strip here and is deliberately NOT given
+    // one. A cut sends a stub of what he approved, and tests/agent-email-kevin-only.test.js
+    // holds the refusal. The declared route is to put the line under the Carrying-this-out line.
+    const r = parse(`${HEAD}${BODY}\n\nKEVIN ONLY: payment: pay the agency £93.00, reference EXAMPLEREF.`);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/KEVIN ONLY line sits inside the email/);
   });
 
   it('a declaration under the Carrying-this-out line goes too', () => {
