@@ -1260,6 +1260,14 @@ def run(dry_run=False, limit=3):
                       % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
                 if unposted: note_refusal(entry, "session text is in its copy", save)
                 continue
+            # The last stop before anything is posted: a record holding another episode's files publishes nothing
+            # (16 Nov 2026, crossed records; the same check refuses the card in approval.output_gate).
+            import qa
+            crossed = qa.crossed_record(day, full["fields"], ledger)
+            if crossed:
+                print("episode %d: NOT published: the record holds another episode's files: %s" % (day, "; ".join(crossed)), file=sys.stderr)
+                if unposted: note_refusal(entry, "its record holds another episode's files", save)
+                continue
             test = mode() == "test"
             if full["fields"].get("Record Status") not in PUBLISHABLE:
                 if unposted: note_refusal(entry, "its record status is %r, not one the publisher takes" % full["fields"].get("Record Status"), save)

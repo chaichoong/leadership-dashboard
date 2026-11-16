@@ -444,7 +444,9 @@ def is_diary_line(m, text, before=""):
 # Still missed, and NOT guessed at here: 2082, 2086, 2095 and 2122, where the line carries no learnings word at all
 # ("So the latest word I say"). Those need the positional guess the finding also asks for, which is a separate change
 # because it needs a way to mark a window as a guess for the output gate.
-LFMD_LOOSE_RE = re.compile(r"(?:learn\w*|lesson\w*|latest)\b(?:[\s,]+\w+){0,4}[\s,]+(?:today|the\s+day|this\s+day|day\s+to\s+day)\b", re.I)
+# A word may carry an apostrophe ("I've", "it's", curly or straight): until 16 Nov 2026 "the learning somewhere I've
+# died for today" (2138) broke the route at "I've" and its card sat blocked on a near miss from 12 Nov.
+LFMD_LOOSE_RE = re.compile(r"(?:learn\w*|lesson\w*|latest)\b(?:[\s,]+\w+(?:['\u2019]\w+)*){0,4}[\s,]+(?:today|the\s+day|this\s+day|day\s+to\s+day)\b", re.I)
 LFMD_LOOSE_FROM = 0.55                    # how far into the talk the fallback starts looking
 
 
@@ -1023,7 +1025,13 @@ def publish_to_drive(paths, day, transcript_txt, role="episode"):
 
 
 def find_or_create_record(day, first_drive_id, clip_name, clip_date):
-    rid, how = watch.find_record(first_drive_id or "no-id", day)
+    """The record of the episode this clip was rendered AS, by its name, or a new one with that name. Never another
+    episode's record (16 Nov 2026, crossed records). The scan makes one record per SHOOTING day, named for the date
+    and carrying the first clip's Raw File Link (watch.scan); a catch-up clip resolves to the day before, finds no
+    record of its own name, and the raw-link fallback then handed it the shooting day's record. So 2131's render
+    wrote into "Episode 2132 Full Episode" (recI6qope8KqWHphG), 2136's into 2137's (recuGpU5xtE5gNDeO), 2143's into
+    2144's (recfkKt2MXikkkeY6), 2156's into 2157's and 2186's into 2187's, each found by raw-link."""
+    rid, how = watch.find_record(first_drive_id or "no-id", day, raw_link=False)
     if rid: return rid, how
     r = watch._airtable("POST", watch.API, {"fields": watch.record_fields(day, [clip_name], first_drive_id or "", clip_date)})
     return r["id"], "created"
