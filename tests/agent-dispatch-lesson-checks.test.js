@@ -93,7 +93,8 @@ def patch(i, f):
     return {"id": i}
 m.patch_task = patch
 def submit(output, agent=None, type_="Admin", plain_approve="The card goes to Kevin and the agent records it.",
-           certificate_search=None, tenant_notice="", duplicate_check=None, same_house_check=None, on_payment_list=None):
+           certificate_search=None, tenant_notice="", duplicate_check=None, same_house_check=None, on_payment_list=None,
+           rent_received=None):
     CAPTURED.clear()
     fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False); fh.write(output); fh.close()
     err = None
@@ -102,7 +103,8 @@ def submit(output, agent=None, type_="Admin", plain_approve="The card goes to Ke
             m.cmd_submit(types.SimpleNamespace(task="recTESTTESTTEST01", agent=agent or BUILDER, type=type_,
                          output_file=fh.name, tier1=False, attach=None, plain_task="A job came in for one of the houses.",
                          plain_approve=plain_approve, tenant_notice=tenant_notice, certificate_search=certificate_search,
-                         duplicate_check=duplicate_check, same_house_check=same_house_check, on_payment_list=on_payment_list))
+                         duplicate_check=duplicate_check, same_house_check=same_house_check, on_payment_list=on_payment_list,
+                         rent_received=rent_received))
         except SystemExit as e:
             err = str(e)
     st = CAPTURED.get(AF["status"])
@@ -432,5 +434,19 @@ print(json.dumps({
   "filing": C("COMPLIANCE: file the certificate paid for - 9 Sample Street", quote, desc=m.certificate_watch.FILING_TASK_MARK),
 }))`);
     expect(r).toEqual({ insurance: '', licence: '', notCompliance: '', close: '', thanks: '', filing: '' });
+  });
+});
+
+describe('an AGENT RENT LATE card rewritten for its unpaid units declares each paid unit with --rent-received', () => {
+  it('each flag is stamped on Notes in the shape the send reads, once per unit', () => {
+    const r = py(`
+task("AGENT RENT LATE: Fixture Lettings, 3 units, rent due (first email)")
+res = submit("A report for the card.\\n\\n**Carrying this out will involve:** a note goes on the task.",
+             rent_received=["recUnitTwoAaaaaaa: recPayUnitTwoAaaa", "recUnitOneAaaaaaa: recPayUnitOneAaaa"])
+print(json.dumps({"err": res["err"], "stamps": re.findall(r"RENT RECEIVED \\(round \\d+\\): [^\\n]*", res["notes"]),
+                  "read": sorted(m.RENT_RECEIVED_RE.findall(res["notes"]))}))`);
+    expect(r.err).toBeNull();
+    expect(r.stamps).toEqual(['RENT RECEIVED (round 1): recUnitTwoAaaaaaa: recPayUnitTwoAaaa', 'RENT RECEIVED (round 1): recUnitOneAaaaaaa: recPayUnitOneAaaa']);
+    expect(r.read).toEqual(['recUnitOneAaaaaaa', 'recUnitTwoAaaaaaa']);
   });
 });

@@ -1039,12 +1039,55 @@ def _rent_rows(table, formula=None, fields=None, max_records=None):
 # only: of the 4 keyed RENT LATE cards sent in the 30 days to 16 Nov 2026, 1 would have been refused at
 # the send, the 30 Oct card itself (its rent is dated the day of the 14:33 send; whether the feed held it
 # by then cannot be told from the record).
+def _units(units):
+    return "; ".join(f"{u['unit']} ({u['tenancy']})" + (f": {u['shown']}" if u.get("shown") else "") for u in units)
+
+
+def agent_rent_landed_refusal(task_id, f):
+    """'' or why an AGENT RENT LATE email to a letting agent must not go now (Kevin, 16 Nov 2026): every unit it
+    names is read again, through agent-dispatch.py agent_rent_landed_state, by the same rules as RENT LATE."""
+    landed = dispatch_module().agent_rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
+                                                       f.get(AF["description"], ""), records=_rent_rows)
+    state = landed.get("state")
+    if state == "landed":
+        return (f"every unit on this card has been paid since the card was made: {_units(landed['paid'])}. Nothing was "
+                "sent: the letting agent has paid, so the chase is not owed (Kevin, 16 Nov 2026). Close the task naming "
+                f"the payments: python3 scripts/agent-dispatch.py complete {task_id} --evidence \"rent arrived before the "
+                "send: <each unit and payment>\"")
+    if state == "partial":
+        return (f"{len(landed['paid'])} unit(s) on this card have been paid since the card was made: {_units(landed['paid'])}. "
+                f"Still unpaid: {_units(landed['unpaid'])}. Nothing was sent: the email would chase rent the letting agent "
+                "has already paid. Rewrite the email for the unpaid units only and submit the card again with one "
+                "--rent-received \"<tenancy id>: <payment id>\" per paid unit (stamped on Notes, so the send then checks "
+                "only the units still chased); Kevin approves the new wording")
+    if state == "unchecked":
+        return (f"the bank could not be read again for this card's units ({landed.get('detail', '')}), so whether the "
+                "rent has landed since the card was made is NOT CHECKED. Nothing was sent. Run the send again; a "
+                "late-rent message goes only on a fresh read")
+    if state == "nokey":
+        return ("it is an AGENT RENT LATE card with no RENT AGENT KEY line, so code cannot tell which units and rent "
+                "cycle to read the bank for: NOT CHECKED. Nothing was sent. The rent check writes one line per unit on "
+                "every AGENT RENT LATE task it raises; record a TOOL wall naming the missing key lines rather than send "
+                "without them")
+    if state == "notenancy":
+        return (f"the tenancy {landed.get('tenancy', '')} in a RENT AGENT KEY line is not in the Tenancies table, so its "
+                "rent cannot be read: NOT CHECKED. Nothing was sent. Find the tenancy the chase is about; record a TOOL "
+                "wall if the key is wrong")
+    if state == "norent":
+        return (f"tenancy {landed.get('tenancy', '')} has no rent on its record, so code cannot judge its owed cycle: "
+                "NOT CHECKED. Nothing was sent. Put the rent on the tenancy record, then run the send again")
+    return ""
+
+
 def rent_landed_refusal(task_id, task_name, fields=None):
-    """'' or why a RENT LATE email or text must not go now. `fields` is the task as the send already read
-    it; with none, it is read here."""
-    if not str(task_name or "").startswith("RENT LATE: "):
+    """'' or why a RENT LATE email or text, or an AGENT RENT LATE email, must not go now. `fields` is the task as
+    the send already read it; with none, it is read here."""
+    name = str(task_name or "")
+    if not (name.startswith("RENT LATE: ") or name.startswith("AGENT RENT LATE: ")):
         return ""
     f = fields if fields is not None else (get_task(task_id).get("fields", {}) or {})
+    if name.startswith("AGENT RENT LATE: "):
+        return agent_rent_landed_refusal(task_id, f)
     landed = dispatch_module().rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
                                                  f.get(AF["description"], ""), records=_rent_rows)
     if landed.get("state") == "landed":
