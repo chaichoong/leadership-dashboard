@@ -14,7 +14,7 @@ This script is the mechanical half of the fix. Two checks:
 1. RETIRED PHRASES. Every file the strategic layer reads or runs on is scanned
    for wording that a dated ruling retired. Each entry says what replaced it, so
    a hit is a one-line fix, never a research job. A "Lessons from Kevin" line is
-   exempt (a lesson is never deleted), and so is a line that quotes the old rule
+   exempt (a lesson is archived, never lost, and only with Kevin's approval), and so is a line that quotes the old rule
    as history ("lowered from", "superseded", "previous rule").
 
    Since 21 Sep 2026 the scan also reads what every Claude Code session loads

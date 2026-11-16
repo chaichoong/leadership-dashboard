@@ -7034,7 +7034,9 @@ LESSONS_PREAMBLE = (
     "asked to be remembered. Apply every one before drafting anything; if a\n"
     "lesson conflicts with the task you have been given, say so rather than\n"
     "guessing. Appended by `scripts/agent-dispatch.py lessons` — never edit a\n"
-    "line to change its meaning, and never delete one without Kevin's say-so."
+    "line to change its meaning. A lesson is archived, never lost: a clean-up\n"
+    "moves it, verbatim, to the private lessons archive in\n"
+    "~/Projects/kevin-hq/lessons-archive/, and only with Kevin's approval."
 )
 # Past this many lines the log is more prompt than instruction and wants a
 # distil pass in a build session. A soft signal in the JSON, never a silent
