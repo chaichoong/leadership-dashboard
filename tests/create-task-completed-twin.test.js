@@ -6,11 +6,12 @@ import { fileURLToPath } from 'url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GATE = resolve(ROOT, 'scripts/create-agent-task.py');
 
-// A NEW ITEM THAT REPEATS A MATTER JUST CLOSED JOINS IT (inbound-comms-triage lesson of 2 Sep 2026:
-// "Before creating a task, check open and recently completed tasks for the same matter. Join the existing
-// one. Never raise a second"). Until 16 Nov 2026 the create gate read only OPEN tasks. These drive the
-// real cmd_create with Airtable replaced by an in-memory board: every network door raises, and names,
-// senders and references are invented.
+// A NEW ITEM THAT REPEATS A MATTER JUST CLOSED SAYS SO (inbound-comms-triage lesson of 2 Sep 2026:
+// "Before creating a task, check open and recently completed tasks for the same matter"). Until 16 Nov 2026
+// the create gate read only OPEN tasks. It now creates as before and stamps one SEEN BEFORE line naming the
+// closed twin, its outcome and Kevin's reason; nothing on the closed task is touched (review of PR 959
+// deleted the first build, which reopened the closed task). These drive the real cmd_create with Airtable
+// replaced by an in-memory board: every network door raises, and names, senders and references are invented.
 
 const PRE = `
 import importlib.util, json, sys, io, contextlib, socket, urllib.request, urllib.parse
@@ -66,7 +67,9 @@ def create(name, sender, due="", dry=False, extra=None):
     out = json.loads(buf.getvalue().strip().splitlines()[-1])
     patches = [c[2]["fields"] for c in CALLS if c[0] == "PATCH"]
     posts = [c for c in CALLS if c[0] == "POST" and not c[1].split("?")[0].endswith("/comments")]
+    touched_done = [c[:2] for c in CALLS if c[0] in ("PATCH", "POST") and any(d["id"] in c[1] for d in DONE)]
     return {"rc": rc, "out": out, "patch": patches[0] if patches else None, "created": len(posts),
+            "notes": (posts[0][2]["fields"].get(F["notes"], "") if posts else ""), "touchedDone": touched_done,
             "completedRead": any(c[0] == "GET" and "LAST_MODIFIED_TIME" in c[1] for c in CALLS)}
 `;
 
@@ -75,45 +78,54 @@ function py(snippet) {
   return JSON.parse(out.trim().split('\n').pop());
 }
 
-describe('a repeat of a matter closed in the last 14 days joins it instead of starting a second task', () => {
-  it('the same subject from the same sender reopens the closed task, folds the item in and keeps Kevin\'s old verdict out of reach', () => {
+describe('a repeat of a matter closed in the last 14 days is created with a SEEN BEFORE line, and the closed task is left alone', () => {
+  it('a twin Kevin REJECTED: a new task, the line says how it was closed and to close this one the same way, the old task untouched', () => {
     const r = py(`
-done("recClosedTaskAaaa", "INBOUND: Fixture Council overdue licensing tasks, 9 Sample Street (1 Apr)",
-     "licensing@fixture-council.test", extra={F["approvalOutcome"]: {"name": "Approved as-is"},
-     F["approvedAt"]: ago(4), F["approvalFeedback"]: "Fine, send it.", F["feedbackHistory"]: "[2026-11-01 09:00] older note",
-     F["notes"]: "earlier trail", F["desc"]: "The first reminder.", F["due"]: ago(5)[:10], F["hardDeadline"]: True})
-res = create("INBOUND: Fixture Council overdue licensing tasks, 9 Sample Street (1 Apr)", "licensing@fixture-council.test",
-             due=(date.today() + timedelta(days=2)).isoformat())
-p = res["patch"]
-print(json.dumps({"rc": res["rc"], "out": res["out"], "created": res["created"],
-                  "status": p[F["status"]], "outcome": p.get(F["approvalOutcome"], "kept"), "approvedAt": p.get(F["approvedAt"], "kept"),
-                  "feedback": p.get(F["approvalFeedback"], "kept"), "history": p.get(F["feedbackHistory"], ""),
-                  "notes": p.get(F["notes"], ""), "desc": p.get(F["desc"], ""), "due": p.get(F["due"]), "hard": p.get(F["hardDeadline"]),
-                  "dueWanted": (date.today() + timedelta(days=2)).isoformat()}))`);
+N = "INBOUND: Fixture Council overdue licensing tasks, 9 Sample Street (1 Apr)"
+done("recClosedTaskAaaa", N, "licensing@fixture-council.test",
+     extra={F["approvalOutcome"]: {"name": "Rejected"}, F["verdictReason"]: {"name": "Not worth my attention"}})
+before = json.dumps(LIVE["recClosedTaskAaaa"], sort_keys=True)
+res = create(N, "licensing@fixture-council.test")
+print(json.dumps({"rc": res["rc"], "out": res["out"], "created": res["created"], "notes": res["notes"], "patch": res["patch"],
+                  "touched": res["touchedDone"], "same": json.dumps(LIVE["recClosedTaskAaaa"], sort_keys=True) == before}))`);
     expect(r.rc).toBe(0);
-    expect(r.out).toMatchObject({ action: 'updated', reopened: true, taskId: 'recClosedTaskAaaa' });
-    expect(r.out.matchedWhy).toBe('the same subject, word for word, from the same sender');
-    expect(r.created).toBe(0);                                    // nothing new is raised
-    expect(r.status).toBe('Today');                               // reopened, so the item is worked
-    expect([r.outcome, r.approvedAt, r.feedback]).toEqual([null, null, '']);   // the old approval is never carried out again
-    expect(r.history).toMatch(/older note[\s\S]*Kept when the duplicate gate reopened this task for a new item: earlier verdict Approved as-is at .*: Fine, send it\./);
-    expect(r.notes).toMatch(/earlier trail[\s\S]*create-agent-task\] REOPENED: a new item from the same sender repeats this task/);
-    expect(r.desc).toMatch(/The first reminder\.[\s\S]*UPDATE \d{4}-\d{2}-\d{2}: new item folded in by the duplicate gate[\s\S]*The new email, word for word\./);
-    expect(r.due).toBe(r.dueWanted);                              // the new item's date, never the closed task's past one
-    expect(r.hard).toBe(false);
+    expect(r.out).toMatchObject({ action: 'created', taskId: 'recNewTaskAaaaaa1', seenBefore: 'recClosedTaskAaaa' });
+    expect(r.created).toBe(1);
+    expect(r.notes).toMatch(/create-agent-task\] SEEN BEFORE: recClosedTaskAaaa closed \d{4}-\d{2}-\d{2}, outcome Rejected, reason Not worth my attention \(the same subject, word for word, from the same sender\)/);
+    expect(r.notes).toMatch(/Kevin turned this matter down then \(Not worth my attention\)\. Close this one the same way, naming recClosedTaskAaaa, and do not bring it back to him/);
+    expect([r.patch, r.touched, r.same]).toEqual([null, [], true]);   // no reopen, no field cleared, no verdict moved
   });
 
-  it('a shared reference number on the same subject joins; a house number alone does not', () => {
+  it('a twin Kevin approved gets the line too, with no instruction to close; a relevance reason alone counts as turned down', () => {
+    const r = py(`
+done("recApprovedAaaaaa", "INBOUND: Fixture Agent sends the monthly statement", "office@fixture-agent.test",
+     extra={F["approvalOutcome"]: {"name": "Approved as-is"}})
+ok = create("INBOUND: Fixture Agent sends the monthly statement", "office@fixture-agent.test")
+DONE.clear()
+done("recRelevanceAaaaa", "INBOUND: Fixture Gym asks us to renew", "hello@fixture-gym.test",
+     extra={F["verdictReason"]: {"name": "Duplicate"}})
+rel = create("INBOUND: Fixture Gym asks us to renew", "hello@fixture-gym.test")
+print(json.dumps({"ok": [ok["out"]["action"], ok["out"].get("seenBefore"), ok["notes"], ok["patch"]],
+                  "rel": rel["notes"]}))`);
+    expect(r.ok[0]).toBe('created');
+    expect(r.ok[1]).toBe('recApprovedAaaaaa');
+    expect(r.ok[2]).toMatch(/SEEN BEFORE: recApprovedAaaaaa closed .*, outcome Approved as-is, reason none/);
+    expect(r.ok[2]).not.toMatch(/turned this matter down/);
+    expect(r.ok[3]).toBeNull();
+    expect(r.rel).toMatch(/outcome none, reason Duplicate .*Kevin turned this matter down then \(Duplicate\)/);
+  });
+
+  it('a shared reference number on the same subject is a twin; a house number alone is not', () => {
     const r = py(`
 done("recPolicyTaskAaaa", "FIXED COST: Fixture Insure L01/0742989 renewed despite stop request", "renewals@fixture-insure.test")
 ref = create("FIXED COST: Fixture Insure L01/0742989 says renewed 1 Nov despite stop request", "renewals@fixture-insure.test")
 DONE.clear()
 done("recHouseTaskAaaaa", "INBOUND: Fixture Council asks 1406 Example Road licence fee", "licensing@fixture-council.test")
 house = create("INBOUND: Fixture Council asks 1406 Example Road waste collection day", "licensing@fixture-council.test")
-print(json.dumps({"ref": [ref["out"]["action"], ref["out"].get("matchedWhy", "")], "house": [house["out"]["action"], house["created"]]}))`);
-    expect(r.ref[0]).toBe('updated');
-    expect(r.ref[1]).toMatch(/the same subject and reference \(0742989\) from the same sender/);
-    expect(r.house).toEqual(['created', 1]);
+print(json.dumps({"ref": [ref["out"]["action"], ref["notes"]], "house": [house["out"]["action"], house["out"].get("seenBefore"), house["notes"]]}))`);
+    expect(r.ref[0]).toBe('created');
+    expect(r.ref[1]).toMatch(/SEEN BEFORE: recPolicyTaskAaaa .*the same subject and reference \(0742989\) from the same sender/);
+    expect(r.house).toEqual(['created', null, '']);
   });
 
   it('a follow-up, another sender, other words, a diary task, another flat and an old close are each created as before', () => {
@@ -142,7 +154,7 @@ print(json.dumps({k: [v["out"]["action"], v["created"], v["completedRead"]] for 
     expect(r.noSender).toEqual(['created', 1, false]);            // agent work, not inbound mail: never read
   });
 
-  it('a read that fails creates and says NOT CHECKED; a task someone reopened meanwhile is not touched; a dry run writes nothing', () => {
+  it('a read that fails creates and says NOT CHECKED; a dry run writes nothing and still names the twin', () => {
     const r = py(`
 S = "licensing@fixture-council.test"
 N = "INBOUND: Fixture Council overdue licensing tasks, 9 Sample Street (1 Apr)"
@@ -150,19 +162,14 @@ done("recClosedTaskAaaa", N, S)
 READ_FAILS.append(1)
 failed = create(N, S)
 READ_FAILS.clear()
-LIVE["recClosedTaskAaaa"][F["status"]] = {"name": "Today"}       # reopened by someone else since the listing
-moved = create(N, S)
-LIVE["recClosedTaskAaaa"][F["status"]] = {"name": "Completed"}
 dry = create(N, S, dry=True)
-print(json.dumps({"failed": [failed["out"]["action"], failed["created"], failed["out"].get("note", "")],
-                  "moved": [moved["out"]["action"], moved["created"], moved["patch"], moved["out"].get("note", "")],
-                  "dry": [dry["out"]["action"], dry["out"].get("reopened"), dry["patch"], dry["created"]]}))`);
+print(json.dumps({"failed": [failed["out"]["action"], failed["created"], failed["out"].get("note", ""), failed["notes"]],
+                  "dry": [dry["out"]["action"], dry["out"].get("seenBefore"), dry["patch"], dry["created"]]}))`);
     expect(r.failed[0]).toBe('created');
     expect(r.failed[1]).toBe(1);
     expect(r.failed[2]).toMatch(/NOT CHECKED: the tasks completed in the last 14 days could not be read \(Airtable GET -> HTTP 503\)/);
-    expect(r.moved.slice(0, 3)).toEqual(['created', 1, null]);
-    expect(r.moved[3]).toMatch(/repeats recClosedTaskAaaa, which is no longer Completed, so nothing was reopened/);
-    expect(r.dry).toEqual(['updated', true, null, 0]);
+    expect(r.failed[3]).not.toMatch(/SEEN BEFORE/);
+    expect(r.dry).toEqual(['created', 'recClosedTaskAaaa', null, 0]);
   });
 
   it('completed_twin reads only Completed rows inside the window, newest first, and never a row with no sender', () => {

@@ -1055,6 +1055,18 @@ def rent_landed_refusal(task_id, task_name, fields=None):
         return (f"the bank could not be read again for this tenancy ({landed.get('detail', '')}), so whether the rent "
                 "has landed since the card was made is NOT CHECKED. Nothing was sent. Run the send again; a late-rent "
                 "message goes only on a fresh read")
+    # Running is not working (review of PR 959): a card the check cannot place is refused, never sent on a guess.
+    if landed.get("state") == "nokey":
+        return ("it is a RENT LATE card with no RENT CHECK KEY line, so code cannot tell which tenancy and rent cycle "
+                "to read the bank for: NOT CHECKED. Nothing was sent. The rent check writes that line on every RENT LATE "
+                "task it raises; record a TOOL wall naming the missing key line rather than send without it")
+    if landed.get("state") == "notenancy":
+        return (f"the tenancy {landed.get('tenancy', '')} in its RENT CHECK KEY is not in the Tenancies table, so the "
+                "rent cannot be read: NOT CHECKED. Nothing was sent. Find the tenancy the chase is about; record a TOOL "
+                "wall if the key is wrong")
+    if landed.get("state") == "norent":
+        return (f"tenancy {landed.get('tenancy', '')} has no rent on its record, so code cannot tell whether what landed "
+                "covers it: NOT CHECKED. Nothing was sent. Put the rent on the tenancy record, then run the send again")
     return ""
 
 

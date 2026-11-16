@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPTS = path.join(root, 'scripts');
 
 const HARNESS = `
-import importlib.util, json, sys, os, io, contextlib, tempfile, argparse
+import importlib.util, json, sys, os, io, contextlib, tempfile, argparse, urllib.parse
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
 def load_mod(name, file):
     spec = importlib.util.spec_from_file_location(name, os.path.join(${JSON.stringify(SCRIPTS)}, file))
@@ -25,6 +25,17 @@ st.SWITCH = os.path.join(SCRATCH, "text-sending-on")
 SE = load_mod("se_for_text", "send-email.py")      # the real worker reading, with only the call stubbed
 REAL_LOADER = st.send_email_module
 st.send_email_module = lambda: SE
+# The send reads the rent and the bank again (16 Nov 2026; tests/send-rent-landed.test.js covers it): here a
+# rent of £900 on the card's tenancy and nothing landed, so the chase still goes. Through send-email.py's own
+# api door, stubbed, so no read reaches Airtable.
+def _rent_api(method, url, payload=None):
+    q = urllib.parse.unquote(url)
+    if "fldDMyfZLFMeONPq8" in q:
+        return {"records": [{"id": "recTenancyTextAaa", "fields": {"fldDMyfZLFMeONPq8": 900.0}}]}
+    if "tbln0gzhCAorFc3zB" in q:
+        return {"records": []}
+    raise RuntimeError("no fixture for " + method + " " + url[:80])
+SE.api = _rent_api
 AF = st.AF
 import agent_email_format as aef
 def trial_ended():                                  # what Kevin's cut-over PR does: the entry moves to TRIAL_ENDED
@@ -36,7 +47,7 @@ OUTPUT = ("TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not 
           "TO: sam@example.com\\nFROM: info@agilelets.co.uk\\nSUBJECT: Your rent at 1 Example Road\\n---\\nHello Sam,\\n\\nBody.\\n\\n"
           "Kind regards\\nRoy Lavin\\nAgile Lets\\n\\n**Carrying this out will involve:** an email and a text.")
 def card(output=OUTPUT, outcome="Approved as-is", agent=CFV, name="RENT LATE: Unit 9, rent due 1 Oct (reminder)", ttype="Correspondence",
-         approved_at="2026-10-03T10:00:00.000Z", tenants=("recTenantTest0001",), status="Today", notes="RENT CHECK KEY: recT:2026-10-01:1",
+         approved_at="2026-10-03T10:00:00.000Z", tenants=("recTenantTest0001",), status="Today", notes="RENT CHECK KEY: recTenancyTextAaa:2026-10-01:1",
          tenancies=()):
     return {"id": "recCARDTEXT000001", "createdTime": "2026-10-03T09:00:00.000Z", "fields": {
         AF["name"]: name, AF["agentOutput"]: output, AF["approvalOutcome"]: outcome, AF["taskType"]: ttype,
@@ -158,8 +169,8 @@ for key, rec in (
                  ("unapproved", card(outcome="")), ("changes", card(outcome="Changes requested")),
                  ("minorEdits", card(outcome="Approved with minor edits")), ("notRentCard", card(name="Book the boiler", notes="")),
                  ("completed", card(status="Completed")), ("cancelled", card(status="Cancelled")),
-                 ("trialSettled", card(notes="RENT CHECK KEY: recT:2026-10-01:1\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict")),
-                 ("stamped", card(notes="RENT CHECK KEY: recT:2026-10-01:1\\n[03 Oct 2026 10:00 — send-text] SENT: text to the number ending 123")),
+                 ("trialSettled", card(notes="RENT CHECK KEY: recTenancyTextAaa:2026-10-01:1\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict")),
+                 ("stamped", card(notes="RENT CHECK KEY: recTenancyTextAaa:2026-10-01:1\\n[03 Oct 2026 10:00 — send-text] SENT: text to the number ending 123")),
                  ("copied", card(approved_at="2026-10-03T08:30:00.000Z")), ("blankApproval", card(approved_at=None)),
                  ("inTrial", card(approved_at="2026-10-03T07:00:00.000Z")), ("admin", card(ttype="Admin")),
                  ("noText", card(output=OUTPUT.split("TO: sam")[0].replace("TEXT TO: 07700 900123\\n", "").replace(

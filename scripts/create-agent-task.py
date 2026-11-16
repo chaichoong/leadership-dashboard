@@ -101,12 +101,11 @@ F = {
     "tenants":      "fld6ZcfEogJmeQj2c",
     "properties":   "fldZKFvEpJ6NZeFKz",
     "units":        "fldEW648YtTZ6j01n",
-    # Read and written only when a new item repeats a task completed in the last
-    # COMPLETED_JOIN_DAYS (16 Nov 2026): when it was completed, and where Kevin's
-    # earlier verdict is kept when the task is reopened for the new item.
+    # Read only when a new item repeats a task completed in the last
+    # COMPLETED_JOIN_DAYS (16 Nov 2026): when it was completed, and why Kevin
+    # decided as he did (agent-dispatch.py AF["verdictReason"]).
     "completion":   "fldFOi1SwEKuJRmdN",
-    "approvalFeedback": "fldtI7SJI4gEohHD1",
-    "feedbackHistory": "fldOzsq68lhfprKJu",
+    "verdictReason": "fldF9Bs4N5mttQvtl",
 }
 
 # Roy Lavin's Team Members row (same id as ROY_REC in task-manager.py and
@@ -2148,37 +2147,40 @@ def decide(incoming_fields, open_rows):
     }
 
 
-# A NEW ITEM THAT REPEATS A MATTER JUST CLOSED JOINS IT (inbound-comms-triage lesson
+# A NEW ITEM THAT REPEATS A MATTER JUST CLOSED SAYS SO (inbound-comms-triage lesson
 # of 2 Sep 2026: "Before creating a task, check open and recently completed tasks
 # for the same matter. Join the existing one. Never raise a second"). Until 16 Nov
 # 2026 `decide` read only OPEN tasks, so the fourth automated "overdue licensing
-# tasks" email from one council in ten days became a fourth task, each worked and
-# closed on its own. A new inbound item now joins a task completed in the last
-# COMPLETED_JOIN_DAYS when it is unmistakably the same matter, with the same outcome
-# as a fold: the item is folded in and nothing is created. A completed task is
-# reopened to take it, because a fold into a closed task is work nobody will see.
+# tasks" email from one council in ten days became a fourth task with nothing on it
+# to say the matter had just been closed three times.
 #
-# NARROW ON PURPOSE, because a fold destroys and a closed task's next instance is
-# usually real new work. The back-test of 16 Nov 2026 (586 creates in the 30 days
-# before, each against the tasks completed in the 14 days before it) found the
-# open-task fold rules matching 137 (23%) and the subject key alone 72 (12%): weekly
-# reviews, each week's mail-out, the next episode, repeat chases. Kept to: an
-# inbound item (it has a sender), not a follow-up the triage skill names on purpose
-# (`INBOUND (follow-up):`), not a diary or buying task, the same sender, the same
-# lane, no other house, tenant or linked record, and then EITHER the same subject
-# word for word OR the same subject key with a shared reference that is not a house
-# number (six digits or more, or digits inside a token such as "L01/0742989"). That
-# joins 5 of the 221 inbound creates, all repeats: three copies of one council's
-# automated reminder with the same subject, a premium finance
-# notice raised twice, an insurer's second letter on one policy number. A looser
-# version (the key and the sender) joined 14; the nine it adds include a refund
-# request folded into a waste quote on the key "inbound|asks roy", one flat's council
-# tax into another flat's, two different smoke alarm messages and two diary changes,
-# so they are left to be created, the cheap direction.
+# It CREATES, and stamps one Notes line naming the closed twin, its outcome and
+# Kevin's reason (`SEEN BEFORE:`), so the robot that works it closes it the way the
+# twin was closed instead of bringing it back to Kevin. When the twin was rejected,
+# or rejected for a relevance reason, the line says so in plain words. Nothing on
+# the closed task is touched. The first build REOPENED the closed task and folded
+# the item in, and review of PR 959 found it reopened tasks Kevin had REJECTED on
+# purpose (a reject marks Completed), wiped a rejection the accuracy figures count,
+# left the completion date and Deferred Until behind, overrode decide's refusal to
+# fold into a decided card and stamped the archived verdict as his own words. Kevin's
+# rule when reviews ratchet: delete the mechanism. It was deleted.
 #
-# Kevin's earlier verdict on the reopened task is archived in Feedback History and
-# cleared from the record, or the dispatcher would read the old approval as owed a
-# carry-out and act on it again.
+# NARROW ON PURPOSE, so the line is right when it appears. The back-test of 16 Nov
+# 2026 (586 creates in the 30 days before, each against the tasks completed in the
+# 14 days before it) found the open-task fold rules matching 137 (23%) and the
+# subject key alone 72 (12%): weekly reviews, each week's mail-out, the next
+# episode, repeat chases. Kept to: an inbound item (it has a sender), not a
+# follow-up the triage skill names on purpose (`INBOUND (follow-up):`), not a diary
+# or buying task, the same sender, the same lane, no other house, tenant or linked
+# record, and then EITHER the same subject word for word OR the same subject key
+# with a shared reference that is not a house number (six digits or more, or digits
+# inside a token such as "L01/0742989"). That marks 5 of the 221 inbound creates,
+# all repeats: three copies of one council's automated reminder with the same
+# subject, a premium finance notice raised twice, an insurer's second letter on one
+# policy number. A looser version (the key and the sender) matched 14; the nine it
+# adds include a refund request against a waste quote on the key "inbound|asks
+# roy", one flat's council tax against another flat's, two different smoke alarm
+# messages and two diary changes.
 COMPLETED_JOIN_DAYS = 14
 FOLLOW_UP_NAME_RE = re.compile(r"\(follow[- ]?up\)", re.I)
 
@@ -2241,27 +2243,33 @@ def completed_twin(incoming_fields, done_rows, today=None):
     return None
 
 
-def build_reopen(existing_fields, incoming_fields, today_iso, stamp):
-    """The patch that reopens a completed task for a new item: the fold's own patch,
-    the new item's due date (never the closed task's past one), and Kevin's earlier
-    verdict moved to Feedback History so it is never carried out a second time."""
-    patch = build_update(existing_fields, incoming_fields, today_iso)
-    if _sel_name(patch.get(F["status"])) not in NEW_TASK_STATUSES or patch.get(F["status"]) == "Approval":
-        patch[F["status"]] = "Today"
-    patch[F["due"]] = str(incoming_fields.get(F["due"]) or "")[:10] or today_iso
-    patch[F["hardDeadline"]] = bool(incoming_fields.get(F["hardDeadline"]))
-    outcome = _sel_name(existing_fields.get(F["approvalOutcome"])).strip()
-    approved_at = str(existing_fields.get(F["approvedAt"]) or "").strip()
-    note = " ".join(str(existing_fields.get(F["approvalFeedback"]) or "").split())
-    if outcome or approved_at or note:
-        line = "[%s] Kept when the duplicate gate reopened this task for a new item: earlier verdict %s%s%s" % (
-            stamp, outcome or "(none)", (" at " + approved_at) if approved_at else "", (": " + note) if note else "")
-        history = (str(existing_fields.get(F["feedbackHistory"]) or "").rstrip() + "\n\n" + line).strip()
-        patch[F["feedbackHistory"]] = history[-90000:]
-        patch[F["approvalOutcome"]] = None
-        patch[F["approvedAt"]] = None
-        patch[F["approvalFeedback"]] = ""
-    return patch
+REJECTED_OUTCOME = "Rejected"
+
+
+def _relevance_reasons():
+    """The verdict reasons that say a task should not have existed: agent-dispatch.py's own list,
+    imported, so the two can never disagree. A dispatcher that will not load gives none, and the
+    line still names the outcome and the reason as they stand."""
+    d, _why = load_dispatch()
+    return tuple(getattr(d, "RELEVANCE_REASONS", ()) or ()) if d is not None else ()
+
+
+def seen_before_line(twin, stamp):
+    """The one Notes line a new task carries when it repeats a task closed in the last
+    COMPLETED_JOIN_DAYS: which task, when it closed, its outcome and Kevin's reason, and, when he
+    turned the matter down, that the robot closes this one the same way."""
+    row = twin["row"]
+    f = row.get("fields") or {}
+    outcome = _sel_name(f.get(F["approvalOutcome"])).strip()
+    reason = _sel_name(f.get(F["verdictReason"])).strip()
+    line = ("[%s — create-agent-task] SEEN BEFORE: %s closed %s, outcome %s, reason %s (%s): %s."
+            % (stamp, row.get("id", ""), str(f.get(F["completion"]) or "")[:10] or "on an unknown date",
+               outcome or "none", reason or "none", twin["why"], str(f.get(F["name"]) or "")[:120]))
+    if outcome == REJECTED_OUTCOME or (reason and reason in _relevance_reasons()):
+        line += (" Kevin turned this matter down then%s. Close this one the same way, naming %s, and do not "
+                 "bring it back to him unless something in the new item has changed."
+                 % ((" (" + reason + ")") if reason else "", row.get("id", "")))
+    return line
 
 
 def fetch_recent_completed(days=COMPLETED_JOIN_DAYS):
@@ -2274,7 +2282,8 @@ def fetch_recent_completed(days=COMPLETED_JOIN_DAYS):
     while True:
         params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"), ("filterByFormula", formula)]
         for fid in (F["name"], F["status"], F["completion"], F["team"], F["inboundSender"], F["maintenance"],
-                    F["tenancies"], F["tenants"], F["properties"], F["units"]):
+                    F["tenancies"], F["tenants"], F["properties"], F["units"], F["approvalOutcome"],
+                    F["verdictReason"]):
             params.append(("fields[]", fid))
         if offset:
             params.append(("offset", offset))
@@ -2861,8 +2870,8 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
             return 2
         verdict = decide(fields, rows)
         # NOTHING OPEN TO FOLD INTO: does it repeat a matter closed in the last two weeks (16 Nov 2026)?
-        # Read only for an item completed_twin could match, so most creates cost no second read. A read
-        # that fails is NOT CHECKED and the item is created as before, said in the note.
+        # Read only for an item completed_twin could match, so most creates cost no second read. It is
+        # created either way; a twin only adds the SEEN BEFORE line. A read that fails is NOT CHECKED.
         if verdict["action"] == "create" and str(fields.get(F["inboundSender"]) or "").strip() \
                 and not FOLLOW_UP_NAME_RE.search(str(fields.get(F["name"]) or "")):
             try:
@@ -2873,46 +2882,10 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
                                    + "NOT CHECKED: the tasks completed in the last %d days could not be read (%s), "
                                      "so a repeat of a closed matter was not looked for." % (COMPLETED_JOIN_DAYS, str(exc)[:120]))
             if twin:
-                verdict = {"action": "update", "reopen": True, "taskId": twin["row"]["id"],
-                           "matchedName": (twin["row"].get("fields") or {}).get(F["name"], ""),
-                           "matchedWhy": twin["why"], "key": verdict.get("key", "")}
-
-    live_fields = None
-    if verdict["action"] == "update" and verdict.get("reopen"):
-        live = _request("GET", f"/{TASKS}/{verdict['taskId']}?returnFieldsByFieldId=true")
-        live_fields = live.get("fields", {}) or {}
-        # Re-read, never trusted from the listing: a task someone reopened since is an open task now, with
-        # whatever verdict it carries, and the open-task rules (which never fold into a decided card) have
-        # already passed it by. So it is created, and said.
-        if _sel_name(live_fields.get(F["status"])) != "Completed":
-            verdict = {"action": "create", "key": verdict.get("key", ""),
-                       "note": "repeats %s, which is no longer Completed, so nothing was reopened" % verdict["taskId"]}
-
-    if verdict["action"] == "update" and verdict.get("reopen"):
-        task_id = verdict["taskId"]
-        now = datetime.now()
-        patch = build_reopen(live_fields, fields, date.today().isoformat(), now.strftime("%Y-%m-%d %H:%M"))
-        line = ("[%s — create-agent-task] REOPENED: a new item from the same sender repeats this task, "
-                "completed %s (%s), so it joins this task instead of starting a second one. New item: %s. "
-                "Any earlier verdict of Kevin's is kept in Feedback History."
-                % (now.strftime("%d %b %Y %H:%M"), str(live_fields.get(F["completion"]) or "")[:10] or "recently",
-                   verdict["matchedWhy"], str(fields.get(F["name"]) or "")[:160]))
-        patch[F["notes"]] = (str(live_fields.get(F["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
-        if not dry_run:
-            _request("PATCH", f"/{TASKS}/{task_id}", {"typecast": True, "fields": patch})
-            post_comment(task_id, "Duplicate gate: a new item repeats this task, completed in the last %d days, "
-                                  "so it was reopened and the item folded in instead of creating a sibling. New item: %s"
-                         % (COMPLETED_JOIN_DAYS, str(fields.get(F["name"], ""))))
-            write_track_record(task_id, fields)
-        out = {"action": "updated", "reopened": True, "taskId": task_id,
-               "matchedName": verdict.get("matchedName", ""), "matchedWhy": verdict.get("matchedWhy", ""),
-               "key": verdict.get("key", ""), "dryRun": dry_run}
-        if holder_note:
-            out["holderCheck"] = holder_note
-        print(json.dumps(out))
-        print("REOPENED %s (%s): %s" % (task_id, verdict.get("matchedWhy", ""), verdict.get("matchedName", "")),
-              file=sys.stderr)
-        return 0
+                seen = seen_before_line(twin, datetime.now().strftime("%d %b %Y %H:%M"))
+                fields = dict(fields)
+                fields[F["notes"]] = (str(fields.get(F["notes"]) or "").rstrip() + "\n\n" + seen).strip()
+                verdict["seenBefore"] = twin["row"]["id"]
 
     if verdict["action"] == "update":
         task_id = verdict["taskId"]
@@ -2971,6 +2944,8 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
         task_id = "(dry run)"
     out = {"action": "created", "taskId": task_id, "key": verdict.get("key", ""),
            "dryRun": dry_run, "status": fields.get(F["status"])}
+    if verdict.get("seenBefore"):
+        out["seenBefore"] = verdict["seenBefore"]
     missing, repaired = [], []
     if not dry_run and task_id:
         live = _request("GET", f"/{TASKS}/{task_id}?returnFieldsByFieldId=true")

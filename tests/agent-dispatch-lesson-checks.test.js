@@ -252,6 +252,29 @@ print(json.dumps(out))`);
     expect(r.paid).toBeNull();
   });
 
+  it('an automatic collection or someone else paying is not a bill for the Friday list, and the refusal says the robot may reword', () => {
+    const r = py(`
+S = lambda t: m.bill_promise_sentence(m.bill_own_words(t))
+task("FIXED COST: Fixture Gym renews 15 Dec at GBP 20.00")
+ref = submit("The £20 renewal will be paid on Friday.\\n\\n**Carrying this out will involve:** Nothing. Information only.")["err"]
+print(json.dumps({
+  "dd": S("The £20 renewal will be paid by direct debit on 15 Dec."),
+  "so": S("The £500 rent to the head landlord will be paid by standing order on the 1st."),
+  "pcl": S("The £61.20 premium will be paid monthly through Premium Credit."),
+  "card": S("The £45 annual fee will be paid from the card already on file."),
+  "auto": S("The £9.99 invoice will be paid automatically when it renews."),
+  "insurer": S("The £300 repair invoice will be paid, and the insurer pays it under the claim."),
+  "agent": S("The £80 invoice will be paid on Friday; the agent pays it from the rent."),
+  "tenant": S("The £60 call-out charge will be paid on Friday, as the tenant pays it under the lease."),
+  "ours": S("The £20 renewal will be paid on Friday."),
+  "message": ref,
+}))`);
+    for (const k of ['dd', 'so', 'pcl', 'card', 'auto', 'insurer', 'agent', 'tenant']) expect([k, r[k]]).toEqual([k, '']);
+    expect(r.ours).toBe('The £20 renewal will be paid on Friday.');
+    expect(r.message).toMatch(/if it is collected automatically \(a direct debit, a standing order, Premium Credit, a card already on file\) or someone else pays \(the insurer, the agent, the tenant\), reword the sentence to name that payer/);
+    expect(r.message).toMatch(/a MARK FOR PAYMENT card would pay it twice/);
+  });
+
   it('money owed to us, a tenant\'s arrears, reported words, a quoted line and a TRACK RECORD line are not our promise', () => {
     const r = py(`
 S = lambda t: m.bill_promise_sentence(m.bill_own_words(t))
@@ -299,6 +322,24 @@ print(json.dumps(out))`);
     expect(r.flag).toBeNull();
     expect(r.closed).toBeNull();
     expect(r.builder).toBeNull();
+  });
+
+  it('two waiting cards on the same house and certificate, both other jobs: one flag each lands, one flag alone names the other', () => {
+    const r = py(`
+WAITING[:] = [card("recAskAgentAaaaaa", "COMPLIANCE: 9 Sample Street gas safety check - ask the letting agent for an access day", sender=PROPERTY),
+              card("recFileCopyAaaaaa", "COMPLIANCE: 9 Sample Street gas safety check - file last year's copy", sender=PROPERTY)]
+task("COMPLIANCE: 9 Sample Street gas safety check - book Fixture Gas", holder=PROPERTY)
+book = "PASS TO ROY: book Fixture Gas for the gas safety check at 9 Sample Street.\\n\\n**Carrying this out will involve:** Roy books it."
+S = "searched the compliance book, the task history and each inbox (info@ and Gmail): no gas certificate held"
+one = submit(book, agent=PROPERTY, certificate_search=S, same_house_check=["recAskAgentAaaaaa is a different job: that card asks for access"])
+both = submit(book, agent=PROPERTY, certificate_search=S, same_house_check=[
+    "recAskAgentAaaaaa is a different job: that card asks the agent for access",
+    "recFileCopyAaaaaa is a different job: that card files last year's certificate"])
+print(json.dumps({"one": one["err"], "both": both["err"],
+                  "stamps": re.findall(r"SAME HOUSE CHECK \\(round \\d+\\): (rec\\w+)", both["notes"])}))`);
+    expect(r.one).toMatch(/already waiting on Kevin: recFileCopyAaaaaa/);
+    expect(r.both).toBeNull();
+    expect(r.stamps).toEqual(['recAskAgentAaaaaa', 'recFileCopyAaaaaa']);
   });
 
   it('another house, another certificate, a group sibling and a card with no single house are not refused; the last says NOT CHECKED', () => {

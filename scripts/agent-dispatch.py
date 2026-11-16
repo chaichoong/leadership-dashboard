@@ -6481,26 +6481,29 @@ def rent_landed_state(name, notes, description, records=None):
     the caller's own paginated reader (table, formula=, fields=), so a send reads through its own door;
     with none, this file's query_records and fetch_bank_lines.
     {"state": "landed", "detail", "shown", "total", "rent", "owed"} | {"state": "unchecked", "detail"} |
-    {"state": ""} when it is not a keyed RENT LATE task or the rent has not landed."""
+    {"state": "nokey"} | {"state": "notenancy", "tenancy"} | {"state": "norent", "tenancy"} | {"state": ""}
+    when it is not a RENT LATE task or the rent has not landed. The card lets the three that could not be
+    checked through with a NOT CHECKED stamp (rent_paid_problem); the send refuses all three (review of PR
+    959: running is not working)."""
     if not str(name or "").startswith("RENT LATE: "):
         return {"state": ""}
     key = RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")
     if not key:
-        return {"state": ""}
+        return {"state": "nokey"}
     tenancy, owed = key.group(1), datetime.strptime(key.group(2), "%Y-%m-%d").date()
     since = (owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat()
     try:
         rows = (records or query_records)(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'",
                                           fields=[RENT_FIELD, RENT_DUE_DAY_FIELD])
-        ten = (rows[0].get("fields") or {}) if rows else {}
+        if not rows:
+            return {"state": "notenancy", "tenancy": tenancy}
+        ten = rows[0].get("fields") or {}
         rent = float(ten.get(RENT_FIELD) or 0)
         due_day = int(ten.get(RENT_DUE_DAY_FIELD) or owed.day)
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
         return {"state": "unchecked", "detail": str(exc)[:120]}
     if not rent:
-        note_not_checked(f"rent paid-again check: tenancy {tenancy} has no rent on its record, so code could not "
-                         "tell whether what was matched to it since the due day covers the rent")
-        return {"state": ""}
+        return {"state": "norent", "tenancy": tenancy}
     try:
         bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
@@ -6523,6 +6526,10 @@ def rent_landed_state(name, notes, description, records=None):
 
 def rent_paid_problem(name, notes, description):
     landed = rent_landed_state(name, notes, description)
+    if landed["state"] in ("notenancy", "norent"):
+        note_not_checked(f"rent paid-again check: tenancy {landed['tenancy']} has no rent on its record, so code could "
+                         "not tell whether what was matched to it since the due day covers the rent")
+        return ""
     if landed["state"] == "unchecked":
         return (f"the bank could not be read again for this tenancy ({landed['detail']}): NOT CHECKED. Try again; "
                 "a late-rent card goes only on a fresh read")
@@ -6896,7 +6903,10 @@ def twin_card_problem(task_rec, output, fetch=None, said=""):
 # card found anywhere on the board (the lesson's own failure), and a note to Roy that names no card (its
 # card exists, so it passes once it names it). Five shapes the first draft read are not read: money owed
 # TO us, a tenant's arrears, a TRACK RECORD line quoting another task, "it has to be paid every year",
-# and reported words ("It says the £376 will be paid in advance").
+# and reported words ("It says the £376 will be paid in advance"). Review of PR 959 added two more: an
+# automatic collection (direct debit, standing order, Premium Credit, a card already on file) and someone
+# else paying (the insurer, the agent, the tenant), because a MARK FOR PAYMENT card for either pays twice;
+# the back-test count is unchanged.
 BILL_PROMISE_RE = re.compile(
     r"\b(?:we|i|agile lets|tnt(?: management)?(?: limited| ltd)?|kevin|the company|our company)\s+(?:will|shall|'ll|are going to"
     r"|am going to|is going to)\s+(?:then\s+)?(?:pay|settle|clear)\b"
@@ -6918,6 +6928,18 @@ BILL_OTHER_PAYER_RE = re.compile(
 # Money coming TO us is not a bill: rent, a deposit, benefit, arrears, anything someone "owes us".
 BILL_TO_US_RE = re.compile(r"\b(?:owes? us|owed to us|pay us|paid to us|rent|deposit|benefit|universal credit|housing element"
                            r"|arrears|refund)\b", re.I)
+# An automatic collection, or someone else paying, is not a bill for the Friday list (review of PR 959):
+# "The £20 renewal will be paid by direct debit on 15 Dec" listed on a MARK FOR PAYMENT card would be paid
+# twice. A direct debit, a standing order, Premium Credit, a card already on file charged automatically, or
+# the insurer, agent or tenant paying, takes the sentence out of the check.
+BILL_AUTOMATIC_RE = re.compile(
+    r"\b(?:direct debit|standing order|premium credit|continuous payment authority|by dd"
+    r"|card (?:on file|we hold|already (?:on file|held|registered|saved))"
+    r"|(?:charged|taken|collected|paid|debited) automatically|automatically (?:charged|taken|collected|paid|debited)"
+    r"|auto-?renew\w*)\b", re.I)
+BILL_THEY_PAY_RE = re.compile(
+    r"\b(?:the\s+)?(?:insurer|insurers|agent|letting agent|managing agent|tenant|tenants|council|mears|landlord)\s+"
+    r"(?:pays|pay|is paying|are paying|covers|cover|will cover|settles|will settle)\b", re.I)
 REC_ID_RE = re.compile(r"\b(rec[A-Za-z0-9]{14})\b")
 
 
@@ -6946,7 +6968,8 @@ def bill_promise_sentence(text):
         hit = BILL_PROMISE_RE.search(s)
         if not hit or not BILL_WORD_RE.search(s):
             continue
-        if BILL_HEDGE_RE.search(s[:hit.start()]) or BILL_OTHER_PAYER_RE.search(s) or BILL_TO_US_RE.search(s):
+        if BILL_HEDGE_RE.search(s[:hit.start()]) or BILL_OTHER_PAYER_RE.search(s) or BILL_TO_US_RE.search(s) \
+                or BILL_AUTOMATIC_RE.search(s) or BILL_THEY_PAY_RE.search(s):
             continue
         return s
     return ""
@@ -6978,7 +7001,9 @@ def bill_promise_problem(task_id, output, plain_approve, fetch=None, said=""):
             "already lists it, name that task with --on-payment-list <its rec id> (stamped on the task's Notes, never "
             "in the email; on a card that is not an email, the line ON PAYMENT LIST: <its rec id>) and code reads that "
             "card for the block; or, if it is already paid, add PAID CHECK: <the payment's date, amount and transaction "
-            "id>; or, if we are not the one paying, say who pays." + tail)
+            "id>; or, if it is collected automatically (a direct debit, a standing order, Premium Credit, a card already "
+            "on file) or someone else pays (the insurer, the agent, the tenant), reword the sentence to name that payer, "
+            "and no card is needed, because a MARK FOR PAYMENT card would pay it twice." + tail)
 
 
 # 11. ONE JOB PER HOUSE AND CERTIFICATE (property-administration lesson of 15 Sep 2026: "Before raising or
@@ -7010,7 +7035,10 @@ def same_house_card_problem(task_rec, output, fetch=None, said=""):
         note_not_checked(f"same-house check: the card is about one certificate ({ctype}) and {how}, so code could "
                          "not look for another card on the same house and certificate")
         return ""
-    said = f"SAME HOUSE CHECK: {said}" if str(said or "").strip() else ""
+    # One --same-house-check per waiting card (review of PR 959: two cards on one house and certificate, both
+    # other jobs, looped for ever while the flag took one value).
+    said = "\n".join(f"SAME HOUSE CHECK: {x}" for x in (said if isinstance(said, (list, tuple)) else [said])
+                     if str(x or "").strip())
     named = {m_.group(1) for m_ in SAME_HOUSE_LINE_RE.finditer(outside_email_body(output) + "\n" + said)}
     for r in waiting_cards((task_rec or {}).get("id"), fetch):
         rf = r.get("fields") or {}
@@ -7024,9 +7052,9 @@ def same_house_card_problem(task_rec, output, fetch=None, said=""):
                 f"\"{rname[:90]}\". Kevin's rule (15 Sep 2026): one job per house and certificate, so nothing is "
                 f"bought or asked for twice. Fold this into it (python3 scripts/agent-dispatch.py annotate {r['id']} "
                 f"--note \"<what is new>\") and close this one with CLOSE PROPOSAL: duplicate of {r['id']}; or, if it "
-                f"is another job, say why with --same-house-check \"{r['id']} is a different job: <why>\" (stamped on the "
-                f"task's Notes, never in the email; on a card that is not an email, the line SAME HOUSE CHECK: {r['id']} is "
-                "a different job: <why> does the same)")
+                f"is another job, say why with --same-house-check \"{r['id']} is a different job: <why>\" (one flag per "
+                f"waiting card; stamped on the task's Notes, never in the email; on a card that is not an email, the line "
+                f"SAME HOUSE CHECK: {r['id']} is a different job: <why> does the same)")
     return ""
 
 
@@ -7745,9 +7773,11 @@ def cmd_submit(args):
     # What the agent said it checked, on the flags that keep it out of an email (16 Nov 2026).
     for flag, label in (("certificate_search", "CERTIFICATE SEARCH"), ("duplicate_check", "DUPLICATE CHECK"),
                         ("same_house_check", "SAME HOUSE CHECK"), ("on_payment_list", "ON PAYMENT LIST")):
-        said_flag = " ".join(str(getattr(args, flag, "") or "").split())
-        if said_flag:
-            stamps.append(note_line("agent-dispatch", f"{label} (round {round_no}): {said_flag[:600]}"))
+        given = getattr(args, flag, "") or ""
+        for said_flag in (given if isinstance(given, (list, tuple)) else [given]):
+            said_flag = " ".join(str(said_flag or "").split())
+            if said_flag:
+                stamps.append(note_line("agent-dispatch", f"{label} (round {round_no}): {said_flag[:600]}"))
     for text in unchecked:
         stamps.append(note_line("agent-dispatch", f"{NOT_CHECKED_MARK} (round {round_no}): {text}"))
     # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
@@ -16031,9 +16061,10 @@ def main():
     s.add_argument("--duplicate-check", default="", metavar="TEXT",
                    help="when an Inbox Response card is refused because a card on the same matter already waits on "
                         "Kevin and it is another matter: 'not the same matter as <rec id>: <why>'. Stamped on Notes.")
-    s.add_argument("--same-house-check", default="", metavar="TEXT",
+    s.add_argument("--same-house-check", action="append", default=None, metavar="TEXT",
                    help="when a Property Administration card is refused because another card on the same house and "
-                        "certificate waits on Kevin and it is another job: '<rec id> is a different job: <why>'.")
+                        "certificate waits on Kevin and it is another job: '<rec id> is a different job: <why>'. "
+                        "Once per waiting card.")
     s.add_argument("--on-payment-list", default="", metavar="RECID",
                    help="when the card says a bill will be paid and another task's MARK FOR PAYMENT card lists it: "
                         "that task's rec id (code reads its card for the block). Stamped on Notes.")

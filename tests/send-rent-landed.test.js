@@ -54,11 +54,13 @@ def fields(name=NAME):
             AF["sentForApprovalBy"]: ["rec7aHLK1Q8fMLRXH"], AF["teamMember"]: ["rec7aHLK1Q8fMLRXH"],
             AF["tenants"] if "tenants" in AF else ST.AF["tenants"]: ["recTenantRentAaaa"], aef.TASK_TENANCIES: [TENANCY]}
 BANK, READS, SENT = [], [], []
-STATE = {"bankFails": False, "rent": 500.0}
+STATE = {"bankFails": False, "rent": 500.0, "tenancyFound": True}
 def rows_for(url):
     q = urllib.parse.unquote(url)
     if AD.TENANCIES_TABLE in q and AD.RENT_FIELD in q:
         READS.append("rent")
+        if not STATE["tenancyFound"]:
+            return {"records": []}
         return {"records": [{"id": TENANCY, "fields": {AD.RENT_FIELD: STATE["rent"], AD.RENT_DUE_DAY_FIELD: int(OWED[8:10])}}]}
     if AD.TRANSACTIONS_TABLE in q:
         READS.append("bank")
@@ -140,6 +142,29 @@ print(json.dumps({"failed": [failed["refused"], failed["sent"]], "part": [part["
     expect(r.part).toEqual([null, 1]);
     expect(r.dry.slice(0, 3)).toEqual([null, [], false]);
     expect(r.dry[3]).toMatch(/has arrived since the check ran/);
+  });
+
+  it('a card the check cannot place is refused, never sent on a guess: no key line, no tenancy found, no rent on record', () => {
+    const r = py(`
+out = {}
+CARD = dict(fields(), **{AF["notes"]: "no key line on this card"})
+out["noKeyEmail"], out["noKeyText"] = run("email"), run("text")
+CARD = fields()
+STATE["tenancyFound"] = False
+out["noTenancy"] = run("email")
+STATE["tenancyFound"], STATE["rent"] = True, 0
+out["noRent"], out["noRentText"] = run("email"), run("text")
+print(json.dumps({k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items()}))`);
+    for (const k of ['noKeyEmail', 'noKeyText']) {
+      expect([k, r[k][0]]).toEqual([k, expect.stringMatching(/a RENT LATE card with no RENT CHECK KEY line.*NOT CHECKED\. Nothing was sent/)]);
+      expect([k, r[k][1], r[k][2]]).toEqual([k, [], []]);
+    }
+    expect(r.noTenancy[0]).toMatch(/the tenancy recTenancyLandAaa in its RENT CHECK KEY is not in the Tenancies table.*NOT CHECKED\. Nothing was sent/);
+    expect(r.noTenancy.slice(1)).toEqual([[], ['rent']]);
+    for (const k of ['noRent', 'noRentText']) {
+      expect([k, r[k][0]]).toEqual([k, expect.stringMatching(/tenancy recTenancyLandAaa has no rent on its record.*NOT CHECKED\. Nothing was sent\. Put the rent on the tenancy record/)]);
+      expect([k, r[k][1], r[k][2]]).toEqual([k, [], ['rent']]);
+    }
   });
 
   it('only a RENT LATE card is read again: another rent lane card and an ordinary email touch no bank', () => {

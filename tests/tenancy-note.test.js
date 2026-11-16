@@ -59,10 +59,14 @@ def api(method, url, payload=None):
     if "tblqB8b22hKBL4PF1?" in url:
         LOOKUPS.append("tasks")
         return {"records": [{"id": "recOPENRENT%06d" % i, "fields": {m.TASK_TENANCIES: [t]}} for i, t in enumerate(a.get("chased", []))]}
-    # The send reads a keyed RENT LATE card's rent again before it goes (16 Nov 2026, send-email.py
-    # rent_landed_refusal). No rent on the fixture tenancy, so it stops there and the bank is not read.
+    # The send reads a keyed RENT LATE card's rent and the bank again before it goes (16 Nov 2026, send-email.py
+    # rent_landed_refusal): a rent of £500 on the fixture tenancy and nothing landed, so the chase still goes.
     if "fldDMyfZLFMeONPq8" in q:
         RENT_READS.append(url.split("?")[0].rsplit("/", 1)[1])
+        tid = (re.findall(r"RECORD_ID\\(\\)='(rec\\w+)'", q) or [""])[0]
+        return {"records": [{"id": tid, "fields": {"fldDMyfZLFMeONPq8": 500.0}}]}
+    if "tbln0gzhCAorFc3zB?" in url:
+        RENT_READS.append("tbln0gzhCAorFc3zB")
         return {"records": []}
     if "tblN51a88qTDB6iMH?" in url:
         LOOKUPS.append("tenancies")
@@ -194,10 +198,10 @@ print(json.dumps({"rc": m and datetime.strptime(m.group(1), "%d %b %Y").date().i
     // An unknown address: said as such.
     expect(send({ ...REPLY, output: EMAIL.replace('sam@example.com', 'nobody@example.com') }).out.tenancyNoteProblem)
       .toBe('the card names no tenancy and its address matches no tenant with a tenancy, so no tenancy comment was written');
-    // A card that links its tenancy never looks anyone up. Its rent is read again before the send, once.
+    // A card that links its tenancy never looks anyone up. Its rent and the bank are read again before the send, once.
     const linked = send({});
     expect(linked.lookups).toEqual([]);
-    expect(linked.rentReads).toEqual(['tblN51a88qTDB6iMH']);
+    expect(linked.rentReads).toEqual(['tblN51a88qTDB6iMH', 'tbln0gzhCAorFc3zB']);
   });
 
   it('two tenancies, the second comment fails: the first is reported as written, so nobody writes it twice', () => {
