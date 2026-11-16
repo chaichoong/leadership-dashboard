@@ -512,7 +512,7 @@ print(json.dumps(c.owed_new_costs("recTaskInventedAa", out, "", [["Some other co
       execFileSync('bash', [script], { encoding: 'utf8' });
       const prompt = readFileSync(resolve(dir, 'prompt.txt'), 'utf8');
       expect(prompt, f).toMatch(/WOKEN BY A CHANGE: .*wokeByChange/);
-      expect(prompt, f).toContain('--changed "<one sentence: what changed on the task and what you did about it>"');
+      expect(prompt, f).toContain('--changed "<one sentence naming the field that changed, or quoting four words of what was added, and what you did about it>"');
       expect(prompt, f).not.toMatch(/wakes sooner by itself on Kevin's verdict, a wall, or a new holder/);
     }
   });

@@ -562,3 +562,20 @@ print(json.dumps({"b": b, "still": still, "lic": lic, "licStill": lic_still, "ma
     expect(r.unasked).toMatch(/managed by Roc Immo/);
   });
 });
+
+// PR 951 built mailout_recipients_problem in agent_email_format.py, but submit called the
+// strict validator without the task name, so the check never ran (16 Nov 2026). This drives
+// the real cmd_submit: a tenant mail-out that shows recipients each other is refused.
+describe('submit passes the task name, so a tenant mail-out never shows its recipients each other', () => {
+  it('refuses two addresses on TO for a TENANT MAILOUT card, and passes one', () => {
+    const r = py(`
+task("TENANT MAILOUT: Exampletown rooms 1 Nov 2026")
+TR = "\\n\\nTRACK RECORD: none found (searched tasks and Gmail for example-charity)\\n\\n**Carrying"
+def mail(to): return email("We have a room free now in Exampletown.", to=to, subject="Rooms for single adults").replace("\\n\\n**Carrying", TR)
+two = submit(mail("one@example-charity.test, two@example-council.test"), type_="Correspondence")
+one = submit(mail("one@example-charity.test"), type_="Correspondence")
+print(json.dumps({"two": two, "one": one}))`);
+    expect(r.two.err).toMatch(/tenant mail-out/);
+    expect(r.one.err).toBeNull();
+  });
+});
