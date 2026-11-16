@@ -565,10 +565,26 @@ def cmd_preview(args):
 ATTACH_DIR = os.path.realpath(os.path.expanduser(
     os.environ.get("SEND_EMAIL_ATTACH_DIR")
     or "~/knowledge-os/attachments"))
-ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+# THE AGENT'S OWN RUN FOLDER IS A SECOND ROOT (16 Nov 2026, findings
+# 20261030-agent-dispatch-1143 and 20261113-agent-dispatch-1301). Two approved emails could not
+# be sent for 17 and 4 days because their ATTACH header named the file where the agent had
+# written it, under the dispatcher's run folders, and the only way out was to redraft and
+# re-approve a card Kevin had already read — changing his approved text to move a file. The
+# injection this guard exists to stop ("ATTACH: ~/.config/od/...") is refused exactly as before:
+# both roots are folders agents write their own working files into, and nothing else is allowed.
+# The run scratch IS cleaned between the draft and the carry-out, so a file that has gone is
+# still refused below by the isfile check, with the message that says to use ATTACH_DIR.
+ATTACH_RUN_ROOT = os.path.realpath(os.path.expanduser(
+    os.environ.get("AGENT_DISPATCH_DIR") or "~/knowledge-os/logs/agent-dispatch"))
+ATTACH_ROOTS = (ATTACH_DIR, ATTACH_RUN_ROOT)
+# .docx added 16 Nov 2026 (finding 20261014-agent-dispatch-862): an approved email to Roy
+# attached a police form as a fillable Word file, the gate allowed only PDF and images, and
+# sending it as a PDF would have changed what Kevin approved and taken the fillable form away.
+ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx"}
 ATTACH_MAX_BYTES = 5 * 1024 * 1024
 ATTACH_MIME = {".pdf": "application/pdf", ".png": "image/png",
-               ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+               ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 
 
 # The hand-off stamp names the file: "SIGNED COPY BACK: <agreement> came back
@@ -598,10 +614,11 @@ def load_attachment(attach, task_id):
     """Path from the approved ATTACH header → worker payload dict, or refuse."""
     import base64
     real = os.path.realpath(os.path.expanduser(attach))
-    if not (real.startswith(ATTACH_DIR + os.sep)):
+    if not any(real.startswith(root + os.sep) for root in ATTACH_ROOTS):
         sys.exit(f"REFUSED: task {task_id} ATTACH is outside the attachments "
-                 f"directory ({ATTACH_DIR}). Files are only ever sent from "
-                 "there — put the file in it and reference that path.")
+                 f"directory ({ATTACH_DIR}) and the dispatcher's run folders "
+                 f"({ATTACH_RUN_ROOT}). Files are only ever sent from there — "
+                 "put the file in the attachments directory and reference that path.")
     name = os.path.basename(real)
     ext = os.path.splitext(name)[1].lower()
     if name.startswith(".") or ext not in ATTACH_EXTENSIONS:

@@ -104,6 +104,7 @@ from agent_email_format import (  # noqa: E402
     RULE_OWN_ADDRESSES,
     parse_text,
     strip_track_record,
+    strip_tier1_banner,
     validate_submission as validate_email_submission,
     validate_submission_any as validate_any_submission,
     PERSONAL_SENDER,
@@ -2085,11 +2086,37 @@ def coverage_parse(text):
     return props, contractors
 
 
+# A POSTCODE AREA SITS IN A COUNTY (16 Nov 2026, findings 20261012-agent-dispatch-844 and
+# 20261012-agent-dispatch-843). A contractor's own site almost never lists postcode areas: it
+# says "we cover Lancashire and the North West". FY8 (Lytham St Annes) IS in Lancashire, but
+# area_covers knew only districts, area letters and town names, so the check refused DD Fire
+# Alarms for a Duckworth certificate and the reply sat written-but-unsent for 34 days.
+# Only the areas this portfolio actually sits in, and only names that cannot mean anywhere
+# else: a county or region, never a town (a town is already read out of the address itself).
+POSTCODE_REGIONS = {
+    "BB": ("LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "BL": ("LANCASHIRE", "GREATER MANCHESTER", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "FY": ("LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "LA": ("LANCASHIRE", "CUMBRIA", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "PR": ("LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "WN": ("GREATER MANCHESTER", "LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "OL": ("GREATER MANCHESTER", "LANCASHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "M": ("GREATER MANCHESTER", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "SK": ("GREATER MANCHESTER", "CHESHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "L": ("MERSEYSIDE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "WA": ("CHESHIRE", "MERSEYSIDE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "CH": ("CHESHIRE", "MERSEYSIDE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "CW": ("CHESHIRE", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+    "CA": ("CUMBRIA", "NORTH WEST", "NORTHWEST", "NORTH-WEST"),
+}
+
+
 def area_covers(areas, address):
     """True when the contractor's stated areas include this property."""
     district = postcode_district(address)
     letters = re.match(r"[A-Z]+", district).group(0) if district else ""
     addr_up = str(address or "").upper()
+    regions = POSTCODE_REGIONS.get(letters, ())
     for a in areas:
         if a in ("NATIONWIDE", "NATIONAL", "UK-WIDE", "UK WIDE"):
             return True
@@ -2097,6 +2124,8 @@ def area_covers(areas, address):
             return True
         if letters and a == letters:
             return True            # an area code: "CB" covers CB9
+        if a in regions:
+            return True            # a county or region this postcode area sits in
         if len(a) >= 4 and not re.match(r"^[A-Z]{1,2}\d", a) and a in addr_up:
             return True            # a town named in the address
     return False
@@ -2348,7 +2377,15 @@ def checked_problem(output, task_type, inbound):
     """Why a report on an inbound item may not be submitted, or ''."""
     if not inbound or task_type not in REPORT_TYPES:
         return ""
-    out = (output or "").strip()
+    # THE BANNER IS NOT THE OUTPUT (16 Nov 2026, findings 20261016-agent-dispatch-951 and
+    # 20261107-agent-dispatch-1242). `submit --tier1` prepends TIER1_BANNER BEFORE this gate
+    # runs, and CHECK_EXEMPT_RE is anchored at the start, so a tier-1 CLOSE PROPOSAL, PASS TO
+    # ROY, CALENDAR, POST or STATUS ONLY never matched its own exemption: it was refused for
+    # "must open with the five questions", and adding a CHECKED line was then refused as "not
+    # a report". No honest shape passed, and two tasks sat behind that for weeks. The banner is
+    # written for Kevin's approval box and is stripped on every other path that reads the shape
+    # of an output; it is stripped here too, for the same reason.
+    out = strip_tier1_banner(output or "").strip()
     # A STATUS ONLY update under the tier-1 banner is exempt too (14 Nov 2026): it declares
     # nothing to decide, and status_only_problem refuses a CHECKED line naming a trigger.
     if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out) or status_only_line(out):
@@ -6952,7 +6989,61 @@ def quote_names_date(quote, new_due):
     return any(_MONTH_NUM[w.lower()] == new_due.month for w in _MONTH_WORD.findall(quote))
 
 
-def due_move_problem(fields, new_due, today, quote):
+# HIS WORDS LIVE ON THE CARD, NOT ON THE TASK THEY MOVE (16 Nov 2026, findings
+# 20261015-agent-dispatch-915 and 20261108-agent-dispatch-1246). Kevin approves ONE card that
+# rules on other tasks ("move checkpoint 3 to 16 Nov", "put the BPO due date back to 5 Nov").
+# `due` demanded his quoted words on the TARGET task, which has none, and refused a date in the
+# past, so the only route left was a hand-rolled PATCH, which carry-out rules forbid. Two moves
+# waited 31 and 7 days and one was still wrong when this was written. So `--approved-on <card>`
+# makes the card itself the evidence, with the same marks every send path demands: the card
+# really went through the gate and was really approved (approval_evidence_problem), its verdict
+# is an approval, and its Agent Output names BOTH this task's record id and this exact date. A
+# card that names a month, or another task, or a different date, moves nothing.
+DUE_CARD_PAST_DAYS = 30      # a correction, never a rewrite of history
+
+
+def card_names_exact_date(text, day):
+    """True when `text` names `day` as a full date: 2026-11-05, 5/11, 5/11/26, 5 Nov 2026,
+    5 November 2026 or November 5 2026. A bare month is never enough on a card."""
+    text = str(text or "")
+    if day.isoformat() in text:
+        return True
+    for d, m in re.findall(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b", text):
+        if (int(d), int(m)) == (day.day, day.month):
+            return True
+    for m in _MONTH_WORD.finditer(text):
+        if _MONTH_NUM[m.group(1).lower()] != day.month:
+            continue
+        around = text[max(0, m.start() - 12):m.end() + 12]
+        if re.search(r"\b%d(?:st|nd|rd|th)?\b" % day.day, around):
+            return True
+    return False
+
+
+def due_card_problem(card, target_task, new_due):
+    """'' when this approved card may move `target_task` to `new_due`, else why not.
+
+    `card` is a get_task() record: {"id", "fields" (keyed by field id), "createdTime"}.
+    """
+    fields = (card or {}).get("fields", {}) or {}
+    bad = approval_evidence_problem(fields, (card or {}).get("createdTime"))
+    if bad:
+        return f"the card {(card or {}).get('id')} is not a real approval: {bad}"
+    outcome = sel(fields.get(AF["approvalOutcome"]))
+    if outcome not in APPROVED:
+        return (f"the card {(card or {}).get('id')} reads {outcome or 'no verdict'}, "
+                f"not one of {', '.join(APPROVED)}")
+    out = str(fields.get(AF["agentOutput"]) or "")
+    if target_task not in out:
+        return (f"the card {(card or {}).get('id')} does not name {target_task}: a card moves only "
+                "the tasks its own approved words name")
+    if not card_names_exact_date(out, new_due):
+        return (f"the card {(card or {}).get('id')} does not name {new_due.isoformat()}: quote the "
+                "exact date on the card, not the month")
+    return ""
+
+
+def due_move_problem(fields, new_due, today, quote, card=None):
     """'' when the due date may move to new_due on these words of Kevin's, else why not."""
     status = sel(fields.get(AF["status"]))
     if status in ("Completed", "Cancelled"):
@@ -6962,7 +7053,15 @@ def due_move_problem(fields, new_due, today, quote):
     if status == "In Progress":
         return "a robot holds the task In Progress; its own lane moves it"
     if new_due < today:
-        return f"{new_due.isoformat()} is in the past"
+        # An approved card may correct a date that has just gone by; nothing else may.
+        if not card:
+            return f"{new_due.isoformat()} is in the past"
+        if (today - new_due).days > DUE_CARD_PAST_DAYS:
+            return (f"{new_due.isoformat()} is more than {DUE_CARD_PAST_DAYS} days in the past: "
+                    "an approved card corrects a date, it does not rewrite history")
+    if card:
+        # The card IS the quote. Everything it must carry is checked in due_card_problem.
+        return ""
     q = _norm_words(FEEDBACK_STAMP.sub(" ", quote or ""))
     if len(q) < 12 or q not in _norm_words(kevins_newest_note(fields)):
         return ("--quote is not Kevin's own words in his NEWEST note on this task (Approval Feedback, else the last "
@@ -6981,19 +7080,34 @@ def cmd_due(args):
     why = " ".join(str(args.why or "").split())
     if len(why) < 10:
         sys.exit("ERROR: --why needs Kevin's words or the reason, in a sentence")
+    on_card = getattr(args, "approved_on", None)
+    if not on_card and not args.quote:
+        sys.exit("ERROR: due needs --quote (Kevin's words on this task) or --approved-on "
+                 "(the id of his approved card that names this task and this date)")
+    card = None
+    if on_card:
+        if on_card == args.task:
+            sys.exit("ERROR: --approved-on names the task being moved; a task cannot approve itself")
+        card = get_task(on_card)
+        bad = due_card_problem(card, args.task, new_due)
+        if bad:
+            print(json.dumps({"refused": args.task, "why": bad}))
+            return 2
     t = get_task(args.task)
     fields = t.get("fields", {}) or {}
     today = datetime.now(LONDON).date()
-    problem = due_move_problem(fields, new_due, today, args.quote)
+    problem = due_move_problem(fields, new_due, today, args.quote, card=card)
     if problem:
         print(json.dumps({"refused": args.task, "why": problem}))
         return 2
     old = fields.get(AF["dueDate"]) or "blank"
     status = "Upcoming" if new_due > today else "Today"
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-    quoted = " ".join(str(args.quote).split())
+    quoted = " ".join(str(args.quote or "").split())
+    # The card id is written into Notes, so the trail names the approval this move rests on.
+    source = f"Kevin: \"{quoted}\"" if quoted else f"Kevin's approved card {on_card}"
     note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
-            f"(Kevin: \"{quoted}\")")
+            f"({source})")
     patch_task(args.task, {
         AF["dueDate"]: new_due.isoformat(),
         AF["status"]: status,
@@ -14814,9 +14928,13 @@ def main():
     du = sub.add_parser("due",
                         help="move a task's due date on Kevin's word (Upcoming until then)")
     du.add_argument("task")
-    du.add_argument("date", help="YYYY-MM-DD, today or later")
+    du.add_argument("date", help="YYYY-MM-DD, today or later (--approved-on may correct a past date)")
     du.add_argument("--why", required=True, help="the reason, in a sentence")
-    du.add_argument("--quote", required=True, help="Kevin's own words from his feedback on the task, verbatim")
+    du.add_argument("--quote", help="Kevin's own words from his feedback on the task, verbatim")
+    du.add_argument("--approved-on", dest="approved_on",
+                    help="the record id of Kevin's APPROVED card whose own words name this task "
+                         "and this exact date (use instead of --quote when his ruling sits on a "
+                         "card rather than on this task)")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
