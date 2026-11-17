@@ -173,6 +173,50 @@ describe('notes for Kevin under a second --- line', () => {
     expect(r.mail.body.trim()).toBe(EMAIL);
     expect(r.mail.body).not.toContain('KEVIN ONLY');
   });
+
+  // THE SAME HOLE, ONE LINE OVER (20261019-agent-dispatch-979). On 19 Oct 2026 the approved email
+  // to a letting agent ended, under the signature, with the money rule's own declaration of what we
+  // would spend. strip_carry_out_line takes off the closing line and KEVIN_ONLY_STEP_RE reads its
+  // own line; nothing read this one, so the card was held unsent for a month.
+  // Back-test: delete the SPEND_STEP_RE check and every case below is sent.
+  it('a declared SPEND line left inside the email is refused: our money is the card, not the email (979)', () => {
+    // The last three are the second review's point (17 Nov 2026): the gate that acts on this
+    // line reads it without regard to case and with a loose colon (agent-dispatch.py
+    // SPEND_AMOUNT_RE, SPEND_LINE_RE), so a refusal that only reads tight capitals leaves the
+    // same leak open. Note the first line carries no figure after the colon — that is the real
+    // one from 19 Oct — so the refusal must not ask for an amount.
+    for (const line of ['SPEND: up to £1,188 taken from the rent by the agent',
+                        '**SPEND: £80**',
+                        '> SPEND: £80/month',
+                        '  SPEND: £1,188',
+                        'Spend: £1,188',
+                        'SPEND : £80',
+                        'spend: £80/month']) {
+      const r = parse(HEAD + EMAIL + '\n\n' + line + CARRY);
+      expect(r.ok, line).toBe(false);
+      expect(r.error).toMatch(/SPEND line sits inside the email/);
+    }
+  });
+
+  // CONTROL: capitals at a line start only, so the email's own words about spending are untouched.
+  it("the email's own words about spending are never read as the declaration (979)", () => {
+    for (const sentence of ['We spend: nothing until you confirm the price.',
+                            'The landlord will spend on the lighting first.']) {
+      const r = parse(HEAD + EMAIL + '\n\n' + sentence + CARRY);
+      expect(r.ok, sentence).toBe(true);
+      expect(r.mail.body).toContain(sentence);
+    }
+  });
+
+  // CONTROL: the right shape still works, and it is the SAME home KEVIN ONLY has. Above the
+  // headers the parser refuses SPEND as an unknown header, so the closing line is the only place
+  // the agent can write it; a check that refused it there too would leave it nowhere.
+  it('a SPEND line under the closing line is the card, and the email goes out clean (979)', () => {
+    const r = parse(HEAD + EMAIL + CARRY + '\nSPEND: £1,188');
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(EMAIL);
+    expect(r.mail.body).not.toContain('SPEND');
+  });
 });
 
 describe('the shapes that were already right stay right', () => {

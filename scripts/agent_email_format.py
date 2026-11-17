@@ -228,6 +228,22 @@ TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*
 # reason: "kevin only wanted the short version" is the email's own words, and this pattern carries no
 # re.I so it cannot reach them.
 KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
+# The DECLARED spend (agent-dispatch.py SPEND_LINE_RE). It is the money rule's own line,
+# written for the approval card so the gate can read the amount; it says what WE will pay
+# and is never addressed to the recipient. On 19 Oct 2026 an approved email to a letting
+# agent would have ended, under Roy's signature, with "SPEND: up to £1,188 ... taken from
+# the rent by Intus": the send path strips the Carrying-this-out line but nothing read this
+# (finding 20261019-agent-dispatch-979).
+# READ IT THE WAY THE MONEY GATE READS IT (second review, 17 Nov 2026). The first draft
+# matched capitals and a tight colon only, copying KEVIN_ONLY_STEP_RE. But the gate that
+# acts on this line is not case-sensitive and does not need the colon tight:
+# agent-dispatch.py SPEND_AMOUNT_RE carries re.I and allows "SPEND : £80", and
+# SPEND_LINE_RE carries re.I too. So "Spend: £1,188" was still a declaration to the gate
+# and still went to the recipient. A refusal narrower than the gate that reads it is no
+# refusal at all. The word must open the line (only quote and emphasis marks before it),
+# so the email's own "We spend: nothing until you confirm" is untouched, and no amount is
+# required: the real leak read "SPEND: up to £1,188 …", where no figure follows the colon.
+SPEND_STEP_RE = re.compile(r"^[ \t>*_#]*\**SPEND[ \t]*:", re.M | re.I)
 
 
 def clean_email_body(body):
@@ -507,6 +523,11 @@ def parse_output(output):
                                "(a payee, an amount and a reference, a signature, a credential) and the recipient "
                                "must never read it. Put it with the closing line, under "
                                "'Carrying this out will involve:', which the send path takes off")
+    if SPEND_STEP_RE.search(body):
+        raise EmailFormatError("a SPEND line sits inside the email: it declares our money for the approval "
+                               "card and the recipient must never read it. Put it with the closing line, "
+                               "under 'Carrying this out will involve:', which the send path takes off "
+                               "(above the headers it is refused as an unknown header)")
 
     if not to and not to_each:
         raise EmailFormatError("no TO recipient")
