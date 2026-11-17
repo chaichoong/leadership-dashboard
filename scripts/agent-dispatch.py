@@ -2123,6 +2123,39 @@ def coverage_parse(text):
     return props, contractors
 
 
+# A COUNTY OR REGION IS AN AREA TOO (finding 20261012-agent-dispatch-844, repeat of
+# 20261012-agent-dispatch-843). On 12 Oct 2026 submit refused a reply to DD Fire Alarms,
+# who say they cover "Lancashire / North West", for FY8 Lytham St Annes — which is in
+# Lancashire. The matcher read postcode districts, area letters and a town named in the
+# address, so a county name matched nothing and the certificate email sat for 35 days.
+# Only the counties and regions Kevin's portfolio and its contractors actually name are
+# listed, each as the Royal Mail postcode AREAS that fall in it (a postcode area straddles
+# borders, so this is the generous reading; the check exists to stop an email that looks
+# clueless, not to adjudicate a boundary). Add an entry when a real coverage line needs it.
+AREA_REGIONS = {
+    "LANCASHIRE": {"BB", "BL", "FY", "LA", "OL", "PR", "WN"},
+    "GREATER MANCHESTER": {"BL", "M", "OL", "SK", "WA", "WN"},
+    "MERSEYSIDE": {"CH", "L", "PR", "WA", "WN"},
+    "CHESHIRE": {"CH", "CW", "SK", "WA"},
+    "CUMBRIA": {"CA", "LA"},
+    "NORTH WEST": {"BB", "BL", "CA", "CH", "CW", "FY", "L", "LA", "M", "OL",
+                   "PR", "SK", "WA", "WN"},
+    "SUFFOLK": {"CB", "CO", "IP", "NR"},
+    "ESSEX": {"CM", "CO", "IG", "RM", "SS"},
+    "CAMBRIDGESHIRE": {"CB", "PE"},
+}
+# "North-West", "North West England" and "the North West" are all the same words.
+AREA_REGION_TRIM_RE = re.compile(r"^(?:THE\s+)?(.*?)(?:\s+(?:ENGLAND|AREA|REGION|COUNTY))?$")
+
+
+def region_areas(stated):
+    """The postcode areas a stated county or region covers, or an empty set."""
+    name = re.sub(r"[-_]+", " ", str(stated or "").upper())
+    name = " ".join(name.split())
+    m = AREA_REGION_TRIM_RE.match(name)
+    return AREA_REGIONS.get(m.group(1) if m else name, set())
+
+
 def area_covers(areas, address):
     """True when the contractor's stated areas include this property."""
     district = postcode_district(address)
@@ -2135,6 +2168,8 @@ def area_covers(areas, address):
             return True
         if letters and a == letters:
             return True            # an area code: "CB" covers CB9
+        if letters and letters in region_areas(a):
+            return True            # a county or region: "Lancashire" covers FY8
         if len(a) >= 4 and not re.match(r"^[A-Z]{1,2}\d", a) and a in addr_up:
             return True            # a town named in the address
     return False
@@ -2387,6 +2422,15 @@ def checked_problem(output, task_type, inbound):
     if not inbound or task_type not in REPORT_TYPES:
         return ""
     out = (output or "").strip()
+    # THE BANNER IS NOT THE SHAPE (findings 20261016-agent-dispatch-951 and
+    # 20261107-agent-dispatch-1242). cmd_submit prepends TIER1_BANNER before this
+    # gate runs, so CHECK_EXEMPT_RE.match never saw the CLOSE PROPOSAL at the
+    # start of a tier-1 close on an inbound task: it was refused as "must open
+    # with the five questions", and adding a CHECKED line got it refused as "not
+    # a report". No honest shape passed, and two approved closes sat for a month.
+    # status_only_line already reads under the banner; this reads under it too.
+    if out.startswith(TIER1_BANNER):
+        out = out[len(TIER1_BANNER):].strip()
     # A STATUS ONLY update under the tier-1 banner is exempt too (14 Nov 2026): it declares
     # nothing to decide, and status_only_problem refuses a CHECKED line naming a trigger.
     if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out) or status_only_line(out):

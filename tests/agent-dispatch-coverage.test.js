@@ -60,6 +60,31 @@ describe('the coverage check on quote emails', () => {
     expect(check('PROPERTY: 6 Chedburgh Place, Haverhill, CB9 0AB\nCONTRACTOR: X covers CB, IP (source: https://x)', EMAIL, 'COMPLIANCE: GSC')).toBe('');
     expect(check('PROPERTY: 6 Chedburgh Place, Haverhill, CB9 0AB\nCONTRACTOR: X covers nationwide (source: https://x)', EMAIL, 'COMPLIANCE: GSC')).toBe('');
   });
+  // THE COUNTY A CONTRACTOR NAMES IS AN AREA (finding 20261012-agent-dispatch-844, repeat of
+  // 843). DD Fire Alarms say they cover "Lancashire / North West"; FY8 Lytham St Annes is in
+  // Lancashire, and submit refused the reply for 35 days because no rule read a county name.
+  // Back-test: delete the region_areas branch in area_covers and all four of these fail.
+  it('a county or region the contractor states covers its postcode areas (844)', () => {
+    const fy8 = 'TO: info@dd.example\nFROM: info@agilelets.co.uk\nSUBJECT: Fire alarm certificate quote\n---\n'
+      + 'Please quote for the fire alarm service at 1 Clifton Drive, Lytham St Annes, FY8 1AA.';
+    const cov = (areas) => `PROPERTY: 1 Clifton Drive, Lytham St Annes, FY8 1AA\nCONTRACTOR: DD Fire Alarms covers ${areas} (source: https://ddfire.example/areas)`;
+    for (const areas of ['Lancashire', 'Lancashire and the North West', 'North-West England', 'the North West']) {
+      expect(check(cov(areas), fy8, 'COMPLIANCE: fire alarm quote'), areas).toBe('');
+    }
+  });
+
+  // CONTROL: a county is not a free pass. A Suffolk contractor still does not cover Lancashire,
+  // and an unmapped word is read as before (a town in the address, or nothing).
+  it('a county that does not contain the property is still refused (844 control)', () => {
+    const fy8 = 'TO: info@dd.example\nFROM: info@agilelets.co.uk\nSUBJECT: quote\n---\nQuote for the EICR at 1 Clifton Drive, Lytham St Annes, FY8 1AA.';
+    const p = check('PROPERTY: 1 Clifton Drive, Lytham St Annes, FY8 1AA\nCONTRACTOR: AC1 covers Suffolk (source: https://x)',
+      fy8, 'COMPLIANCE: EICR');
+    expect(p).toMatch(/FY8/);
+    const q = check('PROPERTY: 1 Clifton Drive, Lytham St Annes, FY8 1AA\nCONTRACTOR: AC1 covers Narnia (source: https://x)',
+      fy8, 'COMPLIANCE: EICR');
+    expect(q).toMatch(/FY8/);
+  });
+
   it('a property line without a postcode is refused: the district is the check', () => {
     expect(check('PROPERTY: 6 Chedburgh Place\nCONTRACTOR: X covers CB9 (source: https://x)', EMAIL, 'COMPLIANCE: GSC')).toMatch(/no postcode/);
   });
