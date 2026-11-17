@@ -15,7 +15,8 @@
 //      end AFTER Kevin has approved the send.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(__dirname, '..');
@@ -115,6 +116,90 @@ describe('the send endpoint actually gates on it', () => {
   it('validates the attachment before building the message, and passes it through', () => {
     expect(WORKER).toMatch(/attachmentProblem\(attachment\)/);
     expect(WORKER).toMatch(/attachment: attachment \|\| undefined/);
+  });
+});
+
+// ─── The file guards in scripts/send-email.py (load_attachment), driven for real ───
+//
+// Two findings held approved messages for weeks against this one function:
+//   * 20261014-agent-dispatch-862 — the allowlist took .pdf, .png and .jpg only, so an
+//     approved message attaching a fillable Word form could not go. Sending it as a PDF
+//     would have changed what Kevin approved and left Roy unable to fill it in.
+//   * 20261030-agent-dispatch-1143 and 20261113-agent-dispatch-1301 — twice, the approved
+//     ATTACH header named the file where the agent had built it (the dispatcher's own run
+//     folder) and the only root allowed was the attachments directory. Moving the file
+//     would have changed the approved text, so both cards sat unsent.
+// Back-test: put ATTACH_EXTENSIONS and the single-root check back and every case below fails.
+const LOAD_PY = `
+import json, os, sys, importlib.util
+sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
+os.environ["SEND_EMAIL_ATTACH_DIR"] = sys.argv[1]
+os.environ["AGENT_DISPATCH_DIR"] = sys.argv[2]
+spec = importlib.util.spec_from_file_location("send_mod", ${JSON.stringify(SEND)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+try:
+    print(json.dumps({"ok": True, "payload": m.load_attachment(sys.argv[3], "recTEST")}))
+except SystemExit as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+`;
+
+function loadAttachment({ file, inAttachDir }) {
+  const base = mkdtempSync(resolve(tmpdir(), 'attach-'));
+  const attachDir = resolve(base, 'attachments');
+  const runRoot = resolve(base, 'runs');
+  const runDir = resolve(runRoot, '20261117-070000', 'recTASK');
+  mkdirSync(attachDir, { recursive: true });
+  mkdirSync(runDir, { recursive: true });
+  const path = resolve(inAttachDir ? attachDir : runDir, file);
+  writeFileSync(path, 'file bytes');
+  const out = execFileSync('python3', ['-c', LOAD_PY, attachDir, runRoot, path], { encoding: 'utf8' });
+  return JSON.parse(out.trim());
+}
+
+describe('load_attachment (real scripts/send-email.py)', () => {
+  it('takes a .docx from the attachments directory: the form Roy has to fill in (862)', () => {
+    const r = loadAttachment({ file: 'police-form.docx', inAttachDir: true });
+    expect(r.ok, r.error).toBe(true);
+    expect(r.payload.mimeType).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(r.payload.filename).toBe('police-form.docx');
+  });
+
+  it('takes a file the agent built in the run folder, approved path untouched (1143, 1301)', () => {
+    const r = loadAttachment({ file: 'title-register.png', inAttachDir: false });
+    expect(r.ok, r.error).toBe(true);
+    expect(r.payload.mimeType).toBe('image/png');
+  });
+
+  // CONTROL: the injection guard is what this function exists for. A path outside BOTH
+  // fixed roots is still refused, and so is a type nobody has asked for.
+  it('a path outside both roots is still refused', () => {
+    const base = mkdtempSync(resolve(tmpdir(), 'attach-'));
+    const attachDir = resolve(base, 'attachments');
+    const runRoot = resolve(base, 'runs');
+    mkdirSync(attachDir, { recursive: true });
+    mkdirSync(runRoot, { recursive: true });
+    const outside = resolve(base, 'secret.pdf');
+    writeFileSync(outside, 'x');
+    const out = execFileSync('python3', ['-c', LOAD_PY, attachDir, runRoot, outside], { encoding: 'utf8' });
+    const r = JSON.parse(out.trim());
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/outside the attachments directory/);
+  });
+
+  it('a macro-bearing .docm, and anything else off the list, is still refused (862 control)', () => {
+    for (const file of ['form.docm', 'script.sh', 'book.xlsx']) {
+      const r = loadAttachment({ file, inAttachDir: true });
+      expect(r.ok, file).toBe(false);
+      expect(r.error).toMatch(/not allowed/);
+    }
+  });
+
+  it('the worker allowlist agrees with the script, or the send fails at the worker (862)', () => {
+    expect(lib.attachmentProblem({ filename: 'f.docx', dataB64: 'AAAA',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })).toBeNull();
+    expect(lib.attachmentProblem({ filename: 'f.docm', dataB64: 'AAAA',
+      mimeType: 'application/vnd.ms-word.document.macroEnabled.12' })).toBeTruthy();
   });
 });
 
