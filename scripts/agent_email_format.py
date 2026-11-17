@@ -228,6 +228,14 @@ TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*
 # reason: "kevin only wanted the short version" is the email's own words, and this pattern carries no
 # re.I so it cannot reach them.
 KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
+# The DECLARED spend (agent-dispatch.py SPEND_LINE_RE). It is the money rule's own line,
+# written for the approval card so the gate can read the amount; it says what WE will pay
+# and is never addressed to the recipient. On 19 Oct 2026 an approved email to a letting
+# agent would have ended, under Roy's signature, with "SPEND: up to £1,188 ... taken from
+# the rent by Intus": the send path strips the Carrying-this-out line but nothing read this
+# (finding 20261019-agent-dispatch-979). Same shape and same rule as KEVIN_ONLY_STEP_RE:
+# capitals at a line start, no re.I, so an email's own "spend:" is never touched.
+SPEND_STEP_RE = re.compile(r"^[ \t>*_#]*\**SPEND:", re.M)
 
 
 def clean_email_body(body):
@@ -507,6 +515,11 @@ def parse_output(output):
                                "(a payee, an amount and a reference, a signature, a credential) and the recipient "
                                "must never read it. Put it with the closing line, under "
                                "'Carrying this out will involve:', which the send path takes off")
+    if SPEND_STEP_RE.search(body):
+        raise EmailFormatError("a SPEND line sits inside the email: it declares our money for the approval "
+                               "card and the recipient must never read it. Put it with the closing line, "
+                               "under 'Carrying this out will involve:', which the send path takes off "
+                               "(above the headers it is refused as an unknown header)")
 
     if not to and not to_each:
         raise EmailFormatError("no TO recipient")
