@@ -233,9 +233,17 @@ KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
 # and is never addressed to the recipient. On 19 Oct 2026 an approved email to a letting
 # agent would have ended, under Roy's signature, with "SPEND: up to £1,188 ... taken from
 # the rent by Intus": the send path strips the Carrying-this-out line but nothing read this
-# (finding 20261019-agent-dispatch-979). Same shape and same rule as KEVIN_ONLY_STEP_RE:
-# capitals at a line start, no re.I, so an email's own "spend:" is never touched.
-SPEND_STEP_RE = re.compile(r"^[ \t>*_#]*\**SPEND:", re.M)
+# (finding 20261019-agent-dispatch-979).
+# READ IT THE WAY THE MONEY GATE READS IT (second review, 17 Nov 2026). The first draft
+# matched capitals and a tight colon only, copying KEVIN_ONLY_STEP_RE. But the gate that
+# acts on this line is not case-sensitive and does not need the colon tight:
+# agent-dispatch.py SPEND_AMOUNT_RE carries re.I and allows "SPEND : £80", and
+# SPEND_LINE_RE carries re.I too. So "Spend: £1,188" was still a declaration to the gate
+# and still went to the recipient. A refusal narrower than the gate that reads it is no
+# refusal at all. The word must open the line (only quote and emphasis marks before it),
+# so the email's own "We spend: nothing until you confirm" is untouched, and no amount is
+# required: the real leak read "SPEND: up to £1,188 …", where no figure follows the colon.
+SPEND_STEP_RE = re.compile(r"^[ \t>*_#]*\**SPEND[ \t]*:", re.M | re.I)
 
 
 def clean_email_body(body):
