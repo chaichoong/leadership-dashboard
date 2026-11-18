@@ -37,6 +37,7 @@ Usage:
 Auth: ~/.config/od/airtable_pat (never printed). Read-only: this file has no write path to Airtable.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -165,10 +166,10 @@ def reading_age(text, today):
         y = int(year) if year else today.year
         try:
             d = date(y, mon, day)
+            if not year and d > today:
+                d = date(y - 1, mon, day)   # "since 29 Feb" in a year after a leap year raises here
         except ValueError:
             continue
-        if not year and d > today:
-            d = date(y - 1, mon, day)
         if d > today:
             continue            # "next review 30 Nov 2026" is a plan, not when the reading was taken
         if newest is None or d > newest:
@@ -212,7 +213,7 @@ def rent_score(row, now):
 
 def pct(part, whole):
     """Math.round, as the dashboard: Python's round() sends 94.5 to 94."""
-    return int(100.0 * part / whole + 0.5)
+    return int(math.floor(part / whole * 100 + 0.5))   # Math.round((part / whole) * 100), same order
 
 
 def recon_score(rows, target_pct=95):
@@ -707,6 +708,9 @@ def selftest():
     check("a future dated plan never hides an old reading",
           reading_age("62 of 64 on 2 Oct 2026; next review 30 Nov 2026", today)[1] == "reading dated 2 Oct, 47 days old")
     check("full month names read", reading_age("checked 14 November 2026", today)[0] == date(2026, 11, 14))
+    check("leap day without a year never crashes", reading_age("since 29 Feb", date(2028, 2, 10)) == (None, "undated reading")
+          and reading_age("since 29 Feb", date(2028, 3, 10))[0] == date(2028, 2, 29))
+    check("23 of 40 is 57, as the dashboard", pct(23, 40) == 57)
     check("half rounds up, as the dashboard's Math.round", pct(189, 200) == 95 and recon_score(
         [{"fields": {RA_OK: True}}] * 189 + [{"fields": {}}] * 11)[0] == "on target")
 
