@@ -31,7 +31,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DECLARATION_TOPIC_RE, NEARBY_DECLARATION_RE, NEVER_ROBOT_RE, PRIVATE_QUESTION_RE, CAPTURE_LOSS_RE } = require('./declaration-words');
+const { DECLARATION_TOPIC_RE, NEARBY_DECLARATION_RE, NEVER_ROBOT_RE, PRIVATE_QUESTION_RE, CAPTURE_LOSS_RE, GAS_RE, namesGasSafety } = require('./declaration-words');
 const SCHEMA = require('./form-facts-schema.json');
 
 const defaultFile = () => process.env.AGENT_FORM_FACTS || path.join(os.homedir(), 'knowledge-os', 'handover', 'form-facts.json');
@@ -88,6 +88,34 @@ const declarationInValue = v => declarationIn(String(v || '').replace(OCCUPATION
 const isFuture = (d, today = todayLondon()) => validDate(d) && d > today;
 const DECLARATION_HELP = 'declarations are never facts: they live in Kevin\'s standing answers file under his own ruling';
 
+// A gas answer is per house (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB, ruling 4): "Yes" only where
+// that house has a current certificate on file, and a house with none stops for him. A general or owner fact
+// reaches every house's form, so a gas answer there would be the blanket yes he ruled out. A house's own gas
+// safety fact (anything but a no, none or n/a) carries its certificate's expiry as "until", so it lapses with it.
+const GAS_HELP = 'a gas answer is per house: store it on that house (--scope property --ref <house>) from its own current certificate, never for every house (Kevin, 16 Nov 2026)';
+const keyWords = key => String(key || '').replace(/-/g, ' ');
+// A house with no gas says so: "No", "No gas supply", "None", "N/A, all electric", "Not applicable". "Not expired" is a yes.
+const NO_GAS_VALUE_RE = /^\s*(?:no|none|n\/?a|not applicable|not required)\b/i;
+// A general or owner fact: any gas word in its key or label, or a value that names gas safety. A schema key's
+// value is the owner's own detail (an occupation, an address) and is not read for it.
+function gasIn(scope, key, label, value) {
+  const m = `${keyWords(key)} | ${label || ''}`.match(GAS_RE);
+  if (m) return m[0];
+  if (schemaEntry(scope, key) || !namesGasSafety(value)) return '';
+  return (String(value).match(GAS_RE) || ['gas safety'])[0];
+}
+const gasSafetyFact = (key, label, value) => namesGasSafety(`${keyWords(key)} | ${label || ''} | ${value || ''}`);
+function gasProblem(scope, key, label, value, until) {
+  if (scope !== 'property') {
+    const gas = gasIn(scope, key, label, value);
+    return gas ? `"${gas}" is a gas answer, and ${GAS_HELP}` : '';
+  }
+  if (gasSafetyFact(key, label, value) && !NO_GAS_VALUE_RE.test(String(value || '')) && !validDate(until)) {
+    return `"${label || key}" is a house's gas safety answer, so it needs "until": the expiry date of that house's current certificate (Kevin, 16 Nov 2026)`;
+  }
+  return '';
+}
+
 // ── Reading and checking ──────────────────────────────────────────────────────────────────────
 function factProblems(where, scope, key, f) {
   const out = [];
@@ -101,6 +129,8 @@ function factProblems(where, scope, key, f) {
   if (!schemaEntry(scope, key) && !String(f.label || '').trim()) out.push(`${where}.${key}: a key not in the schema needs its own label`);
   const dec = declarationIn(labelOf(scope, key, f), key) || declarationInValue(f.value);
   if (dec) out.push(`${where}.${key}: "${dec}" is a declaration topic, and ${DECLARATION_HELP}`);
+  const gas = gasProblem(scope, key, labelOf(scope, key, f), f.value, f.until);
+  if (gas) out.push(`${where}.${key}: ${gas}`);
   return out;
 }
 
@@ -314,8 +344,13 @@ function resolveFact(store, { owner, properties = [], key, at, today = todayLond
     if (!own(facts, k) || !isObj(facts[k])) continue;
     const f = facts[k];
     const label = labelOf(scope, k, f);
+    // Before the date: an out-of-date blanket gas answer is refused as gas, never sent back to be renewed.
+    const gas = scope !== 'property' && gasIn(scope, k, label, f.value);
+    if (gas) return no('gas', `"${gas}" is a gas answer, and ${GAS_HELP}`);
     const expired = isExpired(scope, k, f, today);
-    if (expired && !allowExpired) return no('expired', `"${label}" (${k}) is out of date: dated ${f.date}${f.until ? `, good until ${f.until}` : ''}`);
+    // The live window may run an approved plan on a fact gone stale since, never a gas safety answer: a lapsed
+    // certificate is not a current one, so the question stops for him.
+    if (expired && (!allowExpired || gasSafetyFact(k, label, f.value))) return no('expired', `"${label}" (${k}) is out of date: dated ${f.date}${f.until ? `, good until ${f.until}` : ''}`);
     const decValue = declarationIn(label) || declarationInValue(f.value);
     if (decValue) return no('declaration', `"${decValue}" is a declaration topic, and ${DECLARATION_HELP}`);
     return { value: f.value, scope, ref, label, source: f.source, date: f.date, expired };
@@ -338,6 +373,8 @@ function applySetFact(store, args) {
   if (!schemaEntry(scope, key) && !String(args.label || '').trim()) throw refusal(`"${key}" is not in the schema, so it needs its own --label`);
   const dec = declarationIn(args.label || labelOf(scope, key, null), key) || declarationInValue(args.value);
   if (dec) throw refusal(`refused: "${dec}" is a declaration topic, and ${DECLARATION_HELP}. Nothing was stored.`);
+  const gas = gasProblem(scope, key, args.label || labelOf(scope, key, null), args.value, args.until || undefined);
+  if (gas) throw refusal(`refused: ${gas}. Nothing was stored.`);
   let holder;
   if (scope === 'general') holder = store.general;
   else if (scope === 'owner') {

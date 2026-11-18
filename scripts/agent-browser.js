@@ -2398,7 +2398,7 @@ async function waitForWindowClose(ctx, capMs, onTick) {
 // mapped page may grow by a declared optional group (scripts/declaration-maps.json) and stay mapped, and a
 // typeahead combobox is filled by its one exact option. The declaration rules above are unchanged.
 const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
-const { DECLARATION_TOPIC_RE } = require('./declaration-words');   // shared with form-facts.js, which never stores one
+const { DECLARATION_TOPIC_RE, namesGasSafety } = require('./declaration-words');   // shared with form-facts.js, which never stores one
 const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 // A form that asks for a declaration, anywhere in it however long: his page.
 function declarationWords(text) {
@@ -2752,6 +2752,16 @@ async function snapshotForm(page) {
       const own = clean(q.join(' '));
       return (own || around(c, [])).slice(0, 400);
     };
+    // The heading of the section a box sits in (ruling 4, review round 4): a site can put "Gas safety" in a
+    // heading over a question that does not say it ("Is the certificate current?"). The nearest visible h1-h6
+    // or role=heading before the box, in page order. A title styled as plain text is not seen, and a gas
+    // heading carries on until the next one: wider than the section, which only ever sends a question to him.
+    const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).filter(shown);
+    const sectionOf = el => {
+      let s = '';
+      for (const h of heads) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) s = h.textContent; else break; }
+      return clean(s).slice(0, 120);
+    };
     const items = []; const groups = {};
     for (const el of document.querySelectorAll('input,select,textarea')) {
       const type = String(el.type || '').toLowerCase();
@@ -2771,13 +2781,13 @@ async function snapshotForm(page) {
         if (type === 'radio' && el.name) {
           let g = groups[el.name];
           if (!g) {
-            g = groups[el.name] = { kind: 'radio', question: '', options: [], _el: el };
+            g = groups[el.name] = { kind: 'radio', question: '', section: sectionOf(el), options: [], _el: el };
             items.push(g);
           }
           // Only the option's own label is taken out of the question: a form can tie its question label to the box too.
           g.options.push({ label: option, target: t, checked: !!el.checked, _labels: labels.slice(0, 1) });
         } else {
-          items.push({ kind: 'checkbox', question: question(el), option, target: t, checked: !!el.checked });
+          items.push({ kind: 'checkbox', question: question(el), section: sectionOf(el), option, target: t, checked: !!el.checked });
         }
         continue;
       }
@@ -2789,7 +2799,7 @@ async function snapshotForm(page) {
       const combo = el.tagName === 'INPUT' && String(el.getAttribute('role') || '').toLowerCase() === 'combobox'
         && String(el.getAttribute('aria-haspopup') || '').toLowerCase() === 'listbox';
       const it = { kind: el.tagName === 'SELECT' ? 'select' : (el.tagName === 'TEXTAREA' ? 'text' : (combo ? 'combobox' : (type || 'text'))),
-                   question: question(el), target: target(el), value: clean(el.value).slice(0, 120), required: !!el.required };
+                   question: question(el), section: sectionOf(el), target: target(el), value: clean(el.value).slice(0, 120), required: !!el.required };
       if (el.tagName === 'SELECT') {
         it.options = Array.from(el.options).map(o => clean(o.label || o.textContent)).filter(Boolean).slice(0, 60);
         it.value = el.selectedIndex >= 0 && el.options[el.selectedIndex] ? clean(el.options[el.selectedIndex].label || el.options[el.selectedIndex].textContent) : '';
@@ -3003,11 +3013,16 @@ const planFactLines = plan => {
   const own = plan.carryOn && plan.carryOn.facts;
   return (Array.isArray(own) ? own : String(own || '').split('\n')).map(l => String(l).trim()).filter(Boolean);
 };
+// The gas safety question is answered only from the house's own record (Kevin, 16 Nov 2026, decision card
+// recinoFWz6fQ6JVVB, ruling 4). Only a stored house fact may say it: a line in a plan or in his standing
+// facts that names the topic anywhere would answer every house, so it is left out, and the question is his.
+const saysGasSafety = l => namesGasSafety(l);
 // The plan's own lines first, then the stored facts, then his standing facts; a line that repeats an
 // earlier one whole is dropped.
 function factsOf(plan, standingFacts, storedLines) {
   const seen = new Set();
-  return [].concat(planFactLines(plan), storedLines || [], standingFacts || []).map(l => String(l).trim()).filter(Boolean)
+  return [].concat(planFactLines(plan).filter(l => !saysGasSafety(l)), storedLines || [], (standingFacts || []).filter(l => !saysGasSafety(l)))
+    .map(l => String(l).trim()).filter(Boolean)
     .filter(l => { const k = lineKey(l); if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
@@ -3147,6 +3162,21 @@ function typedFacts(plan, used) {
   return out;
 }
 
+// A step that names the gas safety topic (ruling 4) in its question, the option it ticks or picks, or the
+// value it types is answered only from a "Label: value" line whose own label names the topic and that carries
+// no "[house]" tag: on a one-house form that is the house's own stored fact. Never from a line that only
+// shares a word ("Fire safety certificate: Yes"), and never on a form naming two or more houses, where one
+// house's line could answer for another. '' when the line may answer, else why not.
+function gasLineProblem(asked, line) {
+  if (!namesGasSafety([].concat(asked).map(t => String((t && t.label) || t || '')).join(' | '))) return '';
+  const text = String(line || '');
+  const i = text.indexOf(':');
+  if (i < 0) return 'a gas safety answer comes only from a "Label: value" line';
+  if (/\[[^\]]*\]/.test(text.slice(0, i))) return 'a gas safety question on a form naming two or more houses is his';
+  if (!namesGasSafety(text.slice(0, i))) return 'a gas safety answer comes only from a line whose label names it';
+  return '';
+}
+
 // The planner's steps, checked. Each must target an answer the robot read on the page (a radio
 // option, a tick box, a dropdown or a text box: never a button), cite one whole fact line, and give
 // words that are in that line. Anything else is a question for Kevin, never a guess.
@@ -3170,6 +3200,10 @@ function checkPlannerSteps(out, snap, facts) {
     const want = s.do === 'check' ? 'click' : s.do;
     if (!a) { unknown.push(buttons.has(s.target) ? `press "${buttons.get(s.target).text}"` : q); continue; }
     if (a.kind !== want || !line || !a.item.question) { unknown.push(q); continue; }
+    // The question, its section heading, the option ticked and the value asked for. A dropdown's own pick is
+    // screened again below, once known: a partial match can pick an option that names gas safety for a bare
+    // "Yes". Never every option on offer: an occupation list holds "Gas Fitter" and "Safety Officer".
+    if (gasLineProblem([a.item.question, a.item.section, a.pick, a.item.option, s.value], line)) { unknown.push(q); continue; }
     if (a.kind === 'fill') {
       if (!valueInLine(s.value, line)) { unknown.push(q); continue; }
       // A combobox answer is a pick from a list (review R2): the same checks as a select's, the Yes/No subject
@@ -3180,7 +3214,7 @@ function checkPlannerSteps(out, snap, facts) {
     }
     if (a.kind === 'select') {
       const pick = pickOption((a.item.options || []).map(l => ({ value: l, label: l })), String(s.value || '')).option;
-      if (!pick || !pickInLine(pick.label, line, a.item.question)) { unknown.push(q); continue; }
+      if (!pick || !pickInLine(pick.label, line, a.item.question) || gasLineProblem([a.item.question, a.item.section, pick.label], line)) { unknown.push(q); continue; }
       steps.push({ do: 'select', selector: s.target, label: pick.label, question: q, item: a.item, pick: pick.label });
       continue;
     }
@@ -4971,7 +5005,7 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
                    doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
                    loadStandingFacts, declarationWords, DECLARATION_TOPIC_RE, factsOf,
-                   loadDeclarationMaps, loadExactCovers, mappedDeclarations, clickMappedNo, NEVER_ROBOT_RE, storedFactsFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
+                   loadDeclarationMaps, loadExactCovers, mappedDeclarations, clickMappedNo, NEVER_ROBOT_RE, storedFactsFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine, gasLineProblem,
                    movedOn, assertNotFinalAction, PLANNER_SCHEMA, isoFromUkDate, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
                    adobeSignRefusal, SIGN_WORDS_RE, isAdobeSigningPage, signBinding, runSignFlow, SIGN_DOORS,
                    agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus,

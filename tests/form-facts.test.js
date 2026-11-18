@@ -1204,3 +1204,159 @@ describe('forms round 2 C: his answers in his own window are recorded for the ag
     } finally { fsCjs.chmodSync(dir, 0o700); }
   }, 120000);
 });
+
+// Ruling 4 (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB): the gas question on an insurance form is
+// answered from the house's own record. A general or owner fact reaches every house's form, so a gas answer
+// there would be the blanket yes he ruled out. Every name and address here is invented.
+describe('F: a gas answer is per house, never for every house', () => {
+  const cli = (file, ...args) => spawnSync(process.execPath, [FF_CLI, ...args], { env: { ...process.env, AGENT_FORM_FACTS: file }, encoding: 'utf8' });
+
+  it('set refuses a gas answer at general or owner scope, however the key, label or value words it', () => {
+    const f = fileOf();
+    const before = readFileSync(f, 'utf8');
+    const gen = { scope: 'general', key: 'gas-safety', label: 'Gas safety certificate', value: 'Yes', source: 'test ruling', date: TODAY };
+    expect(() => ff.setFact(gen, f)).toThrow(/gas answer is per house/);
+    expect(() => ff.setFact({ ...gen, key: 'safety', label: 'Landlord gas safety record' }, f)).toThrow(/gas answer is per house/);
+    expect(() => ff.setFact({ ...gen, key: 'certs', label: 'Certificates', value: 'CP12 held for every house' }, f)).toThrow(/gas answer is per house/);
+    expect(() => ff.setFact({ ...gen, key: 'lgsr', label: 'Safety record' }, f)).toThrow(/gas answer is per house/);
+    // At owner scope the key and label decide (an owner's value may name an employer or a street). A line whose
+    // label does not say gas never answers a gas question on a form (agent-browser.js gasLineProblem).
+    const own = { scope: 'owner', ref: 'test-owner', key: 'notes', label: 'Gas certificate notes', value: 'yes on all houses', source: 'test', date: TODAY };
+    expect(() => ff.setFact(own, f)).toThrow(/gas answer is per house/);
+    expect(() => ff.setFact({ ...own, key: 'gas-cert', label: 'Certificate', value: 'Yes' }, f)).toThrow(/gas answer is per house/);
+    expect(readFileSync(f, 'utf8')).toBe(before);
+  });
+
+  it("an owner's own details may say gas: an occupation and a street name are stored", () => {
+    const f = fileOf();
+    const occ = { scope: 'owner', ref: 'test-owner', source: 'test', date: TODAY };
+    expect(ff.setFact({ ...occ, key: 'occupation', value: 'Gas engineer' }, f).value).toBe('Gas engineer');
+    expect(ff.setFact({ ...occ, key: 'correspondence-address', value: '1 Gas Street' }, f).value).toBe('1 Gas Street');
+    expect(ff.loadStore(f).owners['test-owner'].facts.occupation.value).toBe('Gas engineer');
+  });
+
+  it("a house's own gas answer is stored and reaches that house's lines only", () => {
+    const f = fileOf();
+    ff.setFact({ scope: 'property', ref: HOUSE, key: 'gas-safety', label: 'Gas safety certificate', value: 'Yes', source: 'test certificate', date: TODAY, until: '2027-11-01' }, f);
+    const s = ff.loadStore(f);
+    const r = ff.linesFor(s, { owner: 'test-owner', properties: [HOUSE, HOUSE2], today: TODAY });
+    expect(r.lines).toContain('Gas safety certificate [12 Test Lane]: Yes');
+    expect(r.lines.join('\n')).not.toMatch(/Gas safety certificate \[7 Sample Road\]|^Gas safety certificate:/m);
+    expect(ff.resolveFact(s, { properties: [HOUSE], key: 'gas-safety', today: TODAY })).toMatchObject({ value: 'Yes', scope: 'property', ref: HOUSE });
+    expect(ff.resolveFact(s, { properties: [HOUSE2], key: 'gas-safety', today: TODAY })).toMatchObject({ code: 'unknown' });
+  });
+
+  it('a file that holds a blanket gas answer is refused on load, and a plan step never reads one', () => {
+    const s = storeOf();
+    s.general.facts['gas-safety'] = { label: 'Gas safety certificate', value: 'Yes', source: 'test', date: TODAY };
+    expect(() => ff.loadStore(fileOf(s))).toThrow(/gas answer/);
+    expect(ff.resolveFact(s, { properties: [HOUSE2], key: 'gas-safety', today: TODAY })).toMatchObject({ code: 'gas' });
+    const o = storeOf();
+    o.owners['test-owner'].facts['gas-safety'] = { label: 'Gas safety certificate', value: 'Yes', source: 'test', date: TODAY };
+    expect(() => ff.loadStore(fileOf(o))).toThrow(/gas answer/);
+    expect(ff.resolveFact(o, { properties: [HOUSE2], key: 'gas-safety', today: TODAY })).toMatchObject({ code: 'gas' });
+  });
+
+  it('the command line refuses it with exit 1 and leaves the file as it was', () => {
+    const f = fileOf();
+    const before = readFileSync(f, 'utf8');
+    const r = cli(f, 'set', '--scope', 'general', '--key', 'gas-safety', '--label', 'Gas safety certificate', '--value', 'Yes', '--source', 'test', '--date', TODAY);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/gas answer is per house/);
+    expect(readFileSync(f, 'utf8')).toBe(before);
+  });
+});
+
+describe('F2: the gas answer, review round (18 Nov 2026)', () => {
+  const cli = (file, ...args) => spawnSync(process.execPath, [FF_CLI, ...args], { env: { ...process.env, AGENT_FORM_FACTS: file }, encoding: 'utf8' });
+
+  it('plurals and spellings are caught: CP12s, cp-12, LGSRs', () => {
+    const f = fileOf();
+    const gen = { scope: 'general', source: 'test', date: TODAY };
+    expect(() => ff.setFact({ ...gen, key: 'certs', label: 'Certificates', value: 'CP12s for every house' }, f)).toThrow(/gas answer is per house/);
+    expect(() => ff.setFact({ ...gen, key: 'cp-12', label: 'Safety record', value: 'Yes' }, f)).toThrow(/gas answer is per house/);
+    expect(() => ff.setFact({ ...gen, key: 'records', label: 'LGSRs held', value: 'Yes' }, f)).toThrow(/gas answer is per house/);
+  });
+
+  it('the set check itself refuses, before the store is written', () => {
+    expect(() => ff.applySetFact(storeOf(), { scope: 'general', key: 'gas-safety', label: 'Gas safety certificate', value: 'Yes', source: 'test', date: TODAY }))
+      .toThrow(/Nothing was stored/);
+  });
+
+  it("an owner's label that says gas is refused even on a schema key; an employer's name that says gas is stored", () => {
+    const f = fileOf();
+    expect(() => ff.setFact({ scope: 'owner', ref: 'test-owner', key: 'occupation', label: 'Gas safety certificate', value: 'Yes', source: 'test', date: TODAY }, f))
+      .toThrow(/gas answer is per house/);
+    expect(ff.setFact({ scope: 'owner', ref: 'test-owner', key: 'employer', label: 'Employer', value: 'Test Gas Supplies Ltd', source: 'test', date: TODAY }, f).value)
+      .toBe('Test Gas Supplies Ltd');
+  });
+
+  it("a house's gas Yes needs its certificate's expiry; a No (no gas supply) does not", () => {
+    const f = fileOf();
+    const base = { scope: 'property', ref: HOUSE, key: 'gas-safety', label: 'Gas safety certificate', source: 'test certificate', date: TODAY };
+    expect(() => ff.setFact({ ...base, value: 'Yes' }, f)).toThrow(/needs "until"/);
+    expect(ff.setFact({ ...base, value: 'No gas supply' }, f).value).toBe('No gas supply');
+    expect(ff.setFact({ ...base, value: 'Yes', until: '2027-06-30' }, f).until).toBe('2027-06-30');
+    // A file that holds a house gas Yes with no expiry is refused on load.
+    const s = storeOf();
+    s.properties[HOUSE].facts['gas-safety'] = { label: 'Gas safety certificate', value: 'Yes', source: 'test', date: TODAY };
+    expect(() => ff.loadStore(fileOf(s))).toThrow(/needs "until"/);
+  });
+
+  it('an out-of-date blanket gas answer is refused as gas, not sent back to be renewed', () => {
+    const s = storeOf();
+    s.general.facts['gas-safety'] = { label: 'Gas safety certificate', value: 'Yes', source: 'test', date: '2024-01-01', until: '2025-01-01' };
+    expect(ff.resolveFact(s, { properties: [HOUSE], key: 'gas-safety', today: TODAY })).toMatchObject({ code: 'gas' });
+  });
+
+  it('import refuses a blanket gas answer and writes nothing', () => {
+    const f = fileOf();
+    const before = readFileSync(f, 'utf8');
+    const spec = join(tmp(), 'import.json');
+    writeFileSync(spec, JSON.stringify({ facts: [
+      { scope: 'property', ref: HOUSE, key: 'bedrooms', value: '3', source: 'test import', date: TODAY },
+      { scope: 'general', key: 'gas-safety', label: 'Gas safety certificate', value: 'Yes', source: 'test import', date: TODAY }] }));
+    const r = cli(f, 'import', '--file', spec);
+    expect(r.status).toBe(1);
+    expect(JSON.parse(r.stdout).refused[0]).toMatch(/gas answer is per house/);
+    expect(readFileSync(f, 'utf8')).toBe(before);
+  });
+});
+
+describe('F3: the gas answer, review round 2 (18 Nov 2026)', () => {
+  it("a house's gas safety fact needs its expiry unless it is a No; a mains gas supply fact does not", () => {
+    const f = fileOf();
+    const base = { scope: 'property', ref: HOUSE, source: 'test', date: TODAY };
+    expect(() => ff.setFact({ ...base, key: 'gas-safety', label: 'Gas safety certificate', value: 'Valid' }, f)).toThrow(/needs "until"/);
+    expect(() => ff.setFact({ ...base, key: 'gas-cert', label: 'Gas certificate', value: 'Current, held' }, f)).toThrow(/needs "until"/);
+    expect(ff.setFact({ ...base, key: 'gas-supply', label: 'Mains gas supply', value: 'Yes' }, f).value).toBe('Yes');
+    expect(ff.setFact({ ...base, key: 'heating', label: 'Gas central heating', value: 'Yes' }, f).value).toBe('Yes');
+  });
+
+  it('an owner fact naming the topic in its value is refused; a schema key\'s value is the owner\'s own detail', () => {
+    const f = fileOf();
+    const o = { scope: 'owner', ref: 'test-owner', source: 'test', date: TODAY };
+    expect(() => ff.setFact({ ...o, key: 'certificates', label: 'Certificates held', value: 'Gas safety certificate, EICR' }, f)).toThrow(/gas answer is per house/);
+    expect(ff.setFact({ ...o, key: 'occupation', value: 'Gas Safe engineer' }, f).value).toBe('Gas Safe engineer');
+  });
+
+  it('the live window never reads a lapsed gas safety answer, though it may read another stale fact', () => {
+    const s = storeOf();
+    s.properties[HOUSE].facts['gas-safety'] = { label: 'Gas safety certificate', value: 'Yes', source: 'test', date: '2025-01-01', until: '2026-01-01' };
+    s.properties[HOUSE].facts.trees = { value: 'No', source: 'test', date: '2025-01-01', until: '2026-01-01' };
+    expect(ff.resolveFact(s, { properties: [HOUSE], key: 'gas-safety', today: TODAY, allowExpired: true })).toMatchObject({ code: 'expired' });
+    expect(ff.resolveFact(s, { properties: [HOUSE], key: 'trees', today: TODAY, allowExpired: true })).toMatchObject({ value: 'No', expired: true });
+  });
+});
+
+describe('F4: the gas answer, review round 3 (18 Nov 2026)', () => {
+  it("a house fact naming gas safety in its value needs the expiry; no, none and n/a do not, and 'Not expired' is a yes", () => {
+    const f = fileOf();
+    const base = { scope: 'property', ref: HOUSE, source: 'test', date: TODAY };
+    expect(() => ff.setFact({ ...base, key: 'certificates', label: 'Certificates', value: 'Yes - Gas Safe certificate held' }, f)).toThrow(/needs "until"/);
+    const gs = { ...base, key: 'gas-safety', label: 'Gas safety certificate' };
+    for (const v of ['Not applicable (no gas supply)', 'N/A, all electric', 'None'])
+      expect(ff.setFact({ ...gs, value: v }, f).value, v).toBe(v);
+    expect(() => ff.setFact({ ...gs, value: 'Not expired' }, f)).toThrow(/needs "until"/);
+  });
+});

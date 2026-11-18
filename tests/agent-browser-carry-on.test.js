@@ -706,3 +706,133 @@ describe('forms round 2 D3: a typeahead combobox takes only its one exact option
     await pg.close();
   });
 });
+
+// Ruling 4 (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB): the gas question on an insurance form is
+// answered from the house's own record, never one answer for every house. A Yes/No used to be matched by any
+// shared word of five letters or more, so "Fire safety certificate: Yes" answered a gas question. Invented data.
+describe('ruling 4: a gas question is answered only from that house\'s own gas line', () => {
+  const GASQ = 'Does the property have a current gas safety certificate?';
+  const snap = { items: [
+    { kind: 'radio', question: GASQ, options: [{ label: 'Yes', target: '#gy' }, { label: 'No', target: '#gn' }] },
+    { kind: 'text', question: 'Gas safety certificate held (Yes or No)', target: '#gt', value: '' },
+    { kind: 'radio', question: 'Does the property have a fire safety certificate?', options: [{ label: 'Yes', target: '#fy' }, { label: 'No', target: '#fn' }] },
+  ], buttons: [], prices: [] };
+  const run = (steps, facts) => b.checkPlannerSteps({ steps, next: null, unknown: [], done: 'no' }, snap, facts);
+
+  it('a line that only shares a word never answers it, by tick or by typing', () => {
+    const facts = ['Fire safety certificate: Yes'];
+    const r = run([{ do: 'click', target: '#gy', question: 'gas', source: 'Fire safety certificate: Yes' },
+      { do: 'fill', target: '#gt', value: 'Yes', question: 'gas', source: 'Fire safety certificate: Yes' }], facts);
+    expect(r.steps).toEqual([]);
+    expect(r.unknown).toEqual([GASQ, 'Gas safety certificate held (Yes or No)']);
+    // The same line still answers its own question.
+    expect(run([{ do: 'click', target: '#fy', question: 'fire', source: 'Fire safety certificate: Yes' }], facts).steps).toHaveLength(1);
+  });
+
+  it("the house's own gas line answers it on a one-house form; a house-tagged line never does", () => {
+    expect(run([{ do: 'click', target: '#gy', question: 'gas', source: 'Gas safety certificate: Yes' }], ['Gas safety certificate: Yes']).steps)
+      .toMatchObject([{ do: 'click', selector: '#gy' }]);
+    const tagged = 'Gas safety certificate [12 Test Lane]: Yes';
+    expect(run([{ do: 'click', target: '#gy', question: 'gas', source: tagged }], [tagged, 'Property: 12 Test Lane', 'Property: 7 Sample Road']).steps).toEqual([]);
+    expect(b.gasLineProblem(GASQ, tagged)).toMatch(/two or more houses/);
+    expect(b.gasLineProblem(GASQ, 'Gas safety certificate yes')).toMatch(/Label: value/);
+    expect(b.gasLineProblem('How many bedrooms?', 'Bedrooms: 3')).toBe('');
+    expect(b.gasLineProblem('Is there a valid CP12?', 'Landlord gas safety record: Yes')).toBe('');
+  });
+
+  it('a gas line in a plan or in his standing facts is left out; the stored house line stays', () => {
+    const plan = { carryOn: { facts: ['Gas safety certificate: Yes (plan)', 'Number of storeys: 2'] } };
+    const lines = b.factsOf(plan, ['CP12s: held for every house (test)', 'Contact: email only (test)'], ['Gas safety certificate: Yes']);
+    expect(lines).toEqual(['Number of storeys: 2', 'Gas safety certificate: Yes', 'Contact: email only (test)']);
+  });
+});
+
+describe('ruling 4, review round 2: the gas safety topic wherever a step names it, and nothing wider', () => {
+  const snap = { items: [
+    { kind: 'checkbox', question: 'Which certificates does the property hold?', option: 'Gas safety certificate', target: '#cg' },
+    { kind: 'radio', question: 'Main heating fuel', options: [{ label: 'Gas', target: '#hg' }, { label: 'Oil', target: '#ho' }] },
+    { kind: 'radio', question: 'Landlord Safety Certificate held?', options: [{ label: 'Yes', target: '#ly' }, { label: 'No', target: '#ln' }] },
+    { kind: 'text', question: 'Number of bedrooms at 4 Gas Lane', target: '#bd', value: '' },
+  ], buttons: [], prices: [] };
+  const run = (steps, facts) => b.checkPlannerSteps({ steps, next: null, unknown: [], done: 'no' }, snap, facts);
+
+  it('an option or a value that names it counts, as the question does', () => {
+    const facts = ['Certificates held: Gas safety certificate, EICR', 'Fire safety certificate: Yes'];
+    const r = run([{ do: 'check', target: '#cg', question: 'certs', source: facts[0] },
+      { do: 'click', target: '#ly', question: 'landlord', source: facts[1] }], facts);
+    expect(r.steps).toEqual([]);
+    expect(r.unknown).toEqual(['Which certificates does the property hold?', 'Landlord Safety Certificate held?']);
+  });
+
+  it('a plain gas word is not the topic: heating fuel and a street name are answered as before', () => {
+    const facts = ['Heating fuel: Gas', 'Bedrooms: 3'];
+    const r = run([{ do: 'click', target: '#hg', question: 'fuel', source: 'Heating fuel: Gas' },
+      { do: 'fill', target: '#bd', value: '3', question: 'bedrooms', source: 'Bedrooms: 3' }], facts);
+    expect(r.steps.map(s => s.selector)).toEqual(['#hg', '#bd']);
+  });
+
+  it('a plan or standing line naming it in its value, or with no colon, is left out; plain gas lines stay', () => {
+    const plan = { carryOn: { facts: ['Certificates: Gas safety certificate for every house', 'Gas Safe certificate held for all houses', 'Heating: Gas central heating'] } };
+    expect(b.factsOf(plan, ['Safety certificates: CP12 held (test)'], [])).toEqual(['Heating: Gas central heating']);
+  });
+});
+
+describe('ruling 4, review round 3: any word order, and every option a dropdown offers', () => {
+  it('gas named after the safety word still counts', () => {
+    const q1 = 'Do you have a valid safety certificate for all gas appliances?';
+    const q2 = 'Is there a current safety record for the gas boiler?';
+    const snap = { items: [
+      { kind: 'radio', question: q1, options: [{ label: 'Yes', target: '#ay' }, { label: 'No', target: '#an' }] },
+      { kind: 'radio', question: q2, options: [{ label: 'Yes', target: '#by' }, { label: 'No', target: '#bn' }] },
+    ], buttons: [], prices: [] };
+    const r = b.checkPlannerSteps({ steps: [{ do: 'click', target: '#ay', question: 'a', source: 'Fire safety certificate: Yes' },
+      { do: 'click', target: '#by', question: 'b', source: 'Fire safety certificate: Yes' }], next: null, unknown: [], done: 'no' }, snap, ['Fire safety certificate: Yes']);
+    expect(r.steps).toEqual([]);
+    expect(r.unknown).toEqual([q1, q2]);
+    expect(b.gasLineProblem('Safety certificate (gas) in date?', 'Fire safety certificate: Yes')).not.toBe('');
+  });
+
+  it('a dropdown asked for a bare Yes is screened on the options it offers', () => {
+    const line = 'Certificates [12 Test Lane]: Yes - Gas Safe certificate held';
+    const snap = { items: [{ kind: 'select', question: 'Certificates held', target: '#ch', value: '', options: ['Yes - Gas Safe certificate held', 'No'] }], buttons: [], prices: [] };
+    const r = b.checkPlannerSteps({ steps: [{ do: 'select', target: '#ch', value: 'Yes', question: 'certs', source: line }], next: null, unknown: [], done: 'no' },
+      snap, [line, 'Property: 12 Test Lane', 'Property: 7 Sample Road']);
+    expect(r.steps).toEqual([]);
+    expect(r.unknown).toEqual(['Certificates held']);
+  });
+
+  it('a utilities list that says "check" goes to Kevin: wider than the topic, and safe', () => {
+    expect(b.gasLineProblem(['Which utilities? Gas, electricity, water (tick/check all)', 'Gas'], 'Utilities: Gas')).not.toBe('');
+  });
+});
+
+describe('ruling 4, review round 4: the section heading counts, and only the option picked', () => {
+  let browser;
+  beforeAll(async () => { browser = await require_('playwright').chromium.launch(); });
+  afterAll(async () => { if (browser) await browser.close(); });
+
+  it('a question under a "Gas safety" heading is the topic, read off a real page', async () => {
+    const pg = await browser.newPage();
+    await pg.setContent(`<!doctype html><html><body><h1>Your property</h1>
+      <h3>Gas safety</h3><div><p>Is the certificate current?</p>
+      <input type="radio" name="gc" id="gcy" value="y"><label for="gcy">Yes</label>
+      <input type="radio" name="gc" id="gcn" value="n"><label for="gcn">No</label></div>
+      <div role="heading" aria-level="3">About you</div><label for="occ">What is your occupation?</label><select id="occ" name="occ"><option>Accountant</option><option>Gas Fitter</option><option>Property landlord</option><option>Safety Officer</option></select>
+      </body></html>`);
+    const snap = await b.snapshotForm(pg);
+    await pg.close();
+    const radio = snap.items.find(i => i.kind === 'radio');
+    const occ = snap.items.find(i => i.kind === 'select');
+    expect(radio).toMatchObject({ section: 'Gas safety' });
+    // A section title built as role=heading counts as an h3 does.
+    expect(occ).toMatchObject({ section: 'About you' });
+    const facts = ['Electrical certificate current: Yes', 'Occupation: Property landlord'];
+    const yes = radio.options.find(o => o.label === 'Yes');
+    const r = b.checkPlannerSteps({ steps: [
+      { do: 'click', target: yes.target, question: 'cert', source: facts[0] },
+      { do: 'select', target: occ.target, value: 'Property landlord', question: 'occ', source: facts[1] }], next: null, unknown: [], done: 'no' }, snap, facts);
+    // The gas section's question is his; the occupation list holding "Gas Fitter" and "Safety Officer" is not.
+    expect(r.unknown).toEqual([radio.question]);
+    expect(r.steps.map(s => s.selector)).toEqual([occ.target]);
+  });
+});
