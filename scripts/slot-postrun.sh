@@ -136,6 +136,43 @@ done < <(find "$REPO" -mindepth 2 -type f -newer "$MARKER" \
            -not -path "$REPO/.claude/worktrees/*" 2>/dev/null)
 rm -f "$MARKER"
 
+# WHATSAPP LOOKUPS, READ OUTSIDE CLAUDE (finding 20261011-agent-dispatch-834). macOS Full Disk
+# Access belongs to the job's own /usr/bin/python3, never to the claude binary, so an agent's
+# `whatsapp-sweep.py lookup` fails "authorization denied". The refused lookup queues a request
+# (whatsapp-sweep.py writes it); this step reads each one HERE, after claude has exited, the same
+# way inbound-triage-run.sh pre-reads iMessage, and leaves the answer where the same lookup
+# command finds it on the agent's next run. At most five a run, one contact each. A lookup never
+# fails the slot, and answers older than whatsapp-sweep.py's LOOKUP_FRESH_HOURS are deleted.
+if [ -f "$REPO/scripts/whatsapp-sweep.py" ]; then
+  /usr/bin/python3 - "$REPO/scripts/whatsapp-sweep.py" \
+    "${WHATSAPP_LOOKUP_DIR:-$HOME/knowledge-os/logs/whatsapp-lookup}" <<'WA_LOOKUPS' || true
+import json, os, subprocess, sys, time
+sweep, root = sys.argv[1], sys.argv[2]
+reqs, results = os.path.join(root, "requests"), os.path.join(root, "results")
+for n in (os.listdir(results) if os.path.isdir(results) else []):
+    if time.time() - os.path.getmtime(os.path.join(results, n)) > 72 * 3600: os.remove(os.path.join(results, n))
+names = sorted(n for n in os.listdir(reqs) if n.endswith(".json"))[:5] if os.path.isdir(reqs) else []
+env = dict({k: v for k, v in os.environ.items() if k != "CLAUDECODE"}, WHATSAPP_LOOKUP_SERVING="1")
+read = 0
+for n in names:
+    try:
+        with open(os.path.join(reqs, n)) as fh: req = json.load(fh)
+        who, days, limit = str(req["who"]).strip(), str(int(req.get("days") or 60)), str(int(req.get("limit") or 40))
+        r = subprocess.run([sys.executable, sweep, "lookup", "--who", who, "--days", days, "--limit", limit],
+                           capture_output=True, text=True, timeout=60, env=env)
+        try: out = json.loads(r.stdout)
+        except ValueError: out = {"error": "the lookup outside claude printed no JSON (rc=%s)" % r.returncode, "stderr": r.stderr[-500:]}
+        read += 1
+    except Exception as ex:                                   # noqa: BLE001: one bad request never stops the rest
+        out = {"error": "the request could not be read outside claude: %s" % ex}
+    os.makedirs(results, mode=0o700, exist_ok=True)
+    with open(os.path.join(results, n + ".tmp"), "w") as fh: json.dump(out, fh, indent=1)
+    os.replace(os.path.join(results, n + ".tmp"), os.path.join(results, n))
+    os.remove(os.path.join(reqs, n))
+if names: print("whatsapp lookups: %d of %d queued request(s) read outside claude" % (read, len(names)), file=sys.stderr)
+WA_LOOKUPS
+fi
+
 TAIL_TEXT=$(tail -n +$((START_LINE + 1)) "$LOG" 2>/dev/null)
 BAD=$(printf '%s\n' "$TAIL_TEXT" | grep -E "$BAD_ERE" || true)
 # Subtract the lines the caller has declared survivable. Done AFTER the match,

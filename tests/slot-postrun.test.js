@@ -19,7 +19,7 @@
 //     start header and no done line. The wrappers now trap catchable
 //     terminations; this file asserts the traps exist in all three.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, utimesSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, utimesSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -433,5 +433,103 @@ describe('slot failure markers: an unavailable lane fails the run (finding 544)'
   it('the prospecting skill tells the slot to print the marker', () => {
     const skill = readFileSync(resolve(ROOT, '.claude/scheduled-tasks/prospecting/SKILL.md'), 'utf8');
     expect(skill).toMatch(/LANE UNAVAILABLE: claude-in-chrome/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18 Nov 2026, finding 20261011-agent-dispatch-834. macOS Full Disk Access
+// belongs to the job's own /usr/bin/python3, never to the claude binary, so
+// `whatsapp-sweep.py lookup` run by an agent failed "authorization denied" and
+// no WhatsApp read worked from a dispatch run after 24 Aug. Now the refused
+// lookup queues a request, the post-run step reads it OUTSIDE claude, and the
+// same command returns that answer on the agent's next run. The post-run is
+// driven against a STUB sweep script; the agent side runs the real script
+// against a file that is not a database (the same sqlite3.DatabaseError).
+// Invented names only.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('finding 20261011-agent-dispatch-834: a WhatsApp lookup the agent cannot make is read by the post-run step', () => {
+  const REAL_SWEEP = resolve(ROOT, 'scripts/whatsapp-sweep.py');
+  const STUB = String.raw`import json, os, sys
+a = sys.argv
+if os.environ.get("STUB_FAIL"): sys.exit(1)
+print(json.dumps({"who": a[a.index("--who") + 1], "args": a[2:], "serving": os.environ.get("WHATSAPP_LOOKUP_SERVING"),
+                  "claudecode": "CLAUDECODE" in os.environ,
+                  "chats": [{"chat": "Pat Example", "messages": [{"from": "Pat Example", "text": "Boiler fixed"}]}]}))
+`;
+  let wa, notADb;
+  const waEnv = (extra = {}) => {
+    const env = { ...process.env, SLOT_POSTRUN_REPO: repo, WHATSAPP_LOOKUP_DIR: wa, WHATSAPP_DB_PATH: notADb, ...extra };
+    if (!('WHATSAPP_LOOKUP_SERVING' in extra)) delete env.WHATSAPP_LOOKUP_SERVING;
+    return env;
+  };
+  const agentLookup = (who, extra = {}) => sh('python3', [REAL_SWEEP, 'lookup', '--who', who], { env: waEnv(extra) });
+  const postrun = (extra = {}) => sh('bash', [SCRIPT, 'test-job', '0', log, '1', marker, scratch, LEAK_ERE, BAD_ERE],
+    { env: waEnv(extra) });
+  const withStub = () => { mkdirSync(join(repo, 'scripts'), { recursive: true }); writeFileSync(join(repo, 'scripts/whatsapp-sweep.py'), STUB); };
+  const request = (slug, who) => { mkdirSync(join(wa, 'requests'), { recursive: true }); writeFileSync(join(wa, 'requests', `${slug}.json`), JSON.stringify({ who, days: 60 })); };
+
+  beforeEach(() => {
+    wa = join(repo, 'wa');
+    notADb = join(repo, 'ChatStorage.sqlite');
+    writeFileSync(notADb, 'not a sqlite database: the read is refused the way macOS refuses claude');
+  });
+
+  it('round trip: queued in the run, read after it, answered on the next run', () => {
+    const first = agentLookup('Pat Example');
+    expect(first.status).toBe(3);
+    const q = JSON.parse(first.stdout);
+    expect(q.error).toMatch(/QUEUED, not failed/);
+    expect(existsSync(join(wa, 'requests/pat-example.json'))).toBe(true);
+
+    withStub();
+    const r = postrun();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('test-job run OK');
+    expect(r.stderr).toContain('whatsapp lookups: 1 of 1 queued request(s) read outside claude');
+    expect(existsSync(join(wa, 'requests/pat-example.json'))).toBe(false);
+    const res = JSON.parse(readFileSync(join(wa, 'results/pat-example.json'), 'utf8'));
+    expect(res.who).toBe('Pat Example');
+    expect(res.args).toEqual(['--who', 'Pat Example', '--days', '60', '--limit', '40']);
+    expect(res.serving).toBe('1');          // the refusal of the post-run's own read is final, never re-queued
+    expect(res.claudecode).toBe(false);
+
+    const next = agentLookup('pat example');  // the same command, still refused inside claude
+    expect(next.status).toBe(0);
+    const ans = JSON.parse(next.stdout);
+    expect(ans.chats[0].messages[0].text).toBe('Boiler fixed');
+    expect(ans.readOutsideClaude).toMatch(/^\d{4}-\d\d-\d\dT/);
+  });
+
+  it('a lookup that fails outside claude is a loud answer, and never fails the slot', () => {
+    withStub();
+    request('pat-example', 'Pat Example');
+    const r = postrun({ STUB_FAIL: '1' });
+    expect(r.status).toBe(0);
+    const res = JSON.parse(readFileSync(join(wa, 'results/pat-example.json'), 'utf8'));
+    expect(res.error).toMatch(/printed no JSON \(rc=1\)/);
+    expect(agentLookup('Pat Example').status).toBe(1);   // the next run sees the failure, not "nobody said anything"
+  });
+
+  it('reads at most five a run, and leaves the rest for the next slot', () => {
+    withStub();
+    for (let i = 1; i <= 7; i++) request(`contact-${i}`, `Contact Number ${i}`);
+    postrun();
+    expect(readdirSync(join(wa, 'results')).length).toBe(5);
+    expect(readdirSync(join(wa, 'requests')).length).toBe(2);
+  });
+
+  it('the post-run read itself is never re-queued: with SERVING set a refusal is an error', () => {
+    const r = agentLookup('Pat Example', { WHATSAPP_LOOKUP_SERVING: '1' });
+    expect(r.status).toBe(2);
+    expect(JSON.parse(r.stderr).error).toMatch(/not a database/);
+    expect(existsSync(join(wa, 'requests'))).toBe(false);
+  });
+
+  it('a repo with no sweep script leaves the queue alone (so no test can drain a real queue)', () => {
+    request('pat-example', 'Pat Example');
+    const r = postrun();
+    expect(r.status).toBe(0);
+    expect(existsSync(join(wa, 'requests/pat-example.json'))).toBe(true);
+    expect(existsSync(join(wa, 'results'))).toBe(false);
   });
 });

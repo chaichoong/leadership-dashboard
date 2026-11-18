@@ -43,6 +43,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 
 DB_PATH = os.environ.get("WHATSAPP_DB_PATH") or os.path.expanduser(
@@ -413,6 +414,44 @@ LOOKUP_MAX_CHATS = 3
 LOOKUP_MAX_MESSAGES = 100
 LOOKUP_MAX_DAYS = 365
 
+# A LOOKUP THE AGENT CANNOT MAKE IS QUEUED, NOT LOST (finding 20261011-agent-dispatch-834).
+# macOS Full Disk Access belongs to the job's own /usr/bin/python3, never to the claude binary,
+# so this read made from inside an agent run fails "authorization denied". The refused lookup
+# writes a request here; scripts/slot-postrun.sh reads it after the run, outside claude, and
+# leaves the answer in results/, which this same command returns on the agent's next run.
+LOOKUP_DIR = os.environ.get("WHATSAPP_LOOKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/whatsapp-lookup")
+LOOKUP_FRESH_HOURS = 72   # an answer older than this is read again, and the post-run deletes it
+
+
+def lookup_file(kind, who):
+    slug = re.sub(r"[^a-z0-9]+", "-", who.lower()).strip("-")[:60] or "unnamed"
+    return os.path.join(LOOKUP_DIR, kind, slug + ".json")
+
+
+def lookup_refused(who, days, limit, ex):
+    """The answer the post-run step read outside claude, when it is fresh; else queue the lookup."""
+    res = lookup_file("results", who)
+    try:
+        if time.time() - os.path.getmtime(res) <= LOOKUP_FRESH_HOURS * 3600:
+            with open(res) as fh:
+                out = json.load(fh)
+            if isinstance(out, dict):
+                out["readOutsideClaude"] = datetime.fromtimestamp(os.path.getmtime(res), timezone.utc).isoformat(timespec="seconds")
+                print(json.dumps(out, indent=1))
+                return 1 if out.get("error") else 0
+    except (OSError, ValueError):
+        pass
+    req = lookup_file("requests", who)
+    os.makedirs(os.path.dirname(req), mode=0o700, exist_ok=True)
+    with open(req + ".tmp", "w") as fh:
+        json.dump({"who": who, "days": days, "limit": limit, "asked": datetime.now(timezone.utc).isoformat(timespec="seconds")}, fh)
+    os.replace(req + ".tmp", req)
+    print(json.dumps({"error": f"WhatsApp is closed to this run ({ex}). The lookup is QUEUED, not failed: the slot's "
+                               "post-run step reads it outside claude, and this same command returns the answer on "
+                               "your next run. Park the step until then; this is not 'nothing was said'.",
+                      "queued": req, "answerAt": res}))
+    return 3
+
 
 def lookup_digits(who):
     """A UK or international number as the digits a WhatsApp id starts with."""
@@ -433,9 +472,14 @@ def lookup(who, days=60, limit=40):
         return 2
     days = max(1, min(int(days), LOOKUP_MAX_DAYS))
     limit = max(1, min(int(limit), LOOKUP_MAX_MESSAGES))
-    conn = open_db()
+    try:
+        conn = open_db()
+        sessions = conn.execute("SELECT Z_PK AS pk, ZCONTACTJID AS jid, ZPARTNERNAME AS name FROM ZWACHATSESSION").fetchall()
+    except (sqlite3.DatabaseError, PermissionError) as ex:
+        if os.environ.get("WHATSAPP_LOOKUP_SERVING"):   # the post-run step itself: its refusal is the answer
+            raise
+        return lookup_refused(who, days, limit, ex)
     chats = []
-    sessions = conn.execute("SELECT Z_PK AS pk, ZCONTACTJID AS jid, ZPARTNERNAME AS name FROM ZWACHATSESSION").fetchall()
     if not sessions:
         # A blind read (macOS refusing the file, a moved database) returns no
         # chats at all, which must never read as "nobody by that name".
@@ -525,6 +569,6 @@ def main(argv):
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv))
-    except (RuntimeError, sqlite3.OperationalError) as e:
+    except (RuntimeError, sqlite3.DatabaseError) as e:   # DatabaseError: 'authorization denied' is not an OperationalError
         print(json.dumps({"error": str(e)}), file=sys.stderr)
         sys.exit(2)
