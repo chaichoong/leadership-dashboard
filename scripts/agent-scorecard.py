@@ -40,11 +40,15 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_email_format import form_card  # noqa: E402  the hand-back's own exclusion
 
 LONDON = ZoneInfo("Europe/London")
 HOME = os.path.expanduser("~")
@@ -61,7 +65,8 @@ ESTATE = "tblZVrdzivyBueZVf"        # Estate Status
 RECON_AUDIT = "tblbfuxYxu4uMMWwT"   # AI Recon Audit
 RA_DATE, RA_OK, RA_SLICE = "fldJC9UcHCaXAaxKV", "fld9n62GxQijQWqSA", "fldzAqifUzN5HIQpE"
 
-SHOW_AGAIN_HOURS = 3        # a scorecard again after this long away
+SHOW_AGAIN_HOURS = 3        # a scorecard again after Kevin has been away this long
+READ_BUDGET_S = 20          # every Airtable read shares this; the hook's own timeout is 60
 HANDBACK_STALE_MIN = 120    # the AI Agents page's own HANDBACK_STALE_MIN
 OLD_READING_DAYS = 7
 
@@ -102,14 +107,16 @@ ROOMS = {
                        members=["inbox-triage", "customer-service"], also=[]),
     "money-room": dict(name="Money room", team="money",
                        members=["accounts-payable", "accounts-receivable"], also=["bookkeeper"]),
-    "ceo-room": dict(name="CEO room", team="whole-team", agent="od-ceo", member="reciHUAEcEkbctnZ6",
+    "ceo-room": dict(name="CEO room", team="whole-team",
                      members=list(CHATS), also=list(SCHEDULED), whole=True),
 }
 TEAMS = {"property": "Property team", "inbox": "Inbox team", "money": "Money team",
          "runpreneur": "Runpreneur team", "whole-team": "Whole team"}
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
-DATE_RE = re.compile(r"\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:\s+(\d{4}))?",
+# Whole month names only: "3 declined" or "5 marked" is not a date (review of 18 Nov 2026).
+DATE_RE = re.compile(r"\b(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|"
+                     r"aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\.?(?:\s+(\d{4}))?",
                      re.I)
 
 
@@ -153,6 +160,8 @@ def reading_age(text, today):
     newest = None
     for m in DATE_RE.finditer(text or ""):
         day, mon, year = int(m.group(1)), MONTHS[m.group(2).lower()[:3]], m.group(3)
+        if mon == 5 and not year:
+            continue            # "5 may need a look" is a verb: May counts only with its year
         y = int(year) if year else today.year
         try:
             d = date(y, mon, day)
@@ -160,6 +169,8 @@ def reading_age(text, today):
             continue
         if not year and d > today:
             d = date(y - 1, mon, day)
+        if d > today:
+            continue            # "next review 30 Nov 2026" is a plan, not when the reading was taken
         if newest is None or d > newest:
             newest = d
     if newest is None:
@@ -199,6 +210,11 @@ def rent_score(row, now):
     return verdict, head + stamp
 
 
+def pct(part, whole):
+    """Math.round, as the dashboard: Python's round() sends 94.5 to 94."""
+    return int(100.0 * part / whole + 0.5)
+
+
 def recon_score(rows, target_pct=95):
     """js/reconciliation.js refreshReconAccuracyStats, the same 31-day window and rule."""
     total = len(rows)
@@ -207,12 +223,12 @@ def recon_score(rows, target_pct=95):
     ok = sum(1 for r in rows if (r.get("fields") or {}).get(RA_OK))
     auto = [r for r in rows if (r.get("fields") or {}).get(RA_SLICE) == "auto-eligible"]
     auto_ok = sum(1 for r in auto if (r.get("fields") or {}).get(RA_OK))
-    pct = round(100.0 * ok / total)
-    text = "%d%% (%d of %d checked, last 31 days)" % (pct, ok, total)
+    p = pct(ok, total)
+    text = "%d%% (%d of %d checked, last 31 days)" % (p, ok, total)
     if auto:
-        text += "; auto-approve slice %d%% (%d of %d)" % (round(100.0 * auto_ok / len(auto)), auto_ok, len(auto))
+        text += "; auto-approve slice %d%% (%d of %d)" % (pct(auto_ok, len(auto)), auto_ok, len(auto))
     text += ", re-measured live"
-    return ("below target" if pct < target_pct else "on target"), text
+    return ("below target" if p < target_pct else "on target"), text
 
 
 def handback_line(payload, now):
@@ -261,8 +277,8 @@ def last7(tasks, ai_ids):
     for r in tasks or []:
         f = r.get("fields") or {}
         outcome = f.get("Approval Outcome")
-        if not outcome:
-            continue
+        if not outcome or form_card(f.get("Task Name"), f.get("Notes")):
+            continue            # a robot form card or one Kevin works himself: not the agent's card
         who = raised_by(f, ai_ids)
         if who:
             out.setdefault(who, {})
@@ -304,6 +320,8 @@ def score_for(key, spec, facts, now):
 
 
 def target_for(spec, facts):
+    if facts.get("register_error"):
+        return "unavailable: %s" % facts["register_error"]
     reg = (facts.get("register") or {}).get(spec["register"]) or {}
     return first_line(reg.get("Score Metric"), 200) or "not set on the register"
 
@@ -337,7 +355,9 @@ def member_line(key, spec, facts, now):
             parts.append("hand-back %d (%d of %d back)" % (int(a["score"]), int(a["back"]), int(a["cards"])))
         else:
             parts.append("no cards in 14 days")
-        if not facts.get("tasks_error"):
+        if facts.get("tasks_error"):
+            parts.append("7 days unavailable")
+        else:
             c = (facts.get("last7") or {}).get(member) or {}
             if c:
                 parts.append("7 days: %d of %d approved as-is" % (c.get("Approved as-is", 0), sum(c.values())))
@@ -369,7 +389,8 @@ def render(key, facts, now):
 
 
 def due(state, now):
-    t = _parse_time((state or {}).get("shown"))
+    """The first message in a session, or the first after Kevin has been away 3 hours."""
+    t = _parse_time((state or {}).get("last") or (state or {}).get("shown"))
     return t is None or now - t >= timedelta(hours=SHOW_AGAIN_HOURS)
 
 
@@ -400,11 +421,21 @@ def _token():
     return pat
 
 
+_DEADLINE = {"at": None}   # monotonic time the whole gather must finish by (gather sets it)
+
+
 def read_rows(table, formula=None, fields=None, by_field_id=False):
-    """Every matching row, paginated. A reply without a records list is an error, never zero."""
+    """Every matching row, paginated. A reply without a records list is an error, never zero.
+    Every read shares one budget, so a hung Airtable gives "unavailable" lines inside the hook's
+    timeout instead of a killed hook that shows nothing (review of 18 Nov 2026)."""
+    if _DEADLINE["at"] and time.monotonic() >= _DEADLINE["at"]:
+        raise ReadError("ran out of time reading %s (%d s for every read)" % (table, READ_BUDGET_S))
     pat = _token()
     rows, offset = [], None
     for _ in range(200):
+        left = (_DEADLINE["at"] - time.monotonic()) if _DEADLINE["at"] else 10.0
+        if left <= 0:
+            raise ReadError("ran out of time reading %s (%d s for every read)" % (table, READ_BUDGET_S))
         q = [("pageSize", "100")]
         if formula:
             q.append(("filterByFormula", formula))
@@ -417,7 +448,7 @@ def read_rows(table, formula=None, fields=None, by_field_id=False):
         req = urllib.request.Request("%s/%s/%s?%s" % (API, BASE_ID, urllib.parse.quote(table), urllib.parse.urlencode(q)),
                                      headers={"Authorization": "Bearer " + pat})
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=max(1.0, min(10.0, left))) as resp:
                 page = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             raise ReadError("Airtable said HTTP %d for %s" % (e.code, table))
@@ -437,6 +468,7 @@ def gather(key, now):
     keys = [key] if key in CHATS else ROOMS[key]["members"] + ROOMS[key].get("also", [])
     specs = [CHATS.get(k) or SCHEDULED.get(k) for k in keys]
     facts = {}
+    _DEADLINE["at"] = time.monotonic() + READ_BUDGET_S
     try:
         rows = read_rows(REGISTER, fields=["Name", "Metric Score", "Score Metric"])
         if len(rows) < 10:
@@ -466,7 +498,7 @@ def gather(key, now):
                 raise ReadError("no AI rows in Team Members, so the read is wrong")
             ai_ids = {r["id"] for r in team}
             tasks = read_rows("Tasks", formula="IS_AFTER({Approved At}, DATEADD(NOW(), -7, 'days'))",
-                              fields=["Approval Outcome", "Sent For Approval By", "Team Member"])
+                              fields=["Task Name", "Notes", "Approval Outcome", "Sent For Approval By", "Team Member"])
             facts["last7"] = last7(tasks, ai_ids)
         except ReadError as e:
             facts["tasks_error"] = str(e)
@@ -511,6 +543,10 @@ def cmd_hook(stdin_text, env=None, now=None, gather_fn=gather):
     except (OSError, ValueError):
         state = {}
     if not due(state, now):
+        try:   # Kevin is still here: "away" counts from his latest message
+            _write_state(path, dict(state, last=now.isoformat()))
+        except OSError:
+            pass
         return ""
     try:
         text = render(key, gather_fn(key, now), now)
@@ -518,7 +554,7 @@ def cmd_hook(stdin_text, env=None, now=None, gather_fn=gather):
         return ("AGENT CHAT SCORECARD for %s could not be built (%s). Tell Kevin in one line that "
                 "the scorecard is unavailable; never guess its numbers." % (key, e.__class__.__name__))
     try:
-        _write_state(path, {"shown": now.isoformat(), "chat": key})
+        _write_state(path, {"shown": now.isoformat(), "last": now.isoformat(), "chat": key})
     except OSError as e:
         text += "\n(scorecard state not saved: %s; it will show again next message)" % e.strerror
     return text
@@ -625,7 +661,12 @@ def selftest():
              # raised by the Builder about an AR matter: the Builder's card, as in facts_handback
              + [{"fields": {"Approval Outcome": "Approved as-is", "Sent For Approval By": ["recQkO6BA4w5zqwZ4"],
                             "Team Member": ["rec7aHLK1Q8fMLRXH"]}}]
-             + [{"fields": {"Sent For Approval By": ["rec7aHLK1Q8fMLRXH"]}}])   # not decided yet
+             + [{"fields": {"Sent For Approval By": ["rec7aHLK1Q8fMLRXH"]}}]   # not decided yet
+             # a card Kevin works himself, left out exactly as facts_handback leaves it out
+             + [{"fields": {"Task Name": "RENT CLAIM DECISION Unit 1", "Approval Outcome": "Approved as-is",
+                            "Sent For Approval By": ["rec7aHLK1Q8fMLRXH"]}}]
+             + [{"fields": {"Task Name": "Chase", "Notes": "RENT FORM KEY: x", "Approval Outcome": "Rejected",
+                            "Team Member": ["rec7aHLK1Q8fMLRXH"]}}])
     facts = {"register": register, "rent_row": rent_row, "handback": handback_line(payload, now),
              "last7": last7(tasks, ai), "recon": recon}
 
@@ -641,6 +682,7 @@ def selftest():
     check("Compliance score labelled undated", "59 outstanding (21 expired, 36 missing, 2 undated); 1 due in 30 days (undated reading)" in co)
     check("Compliance hand-back with reasons", "2 of 35 cards came back to you (score 94, amber): " in co and "1 you did an ID check" in co)
     check("Compliance last 7 days", "27 cards decided: 27 approved as-is" in co)
+    check("form cards never count as the agent's cards", "RENT" not in ar and "14 cards decided" in ar)
     # Worked example 3: the Bookkeeper, re-measured live.
     v, t = recon_score(recon)
     check("Bookkeeper re-measured", t.startswith("83% (273 of 327 checked, last 31 days); auto-approve slice 96% (107 of 112)"))
@@ -655,6 +697,18 @@ def selftest():
     check("newest of several dates wins", reading_age("Last book 23 Aug 2026; none in (10 to 16 Oct 2026)", today)[0] == date(2026, 10, 16))
     check("no date -> undated", reading_age("101 stuck (target 0)", today)[1] == "undated reading")
     check("a yearless future date is last year", reading_age("since 20 Dec", today)[0] == date(2025, 12, 20))
+    # Review of 18 Nov 2026: ordinary words are not months, and a planned date is not the reading's.
+    dec5 = date(2026, 12, 5)
+    check("'3 declined' is not 3 Dec", reading_age("41 of 45 approved, 3 declined (to 12 Oct 2026)", dec5)[1]
+          == "reading dated 12 Oct, 54 days old")
+    check("'3 declined' alone stays undated", reading_age("40 drafts, 3 declined", dec5)[1] == "undated reading")
+    check("'5 marked', '5 may', '12 novel' are not dates",
+          reading_age("5 marked, 12 novel, 5 may", today)[1] == "undated reading")
+    check("a future dated plan never hides an old reading",
+          reading_age("62 of 64 on 2 Oct 2026; next review 30 Nov 2026", today)[1] == "reading dated 2 Oct, 47 days old")
+    check("full month names read", reading_age("checked 14 November 2026", today)[0] == date(2026, 11, 14))
+    check("half rounds up, as the dashboard's Math.round", pct(189, 200) == 95 and recon_score(
+        [{"fields": {RA_OK: True}}] * 189 + [{"fields": {}}] * 11)[0] == "on target")
 
     # Hand-back trust
     check("stale verdict row -> can't tell", handback_line(dict(payload, computedAt="2026-11-18T17:00:00Z"), now)[0] is None)
@@ -668,6 +722,19 @@ def selftest():
     check("tasks read failure is named", "Last 7 days: unavailable: Airtable said HTTP 503 for Tasks" in render("compliance", bad, now))
     bad = {"register_error": "could not reach Airtable (URLError)", "handback": (None, "x")}
     check("register read failure is named", "Score: unavailable: could not reach Airtable (URLError)" in render("compliance", bad, now))
+    check("an unread register never says 'not set'",
+          "Target: unavailable: could not reach Airtable (URLError)" in render("compliance", bad, now))
+    check("a room names a failed Tasks read", "7 days unavailable" in render(
+        "property-room", dict(facts, tasks_error="Airtable said HTTP 503 for Tasks"), now))
+    _DEADLINE["at"] = time.monotonic() - 1
+    try:
+        read_rows("Tasks")
+        timed_out = False
+    except ReadError as e:
+        timed_out = "ran out of time" in str(e)
+    finally:
+        _DEADLINE["at"] = None
+    check("a spent read budget gives 'ran out of time', never a hang", timed_out)
     check("rent row missing falls back to the register, labelled old",
           "62 of 64 paying (96.9%) on 2 Oct 2026, from the first live rent check (reading dated 2 Oct, 47 days old)"
           in render("accounts-receivable", dict(facts, rent_row=None), now))
@@ -701,6 +768,12 @@ def selftest():
         check("hook shows the scorecard on the first message", first.startswith("AGENT CHAT SCORECARD for Accounts Receivable"))
         check("hook is quiet five minutes later", second == "")
         check("hook shows it again after 3 hours", later.startswith("AGENT CHAT SCORECARD"))
+        stdin3 = json.dumps({"session_id": "s3"})
+        steady = [cmd_hook(stdin3, env, now + timedelta(hours=h), lambda k, n: facts) for h in range(0, 6)]
+        check("a steady hour-by-hour chat gets one scorecard, not one every 3 hours",
+              bool(steady[0]) and not any(steady[1:]))
+        back = cmd_hook(stdin3, env, now + timedelta(hours=8, minutes=1), lambda k, n: facts)
+        check("back after 3 hours away -> scorecard again", back.startswith("AGENT CHAT SCORECARD"))
         check("hook outside a chat folder is silent", cmd_hook(stdin, {}, now, lambda k, n: facts) == "")
 
         def broken(k, n):
