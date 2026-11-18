@@ -20,10 +20,14 @@ dashboard labels it End Date (js/config.js F.costEndDate). A new recurring cost 
 a date, or "no end date".
 
 WHAT A WRITE NEEDS
-  * --task: an Airtable task Kevin approved EXACTLY "Approved as-is", with the marks only a real
-    approval leaves (scripts/approval_evidence.py, through tenancy-record.py approval_problem).
-    "Approved with minor edits" is refused: `agent-dispatch.py revise` rewrites the output after it,
-    so a line there may not be the line he read.
+  * --task: an Airtable task Kevin approved, "Approved as-is" or "Approved with minor edits", with the
+    marks only a real approval leaves (scripts/approval_evidence.py, through tenancy-record.py
+    approval_problem). Minor edits (accepted 18 Nov 2026, finding 20261016-agent-dispatch-945: Kevin's
+    note on that card was information, not an edit, and the cost was never written): with no note there
+    was no edit, so the card counts as it stands. With a note, `agent-dispatch.py revise` must have
+    applied it (the rule `complete` already holds), and a line counts only when it is in BOTH the text
+    he approved (revise archives it in Notes) and the card as revised, so a line his edit changed, or
+    one added after he read the card, is refused and goes on a fresh card.
   * The approved Agent Output (below the last Your step divider when a YOUR STEP block sits on top,
     tenancy-record.py approved_original) carries the exact line, each on its own line:
         RECORD CHANGE: <cost id> Expected Cost = <amount>
@@ -86,6 +90,7 @@ tr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(tr)
 rc = tr.rc
 Refused = tr.Refused
+from approval_evidence import APPROVED_AT  # noqa: E402  (Approved At, by field id)
 
 LEDGER = os.environ.get("COST_RECORD_LEDGER") or os.path.expanduser("~/knowledge-os/logs/cost-record/ledger.jsonl")
 
@@ -166,17 +171,63 @@ def load_cost(cost_id):
     return row
 
 
+APPROVED_OUTCOMES = ("Approved as-is", "Approved with minor edits")
+# What `agent-dispatch.py revise` writes into Notes when it applies Kevin's minor edit: its EDITS_APPLIED_MARK, his
+# note on one line, then the text he approved under this heading. Kept identical to scripts/agent-dispatch.py
+# (tests/payment-run-paid-off-list-945.test.js reads both).
+EDITS_APPLIED_MARK = "EDITS APPLIED:"
+EDITS_ARCHIVE_HEAD = "--- TEXT KEVIN APPROVED, BEFORE THE EDIT ---"
+EDITS_BLOCK_RE = re.compile(r"^\[(?P<stamp>\d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2})[^\]\n]*\] "
+                            + re.escape(EDITS_APPLIED_MARK) + r"[^\n]*\n\n" + re.escape(EDITS_ARCHIVE_HEAD) + r"\n",
+                            re.M)
+# The next dated Notes entry ends the archived text, so a line written into a later note never counts as read.
+NOTE_ENTRY_RE = re.compile(r"\n\n\[\d{1,2} [A-Z][a-z]{2} \d{4}")
+
+
+def text_before_edit(notes, approved_at):
+    """The text Kevin approved, as `revise` archived it, from the FIRST edit applied at or after his approval (a
+    second revise archives the first revision, not his text), or None when no edit was applied since he approved."""
+    try:
+        when = datetime.fromisoformat(str(approved_at or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        return None
+    when = when.replace(second=0, microsecond=0)
+    text = str(notes or "")
+    for m in EDITS_BLOCK_RE.finditer(text):
+        try:
+            stamped = datetime.strptime(m.group("stamp"), "%d %b %Y %H:%M").replace(tzinfo=rc.LONDON)
+        except ValueError:
+            continue
+        if stamped < when:
+            continue
+        body = text[m.end():]
+        nxt = NOTE_ENTRY_RE.search(body)
+        return body[:nxt.start()] if nxt else body
+    return None
+
+
 def approved_lines(task):
-    """The approved card's text, or Refused: Kevin approved this task for real, and approved it as-is."""
+    """The approved card's text, or Refused: Kevin approved this task for real, and every line returned is one he
+    read. See WHAT A WRITE NEEDS above for what "Approved with minor edits" takes."""
     f = task.get("fields") or {}
     why = tr.approval_problem(task)
     if why:
         raise Refused(why)
     outcome = rc.sel(f.get(tr.TK["approvalOutcome"]))
-    if outcome != "Approved as-is":
-        raise Refused(f"task {task['id']} was {outcome}, not Approved as-is: after an edit the card may not say what "
-                      "he read, so put the change on a fresh card")
-    return tr.approved_original(f.get(tr.TK["agentOutput"]))
+    if outcome not in APPROVED_OUTCOMES:
+        raise Refused(f"task {task['id']} was {outcome}, not Approved as-is or Approved with minor edits")
+    text = tr.approved_original(f.get(tr.TK["agentOutput"]))
+    if outcome == "Approved as-is" or not squash(f.get(tr.TK["approvalFeedback"])):
+        return text
+    before = text_before_edit(f.get(tr.TK["notes"]), f.get(APPROVED_AT))
+    if before is None:
+        raise Refused(f"task {task['id']} was Approved with minor edits and his note has not been applied to the card: "
+                      f"run agent-dispatch.py revise {task['id']} --output-file <file> first (complete asks the same), "
+                      "then only the lines his edit left alone can be written")
+    read = {squash(x) for x in tr.approved_original(before).splitlines() if squash(x)}
+    return "\n".join(x for x in text.splitlines() if squash(x) in read)
 
 
 def same_value(label, card_value, value):
@@ -197,7 +248,7 @@ def same_value(label, card_value, value):
 
 
 def change_problem(task, cost_id, label, value):
-    """'' when Kevin approved THIS change to THIS cost on this task, as-is, else why not."""
+    """'' when Kevin approved THIS change to THIS cost on this task, else why not."""
     try:
         text = approved_lines(task)
     except Refused as e:
@@ -206,8 +257,17 @@ def change_problem(task, cost_id, label, value):
         if m.group("cost") == cost_id and m.group("label") == label and same_value(label, m.group("value"), value):
             return ""
     shown = ", ".join(value) if isinstance(value, list) else value
-    return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {cost_id} {label} = {shown}': "
-            "put the change on a card for him to approve (one tap)")
+    return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {cost_id} {label} = {shown}'"
+            f"{edited_hint(task)}: put the change on a card for him to approve (one tap)")
+
+
+def edited_hint(task):
+    """Said when a line is missing after a minor edit, so the robot knows why a line it can see did not count."""
+    f = task.get("fields") or {}
+    if rc.sel(f.get(tr.TK["approvalOutcome"])) == "Approved with minor edits" and squash(f.get(tr.TK["approvalFeedback"])):
+        return (" that he read and his edit left alone (after a minor edit only a line in both the text he approved "
+                "and the revised card counts)")
+    return ""
 
 
 def parse_new_line(body):
@@ -237,7 +297,7 @@ def new_line(spec):
 
 
 def new_problem(task, spec):
-    """'' when Kevin approved THIS new cost on this task, as-is, else why not."""
+    """'' when Kevin approved THIS new cost on this task, else why not."""
     try:
         text = approved_lines(task)
     except Refused as e:
@@ -247,8 +307,8 @@ def new_problem(task, spec):
         if card and name_key(card["name"]) == name_key(spec["name"]) and all(
                 card[k] == spec[k] for k in ("expected", "frequency", "dueDay", "first", "end")):
             return ""
-    return (f"the card Kevin approved (task {task['id']}) has no line '{new_line(spec)}': put the new cost on a card "
-            "for him to approve (one tap)")
+    return (f"the card Kevin approved (task {task['id']}) has no line '{new_line(spec)}'{edited_hint(task)}: put the "
+            "new cost on a card for him to approve (one tap)")
 
 
 # WHAT A CARD STILL OWES THE COSTS TABLE (Kevin, 31 Oct 2026). Four new insurance policies bought in October never

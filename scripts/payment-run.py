@@ -73,7 +73,14 @@ USAGE
                                           it read becomes the next run's start.
   payment-run.py write --items FILE       upsert the model's classified items
                                           (JSON list) keyed on Gmail Message ID.
-  payment-run.py cleanse [--apply]        one-off: delete exact duplicate rows,
+  payment-run.py paid-off-list --transaction TX --amount N --date YYYY-MM-DD
+      --task T (--payee "..." | --row ROW) [--description "..."] [--business REC]
+      [--note "..."] [--apply]
+                                          a payment already made, put on the
+                                          list after the fact (Kevin, 27 Sep
+                                          2026). Only against the bank line it
+                                          names, read live. DRY BY DEFAULT.
+  payment-run.py cleanse [--apply]      one-off: delete exact duplicate rows,
                                           mark transaction-matched rows Paid,
                                           move pre-window survivors to Historic
                                           for the creditor agent. DRY BY DEFAULT.
@@ -353,11 +360,15 @@ def airtable_request(method, path, payload=None, what="Airtable call"):
             time.sleep(backoff_seconds(attempt))
 
 
-def airtable_list(table, params=None, what=None):
+def airtable_list(table, params=None, what=None, strict=False):
     """Every record, following the offset. A hand-rolled read that forgets the
     offset token silently measures the first page and reports it as the whole
     table — this platform has shipped that bug before (the AI Reconciliation
-    Accuracy card, 6 Aug 2026), so the pagination lives in one place."""
+    Accuracy card, 6 Aug 2026), so the pagination lives in one place.
+
+    strict=True: a page with no `records` list is an error, never an empty
+    table (CLAUDE.md "Airtable queries", finding 20261104-phase-2-1187). The
+    paid-off-list door reads this way; the older commands are unchanged."""
     what = what or ("list " + table)
     out, offset = [], None
     while True:
@@ -368,7 +379,11 @@ def airtable_list(table, params=None, what=None):
         data = airtable_request(
             "GET", "%s/%s?%s" % (BASE, table, urllib.parse.urlencode(query, doseq=True)),
             what=what)
-        out.extend(data.get("records", []))
+        records = data.get("records") if isinstance(data, dict) else None
+        if strict and not isinstance(records, list):
+            fail("%s: Airtable answered with no records list (%s). That is an error, "
+                 "never an empty table, so nothing was written." % (what, str(data)[:160]))
+        out.extend(records or [])
         offset = data.get("offset")
         if not offset:
             return out
@@ -2163,6 +2178,200 @@ def cmd_write(args):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# paid-off-list — a payment already made, put on the list after the fact
+# ══════════════════════════════════════════════════════════════════════════
+
+# Kevin's ruling, 27 Sep 2026 ("paid off the list"): a business-account payment
+# with no row on the Payment Run gets a Paid row added after the fact, linked to
+# its bank line, so the payments-came-through-the-list check clears. Until
+# 18 Nov 2026 no command could do it (finding 20261016-agent-dispatch-945):
+# `write` refuses a row with no Gmail message id, and nothing set Paid Date or
+# Matched Transaction on a named row, so two tasks sat on a TOOL wall for a
+# month. This is that door, and its gate is the bank line itself, read live: a
+# row is written only against the transaction that paid it, and only when that
+# transaction is an outgoing business payment of the stated amount on the stated
+# day that no other row already claims. It never moves money and never deletes.
+
+T_BUSINESSES = "tblpqkvWJJo8Uu25q"   # Businesses (js/config.js TABLES.businesses)
+REC_ID_RE = re.compile(r"rec[A-Za-z0-9]{14}")
+AMOUNT_ARG_RE = re.compile(r"^£?\s*(\d{1,7}(?:\.\d{1,2})?)$")
+# A row this door may link: owed, blank, or marked Paid by hand with no bank line.
+# Never a Historic (creditor lane), Duplicate or Estimate row.
+LINKABLE_STATUSES = ("Unpaid", "", "Paid")
+OFF_LIST_NOTE = "Paid off the list (Kevin's ruling, 27 Sep 2026)"
+
+
+class Refused(Exception):
+    """The gate said no. Printed as {"refused": why}, exit 2: a result, never worked round."""
+
+
+def one_record(table, rec_id, what, fields=None):
+    """The record, read through a list filter on its OWN table, or None. A GET
+    by id ignores the table in the URL (CLAUDE.md), so it cannot prove which
+    table a record is in; a list on the table can."""
+    if not REC_ID_RE.fullmatch(rec_id or ""):
+        raise Refused("%r is not a record id" % (rec_id,))
+    params = {"filterByFormula": "RECORD_ID()='%s'" % rec_id}
+    if fields:
+        params["fields[]"] = fields
+    rows = airtable_list(table, params, what=what, strict=True)
+    return rows[0] if rows else None
+
+
+def paid_problem(tx, rows, amount, day, row_id=None, payee=None):
+    """'' when bank line `tx` may be recorded as paying row `row_id` (or a new
+    row for `payee`), else the plain reason it may not. Pure, so the dry run and
+    the write cannot disagree. `rows` is the WHOLE Payment Run, every page."""
+    f = tx.get("fields", {})
+    gbp = f.get("**GBP")
+    if gbp is None or float(gbp) >= 0:
+        return ("transaction %s is not money out (its amount reads %s), so it paid no bill"
+                % (tx["id"], gbp))
+    accounts = f.get("Account Alias (from **Account)") or []
+    if not any(a in BUSINESS_PAYMENT_ACCOUNTS for a in accounts):
+        return ("transaction %s left from %s, not the business payment account (%s): the "
+                "Payment Run lists only payments from that account"
+                % (tx["id"], ", ".join(accounts) or "no account", ", ".join(BUSINESS_PAYMENT_ACCOUNTS)))
+    if not is_business_transfer(tx):
+        return ("transaction %s (%s) is a card purchase, a direct debit, a bank fee, a standing "
+                "collection or the second part of a split, not a payment Kevin sent, so it never "
+                "goes on the Payment Run" % (tx["id"], str(f.get("*Name") or "").strip()[:60]))
+    whole, part = round(abs(float(gbp)), 2), tx_amount(tx)
+    if round(amount, 2) not in (part, whole):
+        split = "" if part == whole else " (its own split part; the whole bank payment is £%.2f)" % whole
+        return ("transaction %s pays £%.2f%s, not £%.2f: name the bank line that paid this amount"
+                % (tx["id"], part, split, amount))
+    if tx_date(tx) != day:
+        return ("transaction %s is dated %s, not %s: the Paid Date is the day on the bank line"
+                % (tx["id"], tx_date(tx) or "with no date", day))
+    others = [r for r in rows if tx["id"] in (r.get("fields", {}).get("Matched Transaction") or [])
+              and r["id"] != row_id]
+    if others:
+        o = others[0]["fields"]
+        return ("transaction %s is already claimed by row %s (%s, £%.2f): one payment pays one row"
+                % (tx["id"], others[0]["id"], o.get("Payee") or "no payee", float(o.get("Amount") or 0)))
+    if row_id:
+        row = next((r for r in rows if r["id"] == row_id), None)
+        if row is None:
+            return "%s is not a row on the Payment Run (Dashboard Invoices)" % row_id
+        rf = row.get("fields", {})
+        if status_of(row) not in LINKABLE_STATUSES:
+            return ("row %s is %s, so it is not a bill this payment can settle"
+                    % (row_id, status_of(row)))
+        if rf.get("Amount") is None:
+            return "row %s has no amount, so nothing proves this payment is its bill" % row_id
+        if round(abs(float(rf["Amount"])), 2) != round(amount, 2):
+            return ("row %s is for £%.2f, not £%.2f" % (row_id, abs(float(rf["Amount"])), amount))
+        linked = rf.get("Matched Transaction") or []
+        if linked and tx["id"] not in linked:
+            return ("row %s already names transaction %s: one row is paid by one payment"
+                    % (row_id, ", ".join(linked)))
+        return ""
+    # A new row while an OPEN bill of the same payee and size is on the list
+    # leaves that bill owed, and Kevin pays it twice. That payment is its bill.
+    for r in rows:
+        rf = r.get("fields", {})
+        if status_of(r) not in ("Unpaid", "") or rf.get("Amount") is None:
+            continue
+        if round(abs(float(rf["Amount"])), 2) != round(amount, 2):
+            continue
+        tokens = payee_tokens(rf.get("Payee"))
+        if tokens and (tokens & payee_tokens(payee) or memo_names_payee(tokens, tx)):
+            return ("an open bill for the same payee and amount is on the list (row %s, %s, £%.2f, "
+                    "dated %s): if this payment is that bill, link it with --row %s; a second row "
+                    "would leave that bill owed and paid twice"
+                    % (r["id"], rf.get("Payee") or "", abs(float(rf["Amount"])),
+                       (rf.get("Email Date") or "no date")[:10], r["id"]))
+    return ""
+
+
+def run_paid(args):
+    """The paid-off-list door. Returns the result dict, or raises Refused."""
+    m = AMOUNT_ARG_RE.match(str(args.amount or "").replace(",", "").strip())
+    if not m or float(m.group(1)) <= 0:
+        raise Refused("--amount must be a pounds amount above zero, like 80 or 67.50, not %r" % args.amount)
+    amount = round(float(m.group(1)), 2)
+    try:
+        day = datetime.strptime(str(args.date or ""), "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise Refused("--date must be the bank line's date, written YYYY-MM-DD, not %r" % args.date)
+    payee = " ".join(str(args.payee or "").split())
+    if args.row and payee:
+        raise Refused("give --row (link a row already on the list) or --payee (a new row), not both")
+    if not args.row and not payee:
+        raise Refused("a new row needs --payee (who was paid); to settle a row already on the list, give --row")
+    if args.row and not REC_ID_RE.fullmatch(args.row):
+        raise Refused("--row %r is not a record id" % args.row)
+    if not one_record(T_TASKS, args.task, "the task that asked"):
+        raise Refused("--task %s is not a task (no row with that id in the Tasks table)" % args.task)
+    tx = one_record(T_TRANSACTIONS, args.transaction, "the bank line", fields=OUTFLOW_FIELDS)
+    if tx is None:
+        raise Refused("--transaction %s is not a bank line (no row with that id in Transactions)"
+                      % args.transaction)
+    if args.business and not one_record(T_BUSINESSES, args.business, "the business"):
+        raise Refused("--business %s is not a record in the Businesses table" % args.business)
+    rows =airtable_list(T_INVOICES, what="Dashboard Invoices", strict=True)
+    if not rows:
+        fail("the Payment Run read returned no rows at all. That is a broken read, never an "
+             "empty list, so nothing was written.")
+    problem = paid_problem(tx, rows, amount, day, row_id=args.row, payee=payee)
+    if problem:
+        raise Refused(problem)
+    row = next((r for r in rows if r["id"] == args.row), None) if args.row else None
+    out = {"transaction": tx["id"], "bankLine": tx_line(tx), "amount": amount, "paidDate": day,
+           "task": args.task}
+    if row is not None and tx["id"] in (row["fields"].get("Matched Transaction") or []) \
+            and status_of(row) == "Paid":
+        return dict(out, row=row["id"], unchanged=True,
+                    note="row %s already records this payment; nothing written" % row["id"])
+    note = "%s: %s (%s). Recorded for task %s.%s" % (
+        OFF_LIST_NOTE, tx_line(tx), tx["id"], args.task,
+        (" " + " ".join(args.note.split())) if args.note else "")
+    if row is not None:
+        fields = {"Status": "Paid", "Matched Transaction": [tx["id"]], "Notes": append_note(row, note)}
+        if not row["fields"].get("Paid Date"):
+            fields["Paid Date"] = day
+    else:
+        fields = {"Payee": payee, "Amount": amount, "Email Date": day, "Paid Date": day,
+                  "Status": "Paid", "Matched Transaction": [tx["id"]], "Notes": append_note({}, note),
+                  "Description": (" ".join(str(args.description).split()) if args.description
+                                  else "Paid off the list: %s" % str(tx["fields"].get("*Name") or "")
+                                  .strip()[:80])}
+        if args.business:
+            fields["Business"] = [args.business]
+    out.update({"row": row["id"] if row is not None else None,
+                "action": "link the row on the list" if row is not None else "add a Paid row",
+                "fields": {k: v for k, v in fields.items() if k != "Notes"}})
+    if not args.apply:
+        return dict(out, dryRun=True, note="Nothing written. Re-run with --apply.")
+    if row is not None:
+        written = airtable_write(T_INVOICES, "PATCH", [{"id": row["id"], "fields": fields}],
+                                 "link a payment made off the list")
+    else:
+        written = airtable_write(T_INVOICES, "POST", [{"fields": fields}],
+                                 "add a row for a payment made off the list")
+    rid = row["id"] if row is not None else ((written or [{}])[0].get("id") or "")
+    if not REC_ID_RE.fullmatch(rid):
+        fail("the write returned no record id (%s): the row may not exist" % str(written)[:160])
+    back = one_record(T_INVOICES, rid, "the row just written")
+    bf = (back or {}).get("fields", {})
+    if (status_of(back or {}) != "Paid" or tx["id"] not in (bf.get("Matched Transaction") or [])
+            or not bf.get("Paid Date")):
+        fail("row %s does not read Paid, linked to %s and dated after the write: it did not land"
+             % (rid, tx["id"]))
+    return dict(out, row=rid, written=True)
+
+
+def cmd_paid(args):
+    try:
+        out = run_paid(args)
+    except Refused as exc:
+        print(json.dumps({"refused": str(exc)}, indent=2))
+        sys.exit(2)
+    print(json.dumps(out, indent=2))
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # cleanse — the one-off tidy of the legacy rows
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -3017,6 +3226,20 @@ def main(argv=None):
     p.add_argument("--items", required=True)
     p.add_argument("--run-date")
     p.set_defaults(fn=cmd_write)
+
+    p = sub.add_parser("paid-off-list",
+                       help="a payment already made, put on the list against its bank line")
+    p.add_argument("--transaction", required=True, help="the Transactions record that paid it")
+    p.add_argument("--amount", required=True, help="what the bank line paid, in pounds")
+    p.add_argument("--date", required=True, help="the bank line's date, YYYY-MM-DD")
+    p.add_argument("--task", required=True, help="the task that asked, cited on the row")
+    p.add_argument("--row", help="settle this row already on the list instead of adding one")
+    p.add_argument("--payee", help="who was paid, for a new row")
+    p.add_argument("--description")
+    p.add_argument("--business", help="the Businesses record for a new row")
+    p.add_argument("--note", help="one sentence added to the row's dated note")
+    p.add_argument("--apply", action="store_true")
+    p.set_defaults(fn=cmd_paid)
 
     p = sub.add_parser("cleanse")
     p.add_argument("--apply", action="store_true")
