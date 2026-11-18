@@ -715,25 +715,33 @@ const SECRET_SHAPES = [
 // (?<![\w.-]) rather than \b: \b fires at every hyphen and made this quadratic on a long value (review, 18 Nov 2026).
 const COPY_NOT_SECRET_RE = /(?:https?:\/\/|www\.)\S+|(?<![\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*|#\w+/gi;
 
-// A credential word labelling a value. "=" is code ("api_key=abc", "token = x"); after a colon it counts when the label
-// opens a line ("Password: correcthorse") or the word after it is key-like ("my password: hunter2"), never in a
-// sentence ("Turn on 2FA: always.", "Every token: earned"). "secret" alone is an everyday word: only a key-like run.
-const CRED_LABEL_RE = /(pass(?:word|code)|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(?:code|answer)|auth(?:entication)?.?code|token|api.?key|secret)(\s*)([:=])(\s*)(\S+)/gi;
-const keyLike = (w) => /\d/.test(w) || /[^A-Za-z0-9.,;:!?'"()[\]-]/.test(w) || /[a-z][A-Z]/.test(w);
+// A credential word labelling a value. "=" is code ("api_key=abc", "token = x"). After ":", "is", "was" or a dash it
+// counts when the word after it is key-like ("Your OTP is 483920", "My password is Tr0ub4dor&3", "Password - Hunter22!"),
+// and after ":" also when it is glued to the label or stands alone at the end of its line ("Password: correcthorsebattery").
+// A sentence passes: "Turn on 2FA: always.", "Every token: earned", "OTP: never share it", "Token: 10,000 steps".
+// "secret" alone is an everyday word ("The secret: consistency."): only glued "=", a run with a letter and a digit, or a
+// lone run of 16 or more counts.
+const CRED_LABEL_RE = /(pass(?:word|code)|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(?:code|answer)|auth(?:entication)?.?code|token|api.?key|secret)(\s*[:=]\s*|\s+(?:is|was)\s+|\s+[-–]\s+)(?=([^\n]{0,200}))/gi;   // 200: a capped look, so a long line stays linear
+const keyLike = (w) => !/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(w)
+  && (/\d/.test(w) || /[^A-Za-z0-9.,;:!?'"()[\]-]/.test(w) || /[a-z][A-Z]/.test(w));
 
 function labelledSecret(v) {
   for (const m of v.matchAll(CRED_LABEL_RE)) {
-    const [, label, gap1, sep, gap2, raw] = m;
-    const word = raw.replace(/[.,;:!?)\]"']+$/, '');
-    const glued = !gap1 && !gap2;                                           // client_secret=abc, token:abc
+    const [, label, sepRaw, rest] = m;
+    const sep = sepRaw.trim();
+    const glued = sepRaw === sep;                                           // client_secret=abc, token:abc
+    const word = (rest.trim().split(/\s+/)[0] || '').replace(/[.,;:!?)\]"']+$/, '');
+    const alone = word.length > 0 && !/\s/.test(rest.trim());              // the only word left on its line
     if (/^secret$/i.test(label)) {
       if (glued && sep === '=') return true;
       if (word.length >= 8 && /[A-Za-z]/.test(word) && /\d/.test(word)) return true;
+      if ((sep === ':' || sep === '=') && alone && word.length >= 16) return true;
       continue;
     }
     if (sep === '=') return true;
-    const opensLine = /(^|\n)[ \t]*$/.test(v.slice(0, m.index));
-    if (word.length >= 4 && (opensLine || glued || keyLike(word))) return true;
+    if (word.length >= 4 && keyLike(word)) return true;
+    if (sep === ':' && word.length >= 4 && glued) return true;
+    if (sep === ':' && alone && word.length >= 8) return true;
   }
   return false;
 }
