@@ -1080,10 +1080,22 @@ def reels_already_shared(state, day, clip):
     return used
 
 
-# How many runs a share gets when the Share control never appears, before it is written off. Three is
-# two nights of publish runs: long enough for a Facebook layout wobble to pass, short enough that a
-# control that has genuinely gone stops asking (finding 20261102-phase-3-1164).
+# How many DAYS a share gets when the Share control never appears, before it is written off. Three is
+# two nights: long enough for a Facebook layout wobble to pass, short enough that a control that has
+# genuinely gone stops asking (finding 20261102-phase-3-1164).
+# Days, not runs (18 Nov 2026). From 2 Nov this counted RUNS, and the publisher runs hourly from 07:15,
+# so "two nights" was in fact three hours: a renamed Share control would have written off every share
+# of the day by lunchtime, Share never once pressed, exactly the backlog of 14 to 24 Oct 2026 (37 shares,
+# every reel still reading "Share, 0 shares" on 18 Nov). So a missing control is looked for once a day,
+# and written off on the third separate London day. The nightly content run shares too (about 02:00), so
+# at the shortest that is a miss late one evening and two early-morning misses: about 30 hours, not 3.
 FB_SHARE_CONTROL_TRIES = 3
+
+
+def london_day(now=None):
+    """Today's date in London, the day every publishing run belongs to (the hourly 07:15 to 20:15 runs and
+    the nightly content run alike)."""
+    return (now or dt.datetime.now(dt.timezone.utc)).astimezone(LONDON).date().isoformat()
 
 
 def retry_share(day=0):
@@ -1101,6 +1113,8 @@ def retry_share(day=0):
             if fb.get("status") != "failed": continue
             fb["was"] = {"status": "failed", "error": fb.get("error"), "at": now_utc()}
             fb["status"] = "page-post-not-found"; fb.pop("error", None); fb.pop("reshared_at", None)
+            # a retry gets its full three days: left in place, a written-off count fails the first new miss
+            fb.pop("control_tries", None); fb.pop("control_missed_on", None)
             done.append("%s %s" % (d, clip))
     if not done:
         print("retry-share: no failed Facebook share to retry%s" % (" for day %d" % day if day else "")); return
@@ -1152,6 +1166,12 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         # a run died while pressing Share: check the profile before ever sharing again
         fb["status"] = "shared" if fb.get("post_url") and facebook_share.verify_shared(fb["post_url"]) else "unconfirmed"
         return True
+    if fb.get("status") == "share-control-not-found" and fb.get("control_missed_on") == london_day():
+        # One look a day (18 Nov 2026): the count below is in DAYS, so a second look today would only spend
+        # the run's time. Share was never pressed, so tomorrow's look is safe.
+        print("episode %s: the %s share looks for its Share control again tomorrow (missing today, day %s of %d)"
+              % (day, clip, fb.get("control_tries") or 1, FB_SHARE_CONTROL_TRIES), file=sys.stderr)
+        return False
     page = [p for k, p in (entry.get("posts") or {}).items() if p.get("platform") == "facebook" and p.get("clip") == clip]
     if not page: return False
     post = page[0]
@@ -1217,19 +1237,23 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         # guard against and the share is not finished with (finding 20261102-phase-3-1164). It gets
         # FB_SHARE_CONTROL_TRIES goes before it is written off, so a stale selector cannot turn into a
         # permanent gap on every episode, and a control that is simply gone still stops asking.
-        tries = int(fb.get("control_tries") or 0) + 1
+        # one try a DAY counts (18 Nov 2026): three hourly runs used to be the whole allowance. A count with no
+        # day beside it was made by the hourly rule, so it is not days and starts again from nothing.
+        today = london_day()
+        before = int(fb.get("control_tries") or 0) if fb.get("control_missed_on") else 0
+        tries = before + (0 if fb.get("control_missed_on") == today else 1)
         if facebook_share.share_control_never_pressed(why) and tries < FB_SHARE_CONTROL_TRIES:
-            fb.update({"status": "share-control-not-found", "error": why, "control_tries": tries})
+            fb.update({"status": "share-control-not-found", "error": why, "control_tries": tries, "control_missed_on": today})
             fb.pop("started", None)
-            print("episode %s: the %s share never found its Share control, so Share was NOT pressed (try %d of %d); "
-                  "looking again next run: %s" % (day, clip, tries, FB_SHARE_CONTROL_TRIES, why), file=sys.stderr)
+            print("episode %s: the %s share never found its Share control, so Share was NOT pressed (day %d of %d); "
+                  "looking again tomorrow: %s" % (day, clip, tries, FB_SHARE_CONTROL_TRIES, why), file=sys.stderr)
             return True
         fb["status"] = "failed"; fb["error"] = why; fb["failed_at"] = now_utc()
         print("episode %s: Facebook %s profile share FAILED: %s" % (day, clip, fb["error"]), file=sys.stderr)
         return True
     fb.update({"status": "reviewed" if test else "shared", "shot": shot,
                "shared_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
-    fb.pop("control_tries", None)
+    fb.pop("control_tries", None); fb.pop("control_missed_on", None)
     if not test and not facebook_share.verify_shared(url):
         fb["status"] = "unconfirmed"
         print("episode %s: pressed Share on the %s post but it is not on the profile yet" % (day, clip), file=sys.stderr)

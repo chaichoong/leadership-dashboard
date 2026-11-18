@@ -63,9 +63,11 @@ approval.load_state = lambda: {}
 facebook_share.signed_in = lambda: True
 facebook_share.verify_shared = lambda url: True
 pressed = []
+tried = []        # every reel the lane was opened on, pressed or not
 SCENARIO_EARLY = ${JSON.stringify(scenario)}
 def run_plan(plan_path, task, test, shot):
     url = json.load(open(plan_path))["steps"][0]["url"]
+    tried.append(url)
     # 15 Oct 2026: the real run_plan signals a lane failure by RAISING SystemExit
     if SCENARIO_EARLY.startswith("lane-dies") and url == ${JSON.stringify(SUMMARY_REEL)}:
         raise SystemExit("page.waitForSelector: Timeout 20000ms exceeded.\\nwaiting for locator('[aria-label=\"Share\"]') to be visible")
@@ -86,14 +88,31 @@ if SCENARIO == "stored-duplicate":
 if SCENARIO == "finder-ignores-skip":
     entry["facebook_share"] = {"status": "shared", "post_url": ${JSON.stringify(SUMMARY_REEL)}}
     facebook_share.find_page_post = lambda copy, url=None, day=None, scan=None, skip=(): ${JSON.stringify(SUMMARY_REEL)}
+from zoneinfo import ZoneInfo   # the publisher's day is London's; worked out here, not with the code under test
+_LONDON_TODAY = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo("Europe/London")).date()
+TODAY = _LONDON_TODAY.isoformat()
+YESTERDAY = (_LONDON_TODAY - dt.timedelta(days=1)).isoformat()     # a calendar day back: 24 hours is not one when the clocks change
 if SCENARIO == "lane-dies-last-try":
-    # two runs have already failed on the wait; this is the third and last
-    entry["facebook_share"] = {"status": "share-control-not-found", "control_tries": 2}
+    # two DAYS have already failed on the wait (the last one yesterday); today is the third and last
+    entry["facebook_share"] = {"status": "share-control-not-found", "control_tries": 2, "control_missed_on": YESTERDAY,
+                               "post_url": ${JSON.stringify(SUMMARY_REEL)}}
+if SCENARIO == "lane-dies-same-day":
+    # 18 Nov 2026: the control was missing on two earlier looks and once already TODAY. Hourly runs used
+    # to count each as a try, so the third hour wrote the share off with Share never pressed.
+    entry["facebook_share"] = {"status": "share-control-not-found", "control_tries": 2, "control_missed_on": TODAY,
+                               "post_url": ${JSON.stringify(SUMMARY_REEL)}}
+if SCENARIO == "lane-dies-next-day":
+    entry["facebook_share"] = {"status": "share-control-not-found", "control_tries": 1, "control_missed_on": YESTERDAY,
+                               "post_url": ${JSON.stringify(SUMMARY_REEL)}}
+if SCENARIO == "lane-dies-hourly-count":
+    # left by the hourly rule before this fix: two runs counted, no day recorded
+    entry["facebook_share"] = {"status": "share-control-not-found", "control_tries": 2, "post_url": ${JSON.stringify(SUMMARY_REEL)}}
 if SCENARIO == "other-day":
     state["2189"] = {"facebook_share": {"status": "shared", "post_url": ${JSON.stringify(OLDER_REEL)}}}
 for clip in publish.FB_SHARES:
     publish.share_to_facebook_profile("2190", entry, state, clip=clip)
-print(json.dumps({"pressed": pressed, "summary": entry.get("facebook_share"), "lfmd": entry.get("facebook_share_lfmd")}))
+print(json.dumps({"pressed": pressed, "tried": tried, "today": TODAY, "yesterday": YESTERDAY,
+                  "summary": entry.get("facebook_share"), "lfmd": entry.get("facebook_share_lfmd")}))
 `;
   const out = execFileSync('python3', ['-c', py], {
     encoding: 'utf8', cwd: CE, env: { ...process.env, FAKE_FB_PAGE: JSON.stringify(page) }, timeout: 60000,
@@ -215,11 +234,38 @@ describe('a page reel reaches Kevin\'s Facebook profile once (2083, 2 Oct 2026)'
     const r = harness(SAME_OPENING, 'lane-dies');
     expect(r.summary.status).toBe('share-control-not-found');
     expect(r.summary.control_tries).toBe(1);
+    expect(r.summary.control_missed_on).toBe(r.today);       // the day it was missing, so the count is in days
     expect(r.pressed).not.toContain(SUMMARY_REEL);           // and it still pressed nothing on this run
   });
 
-  it('control: the third such run writes it off, so a control that has gone stops asking for ever', () => {
+  // 18 Nov 2026. The rule above promised "two nights" but counted RUNS, and the publisher runs hourly from
+  // 07:15, so three missed looks in one morning wrote the share off with Share never pressed: the same
+  // permanent gap as the 37 shares of 14 to 24 Oct, whose reels all still read "Share, 0 shares".
+  it('a missing Share control is looked for once a day, and later runs that day never write it off', () => {
+    const r = harness(SAME_OPENING, 'lane-dies-same-day');
+    expect(r.summary.status).toBe('share-control-not-found');
+    expect(r.summary.control_tries).toBe(2);                 // the same day does not count again
+    expect(r.tried).not.toContain(SUMMARY_REEL);             // and the lane is not opened on it again today
+    expect(r.lfmd.status).toBe('shared');                    // the other clip is not held up
+  });
+
+  it('the next day it is looked for again, and that day counts once', () => {
+    const r = harness(SAME_OPENING, 'lane-dies-next-day');
+    expect(r.tried).toContain(SUMMARY_REEL);
+    expect(r.summary.status).toBe('share-control-not-found');
+    expect([r.summary.control_tries, r.summary.control_missed_on]).toEqual([2, r.today]);
+    expect(r.pressed).not.toContain(SUMMARY_REEL);
+  });
+
+  it('a count the hourly rule left behind (no day beside it) starts again at day 1, not written off', () => {
+    const r = harness(SAME_OPENING, 'lane-dies-hourly-count');
+    expect(r.summary.status).toBe('share-control-not-found');
+    expect([r.summary.control_tries, r.summary.control_missed_on]).toEqual([1, r.today]);
+  });
+
+  it('control: a third DAY without the control writes it off, so a control that has gone stops asking for ever', () => {
     const r = harness(SAME_OPENING, 'lane-dies-last-try');
+    expect(r.tried).toContain(SUMMARY_REEL);
     expect(r.summary.status).toBe('failed');
     expect(r.summary.failed_at).toBeTruthy();                // and it says WHEN, so the log line is not read as today
   });
@@ -230,6 +276,32 @@ describe('a page reel reaches Kevin\'s Facebook profile once (2083, 2 Oct 2026)'
       [SUMMARY_REEL]: 'Runpreneur ' + SUMMARY_COPY, [LEARNINGS_REEL]: 'Runpreneur ' + LEARNINGS_COPY } };
     const r = harness(page, 'other-day');
     expect(r.pressed).toEqual([SUMMARY_REEL, LEARNINGS_REEL]);
+  });
+});
+
+// 18 Nov 2026: retry-share is Kevin's door back for a written-off share. A share written off on its third day
+// keeps the day count it had (2) and that day's date; left in place, the count writes the retried share off again
+// on its first new miss. (The fixture holds 3 so any leftover count, whatever its size, is shown to be cleared.)
+describe('retry-share gives a written-off share its full three days back (18 Nov 2026)', () => {
+  it('clears the day count with the failure, and leaves a share that worked alone', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'fb-retry-'));
+    const py = String.raw`
+import sys, os, json, io, contextlib
+sys.path.insert(0, ${JSON.stringify(CE)})
+import publish
+publish.STATE = os.path.join(${JSON.stringify(tmp)}, "publishing.json")
+publish.save_state({"2190": {"facebook_share": {"status": "failed", "error": "waiting for Share", "control_tries": 3,
+                                                "control_missed_on": "2026-02-20", "post_url": "https://www.facebook.com/reel/9100000000000001"},
+                             "facebook_share_lfmd": {"status": "shared", "control_tries": 1}}})
+with contextlib.redirect_stdout(io.StringIO()): publish.retry_share(2190)
+print(json.dumps(publish.load_state()["2190"]))
+`;
+    const e = JSON.parse(execFileSync('python3', ['-c', py], { encoding: 'utf8', cwd: CE, timeout: 60000 }).trim().split('\n').pop());
+    expect(e.facebook_share.status).toBe('page-post-not-found');
+    expect(e.facebook_share.control_tries).toBeUndefined();
+    expect(e.facebook_share.control_missed_on).toBeUndefined();
+    expect(e.facebook_share.post_url).toBe('https://www.facebook.com/reel/9100000000000001');   // the finder is not re-run
+    expect(e.facebook_share_lfmd).toEqual({ status: 'shared', control_tries: 1 });               // control: untouched
   });
 });
 
