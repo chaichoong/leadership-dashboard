@@ -226,8 +226,64 @@ def approved_lines(task):
         raise Refused(f"task {task['id']} was Approved with minor edits and his note has not been applied to the card: "
                       f"run agent-dispatch.py revise {task['id']} --output-file <file> first (complete asks the same), "
                       "then only the lines his edit left alone can be written")
-    read = {squash(x) for x in tr.approved_original(before).splitlines() if squash(x)}
-    return "\n".join(x for x in text.splitlines() if squash(x) in read)
+    original = tr.approved_original(before)
+    read = {squash(x) for x in original.splitlines() if squash(x)}
+    # A RECORD CHANGE line his edit changed counts only when its new value is one his note names, on a line he
+    # read for the same cost and field: "make it 15.99" made 16.36 into 15.99 (review of PR #982).
+    amounts, dates = note_values(f.get(tr.TK["approvalFeedback"]))
+    asked = {(m.group("cost"), m.group("label")) for m in CHANGE_RE.finditer(original)}
+    keep = []
+    for x in text.splitlines():
+        m = CHANGE_RE.match(x)
+        if squash(x) in read or (m and (m.group("cost"), m.group("label")) in asked and (
+                (m.group("label") == "Expected Cost" and amount(m.group("value")) in amounts)
+                or (m.group("label") == "End Date" and day(m.group("value")) in dates))):
+            keep.append(x)
+    return "\n".join(keep)
+
+
+# The values a minor-edit note names: £ amounts and figures written with pence, and dates written 2026-10-24 or
+# 24 Oct 2026. A bare whole number is not read: "due 28" or "2 houses" is not a price.
+NOTE_AMOUNT_RE = re.compile(r"(?:£|\bGBP\s*)\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"
+                            r"|(?<![\d.,])(\d+\.\d{2})(?![\d.])", re.I)
+NOTE_ISO_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+NOTE_WORD_DATE_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3})[a-z]*\.?,?\s+(\d{4})\b")
+MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
+                                      "dec"), 1)}
+
+
+def note_values(text):
+    """(amounts, dates) Kevin's note names, as Decimals to the penny and YYYY-MM-DD strings."""
+    text = str(text or "")
+    amounts = {amount(a or b) for a, b in NOTE_AMOUNT_RE.findall(text)} - {None}
+    dates = {day(x) for x in NOTE_ISO_RE.findall(text)}
+    for d, mon, y in NOTE_WORD_DATE_RE.findall(text):
+        if mon.lower() in MONTHS:
+            dates.add(day("%s-%02d-%02d" % (y, MONTHS[mon.lower()], int(d))))
+    return amounts, dates - {None}
+
+
+def note_value_problem(task, values):
+    """'' unless Kevin approved with minor edits and his note names a value this write does not carry: a line he
+    asked to change is never written unchanged (review of PR #982). `values` is {"amount": Decimal or None,
+    "dates": [YYYY-MM-DD, ...]}: an amount the note does not name, when it names one, is refused, and so is a
+    write none of whose dates the note names, when it names a date."""
+    f = task.get("fields") or {}
+    if rc.sel(f.get(tr.TK["approvalOutcome"])) != "Approved with minor edits":
+        return ""
+    note = squash(f.get(tr.TK["approvalFeedback"]))
+    amounts, dates = note_values(note)
+    if values.get("amount") is not None and amounts and values["amount"] not in amounts:
+        return (f"Kevin approved task {task['id']} with the note \"{note[:120]}\", which names "
+                f"{', '.join(money(a) for a in sorted(amounts))}, and this writes {money(values['amount'])}: his edit "
+                "is applied first (agent-dispatch.py revise), then the value his note gives is written, or it goes on a "
+                "fresh card")
+    given = [d for d in values.get("dates") or [] if d]
+    if given and dates and not set(given) & dates:
+        return (f"Kevin approved task {task['id']} with the note \"{note[:120]}\", which names "
+                f"{', '.join(sorted(dates))}, and this writes {', '.join(given)}: his edit is applied first "
+                "(agent-dispatch.py revise), then the date his note gives is written, or it goes on a fresh card")
+    return ""
 
 
 def same_value(label, card_value, value):
@@ -255,7 +311,8 @@ def change_problem(task, cost_id, label, value):
         return str(e)
     for m in CHANGE_RE.finditer(text):
         if m.group("cost") == cost_id and m.group("label") == label and same_value(label, m.group("value"), value):
-            return ""
+            return note_value_problem(task, {"amount": value if label == "Expected Cost" else None,
+                                             "dates": [value] if label == "End Date" else []})
     shown = ", ".join(value) if isinstance(value, list) else value
     return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {cost_id} {label} = {shown}'"
             f"{edited_hint(task)}: put the change on a card for him to approve (one tap)")
@@ -306,7 +363,7 @@ def new_problem(task, spec):
         card = parse_new_line(m.group("body"))
         if card and name_key(card["name"]) == name_key(spec["name"]) and all(
                 card[k] == spec[k] for k in ("expected", "frequency", "dueDay", "first", "end")):
-            return ""
+            return note_value_problem(task, {"amount": spec["expected"], "dates": [spec["first"], spec["end"]]})
     return (f"the card Kevin approved (task {task['id']}) has no line '{new_line(spec)}'{edited_hint(task)}: put the "
             "new cost on a card for him to approve (one tap)")
 

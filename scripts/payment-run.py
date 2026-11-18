@@ -74,8 +74,8 @@ USAGE
   payment-run.py write --items FILE       upsert the model's classified items
                                           (JSON list) keyed on Gmail Message ID.
   payment-run.py paid-off-list --transaction TX --amount N --date YYYY-MM-DD
-      --task T (--payee "..." | --row ROW) [--description "..."] [--business REC]
-      [--note "..."] [--apply]
+      --task T (--payee "..." | --row ROW [--bank-line-names-other "..."])
+      [--description "..."] [--business REC] [--note "..."] [--apply]
                                           a payment already made, put on the
                                           list after the fact (Kevin, 27 Sep
                                           2026). Only against the bank line it
@@ -332,7 +332,11 @@ def worker_post(path, payload, account, sleep=time.sleep):
         fail("worker %s returned non-JSON (%s...)" % (path, str(body)[:120]))
 
 
-def airtable_request(method, path, payload=None, what="Airtable call"):
+def airtable_request(method, path, payload=None, what="Airtable call", retry_network=True):
+    """retry_network=False: a timeout or dropped connection fails at once instead of
+    sending again. A create that timed out may still have landed, and sending it
+    again makes a second row (review of PR #982); 429 is still retried, because
+    Airtable did not process that call."""
     pat = read_secret(AIRTABLE_PAT_FILE, "Airtable PAT")
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
@@ -355,6 +359,10 @@ def airtable_request(method, path, payload=None, what="Airtable call"):
                 continue
             fail("%s failed (%d): %s" % (what, exc.code, detail))
         except (urllib.error.URLError, TimeoutError) as exc:
+            if not retry_network:
+                fail("%s: no answer from Airtable (%s). The write may or may not have landed, so "
+                     "it was not sent again: run the same command again, and it finds a row it "
+                     "made by its marker and writes nothing twice." % (what, exc))
             if attempt == MAX_ATTEMPTS:
                 fail("%s unreachable: %s" % (what, exc))
             time.sleep(backoff_seconds(attempt))
@@ -389,13 +397,14 @@ def airtable_list(table, params=None, what=None, strict=False):
             return out
 
 
-def airtable_write(table, method, records, what):
+def airtable_write(table, method, records, what, retry_network=True):
     """Batched create/update, 10 at a time (Airtable's limit)."""
     done = []
     for i in range(0, len(records), 10):
         chunk = records[i:i + 10]
         data = airtable_request(method, "%s/%s" % (BASE, table),
-                                {"records": chunk, "typecast": True}, what=what)
+                                {"records": chunk, "typecast": True}, what=what,
+                                retry_network=retry_network)
         done.extend(data.get("records", []))
         time.sleep(0.25)  # stay under Airtable's 5 requests/second
     return done
@@ -2134,6 +2143,7 @@ def cmd_write(args):
 
     run_date = (parse_asof(args.run_date) or datetime.now(LONDON)).date().isoformat()
     creates, updates, flagged, duplicates = [], [], [], []
+    covered = set()   # off-list rows a bill in THIS batch already took: one payment covers one bill
     for item in items:
         mid = item.get("messageId")
         if not mid:
@@ -2163,6 +2173,23 @@ def cmd_write(args):
                 twin["id"], twin["fields"].get("Payee") or "", float(twin["fields"].get("Amount") or 0)))
             duplicates.append({"id": twin["id"], "fields": {"Notes": append_note(
                 twin, "The same bill arrived again in email %s; kept off the list as a duplicate." % mid)}})
+        else:
+            cover = off_list_cover(existing, item, covered)
+            if cover is not None:
+                # Already paid off the list, and the bill only came by email afterwards
+                # (review of PR #982): listed Unpaid, it would be owed beside its own
+                # payment, settle could never close it (that bank line is claimed), and
+                # Kevin would pay it twice. Kept off as a Duplicate he can set back.
+                covered.add(cover["id"])
+                cf = cover["fields"]
+                fields[WRITABLE["status"]] = "Duplicate"
+                fields[WRITABLE["notes"]] = append_note({}, (
+                    "Same bill as row %s (%s £%.2f), already paid off the list on %s: kept off the list "
+                    "as a duplicate. If this is a second bill, set it back to Unpaid.") % (
+                    cover["id"], cf.get("Payee") or "", float(cf.get("Amount") or 0),
+                    (cf.get("Paid Date") or "")[:10]))
+                duplicates.append({"id": cover["id"], "fields": {"Notes": append_note(
+                    cover, "%s email %s." % (OFF_LIST_COVER_MARK, mid))}})
         creates.append({"fields": fields})
 
     if creates:
@@ -2198,7 +2225,19 @@ AMOUNT_ARG_RE = re.compile(r"^£?\s*(\d{1,7}(?:\.\d{1,2})?)$")
 # A row this door may link: owed, blank, or marked Paid by hand with no bank line.
 # Never a Historic (creditor lane), Duplicate or Estimate row.
 LINKABLE_STATUSES = ("Unpaid", "", "Paid")
+# The marker on every row this door writes, with the transaction id after it, so a
+# re-run finds its own row and writes nothing twice.
 OFF_LIST_NOTE = "Paid off the list (Kevin's ruling, 27 Sep 2026)"
+# Written on an off-list row once a bill emailed later is taken as its bill (cmd_write),
+# so one payment covers one bill and a second bill of the same size is still listed.
+OFF_LIST_COVER_MARK = "This payment's bill came later by"
+# An emailed bill for the same payee and amount this many days either side of an
+# off-list payment is that payment's bill. Further apart, it is listed as owed.
+OFF_LIST_COVER_DAYS = 14
+# A row marked Paid by hand, with no bank line, this close to the payment may be its bill.
+HAND_PAID_TWIN_DAYS = 14
+# The shortest --bank-line-names-other reason taken as a reason.
+OTHER_NAME_MIN = 15
 
 
 class Refused(Exception):
@@ -2218,10 +2257,11 @@ def one_record(table, rec_id, what, fields=None):
     return rows[0] if rows else None
 
 
-def paid_problem(tx, rows, amount, day, row_id=None, payee=None):
+def paid_problem(tx, rows, amount, day, row_id=None, payee=None, split_parts=(), other_name=None):
     """'' when bank line `tx` may be recorded as paying row `row_id` (or a new
     row for `payee`), else the plain reason it may not. Pure, so the dry run and
-    the write cannot disagree. `rows` is the WHOLE Payment Run, every page."""
+    the write cannot disagree. `rows` is the WHOLE Payment Run, every page, and
+    `split_parts` the other parts of a split payment, read live."""
     f = tx.get("fields", {})
     gbp = f.get("**GBP")
     if gbp is None or float(gbp) >= 0:
@@ -2237,59 +2277,178 @@ def paid_problem(tx, rows, amount, day, row_id=None, payee=None):
                 "collection or the second part of a split, not a payment Kevin sent, so it never "
                 "goes on the Payment Run" % (tx["id"], str(f.get("*Name") or "").strip()[:60]))
     whole, part = round(abs(float(gbp)), 2), tx_amount(tx)
-    if round(amount, 2) not in (part, whole):
-        split = "" if part == whole else " (its own split part; the whole bank payment is £%.2f)" % whole
-        return ("transaction %s pays £%.2f%s, not £%.2f: name the bank line that paid this amount"
-                % (tx["id"], part, split, amount))
+    # A split payment is recorded at its own part only: the whole amount against
+    # "Split 1 of 2" left "Split 2 of 2" free for settle to close a second bill, so
+    # more was recorded than left the account (review of PR #982).
+    if round(amount, 2) != part:
+        split = ("" if part == whole else " (its own split part; the whole bank payment is £%.2f, and a "
+                 "split payment is recorded at its part, because each part pays its own bill)" % whole)
+        return ("transaction %s pays £%.2f%s, not £%.2f" % (tx["id"], part, split, amount))
     if tx_date(tx) != day:
         return ("transaction %s is dated %s, not %s: the Paid Date is the day on the bank line"
                 % (tx["id"], tx_date(tx) or "with no date", day))
-    others = [r for r in rows if tx["id"] in (r.get("fields", {}).get("Matched Transaction") or [])
-              and r["id"] != row_id]
+    held = {tx["id"]} | {t["id"] for t in split_parts}
+    others = [r for r in rows if r["id"] != row_id
+              and held & set(r.get("fields", {}).get("Matched Transaction") or [])]
     if others:
         o = others[0]["fields"]
-        return ("transaction %s is already claimed by row %s (%s, £%.2f): one payment pays one row"
-                % (tx["id"], others[0]["id"], o.get("Payee") or "no payee", float(o.get("Amount") or 0)))
+        who = "%s (%s, £%.2f)" % (others[0]["id"], o.get("Payee") or "no payee", float(o.get("Amount") or 0))
+        if tx["id"] in (o.get("Matched Transaction") or []):
+            return "transaction %s is already claimed by row %s: one payment pays one row" % (tx["id"], who)
+        return ("another part of this split payment is already held by row %s, so the payment already "
+                "counts as on the list, and each part pays its own bill" % who)
     if row_id:
-        row = next((r for r in rows if r["id"] == row_id), None)
-        if row is None:
-            return "%s is not a row on the Payment Run (Dashboard Invoices)" % row_id
-        rf = row.get("fields", {})
-        if status_of(row) not in LINKABLE_STATUSES:
-            return ("row %s is %s, so it is not a bill this payment can settle"
-                    % (row_id, status_of(row)))
-        if rf.get("Amount") is None:
-            return "row %s has no amount, so nothing proves this payment is its bill" % row_id
-        if round(abs(float(rf["Amount"])), 2) != round(amount, 2):
-            return ("row %s is for £%.2f, not £%.2f" % (row_id, abs(float(rf["Amount"])), amount))
-        linked = rf.get("Matched Transaction") or []
-        if linked and tx["id"] not in linked:
-            return ("row %s already names transaction %s: one row is paid by one payment"
-                    % (row_id, ", ".join(linked)))
-        return ""
-    # A new row while an OPEN bill of the same payee and size is on the list
-    # leaves that bill owed, and Kevin pays it twice. That payment is its bill.
+        return row_problem(tx, rows, amount, row_id, other_name)
+    return twin_problem(tx, rows, amount, day, payee)
+
+
+def same_size(fields, amount):
+    return fields.get("Amount") is not None and round(abs(float(fields["Amount"])), 2) == round(amount, 2)
+
+
+def row_problem(tx, rows, amount, row_id, other_name=None):
+    """'' when bank line `tx` may settle row `row_id`, by the checks settle itself
+    uses (payee on the bank line, no open bill that fits it better, Kevin's
+    rejection), else why not. A payee the bank line does not name passes only
+    with a reason, written on the row (--bank-line-names-other)."""
+    row = next((r for r in rows if r["id"] == row_id), None)
+    if row is None:
+        return "%s is not a row on the Payment Run (Dashboard Invoices)" % row_id
+    rf = row.get("fields", {})
+    if status_of(row) not in LINKABLE_STATUSES:
+        restore = (" If this payment settled it, put it back on the list first (historic --ids %s --restore)."
+                   % row_id if status_of(row) == "Historic" else "")
+        return "row %s is %s, so it is not a bill this payment can settle.%s" % (row_id, status_of(row), restore)
+    if rf.get("AI Match Rejected"):
+        return ("Kevin rejected the suggested payment on row %s: whether this payment is its bill is his "
+                "decision, on a card" % row_id)
+    if rf.get("Amount") is None:
+        return "row %s has no amount, so nothing proves this payment is its bill" % row_id
+    if not same_size(rf, amount):
+        return "row %s is for £%.2f, not £%.2f" % (row_id, abs(float(rf["Amount"])), amount)
+    linked = rf.get("Matched Transaction") or []
+    if linked and tx["id"] not in linked:
+        return ("row %s already names transaction %s: one row is paid by one payment"
+                % (row_id, ", ".join(linked)))
+    tokens = payee_tokens(rf.get("Payee"))
+    if not (tokens and memo_names_payee(tokens, tx)):
+        for r in rows:
+            f = r.get("fields", {})
+            tk = payee_tokens(f.get("Payee"))
+            if (r["id"] != row_id and settleable(r) and same_size(f, amount) and tk
+                    and memo_names_payee(tk, tx) and (f.get("Email Date") or "")[:10] <= tx_date(tx)):
+                return ("the bank line names the payee of row %s (%s), an open bill of the same size, so the "
+                        "payment is that bill's and settle closes it" % (r["id"], f.get("Payee") or ""))
+        if len(" ".join(str(other_name or "").split())) < OTHER_NAME_MIN:
+            return ("the bank line (%s) does not name row %s's payee (%s), so settle would never match them. "
+                    "If this payment really is that bill, say why in one sentence with "
+                    "--bank-line-names-other \"<why>\"; it is written on the row"
+                    % (str(tx["fields"].get("*Name") or "").strip()[:60], row_id, rf.get("Payee") or "no payee"))
+    if better_open_row(row, tx, rows):
+        return ("an open bill of the same size and payee fits this payment better (its house or reference is on "
+                "the bank line, row %s's is not): link that row instead" % row_id)
+    return ""
+
+
+def twin_problem(tx, rows, amount, day, payee):
+    """'' when a NEW Paid row for this payment counts nothing twice, else the row
+    it should be instead. An open bill of the same payee and size is left owed by
+    a second row and paid twice; a row marked Paid by hand with no bank line, near
+    the payment, is probably this payment already; a Historic row is the creditor
+    lane's, so it comes back to the list first (review of PR #982). A Paid row
+    linked to ANOTHER bank line is another payment: a contractor paid the same sum
+    every week is not one bill."""
     for r in rows:
         rf = r.get("fields", {})
-        if status_of(r) not in ("Unpaid", "") or rf.get("Amount") is None:
-            continue
-        if round(abs(float(rf["Amount"])), 2) != round(amount, 2):
-            continue
         tokens = payee_tokens(rf.get("Payee"))
-        if tokens and (tokens & payee_tokens(payee) or memo_names_payee(tokens, tx)):
-            return ("an open bill for the same payee and amount is on the list (row %s, %s, £%.2f, "
-                    "dated %s): if this payment is that bill, link it with --row %s; a second row "
-                    "would leave that bill owed and paid twice"
-                    % (r["id"], rf.get("Payee") or "", abs(float(rf["Amount"])),
-                       (rf.get("Email Date") or "no date")[:10], r["id"]))
+        if not (same_size(rf, amount) and tokens
+                and (tokens & payee_tokens(payee) or memo_names_payee(tokens, tx))):
+            continue
+        status = status_of(r)
+        label = "%s (%s, £%.2f, dated %s)" % (r["id"], rf.get("Payee") or "", abs(float(rf["Amount"])),
+                                               (rf.get("Email Date") or rf.get("Paid Date") or "no date")[:10])
+        if status in ("Unpaid", ""):
+            if rf.get("AI Match Rejected"):
+                return ("an open bill for the same payee and amount is on the list (row %s) and Kevin rejected "
+                        "the suggested payment on it: whether this payment is that bill is his decision, on a "
+                        "card" % label)
+            return ("an open bill for the same payee and amount is on the list (row %s): if this payment is "
+                    "that bill, link it with --row %s; a second row would leave that bill owed and paid twice"
+                    % (label, r["id"]))
+        if status == "Paid" and not rf.get("Matched Transaction"):
+            when = (rf.get("Paid Date") or rf.get("Email Date") or "")[:10]
+            if not when or days_between(when, day) <= HAND_PAID_TWIN_DAYS:
+                return ("row %s is marked Paid by hand with no bank line, for the same payee and amount: if "
+                        "this payment is that bill, link it with --row %s; a second Paid row would count one "
+                        "payment twice" % (label, r["id"]))
+        if status == "Historic":
+            return ("row %s is Historic (the creditor agent's lane) for the same payee and amount: if this "
+                    "payment settled it, put it back on the list with historic --ids %s --restore and link it "
+                    "with --row %s; if it did not, this needs a card" % (label, r["id"], r["id"]))
     return ""
+
+
+def door_row(rows, tx):
+    """The row this door already wrote or linked for `tx` (its marker and the bank
+    line on it), or None: a re-run after a timeout finds it and writes nothing."""
+    for r in rows:
+        f = r.get("fields", {})
+        notes = f.get("Notes") or ""
+        if (status_of(r) == "Paid" and tx["id"] in (f.get("Matched Transaction") or [])
+                and OFF_LIST_NOTE in notes and tx["id"] in notes):
+            return r
+    return None
+
+
+def off_list_cover(records, item, taken=()):
+    """The Paid row this door wrote that an emailed bill IS, or None: the same
+    payee words and amount, its payment within OFF_LIST_COVER_DAYS of the email,
+    and no earlier bill already taken as that payment's bill."""
+    try:
+        amount = round(abs(float(item.get("amount"))), 2)
+    except (TypeError, ValueError):
+        return None
+    words = twin_words(item.get("payee"))
+    day = str(item.get("emailDate") or "")[:10]
+    if not words or not day:
+        return None
+    for r in records:
+        f = r.get("fields", {})
+        notes = f.get("Notes") or ""
+        if (r["id"] in taken or status_of(r) != "Paid" or not f.get("Matched Transaction")
+                or OFF_LIST_NOTE not in notes or OFF_LIST_COVER_MARK in notes or not same_size(f, amount)
+                or not twin_words(f.get("Payee")) & words):
+            continue
+        paid = str(f.get("Paid Date") or "")[:10]
+        try:
+            if paid and days_between(day, paid) <= OFF_LIST_COVER_DAYS:
+                return r
+        except ValueError:
+            continue
+    return None
+
+
+def split_siblings(tx):
+    """The other parts of the split payment `tx` belongs to, read live and every
+    page; [] for a payment never split. Fails rather than guesses when the read
+    does not even return `tx` itself."""
+    group = split_group(tx)
+    if group is None:
+        return []
+    same_day = airtable_list(T_TRANSACTIONS, {
+        "filterByFormula": "AND(DATESTR({**Date})='%s', {**GBP} < 0)" % tx_date(tx),
+        "fields[]": OUTFLOW_FIELDS}, what="the split payment's parts", strict=True)
+    if tx["id"] not in {t["id"] for t in same_day}:
+        fail("the read of %s's day did not return %s itself, so its split parts cannot be known. "
+             "Nothing was written." % (tx_date(tx), tx["id"]))
+    return [t for t in same_day if t["id"] != tx["id"] and split_group(t) == group]
 
 
 def run_paid(args):
     """The paid-off-list door. Returns the result dict, or raises Refused."""
     m = AMOUNT_ARG_RE.match(str(args.amount or "").replace(",", "").strip())
     if not m or float(m.group(1)) <= 0:
-        raise Refused("--amount must be a pounds amount above zero, like 80 or 67.50, not %r" % args.amount)
+        raise Refused("--amount must be a pounds amount above zero, like 40 or 12.50, not %r" % args.amount)
     amount = round(float(m.group(1)), 2)
     try:
         day = datetime.strptime(str(args.date or ""), "%Y-%m-%d").date().isoformat()
@@ -2310,25 +2469,35 @@ def run_paid(args):
                       % args.transaction)
     if args.business and not one_record(T_BUSINESSES, args.business, "the business"):
         raise Refused("--business %s is not a record in the Businesses table" % args.business)
-    rows =airtable_list(T_INVOICES, what="Dashboard Invoices", strict=True)
+    rows = airtable_list(T_INVOICES, what="Dashboard Invoices", strict=True)
     if not rows:
         fail("the Payment Run read returned no rows at all. That is a broken read, never an "
              "empty list, so nothing was written.")
-    problem = paid_problem(tx, rows, amount, day, row_id=args.row, payee=payee)
-    if problem:
-        raise Refused(problem)
-    row = next((r for r in rows if r["id"] == args.row), None) if args.row else None
     out = {"transaction": tx["id"], "bankLine": tx_line(tx), "amount": amount, "paidDate": day,
            "task": args.task}
+    row = next((r for r in rows if r["id"] == args.row), None) if args.row else None
+    made = door_row(rows, tx)
+    if made is not None and (not args.row or made["id"] == args.row):
+        return dict(out, row=made["id"], unchanged=True,
+                    note="row %s already records this payment; nothing written" % made["id"])
     if row is not None and tx["id"] in (row["fields"].get("Matched Transaction") or []) \
             and status_of(row) == "Paid":
         return dict(out, row=row["id"], unchanged=True,
                     note="row %s already records this payment; nothing written" % row["id"])
-    note = "%s: %s (%s). Recorded for task %s.%s" % (
+    other_name = " ".join(str(args.bank_line_names_other or "").split())
+    problem = paid_problem(tx, rows, amount, day, row_id=args.row, payee=payee,
+                           split_parts=split_siblings(tx), other_name=other_name)
+    if problem:
+        raise Refused(problem)
+    note = "%s: %s (%s). Recorded for task %s.%s%s" % (
         OFF_LIST_NOTE, tx_line(tx), tx["id"], args.task,
+        (" The bank line names someone else: %s" % other_name) if row is not None and other_name else "",
         (" " + " ".join(args.note.split())) if args.note else "")
     if row is not None:
-        fields = {"Status": "Paid", "Matched Transaction": [tx["id"]], "Notes": append_note(row, note)}
+        # Appended, never replaced: a link already on the row stays.
+        linked = list(row["fields"].get("Matched Transaction") or [])
+        fields = {"Status": "Paid", "Matched Transaction": linked + [t for t in [tx["id"]] if t not in linked],
+                  "Notes": append_note(row, note)}
         if not row["fields"].get("Paid Date"):
             fields["Paid Date"] = day
     else:
@@ -2348,8 +2517,10 @@ def run_paid(args):
         written = airtable_write(T_INVOICES, "PATCH", [{"id": row["id"], "fields": fields}],
                                  "link a payment made off the list")
     else:
+        # Sent once: a create that timed out may have landed, and a second send
+        # would make a second row. The re-run finds it by its marker (door_row).
         written = airtable_write(T_INVOICES, "POST", [{"fields": fields}],
-                                 "add a row for a payment made off the list")
+                                 "add a row for a payment made off the list", retry_network=False)
     rid = row["id"] if row is not None else ((written or [{}])[0].get("id") or "")
     if not REC_ID_RE.fullmatch(rid):
         fail("the write returned no record id (%s): the row may not exist" % str(written)[:160])
@@ -3238,6 +3409,8 @@ def main(argv=None):
     p.add_argument("--description")
     p.add_argument("--business", help="the Businesses record for a new row")
     p.add_argument("--note", help="one sentence added to the row's dated note")
+    p.add_argument("--bank-line-names-other",
+                   help="with --row: why this payment is that bill although the bank line names someone else")
     p.add_argument("--apply", action="store_true")
     p.set_defaults(fn=cmd_paid)
 
