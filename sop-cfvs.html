@@ -347,7 +347,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
       <h3>When this runs</h3>
       <p><strong>Not only on the CFV tab.</strong> Auto-return is a side effect of CFV detection,
-      and detection runs on four paths &mdash; every one of them can write to Airtable:</p>
+      and detection runs on three paths &mdash; every one of them can write to Airtable:</p>
       <ul>
         <li><strong>Every dashboard load or refresh.</strong> The sidebar badge count runs detection,
         so opening the dashboard on any tab can auto-return a tenancy without you ever visiting
@@ -357,7 +357,6 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li><strong>After a reconciliation.</strong> The badge refresh runs the moment a
         transaction is reconciled, which is usually what makes the payment findable in the
         first place.</li>
-        <li><strong>When the AI assistant gathers CFV context</strong> while the CFV tab is open.</li>
       </ul>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>

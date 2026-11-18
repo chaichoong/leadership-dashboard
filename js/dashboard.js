@@ -3187,26 +3187,6 @@
         // (Removed) — the "Last bank sync" footer was dropped from index.html; the
         // Fintable Sync Monitor OS page surfaces this same timestamp more clearly.
 
-        // Store computed state for AI context
-        if (typeof updateDashboardState === 'function') {
-            updateDashboardState({
-                openingBalance, santBal, zempBal,
-                monthlyIncome, inPaymentIncome, monthlyCosts,
-                operatingCushionHigh, operatingCushionLow, operatingCushionMarginHigh, operatingCushionMarginLow,
-                activeTenanciesCount: activeTenancies.length,
-                inPaymentCount: inPaymentTenancies.length,
-                cfvCount: cfvTenancies.length,
-                cfvActionedCount: cfvActionedTenancies.length,
-                cfvExposure, rentalInc30, maintSpend, wagesSpend,
-                occupancyRate,
-                unreconciledCount: unreconciledTx.length,
-                propertyCosts,
-                propertyCushionPlan: rePlan.cushion,
-                kevinIncomeFromPropertyPlan: rePlan.income,
-                variableBudget: RE_VARIABLE_BUDGET_GBP,
-            });
-        }
-
         // ── Sync Bar + Health Checks ──
         // Re-register on every render so check closures capture the latest scope.
         // markTabSynced(...) is called below to bump the lastSyncedAt and roll up

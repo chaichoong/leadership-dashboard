@@ -23,5 +23,4 @@ Moved from SKILL.md on 21 Sep 2026, word for word. Read while planning (Phase 1 
 | Feature write-back breaks another tab's counts | Run cross-feature regression check (Phase 4d) |
 | No undo on destructive actions | Add sliding undo toast for dismiss/status-change/field-edit |
 | Missing accessibility (no keyboard nav) | Escape closes, Enter submits, aria-expanded on collapsibles |
-| AI assistant can't answer questions about new feature | Add context block in `ai-assistant.js` |
 | Forgot SOP / sitemap update | Phase 8 — it's not done until the SOP exists |

@@ -55,7 +55,6 @@ Every feature MUST include all of these. Not "should" — MUST:
 - [ ] `tabLabelMap` entry in shared.js (for tab label display)
 - [ ] PAGE_REGISTRY entry in config.js (for version tracking)
 - [ ] Sidebar menu item in index.html
-- [ ] **AI Assistant context** — if the feature exposes data Kevin might ask the AI about, add a context block in `js/ai-assistant.js` so the AI panel can reference it (see existing `ctx.compliancePage`, `ctx.commsPage` patterns)
 - [ ] **Iframe communication** (iframe pages only) — `postMessage` status up to parent shell, listen for messages from parent (e.g. `qt:open-new-task-drawer`). Sync bar handles health broadcasting automatically, but feature-specific messages need manual wiring
 
 ### 3c. Code quality gates (check as you write)

@@ -480,7 +480,6 @@
                 <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
                     <button onclick="_txClearFilters()" style="font-size:12px;padding:5px 12px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);cursor:pointer">Clear filters</button>
                     <button onclick="_txExportCsv()" style="font-size:12px;padding:5px 12px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);cursor:pointer">Export CSV</button>
-                    <button onclick="_txRunAiAnalysis()" style="font-size:12px;padding:5px 12px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:var(--radius-sm);cursor:pointer">AI analysis of filtered set</button>
                 </div>
             </div>
 
@@ -1135,74 +1134,3 @@
         URL.revokeObjectURL(url);
     }
 
-    // ── AI analysis: feed filtered set to existing AI assistant ──
-    function _txRunAiAnalysis() {
-        const s = _txState;
-        const rows = s.filtered;
-        if (!rows.length) { alert('No transactions in current filter.'); return; }
-
-        // Build a compact summary the assistant can reason about
-        let totalIn = 0, totalOut = 0;
-        const bySubCat = {}, byVendor = {}, byMonth = {};
-        for (const r of rows) {
-            const a = _txAmount(r);
-            if (a >= 0) totalIn += a; else totalOut += a;
-            const sc = s.subCatById[_txLinkedId(r, F.txSubCategory)] || '(uncategorised)';
-            bySubCat[sc] = (bySubCat[sc] || 0) + a;
-            if (a < 0) {
-                const v = (getField(r, F.txVendor) || getField(r, F.txDescription) || '(unknown)').toString().slice(0, 40);
-                byVendor[v] = (byVendor[v] || 0) + a;
-            }
-            const d = _txDateStr(r);
-            if (d.length >= 7) byMonth[d.slice(0, 7)] = (byMonth[d.slice(0, 7)] || 0) + a;
-        }
-        const top = (obj, n) => Object.entries(obj).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, n);
-
-        const filterDesc = [];
-        if (s.search) filterDesc.push(`search="${s.search}"`);
-        if (s.f_business) filterDesc.push(`business=${s.bizById[s.f_business] || s.f_business}`);
-        if (s.f_category) filterDesc.push(`category=${s.catById[s.f_category] || s.f_category}`);
-        if (s.f_subcat) filterDesc.push(`sub-category=${s.subCatById[s.f_subcat] || s.f_subcat}`);
-        if (s.f_account) filterDesc.push(`account=${s.f_account}`);
-        if (s.f_recon) filterDesc.push(`reconciled=${s.f_recon}`);
-        if (s.f_dateFrom || s.f_dateTo) filterDesc.push(`dates=${s.f_dateFrom || '…'}..${s.f_dateTo || '…'}`);
-        if (s.f_amountMin || s.f_amountMax) filterDesc.push(`amount=£${s.f_amountMin || '0'}..£${s.f_amountMax || '∞'}`);
-
-        const promptLines = [
-            `I'm looking at ${rows.length} transactions from the Transactions page.`,
-            filterDesc.length ? `Active filters: ${filterDesc.join(', ')}.` : 'No filters applied (whole history).',
-            ``,
-            `Totals: inflows +£${totalIn.toFixed(2)}, outflows -£${Math.abs(totalOut).toFixed(2)}, net ${(totalIn + totalOut).toFixed(2)}.`,
-            ``,
-            `Top spend sub-categories:`,
-            ...top(bySubCat, 8).map(([k, v]) => `  • ${k}: £${v.toFixed(2)}`),
-            ``,
-            `Top vendors by spend:`,
-            ...top(byVendor, 8).map(([k, v]) => `  • ${k}: £${v.toFixed(2)}`),
-            ``,
-            `Net by month (recent):`,
-            ...Object.entries(byMonth).sort((a, b) => a[0] < b[0] ? -1 : 1).slice(-12).map(([m, v]) => `  • ${m}: £${v.toFixed(2)}`),
-            ``,
-            `Please analyse this for spending efficiency. Where am I overspending? Are there obvious optimisations or vendor consolidation opportunities? Any unusual patterns or month-on-month shifts I should look at?`
-        ];
-        const prompt = promptLines.join('\n');
-
-        // Open the AI panel and send the prompt through the existing pipeline
-        if (typeof toggleAIPanel === 'function') {
-            const panel = document.getElementById('aiPanel');
-            if (panel && !panel.classList.contains('open')) toggleAIPanel();
-        }
-        const input = document.getElementById('aiInput');
-        if (input) {
-            input.value = prompt;
-            if (typeof sendAIMessage === 'function') sendAIMessage();
-        } else {
-            // Fallback — copy to clipboard if AI panel is unavailable
-            navigator.clipboard.writeText(prompt)
-                .then(() => alert('AI analysis prompt copied to clipboard — paste it into the AI assistant.'))
-                .catch(() => {
-                    if (typeof showToast === 'function') showToast('Copy failed — select and copy manually', { type: 'error' });
-                    else alert('Copy failed — select and copy manually');
-                });
-        }
-    }

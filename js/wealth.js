@@ -407,6 +407,11 @@ const WEALTH_LIVE_CLASSES = ['Cash','Credit Cards'];
 // reads the figure. The value is a SUGGESTION the user confirms — it fills the
 // field but is never saved until the user clicks Save, so a misread cannot slip
 // silently into net worth. Any failure falls back to manual entry.
+// The Claude relay. It used to be borrowed from js/ai-assistant.js (the chat panel,
+// retired 18 Nov 2026), so it lives here now. The WEALTH_ prefix keeps the old global
+// name off the shell, so tests/business-analysis-retired.test.js can tell a leftover
+// borrow from this file's own relay.
+const WEALTH_AI_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 const WEALTH_EXTRACT_PROMPT = 'You are reading a financial document or screenshot (a bank, investment, loan or mortgage statement, or an account screen). Identify the single most relevant CURRENT balance or total value in GBP. Respond with ONLY the number — digits and an optional decimal point, no commas, no currency symbol, no words. If there is no clear value, respond exactly: NONE';
 
 function parseWealthNumber(text) {
@@ -452,7 +457,7 @@ async function wealthExtractIntoRow(row, file) {
             ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
             : { type: 'image', source: { type: 'base64', media_type: file.type, data: b64 } };
         const messages = [{ role: 'user', content: [block, { type: 'text', text: WEALTH_EXTRACT_PROMPT }] }];
-        const resp = await fetch(AI_PROXY, {
+        const resp = await fetch(WEALTH_AI_PROXY, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 80, system: '', messages }),
@@ -2163,7 +2168,7 @@ async function wealthExtractDebtTerms(box, file) {
         const block = (file.type === 'application/pdf')
             ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
             : { type: 'image', source: { type: 'base64', media_type: file.type, data: b64 } };
-        const resp = await fetch(AI_PROXY, {
+        const resp = await fetch(WEALTH_AI_PROXY, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 300, messages: [{ role: 'user', content: [block, { type: 'text', text: DEBT_EXTRACT_PROMPT }] }] }),
         });
@@ -2200,7 +2205,7 @@ async function getDebtGuidance(btn) {
     const list = rows.map(r => `- ${r.name} (${r.cls}): balance £${Math.round(r.balance)}, rate ${r.rate == null ? 'UNKNOWN' : (Math.round(r.rate * 100) / 100) + '%'}, ${r.monthly != null ? '£' + Math.round(r.monthly) + '/mo payment' : 'monthly payment unknown'}`).join('\n');
     const prompt = `You are a UK wealth adviser. Here are the client's debts:\n${list}\n\nAssume long-run investment returns of about 5-7% a year after tax. In plain, direct English (UK), and in under 180 words:\n1. Name the debts that cost MORE than investing would return (pay these down first) and the order to clear them.\n2. Name the debts cheap enough that investing the money likely beats overpaying them.\n3. Give one clear next action.\nName any debt whose rate is UNKNOWN and say it needs a rate before it can be judged. Be specific with the debt names. No preamble, no disclaimer.`;
     try {
-        const resp = await fetch(AI_PROXY, {
+        const resp = await fetch(WEALTH_AI_PROXY, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
         });

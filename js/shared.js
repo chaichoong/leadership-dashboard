@@ -931,8 +931,6 @@
         // Close sidebar on mobile
         document.getElementById('sidebar').classList.remove('open');
         document.getElementById('sidebarOverlay').classList.remove('open');
-        // Update AI quick-action chips for current tab
-        if (typeof renderAIChips === 'function') renderAIChips();
     };
 
     // On load: check URL hash for deep-linking

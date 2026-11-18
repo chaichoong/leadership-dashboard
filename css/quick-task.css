@@ -9,7 +9,8 @@
 .qt-fab {
   position: fixed;
   right: 20px;
-  bottom: 90px;        /* above the AI bubble (which sits at bottom:20px) */
+  bottom: 90px;        /* first set to clear the AI chat bubble, retired 18 Nov 2026; kept so
+                          nothing else on the six pages that load this file shifts */
   z-index: 9998;       /* below modal overlays (10000) but above content */
   display: inline-flex;
   align-items: center;

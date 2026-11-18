@@ -206,7 +206,6 @@
                     <tr><td>Arrears</td><td><code>js/arrears.js</code> · <code>js/ar-variable.js</code></td><td>Rent balance per tenancy</td></tr>
                     <tr><td>Fintable monitor</td><td><code>js/fintable.js</code></td><td>Bank sync health</td></tr>
                     <tr><td>Site map &amp; links</td><td><code>js/sitemap.js</code></td><td>Also SOP update requests</td></tr>
-                    <tr><td>AI assistant panel</td><td><code>js/ai-assistant.js</code></td><td>Context blocks per tab live here</td></tr>
                     <tr><td>Skills / KPI sources / quick task</td><td><code>js/skills.js</code> · <code>js/skills-data.js</code> · <code>js/kpi-sources.js</code> · <code>js/quick-task.js</code></td><td></td></tr>
                     <tr><td>Health bars</td><td><code>js/sync-bar.js</code></td><td>registerSyncBar engine — shared, treat like shared.js</td></tr>
                     <tr><td>Operating Systems pages</td><td><code>os/*/index.html</code></td><td>tasks, operations, strategy, systemisation, team — loaded via iframe (business-plan-builder retired from the shell 1 Aug 2026, files remain)</td></tr>
@@ -491,7 +490,7 @@
                 <div class="db-node-detail">
                     <ul>
                         <li><code>js/prompts/boardroom-mentor.js</code> — the single source of truth for every AI wizard's voice. All wizards import it; never fork the tone per feature</li>
-                        <li><code>js/ai-assistant.js</code> — the chat panel; per-tab context blocks (e.g. <code>ctx.compliancePage</code>) tell the AI what the user is looking at. New features that hold data Kevin might ask about add a context block here</li>
+                        <li>The in-app AI chat panel (<code>js/ai-assistant.js</code>) was retired on 18 Nov 2026 on Kevin's approval. Agent chats in Claude Code replace it. New features no longer add a chat context block</li>
                     </ul>
                 </div>
             </div>

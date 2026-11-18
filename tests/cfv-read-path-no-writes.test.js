@@ -4,7 +4,8 @@
 // detectCFVs() queues tenancies back to "In Payment" in Airtable and posts an
 // audit comment whenever it finds a linked payment. Two callers only wanted a
 // number out of it — the sidebar badge (js/cfv.js refreshCFVSidebarBadges) and
-// the AI assistant's context gather (js/ai-assistant.js) — so merely opening
+// the AI assistant's context gather (js/ai-assistant.js, retired with the chat
+// panel on 18 Nov 2026) — so merely opening
 // the dashboard could change a tenancy's Payment Status, and it fired twice on
 // a cold load: once off the cached render, once off fresh data. The only guard
 // was a localStorage flag, which another browser or a cleared cache ignores.
@@ -19,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CFV = readFileSync(resolve(root, 'js/cfv.js'), 'utf8');
-const AI = readFileSync(resolve(root, 'js/ai-assistant.js'), 'utf8');
 
 function extract(src, name, file) {
   const start = src.indexOf(`function ${name}(`);
@@ -84,11 +84,5 @@ describe('the read-only callers actually ask for read-only', () => {
   it('the sidebar badge does', () => {
     const body = extract(CFV, 'refreshCFVSidebarBadges', 'js/cfv.js');
     expect(body).toMatch(/detectCFVs\(\s*\{\s*autoReturn:\s*false\s*\}\s*\)/);
-  });
-
-  it('the AI assistant context does', () => {
-    expect(AI).toContain('detectCFVs({ autoReturn: false })');
-    expect(AI, 'a bare detectCFVs() call is a write from a read path')
-      .not.toMatch(/detectCFVs\(\)/);
   });
 });
