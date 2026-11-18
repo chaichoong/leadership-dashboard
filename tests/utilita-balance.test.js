@@ -246,19 +246,28 @@ print('HEALTHY=' + str(ub.row_alarm(r(34.30, 'More than a week left'), 10)))
             ['https://my.utilita.co.uk/energy', 0, 'Verify you are human by completing the action below.'],
             // A sign-out address reads signed out in both (7 Oct 2026).
             ['https://my.utilita.co.uk/logout?next=/energy', 0, ''],
+            // A PASSWORDLESS DOOR, on the dashboard's own address, with no password box
+            // (finding 20261117-agent-dispatch-1340, round 2). The comment at the top of
+            // AT_DOOR names the "email-first login step" as the very thing that broke this,
+            // and signed_in() still decided without reading the page's words, so this read
+            // as a signed-in dashboard and the Robot sign-in line was withheld.
+            ['https://my.utilita.co.uk/energy', 0, 'Sign in to view your account\nEmail address\nEmail me a login code'],
+            ['https://my.utilita.co.uk/energy', 0, "We'll email you a security code"],
+            // CONTROL: a signed-in dashboard that merely carries the words is still signed in.
+            ['https://my.utilita.co.uk/energy', 0, 'Your balance is £12.40. Sign out'],
         ];
         const py = `
 import importlib.util, json
 spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
 ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
-for url, pw, bot in json.loads(${JSON.stringify(JSON.stringify(urls.map(([u, pw, t]) => [u, pw, isBotCheck(t, '')])))}):
-    print(str(ub.signed_in(url, pw, bot)))
+for url, pw, bot, text in json.loads(${JSON.stringify(JSON.stringify(urls.map(([u, pw, t]) => [u, pw, isBotCheck(t, ''), t])))}):
+    print(str(ub.signed_in(url, pw, bot, text)))
 `;
         const mine = execFileSync('python3', ['-c', py], { encoding: 'utf8' })
             .trim().split('\n').map(l => l === 'True');
         const theirs = urls.map(([u, pw, t]) => sessionVerdict(u, pw, t, '').signedIn);
         expect(mine).toEqual(theirs);
-        expect(mine).toEqual([true, false, false, false, false, false]);
+        expect(mine).toEqual([true, false, false, false, false, false, false, false, true]);
     });
 
     it('a trimmed accounts list is refused, not reported as a clean run', () => {
