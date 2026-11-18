@@ -453,6 +453,10 @@ each = ("TO-EACH: fixturegascare@gmail.com, office@other-gas.test, jobs@third-ga
         "SUBJECT: Quote request: gas safety check\\n---\\nHello,\\n\\nPlease could you send us a quote for a gas safety check at "
         "12 Example Lane, Haverhill CB9 9ZZ?\\n\\n" + ROY + "\\n\\n**Carrying this out will involve:** three separate emails go.")
 out["toEachFirst"] = submit(each)["err"]
+# Third review: a failed letting-agent read refuses only when a recipient is left that it might have set aside.
+AGENT_ROWS[:] = []
+out["agentsUnreadTenant"] = go("sam.tenant@fixture-mail.test")
+out["agentsUnreadOther"] = go("someone@fixture-mail.test")
 READ_FAIL.add(m.TENANTS_TABLE)
 out["tenantUnread"] = go("sam.tenant@fixture-mail.test")
 print(json.dumps(out))`);
@@ -466,6 +470,8 @@ print(json.dumps(out))`);
     expect(r.newTenant).toMatch(/must be on record \(the Tenants table/);
     expect(r.toEachFirst).toMatch(/and to another firm at the same time \(office@other-gas.test, jobs@third-gas.test\)/);
     expect(r.tenantUnread).toMatch(/could not read the Tenants table .*NOT CHECKED/);
+    expect(r.agentsUnreadTenant).toBeNull();
+    expect(r.agentsUnreadOther).toMatch(/could not read the letting agents' AGENT RENT LATE cards \(none read back\) to tell whether someone@fixture-mail.test/);
   });
 
   it('ruling 3: a street named after the town is not the town, and a file with odd value types neither crashes nor goes quiet', () => {
@@ -493,9 +499,9 @@ print(json.dumps(out))`);
     expect(r.broken.err).toBeNull();
     expect(r.broken.nc[0]).toMatch(/entries it cannot use: entry 1 \(no name\)/);
     expect(r.twoTypes.err).toBeNull();
-    expect(r.twoTypes.nc[0]).toMatch(/names EICR and GSC beside another subject/);
+    expect(r.twoTypes.nc[0]).toMatch(/reads as more than one certificate or subject \(it names EICR and GSC/);
     expect(r.mixed.err).toBeNull();
-    expect(r.mixed.nc[0]).toMatch(/names GSC beside another subject/);
+    expect(r.mixed.nc[0]).toMatch(/reads as more than one certificate or subject \(it names GSC with something else\)/);
   });
 
   it('ruling 1: zero letting-agent cards read is NOT CHECKED, and a property\'s agent email is matched exactly', () => {

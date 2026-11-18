@@ -7309,9 +7309,9 @@ def preferred_contractor_problem(task_rec, output, mail_subject, declined=None, 
         # certificate_step reads the task name only to know it is one certificate; ask it about the output alone.
         if name.startswith(COMPLIANCE_TASK_PREFIX) and hits and certificate_type(name) == "" and \
                 certificate_step(f"{COMPLIANCE_TASK_PREFIX} EICR", output, mail_subject) in ("quote", "booking"):
-            note_not_checked(f"designated-contractor check: the task name names {' and '.join(hits)} beside another "
-                             "subject, so code could not tell which certificate, and so which designated contractor, "
-                             "this goes to first")
+            note_not_checked(f"designated-contractor check: the task name reads as more than one certificate or subject "
+                             f"(it names {' and '.join(hits)} with something else), so code could not tell which "
+                             "designated contractor this goes to first")
         return ""
     step = certificate_step(name, output, mail_subject)
     if step not in ("quote", "booking"):
@@ -7365,18 +7365,21 @@ def preferred_contractor_problem(task_rec, output, mail_subject, declined=None, 
     if others:
         # A notice to the house's tenants or its letting agent (the visit is booked) asks no firm for anything
         # (both reviews of this PR). Both are read from the records, and an unreadable record is NOT CHECKED.
+        unread = []
         if tenants is None:
             try:
                 rec = recipients_on_record()
             except (Exception, SystemExit) as exc:          # noqa: BLE001 — said, and the card is refused
                 rec = {"tenants": set(), "agents": set(), "unread": [f"the Tenants table ({type(exc).__name__})"]}
             unread = [u for u in rec["unread"] if u.startswith("the Tenants table") or u.startswith("the letting agents")]
-            if unread:
-                return (f"it is a {cert} {step} for {house['short']} and code could not read {unread[0]} to tell whether "
-                        "its recipients are the house's tenants, its letting agent or other firms: NOT CHECKED. Try "
-                        "again; if it fails again, record a TOOL wall")
             tenants = set(rec["tenants"]) | set(rec.get("agents") or ())
+        # Whoever the records that WERE read set aside goes first; a failed read refuses only when a recipient is
+        # still left that it might have set aside (third review of this PR).
         others = [a for a in others if a not in tenants and company_key(a) not in tenants]
+        if others and unread:
+            return (f"it is a {cert} {step} for {house['short']} and code could not read {unread[0]} to tell whether "
+                    f"{', '.join(others)} is the house's tenant, its letting agent or another firm: NOT CHECKED. Try "
+                    "again; if it fails again, record a TOOL wall")
     if not others:
         return ""
     if reached:
