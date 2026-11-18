@@ -131,6 +131,31 @@ test.describe('the 15-Minute Dashboard', () => {
     await expect(h).toContainText('Handled without you: 2 this week, 1 reversed');
     await expect(h).toContainText('Queue now: 3');
   });
+  // Kevin, 16 Nov 2026 (decision card recinoFWz6fQ6JVVB, ruling 5): a category moves up only once the bar has
+  // held on every one of the last 90 days, read from the same history as it stood at each day's end.
+  test('a category is a candidate only once the bar has held on every one of the last 90 days', async ({ page }) => {
+    const fx = withHandled();
+    const ago = (n) => new Date(Date.now() - n * 86400000).toISOString();
+    const decided = (id, i, output) => ({ id: id + i, createdTime: ago(i + 1), fields: {
+      [TF.teamMember]: [AGENT_B], [TF.sentForApprovalBy]: [AGENT_B], [TF.status]: 'Completed', [TF.completionDate]: ago(i + 1),
+      [TF.approvalOutcome]: 'Approved as-is', [TF.approvedAt]: ago(i + 1), [TF.taskType]: 'Admin', [TF.name]: id + ' ' + i,
+      [TF.agentOutput]: output,
+    } });
+    // One clean close a day for 125 days: on the bar at the end of each of the last 90 days.
+    for (let i = 0; i < 125; i++) fx.taskHistory.push(decided('recHeldClose', i, 'CLOSE PROPOSAL: dead — stale'));
+    // 25 clean recommendations over the last 40 days: on the bar today, but not for 90 days in a row.
+    for (let i = 0; i < 25; i++) fx.taskHistory.push(decided('recNewRec', Math.round(i * 1.6), 'RECOMMEND: keep the plan as it is'));
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    const lv = page.locator('[data-fifteen] [data-f15="levels"]');
+    await expect(lv).toContainText('held on every one of the last 90 days)');
+    await expect(lv.locator('.f15-big')).toHaveText('1');
+    const cands = lv.locator('[data-f15-candidates]');
+    await expect(cands).toHaveCount(1);
+    await expect(cands).toContainText('Candidate: close: judgement');
+    await expect(cands).toContainText('and the bar has held on every one of the last 90 days.');
+    await expect(cands).not.toContainText('recommendation');
+  });
   test('the withdrawal tracker names the week and phase and compares actual with target', async ({ page }) => {
     await mockAgentsPage(page, withHandled());
     await loadAgentsPage(page);

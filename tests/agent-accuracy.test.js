@@ -17,6 +17,9 @@ const { computeAgentAccuracy, agentAutonomyRecommendations, THRESHOLD, countAgen
 // its decisions inside three days). At one an hour these fixtures spanned less
 // than a day and would fail the bar for a reason none of them is testing.
 // The 30-day rule itself is covered by tests/autonomy-30-days.test.js.
+// They end 31 Jul 2026, more than 90 days before any run of this suite, so the bar reads them the same at
+// every one of the last 90 day-ends and `ready` here tests the bar's other conditions. The 90-day rule
+// (Kevin, 16 Nov 2026) has its own tests, with a fixed `now`, in autonomy-30-days.test.js and below.
 const SEED_STEP_MS = 2 * 24 * 3600e3;
 function seed(agentId, taskType, outcomes) {
   return outcomes.map((outcome, i) => ({
@@ -350,5 +353,27 @@ describe('categoryCandidates — a category earns Level A on the agent bar', () 
     expect(rows[0].total).toBe(20);
     expect(rows[0].relevanceFailures).toBe(1);
     expect(rows[0].candidate).toBe(true);
+  });
+  // Kevin, 16 Nov 2026 (decision card recinoFWz6fQ6JVVB, ruling 5): category migration needs the bar held on
+  // every one of the last 90 days too, read from the decisions as they stood at each day's end.
+  it('a category on the bar today but for under 90 days is not a candidate', () => {
+    const now = Date.UTC(2026, 6, 31, 12, 0, 0);   // the day of the newest seeded decision
+    const rows = categoryCandidates(cat('close: judgement', Array(25).fill(APPROVE)), now);
+    expect(rows[0].barToday).toBe(true);
+    expect(rows[0].heldDays).toBeLessThan(THRESHOLD.holdDays);
+    expect(rows[0].candidate).toBe(false);
+    // The same decisions 90 days later: the bar held at every day-end since, so it is a candidate.
+    const later = categoryCandidates(cat('close: judgement', Array(25).fill(APPROVE)), now + 91 * 86400000);
+    expect(later[0].heldDays).toBe(THRESHOLD.holdDays);
+    expect(later[0].candidate).toBe(true);
+  });
+  it('a rejection inside the 90 days stops a category, though it is clean today', () => {
+    const now = Date.UTC(2026, 9, 31, 12, 0, 0);
+    const daily = Array.from({ length: 200 }, (_, i) => ({ category: 'email: reply', at: new Date(now - (i + 1) * 86400000).toISOString(),
+      outcome: i === 40 ? 'Rejected' : APPROVE, reason: i === 40 ? 'The work is wrong' : '' }));
+    const rows = categoryCandidates(daily, now);
+    expect(rows[0].barToday).toBe(true);
+    expect(rows[0].candidate).toBe(false);
+    expect(rows[0].heldDays).toBeLessThan(41);
   });
 });

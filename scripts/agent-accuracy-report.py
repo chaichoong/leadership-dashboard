@@ -6,10 +6,14 @@ cleared the autonomy bar. Crossing the bar is a RECOMMENDATION to Kevin and
 nothing else: this script changes no data and promotes nobody. The owner moves
 the gears; accuracy only advises.
 
-THE BAR (all three, not any of them):
+THE BAR (all of them, not any of them):
   - at least 20 decisions of that task type by that agent
   - 90% or better accurate (approved as-is + approved with minor edits)
   - zero rejections in the last 10
+  - 30 days of history (Kevin, 28 Aug 2026)
+  - and all of that held at the end of every one of the last 90 days in a
+    row, for every robot and every category (Kevin, 16 Nov 2026, decision
+    card recinoFWz6fQ6JVVB)
 
 These three numbers are duplicated in js/agent-accuracy.js, which is what the
 browser uses. tests/constant-drift.test.js fails if the two ever disagree — a
@@ -81,6 +85,12 @@ STUCK_HOURS = 24
 # one thing that cannot be manufactured. Kept identical to THRESHOLD.minDays in
 # js/agent-accuracy.js — drift-tested.
 MIN_DAYS = 30
+# Kevin's ruling, 16 Nov 2026 (decision card recinoFWz6fQ6JVVB, ruling 5): before any robot or any category
+# moves up a level, the bar above must have held on EVERY day of the last 90 days in a row, for every robot.
+# His words of 19 Oct 2026 on a TRUST REVIEW card: a rolling 30 days, held for a full quarter, "before we can
+# move that AI agent". Computed from the same decision history, read as it stood at the end of each day: no
+# new stored state. Kept identical to THRESHOLD.holdDays in js/agent-accuracy.js (tests/constant-drift.test.js).
+HOLD_DAYS = 90
 
 ACCURATE = ("Approved as-is", "Approved with minor edits")
 
@@ -205,7 +215,43 @@ def span_days(items):
     return (b - a).days
 
 
-def score(decisions, names):
+def hold_points(as_of, days=HOLD_DAYS):
+    """The moments the bar is read at, newest first: as_of itself, then the end of each of the days-1 days
+    before it (UTC). `days` points in all, one per day."""
+    start = as_of.replace(hour=0, minute=0, second=0, microsecond=0)
+    return [as_of] + [start - datetime.timedelta(days=k - 1, microseconds=1) for k in range(1, days)]
+
+
+def days_held(bar_at, as_of, days=HOLD_DAYS):
+    """How many days in a row, counting back from as_of, `bar_at(point)` has been true (0 to `days`)."""
+    held = 0
+    for point in hold_points(as_of, days):
+        if not bar_at(point):
+            break
+        held += 1
+    return held
+
+
+def known_at(items, point, as_of):
+    """The decisions as they stood at `point`: every one at as_of itself (an undated one included, as the
+    snapshot always counted it), and only the dated ones up to `point` before that."""
+    if point == as_of:
+        return items
+    return [d for d in items if parse_at(d.get("at")) and parse_at(d["at"]) <= point]
+
+
+def snapshot_bar(items):
+    """The snapshot bar over these decisions: 20+ judged, 90%+, no rejection in the last 10, 30+ days."""
+    judged = sorted((d for d in items if not is_relevance_failure(d)), key=lambda d: d["at"] or "", reverse=True)
+    total = len(judged)
+    accurate = sum(1 for d in judged if d["outcome"] in ACCURATE)
+    recent = sum(1 for d in judged[:RECENT_N] if d["outcome"] == "Rejected")
+    return (total >= MIN_SAMPLE and total and accurate / total >= MIN_RATE and recent == 0
+            and span_days(judged) >= MIN_DAYS)
+
+
+def score(decisions, names, now=None):
+    now = now or datetime.datetime.now(datetime.timezone.utc)
     buckets = {}
     for d in decisions:
         buckets.setdefault((d["agent"], d["type"]), []).append(d)
@@ -214,6 +260,8 @@ def score(decisions, names):
     for (agent_id, task_type), items in buckets.items():
         # Newest first; undated entries sort last so they cannot pass as recent.
         items.sort(key=lambda d: d["at"] or "", reverse=True)
+        # Kevin, 16 Nov 2026: the bar must have held at the end of every one of the last HOLD_DAYS days.
+        held = days_held(lambda p, items=items: bool(snapshot_bar(known_at(items, p, now))), now)
         # Split before counting. A relevance failure never touches this agent's
         # rate, its sample, or its recent run — including the "no rejections in
         # the last 10" clause, which one of them could otherwise use to block
@@ -253,8 +301,12 @@ def score(decisions, names):
             "unclassified_rejections": unclassified,
             "span_days": days,
             "days_to_go": max(0, MIN_DAYS - days),
+            # The bar today, and how many days in a row it has held: a candidate needs HOLD_DAYS of them.
+            "bar_today": (total >= MIN_SAMPLE and rate >= MIN_RATE
+                          and recent_rejections == 0 and days >= MIN_DAYS),
+            "held_days": held,
             "ready": (total >= MIN_SAMPLE and rate >= MIN_RATE
-                      and recent_rejections == 0 and days >= MIN_DAYS),
+                      and recent_rejections == 0 and days >= MIN_DAYS and held >= HOLD_DAYS),
         })
     rows.sort(key=lambda r: (r["agent"], r["task_type"]))
     return rows
@@ -351,8 +403,9 @@ def failing_part(reason):
     return PART_OF_REASON.get(reason or "", "unattributed")
 
 
-def verdict_as_of(items, as_of):
-    """UP / HOLD / DOWN for one agent and task type, using only what was known at as_of."""
+def window_bar(items, as_of):
+    """The rolling bar at one moment: (judged in the window newest first, window, rate, recent rejections,
+    history days, whether the bar holds)."""
     start = as_of - datetime.timedelta(days=WINDOW_DAYS)
     window = [d for d in items if between(d, start, as_of)]
     judged = sorted((d for d in window if not is_relevance_failure(d)),
@@ -362,8 +415,16 @@ def verdict_as_of(items, as_of):
     rate = approval_rate(judged)
     recent = sum(1 for d in judged[:RECENT_N] if d["outcome"] == "Rejected")
     days = span_days(history)
-    if (len(judged) >= MIN_SAMPLE and rate >= MIN_RATE and recent == 0
-            and days >= MIN_DAYS):
+    holds = (len(judged) >= MIN_SAMPLE and rate >= MIN_RATE and recent == 0 and days >= MIN_DAYS)
+    return judged, window, rate, recent, days, holds
+
+
+def verdict_as_of(items, as_of):
+    """UP / HOLD / DOWN for one agent and task type, using only what was known at as_of. UP needs the rolling
+    bar to have held at the end of every one of the last HOLD_DAYS days (Kevin, 16 Nov 2026)."""
+    judged, window, rate, recent, days, holds = window_bar(items, as_of)
+    held = days_held(lambda p: window_bar(items, p)[5], as_of) if holds else 0
+    if holds and held >= HOLD_DAYS:
         verdict = "UP"
     elif ((len(judged) >= DOWN_MIN_SAMPLE and rate < DOWN_RATE)
             or recent >= DOWN_RECENT_REJECTIONS):
@@ -371,7 +432,7 @@ def verdict_as_of(items, as_of):
     else:
         verdict = "HOLD"
     return {"verdict": verdict, "window": window, "judged": judged, "rate": rate,
-            "recent_rejections": recent, "history_days": days}
+            "recent_rejections": recent, "history_days": days, "held_days": held}
 
 
 def direction(items, now):
@@ -425,6 +486,7 @@ def weekly_review(decisions, names, job_rows, now):
             "sample": len(current["judged"]),
             "rate": None if current["rate"] is None else round(current["rate"], 4),
             "history_days": current["history_days"],
+            "held_days": current["held_days"],
             "recent_rejections": current["recent_rejections"],
             "direction_pts": points,
             "direction": dir_label,
@@ -535,8 +597,9 @@ def trust_card(crossings, now):
         if c["verdict"] == "UP":
             lines.append(
                 f"- UP: {c['agent']} on {c['task_type']}: {pct}% over {c['sample']} decisions "
-                f"in 30 days, {c['history_days']} days of history, no rejection in the last "
-                f"{min(c['sample'], RECENT_N)} (was {c['verdict_last_week']}). "
+                f"in {WINDOW_DAYS} days, {c['history_days']} days of history, no rejection in the last "
+                f"{min(c['sample'], RECENT_N)}, and the bar has held on every one of the last "
+                f"{HOLD_DAYS} days (was {c['verdict_last_week']}). "
                 "Your call: move this category to Level A?")
         else:
             why = (f", top reason {c['top_trigger']} x{c['top_trigger_count']} "
@@ -569,7 +632,7 @@ def print_weekly(review):
     print(f"Weekly trust review, {WINDOW_DAYS}-day window to {review['as_of'][:10]}")
     print("=" * 60)
     print(f"UP   = {MIN_SAMPLE}+ judged, {round(MIN_RATE * 100)}%+, no rejection in the last "
-          f"{RECENT_N}, {MIN_DAYS}+ days of history")
+          f"{RECENT_N}, {MIN_DAYS}+ days of history, held on every one of the last {HOLD_DAYS} days")
     print(f"DOWN = under {round(DOWN_RATE * 100)}% on {DOWN_MIN_SAMPLE}+ judged, or "
           f"{DOWN_RECENT_REJECTIONS}+ rejections in the last {RECENT_N}")
     if review["shared_pool_minutes"] is None:
@@ -592,8 +655,8 @@ def print_weekly(review):
             parts = ", ".join(f"{k} {v}" for k, v in sorted(r["parts"].items())) or "none"
             moved = f" (was {r['verdict_last_week']})" if r["crossed"] else ""
             print(f"  {r['task_type']:<16} {r['verdict']:<4}{moved}  {rate} of {r['sample']}  "
-                  f"{r['history_days']}d  {r['direction']}  relevance {round(r['relevance_share'] * 100)}%  "
-                  f"top: {trig}  parts: {parts}")
+                  f"{r['history_days']}d  held {r['held_days']}/{HOLD_DAYS}d  {r['direction']}  "
+                  f"relevance {round(r['relevance_share'] * 100)}%  top: {trig}  parts: {parts}")
     print()
 
 
@@ -609,15 +672,33 @@ def selftest():
     def check(label, ok):
         checks.append((label, bool(ok)))
 
-    # UP: 22 approvals in 22 days plus one 40 days back. A week ago only 15 sat
-    # in the window, so the verdict moved HOLD -> UP: one crossing.
-    up = [dec("recUP", d) for d in range(1, 23)] + [dec("recUP", 40)]
+    # UP needs the rolling bar held at the end of every one of the last 90 days (Kevin, 16 Nov 2026). One
+    # approval a day for 122 days: the bar first held 120 days back (30 days of history), so it has held for
+    # 90 days today, and a week ago it had held only 86: the verdict moved HOLD -> UP, one crossing.
+    up = [dec("recUP", d) for d in range(1, 123)]
     r = weekly_review(up, {"recUP": "Up Agent"}, [], now)
     row = r["agents"][0]["rows"][0]
     check("UP verdict", row["verdict"] == "UP")
     check("UP was HOLD a week ago", row["verdict_last_week"] == "HOLD")
     check("UP crossed", row["crossed"] and len(r["crossings"]) == 1)
-    check("UP history days", row["history_days"] == 39)
+    check("UP history days", row["history_days"] == 121)
+    check("UP held 90 days", row["held_days"] == HOLD_DAYS)
+    # One day short of 90 is HOLD, however clean today is.
+    short = verdict_as_of([dec("recSH", d) for d in range(1, 119)], now)
+    check("89 days held is not UP", short["verdict"] == "HOLD" and short["held_days"] == 89)
+    # The 28 Aug burst case, and the old 30-day fixture (22 in 22 days plus one 40 days back): the bar holds
+    # today, but it has not held for 90 days, so it is not a candidate.
+    burst = verdict_as_of([dec("recBU", d) for d in range(1, 23)] + [dec("recBU", 40)], now)
+    check("30-day bar alone is not UP", burst["verdict"] == "HOLD" and 0 < burst["held_days"] < HOLD_DAYS)
+    # A rejection 45 days ago breaks the run: the bar failed while it sat in the last 10, so it has held only
+    # since it left them, though 200 days of approvals pass the 30-day bar today.
+    broke = verdict_as_of([dec("recRJ", d) for d in range(1, 201) if d != 45]
+                          + [dec("recRJ", 45, "Rejected", "The work is wrong")], now)
+    check("a rejection inside 90 days blocks UP", broke["verdict"] == "HOLD" and 30 < broke["held_days"] < 45)
+    # The snapshot score obeys the same rule.
+    check("snapshot ready needs 90 days held", score([dec("recSN", d) for d in range(1, 125)], {}, now)[0]["ready"]
+          and not score([dec("recSN", d) for d in range(1, 60)], {}, now)[0]["ready"])
+    check("snapshot says it is on the bar today", score([dec("recSN", d) for d in range(1, 60)], {}, now)[0]["bar_today"])
 
     # DOWN: 6 approved, 4 rejected as wrong work in 10 days.
     down = ([dec("recDN", d) for d in (1, 2, 3, 4, 5, 6)]
@@ -755,7 +836,8 @@ def main():
     recommendations = [
         f"{r['agent']} has cleared the bar on {r['task_type']}: {round(r['rate'] * 100)}% over "
         f"{r['total']} approvals across {r['span_days']} days, "
-        f"no rejections in the last {min(r['total'], RECENT_N)}. "
+        f"no rejections in the last {min(r['total'], RECENT_N)}, and the bar has held on every one of "
+        f"the last {HOLD_DAYS} days. "
         f"Your call whether it runs that task type without the gate."
         for r in rows if r["ready"]
     ]
@@ -827,6 +909,10 @@ def main():
             # it inside three days.
             flag = (f"holding {round(r['rate'] * 100)}% — {r['days_to_go']}d more "
                     f"(only {r['span_days']}d of history)")
+        elif r["bar_today"]:
+            # On the bar today; only the 90 days in a row are short (Kevin, 16 Nov 2026).
+            flag = (f"on the bar today — held {r['held_days']}/{HOLD_DAYS} days in a row, "
+                    f"{HOLD_DAYS - r['held_days']}d more")
         else:
             flag = f"{round(r['rate'] * 100)}% — under {round(MIN_RATE * 100)}%"
         print(f"  {r['agent']:<34} {r['task_type']:<16} "

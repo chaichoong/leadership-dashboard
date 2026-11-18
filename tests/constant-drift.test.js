@@ -164,6 +164,12 @@ describe('agent autonomy threshold does not drift between the app and the huddle
     expect(pyConst('RECENT_N')).toBe(jsThreshold('recentN'));
   });
 
+  // Kevin, 16 Nov 2026 (decision card recinoFWz6fQ6JVVB): the bar must hold on every one of the last 90 days.
+  it('the days-in-a-row rule matches', () => {
+    expect(pyConst('HOLD_DAYS')).toBeTypeOf('number');
+    expect(pyConst('HOLD_DAYS')).toBe(jsThreshold('holdDays'));
+  });
+
   // The reason list decides whether a rejection touches an agent's score at
   // all, so a divergence here means the huddle and the dashboard disagree about
   // whether an agent has earned autonomy — which is precisely what this file

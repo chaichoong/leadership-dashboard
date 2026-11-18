@@ -312,6 +312,18 @@ RETIRED = [
      "Swinton is off the robot: ask Swinton by email, never a sign-in window"),
     (r"Everywhen Your turn window", "2026-11-15",
      "Everywhen is off the robot: quote through RightSure via TopCashback, or a broker by email"),
+    # Kevin's six rulings (decision card recinoFWz6fQ6JVVB, approved as-is, option A; written into the
+    # robots' files 18 Nov 2026). Four of the losing lines, so a surface that still states one is stale.
+    (r"(?i)knows? him as the landlord", "2026-11-16",
+     "every email to a letting agent, AGENT RENT LATE included, goes from info@agilelets.co.uk signed "
+     "Roy Lavin, Agile Lets"),
+    (r"(?i)one to three (recipients|tradespeople|companies)", "2026-11-16",
+     "a quote request is one company per email; several companies are several separate emails"),
+    (r"(?i)out of agent work entirely", "2026-11-16",
+     "WhatsApp: read one contact for the task in hand, never send"),
+    (r"90%\+, 30 days", "2026-11-16",
+     "the trust bar (20+ decisions, 90%+, clean last 10, rolling 30 days) must hold on every day of "
+     "the last 90 days before any robot or category moves up a level"),
 ]
 
 # A line that is describing the old rule, not stating it.

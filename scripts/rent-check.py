@@ -977,17 +977,20 @@ def agent_late_plan(res, tenancies, existing, day, tenants=()):
             return " and ".join(d.strftime("%-d %b") for d in sorted({u[which]["sent"] for u in units}))
         if step == "1":
             name = f"{title} ({count})"
+            # Kevin, 16 Nov 2026 (decision card recinoFWz6fQ6JVVB): letting-agent mail goes from info@ signed Roy.
+            # The submit gate refuses any other sender on an AGENT RENT LATE card (agent_email_format.py).
             ask = [f"Draft ONE email to the letting agent covering every unit above, asking what has happened to "
                    f"{'this payment' if n == 1 else 'each payment'} and when it will be paid. It goes from "
-                   "kevinbrittain@gmail.com, signed Kevin Brittain (Kevin, 5 Oct 2026: the "
-                   "letting agent knows him as the landlord), to their accounts contact, in the thread of the last "
-                   "emails about this place where there is one (agent-dispatch.py history). Nothing goes to the tenant."]
+                   "info@agilelets.co.uk, signed Roy Lavin, then Agile Lets on the next line (Kevin, 16 Nov 2026), to "
+                   "their accounts contact. Read the last emails about this place first (agent-dispatch.py history) "
+                   "and quote their subject: it is a new email from info@, because the old threads sit in Kevin's "
+                   "Gmail. Nothing goes to the tenant."]
         elif step == "2":
             name = f"{title} ({count}, second email)"
             ask = [f"The email to the letting agent went on {sent('first')} and the rent has still not arrived. One "
-                   "email covers every unit above. Draft a second, firmer email in the same thread, from "
-                   "kevinbrittain@gmail.com, signed Kevin Brittain, asking for the payment date in writing. Nothing "
-                   "goes to the tenant."]
+                   "email covers every unit above. Draft a second, firmer email, from info@agilelets.co.uk, signed "
+                   "Roy Lavin, then Agile Lets on the next line, in the thread of the first email where it went from "
+                   "info@, asking for the payment date in writing. Nothing goes to the tenant."]
         else:
             name = f"{title} ({count}): phone the letting agent"
             ask = [f"Two emails to the letting agent ({sent('first')} and {sent('second')}) and the rent for "

@@ -90,30 +90,89 @@
     // before it passes. Volume is not the same as consistency, and a busy
     // Tuesday can manufacture a sample in an afternoon. Elapsed time is the one
     // thing that cannot be manufactured.
+    // ─── 90 DAYS IN A ROW (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB) ───
+    // Before any robot or category moves up a level, the bar must have held at
+    // the end of EVERY one of the last 90 days, for every robot. Computed from
+    // the same history, read as it stood at each day's end: no stored state.
+    // Kept identical to HOLD_DAYS in scripts/agent-accuracy-report.py.
     var THRESHOLD = {
         minSample: 20,  // decisions of that task type by that agent
         minRate: 0.9,   // 90% accurate
         recentN: 10,    // and zero rejections in the last this-many
         minDays: 30,    // spanning at least this many days, first to last
+        holdDays: 90,   // and all of it held at the end of every one of the last this-many days
     };
 
-    /** Whole days between the oldest and newest dated decision in a bucket.
+    /** Calendar days (UTC) between the oldest and newest dated decision in a
+     *  bucket, the same count as span_days in scripts/agent-accuracy-report.py
+     *  (its dates are the stamps' UTC date parts). Counting whole 24-hour
+     *  periods instead made the page and the huddle differ by a day at the
+     *  edge, which the 90-day rule (16 Nov 2026) turns into opposite answers.
      *  Undated entries are ignored rather than counted as today: treating a
      *  blank date as now would let a single dated decision look like a span. */
     function spanDays(items) {
-        var dates = (items || [])
+        var days = (items || [])
             .map(function (i) { return Date.parse(i.at || ''); })
-            .filter(function (t) { return !isNaN(t); });
-        if (dates.length < 2) return 0;
-        return Math.floor((Math.max.apply(null, dates) - Math.min.apply(null, dates))
-            / 86400000);
+            .filter(function (t) { return !isNaN(t); })
+            .map(function (t) { return Math.floor(t / 86400000); });
+        if (days.length < 2) return 0;
+        return Math.max.apply(null, days) - Math.min.apply(null, days);
+    }
+
+    /** The moments the bar is read at, newest first: now itself, then the end
+     *  of each of the holdDays-1 days before it (UTC). Mirrors hold_points in
+     *  scripts/agent-accuracy-report.py. */
+    function holdPoints(now) {
+        var d = new Date(now);
+        var startOfToday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+        var points = [now];
+        for (var k = 1; k < THRESHOLD.holdDays; k++) points.push(startOfToday - (k - 1) * 86400000 - 1);
+        return points;
+    }
+
+    /** The decisions as they stood at `point`: all of them at now itself (an
+     *  undated one included, as the snapshot always counted it), and only the
+     *  dated ones up to `point` before that. */
+    function knownAt(items, point, now) {
+        if (point === now) return items;
+        return items.filter(function (i) {
+            var t = Date.parse(i.at || '');
+            return !isNaN(t) && t <= point;
+        });
+    }
+
+    /** How many days in a row, back from now, barAt(items as they stood) held. */
+    function daysHeld(items, now, barAt) {
+        var held = 0;
+        var points = holdPoints(now);
+        for (var p = 0; p < points.length; p++) {
+            if (!barAt(knownAt(items, points[p], now))) break;
+            held++;
+        }
+        return held;
+    }
+
+    /** The bar over a set of decisions: 20+ judged, 90%+, clean last 10, 30+ days. */
+    function barHolds(items) {
+        var judged = items.filter(function (i) { return !isRelevanceFailure(i); }).sort(function (a, c) {
+            return String(c.at || '').localeCompare(String(a.at || ''));
+        });
+        var total = judged.length;
+        if (total < THRESHOLD.minSample) return false;
+        var accurate = judged.filter(function (i) { return APPROVAL_ACCURATE.indexOf(i.outcome) !== -1; }).length;
+        var recentRejections = judged.slice(0, THRESHOLD.recentN)
+            .filter(function (i) { return i.outcome === 'Rejected'; }).length;
+        return accurate / total >= THRESHOLD.minRate && recentRejections === 0
+            && spanDays(judged) >= THRESHOLD.minDays;
     }
 
     // history: [{ agentId, taskType, outcome, at }]  (at = ISO string, may be blank)
     // names:   optional { agentId: 'Display name' }
+    // now:     optional time in ms (default Date.now()): the end of the 90 days
     // → one row per agent × task type, newest decisions weighted into `recent`.
-    function computeAgentAccuracy(history, names) {
+    function computeAgentAccuracy(history, names, now) {
         var lookup = names || {};
+        var at = typeof now === 'number' ? now : Date.now();
         var buckets = {};
         (history || []).forEach(function (h) {
             if (!h || !h.agentId || !h.outcome) return;
@@ -156,6 +215,9 @@
             // this standard, and a rejected-as-irrelevant task is not evidence
             // either way.
             var days = spanDays(judged);
+            var barToday = total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate
+                       && recentRejections === 0 && days >= THRESHOLD.minDays;
+            var held = barToday ? daysHeld(items, at, barHolds) : 0;
             return {
                 agentId: b.agentId,
                 agentName: lookup[b.agentId] || b.agentId,
@@ -172,8 +234,10 @@
                 // Kevin at all, and somebody has to own that number.
                 relevanceFailures: relevance.length,
                 unclassifiedRejections: unclassified,
-                ready: total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate
-                       && recentRejections === 0 && days >= THRESHOLD.minDays,
+                // On the bar today, and how many days in a row it has held.
+                barToday: barToday,
+                heldDays: held,
+                ready: barToday && held >= THRESHOLD.holdDays,
             };
         }).sort(function (a, c) {
             return String(a.agentName).localeCompare(String(c.agentName))
@@ -190,7 +254,8 @@
                 + Math.round(r.rate * 100) + '% over ' + r.total + ' approvals across '
                 + r.spanDays + ' days, no rejections in the last '
                 + Math.min(r.total, THRESHOLD.recentN)
-                + '. Your call whether it runs that task type without the gate.';
+                + ', and the bar has held on every one of the last ' + THRESHOLD.holdDays
+                + ' days. Your call whether it runs that task type without the gate.';
         });
     }
 
@@ -331,9 +396,12 @@
 
     // A Level B category becomes a Level A CANDIDATE on the same bar an agent
     // does (Chen's 90/100, Kevin's 20 sample + rolling 30 days + clean last
-    // 10). Kevin clicks; nothing promotes itself. history items carry
-    // { category, outcome, at }.
-    function categoryCandidates(history) {
+    // 10), held at the end of every one of the last 90 days (Kevin, 16 Nov
+    // 2026: for category migration too). Kevin clicks; nothing promotes
+    // itself. history items carry { category, outcome, at }; now is optional
+    // (ms, default Date.now()).
+    function categoryCandidates(history, now) {
+        var at = typeof now === 'number' ? now : Date.now();
         var buckets = {};
         (history || []).forEach(function (h) {
             if (!h || !h.category || !h.outcome) return;
@@ -350,12 +418,15 @@
             var days = spanDays(judged);
             var rate = total ? accurate / total : 0;
             var lvl = (AUTONOMY_LEVELS[cat] || {}).level || 'B';
+            var barToday = total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate
+                           && recentRejections === 0 && days >= THRESHOLD.minDays;
+            var held = barToday ? daysHeld(items, at, barHolds) : 0;
             return {
                 category: cat, level: lvl, total: total, accurate: accurate, rate: rate,
                 spanDays: days, recentRejections: recentRejections,
                 relevanceFailures: items.length - total,
-                candidate: lvl === 'B' && total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate
-                           && recentRejections === 0 && days >= THRESHOLD.minDays,
+                barToday: barToday, heldDays: held,
+                candidate: lvl === 'B' && barToday && held >= THRESHOLD.holdDays,
             };
         }).sort(function (a, c) { return c.total - a.total; });
     }
@@ -409,6 +480,7 @@
         agentAutonomyRecommendations: agentAutonomyRecommendations,
         countAgents: countAgents,
         spanDays: spanDays,
+        holdPoints: holdPoints,
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

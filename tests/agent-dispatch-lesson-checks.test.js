@@ -30,6 +30,8 @@ STATE = tempfile.mkdtemp()
 m.STATE_DIR = STATE
 m.INTENT_LEDGER = os.path.join(STATE, "carryout-intent.jsonl")
 m.HANDOVER_DIR = tempfile.mkdtemp()
+# The designated-contractor list is a private file (Kevin, 16 Nov 2026); none is designated for these houses.
+open(os.path.join(m.HANDOVER_DIR, m.PREFERRED_CONTRACTORS_FILE), "w").write(json.dumps({"contractors": []}))
 m.BROWSER_LEDGER = "/nonexistent/od-test-browser-ledger.jsonl"
 AF = m.AF
 G = m._gate().F

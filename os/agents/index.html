@@ -614,7 +614,7 @@ html.home-embed .main{max-width:none;margin:0;padding:0}
 <script src="../../js/ai-models.js?v=1"></script>
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
-<script src="../../js/agent-accuracy.js?v=8"></script>
+<script src="../../js/agent-accuracy.js?v=9"></script>
 <script src="../../js/automations-data.js?v=26"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
@@ -8663,8 +8663,8 @@ function renderFifteen(){
     // 4. Trust levels + candidates
     const cats = s.categories.filter(c=>c.total>0);
     const candidates = cats.filter(c=>c.candidate);
-    html += `<div class="f15-block" data-f15="levels"><div class="f15-head">4. Trust levels <span class="f15-big">${candidates.length}</span><span class="f15-sub">categor${candidates.length===1?'y':'ies'} ready to move from "you approve" to "runs without you" (20+ decisions, 90%+, 30 days, clean last 10). Your click, never automatic: say so in a session and the dispatcher's table changes.</span></div>`;
-    if(candidates.length) html += `<div class="f15-candidates" data-f15-candidates>${candidates.map(c=>`<div class="f15-cand">Candidate: <b>${esc(c.category)}</b> — ${pct(c.rate)} over ${c.total} decisions across ${c.spanDays} days, none rejected in the last 10.</div>`).join('')}</div>`;
+    html += `<div class="f15-block" data-f15="levels"><div class="f15-head">4. Trust levels <span class="f15-big">${candidates.length}</span><span class="f15-sub">categor${candidates.length===1?'y':'ies'} ready to move from "you approve" to "runs without you" (20+ decisions, 90%+, clean last 10, rolling 30 days, held on every one of the last 90 days). Your click, never automatic: say so in a session and the dispatcher's table changes.</span></div>`;
+    if(candidates.length) html += `<div class="f15-candidates" data-f15-candidates>${candidates.map(c=>`<div class="f15-cand">Candidate: <b>${esc(c.category)}</b> — ${pct(c.rate)} over ${c.total} decisions across ${c.spanDays} days, none rejected in the last 10, and the bar has held on every one of the last 90 days.</div>`).join('')}</div>`;
     if(s.agentCandidates.length) html += `<div class="f15-candidates">${s.agentCandidates.map(t=>`<div class="f15-cand">${esc(t)}</div>`).join('')}</div>`;
     html += `<table class="f15-table"><thead><tr><th>Decision category</th><th>Level</th><th>Decided</th><th>Approved</th><th>Noise</th><th>Span</th></tr></thead><tbody>`
         + Object.keys(LEVELS).map(cat=>{

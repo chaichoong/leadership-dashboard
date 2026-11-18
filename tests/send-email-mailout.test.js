@@ -110,7 +110,7 @@ sys.path.insert(0, ${JSON.stringify(path.join(root, 'scripts'))})
 from agent_email_format import validate_submission, EmailFormatError
 def out(n):
     to = ", ".join("p%d@x.org" % i for i in range(n))
-    return "TO: " + to + "\\nFROM: info@agilelets.co.uk\\nSUBJECT: Rooms\\n---\\nHello.\\n\\nKind regards\\nRoy Lavin"
+    return "TO: " + to + "\\nFROM: info@agilelets.co.uk\\nSUBJECT: Rooms\\n---\\nHello.\\n\\nKind regards\\nRoy Lavin\\nAgile Lets"
 r = {}
 for n in (10, 11):
     try:

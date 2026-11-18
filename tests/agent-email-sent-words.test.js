@@ -390,8 +390,13 @@ describe('the Roy rule has no holes and no false refusals (review of PR 951, F4)
       expect(r.ok, sign).toBe(false);
       expect(r.error, sign).toMatch(/^this email is signed Roy but names Roy/);
     }
-    // Control: the same email in the first person passes.
-    expect(check(`${head}\n---\nHello Jordan,\n\nI will arrange access on Friday.\n\nThanks, Roy\n\n**Carrying this out will involve:** sending this email.`))
+    // Control: the same email in the first person is not refused by the Roy rule. Signed just "Roy" from info@, it
+    // is refused by Kevin's ruling of 16 Nov 2026 (decision card recinoFWz6fQ6JVVB): signed Roy Lavin, then Agile Lets.
+    const short = check(`${head}\n---\nHello Jordan,\n\nI will arrange access on Friday.\n\nThanks, Roy\n\n**Carrying this out will involve:** sending this email.`);
+    expect(short.ok).toBe(false);
+    expect(short.error).not.toMatch(/names Roy/);
+    expect(short.error).toMatch(/`Roy Lavin` and `Agile Lets` on the next line/);
+    expect(check(`${head}\n---\nHello Jordan,\n\nI will arrange access on Friday.\n\nThanks,\nRoy Lavin\nAgile Lets\n\n**Carrying this out will involve:** sending this email.`))
       .toEqual({ ok: true });
   });
 
