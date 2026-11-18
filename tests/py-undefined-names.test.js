@@ -26,6 +26,8 @@ const ESTATE_SCRIPTS = [
   // 13 Nov 2026: the clause a slot's "run OK" line carries, called from slot-postrun.sh
   'scripts/slot-tally.py',
   'scripts/padel-emails.py',
+  // 18 Nov 2026: the scorecard every agent chat opens with (UserPromptSubmit hook)
+  'scripts/agent-scorecard.py',
   // 15 Oct 2026: the "Is the AI team healthy?" verdict, judged on the estate-status pass
   'scripts/ai_team_health.py',
   'scripts/session_handbacks.py',
