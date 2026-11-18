@@ -2350,6 +2350,15 @@ def build_update(existing_fields, incoming_fields, today_iso):
     parked = KEVIN_PARK_LINE_RE.findall(str(existing_fields.get(F["notes"]) or ""))
     park_stands = (existing_status == "Upcoming" and bool(parked) and parked[-1] > today_iso
                    and str(existing_fields.get(F["due"]) or "")[:10] > today_iso)
+    # A real deadline beats a park (review of PR #978): a hard date earlier than the park ends it.
+    _in_due = str(incoming_fields.get(F["due"]) or "")[:10]
+    if park_stands and bool(incoming_fields.get(F["hardDeadline"])) and _in_due and _in_due < parked[-1]:
+        park_stands = False
+    if park_stands:
+        # Said, never silent: what folded in is read on the park's date.
+        patch[F["notes"]] = (str(existing_fields.get(F["notes"]) or "").rstrip() + "\n\n[%s — create-agent-task] "
+                             "Folded in while Kevin's park stands until %s: read on that date (see the Description)."
+                             % (today_iso, parked[-1])).strip()
     if existing_status != "Approval" and not park_stands:
         # Same allowed set as a create: the fold path PATCHes with typecast
         # on, so an unvalidated value here would mint the phantom option the

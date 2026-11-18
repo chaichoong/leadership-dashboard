@@ -58,6 +58,20 @@ print(json.dumps({"status": p.get(F["status"]), "due": p.get(F["due"]), "sender"
     expect(fold('Upcoming', '[19 Oct 2026 — agent] Parked until 2027-01-17 on Kevin\'s answer').status).toBe('Approval');
   });
 
+  it('a hard deadline earlier than the park ends it, and a fold the park holds says so in Notes (review of PR #978)', () => {
+    const r = py(`
+g = load("g", ${JSON.stringify(GATE)})
+F = g.F
+existing = {F["status"]: "Upcoming", F["due"]: "2027-01-17", F["notes"]: PARK, F["desc"]: "x"}
+hard = g.build_update(existing, {F["status"]: "Today", F["due"]: "2026-11-25", F["hardDeadline"]: True, F["desc"]: "pay by 25 Nov"}, "2026-11-18")
+held = g.build_update(existing, {F["status"]: "Approval", F["sentForApprovalBy"]: ["recCEOxxxxxxxxxx1"], F["desc"]: "weekly"}, "2026-11-18")
+print(json.dumps({"hardStatus": hard.get(F["status"]), "hardDue": hard.get(F["due"]),
+                  "heldNote": str(held.get(F["notes"]) or "").split("\\n\\n")[-1]}))`);
+    expect(r.hardStatus).toBe('Today');
+    expect(r.hardDue).toBe('2026-11-25');
+    expect(r.heldNote).toMatch(/Folded in while Kevin's park stands until 2027-01-17/);
+  });
+
   it('the gate reads the same park line the dispatcher writes (no drift)', () => {
     const r = py(`
 g = load("g", ${JSON.stringify(GATE)}); d = load("d", ${JSON.stringify(DISPATCH)})
@@ -74,7 +88,7 @@ d.today_london = lambda: "2026-11-18"
 f = {AF["name"]: "TRUST REVIEW: 2026-10-19, 1 bar crossed", AF["status"]: {"name": "Approval"},
      AF["dueDate"]: "2027-01-17", AF["notes"]: PARK, AF["sentForApprovalBy"]: ["recCEOxxxxxxxxxx1"]}
 for k, v in json.loads(${JSON.stringify(JSON.stringify(over))}).items():
-    f[AF[k]] = v
+    f[d.HARD_DEADLINE_FIELD if k == "hardDeadline" else AF[k]] = v
 T = {"id": "recTRUSTxxxxxxxx1", "createdTime": "2026-10-19T06:48:00.000Z", "fields": f}
 d.get_task = lambda i: json.loads(json.dumps(T))
 def patch(i, fields):
@@ -97,6 +111,15 @@ print(json.dumps({"err": err, "status": d.sel(nf.get(AF["status"])), "due": nf.g
     expect(r.due).toBe('2027-01-17');
     expect(r.sender).toEqual([]);
     expect(r.last).toMatch(/^\[\d{2} \w{3} \d{4} — agent-dispatch\] Parked until 2027-01-17 on Kevin's answer \(his earlier park/);
+  });
+
+  it('never when anything newer than the park is on record, or a hard deadline falls before it (review of PR #978)', () => {
+    const after = (line) => restore({ notes: "[19 Oct 2026 — agent-dispatch] Parked until 2027-01-17 on Kevin's answer\n\n" + line });
+    expect(after('[10 Nov 2026 09:00 — agent-dispatch] SUBMITTED (round 2) as Admin with no new file').err).toMatch(/a card was submitted/);
+    expect(after('[10 Nov 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder recX)').err).toMatch(/escalated to him/);
+    expect(after('[12 Nov 2026 — agent-dispatch] Decision carried out: Approved as-is').err).toMatch(/decision of his was carried out/);
+    expect(after('[12 Nov 2026 09:00 — agent-dispatch] DUE MOVED from 2027-01-17 to 2026-12-01: his words').err).toMatch(/due date was moved/);
+    expect(restore({ hardDeadline: true, dueDate: '2026-12-01' }).err).toMatch(/Hard Deadline of 2026-12-01 falls before the park/);
   });
 
   it('never without his park, after it ran out, or when he answered again since', () => {

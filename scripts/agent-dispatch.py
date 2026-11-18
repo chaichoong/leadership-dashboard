@@ -5951,7 +5951,8 @@ def cmd_handover(args):
             "Airtable accepts it without complaint."
         )
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
-    reason = (args.reason or "").strip() or "approved reassignment"
+    # One line (review of PR #978): a reason with line breaks could plant a stamped Notes line.
+    reason = " ".join(str(args.reason or "").split()) or "approved reassignment"
     t = get_task(args.task)
     # A handover emails the task and its draft to a colleague. A trial task goes to nobody (2 Oct 2026).
     _tf = t.get("fields", {}) or {}
@@ -8618,7 +8619,7 @@ def cmd_annotate(args):
     # nine times that way while its house had no insurance (25 Sep 2026). A
     # wall is now a `block` with a kind, which routes the fix and wakes the
     # task when it lands. The free-text form is refused so it cannot come back.
-    if DECIDED_NOTE_MARK.lower() in (args.note or "").lower():
+    if (DECIDED_NOTE_MARK + ":") in (args.note or ""):
         # Only `decided`, route and handover write it, and `complete` reads it as Kevin's carried-out
         # approval (finding 20261106-agent-dispatch-1223): a typed one would close a task he never approved.
         sys.exit(f"ERROR: refusing a note on {args.task} that writes the '{DECIDED_NOTE_MARK}' mark. Only "
@@ -8749,6 +8750,17 @@ def restore_park_problem(t, today_iso):
     until = parks[-1].group(1)
     if until <= today_iso:
         return "", f"his park ran to {until}, which has passed"
+    # Anything on record AFTER his park is newer than it (review of PR #978): a card submitted since (submit
+    # clears Approved At), an escalation, a decision carried out, or a due date moved on his words.
+    later = str(t["notes"] or "")[parks[-1].end():]
+    newer = [what for what, rx in (("a card was submitted", SUBMITTED_LINE_RE),
+                                   ("it was escalated to him", ESCALATED_LINE_RE),
+                                   ("a decision of his was carried out", DECIDED_ANY_LINE_RE),
+                                   ("its due date was moved on his words", DUE_MOVED_LINE_RE)) if rx.search(later)]
+    if newer:
+        return "", f"since his park, {' and '.join(newer)}: the newer step decides, not the park"
+    if t.get("_hardDeadline") and str(t.get("dueDate") or "")[:10] and str(t["dueDate"])[:10] < until:
+        return "", f"a Hard Deadline of {str(t['dueDate'])[:10]} falls before the park's {until}: the deadline decides"
     m = re.match(r"\[(\d{1,2} \w{3} \d{4})", parks[-1].group(0))
     try:
         park_day = datetime.strptime(m.group(1), "%d %b %Y").date().isoformat() if m else ""
@@ -8762,9 +8774,14 @@ def restore_park_problem(t, today_iso):
     return until, ""
 
 
+# Tasks "Hard Deadline" (scripts/create-agent-task.py F["hardDeadline"]; js/config.js).
+HARD_DEADLINE_FIELD = "fldZKzIxgyrQ8CG8a"
+
+
 def cmd_restore_park(args):
     """Put back a park Kevin gave that a fold or a stray write undid (restore_park_problem)."""
-    t = task_view(get_task(args.task))
+    rec = get_task(args.task)
+    t = dict(task_view(rec), _hardDeadline=bool((rec.get("fields") or {}).get(HARD_DEADLINE_FIELD)))
     until, why = restore_park_problem(t, today_london())
     if why:
         sys.exit(f"REFUSED: {args.task}: {why}.")
@@ -11180,6 +11197,9 @@ DECIDED_MARK_LINE_RE = re.compile(
     r"^\[\d{1,2} \w{3} \d{4}(?: \d{2}:\d{2})? — agent-dispatch\] " + re.escape(DECIDED_NOTE_MARK)
     + r": (Approved as-is|Approved with minor edits)\b", re.M)
 SUBMITTED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] SUBMITTED\b", re.M)
+ESCALATED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] Escalated to Kevin as a decision card\b", re.M)
+DECIDED_ANY_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DECIDED_NOTE_MARK) + r":", re.M)
+DUE_MOVED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DUE_MOVED_MARK) + r"\b", re.M)
 PLAN_REPAIR_CARD_RE = re.compile(r"\bThe Your turn plan for (rec[A-Za-z0-9]{14})\b")
 
 
@@ -11219,7 +11239,11 @@ def plan_repair_closable(t):
     if kind == "none":
         # The plan is gone. Moot only when the card no longer waits in Kevin's lane as his step (read live):
         # a Your step card with no plan is still owed one.
-        card = task_view(get_task(m.group(1)))
+        try:
+            card = task_view(get_task(m.group(1)))
+        except Exception as e:  # noqa: BLE001 - said, then refused: a card that cannot be read is not "done"
+            print(f"WARNING: could not read card {m.group(1)} for plan repair {t['id']}: {e}", file=sys.stderr)
+            return ""
         return m.group(1) if card["status"] != "Approval" else ""
     return ""
 
@@ -11228,7 +11252,12 @@ def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
         evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
-        door = decided_card_verdict(t) or plan_repair_closable(t)
+        # Only a task with NO live verdict and nothing waiting (review of PR #978): a card back at Approval, a
+        # verdict of Changes requested or Rejected, or a park he gave that still stands keeps the door shut.
+        parked_until = [d for d in KEVIN_PARK_RE.findall(str(t["notes"] or "")) if d > today_london()]
+        door = ""
+        if not t["outcome"] and t["status"] not in ("Approval", "Completed", "Cancelled") and not parked_until:
+            door = decided_card_verdict(t) or plan_repair_closable(t)
         if not door:
             sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                      f"'{t['outcome'] or 'empty'}', not an approval. Only "

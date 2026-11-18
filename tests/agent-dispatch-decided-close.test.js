@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -107,6 +108,39 @@ except SystemExit as e:
 print(json.dumps({"err": err, "notes": TASKS["recANNOTATExxxxx1"]["fields"][AF["notes"]]}))`);
     expect(r.err).toMatch(/refusing a note .* that writes the 'Decision carried out' mark/);
     expect(r.notes).toBe('');
+  });
+});
+
+describe('finding 20261106-agent-dispatch-1223, review of PR #978: the door opens only when nothing is live', () => {
+  it("the real decided output opens it: decided on an approved card, then complete", () => {
+    const r = py(`
+rec("recREALDECIDExxx1", agentOutput="DECIDE: keep the example price cap?\\n\\nRECOMMENDED: delete it.",
+    approvalOutcome={"name": "Approved as-is"}, approvedAt="2026-10-19T08:00:00.000Z", sentForApprovalBy=[AGENT])
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_decided(types.SimpleNamespace(task="recREALDECIDExxx1", until=None, on_card=None, siblings_handled=None))
+print(json.dumps({"why": complete("recREALDECIDExxx1"), "status": status("recREALDECIDExxx1")}))`);
+    expect(r.why).toBe(null);
+    expect(r.status).toBe('Completed');
+  });
+
+  it('never while the card is back at Approval, carries a live verdict, or sits on a park he gave', () => {
+    const r = py(`
+from datetime import date
+FUTURE = "2099-01-17"
+rec("recBACKATAPPRxxx1", agentOutput=DECIDED_OUT, notes=MARK, status={"name": "Approval"})
+rec("recCHANGESxxxxxx1", agentOutput=DECIDED_OUT, notes=MARK, approvalOutcome={"name": "Changes requested"})
+rec("recPARKEDxxxxxxx1", agentOutput=DECIDED_OUT, status={"name": "Upcoming"}, dueDate=FUTURE,
+    notes=MARK + "\\n\\n[19 Oct 2026 — agent-dispatch] Parked until " + FUTURE + " on Kevin's answer; it comes back on the board that day.")
+print(json.dumps({k: [complete(k), status(k)] for k in ("recBACKATAPPRxxx1", "recCHANGESxxxxxx1", "recPARKEDxxxxxxx1")}))`);
+    expect(r.recBACKATAPPRxxx1[1]).toBe('Approval');
+    expect(r.recCHANGESxxxxxx1[0]).toMatch(/not an approval/);
+    expect(r.recPARKEDxxxxxxx1[0]).toMatch(/not an approval/);
+    for (const [why] of Object.values(r)) expect(why).not.toBe(null);
+  });
+
+  it('a hand-over reason is one line, so it cannot plant a stamped mark', () => {
+    const src = readFileSync(DISPATCH, 'utf8');
+    expect(src).toMatch(/reason = " "\.join\(str\(args\.reason or ""\)\.split\(\)\) or "approved reassignment"/);
   });
 });
 
