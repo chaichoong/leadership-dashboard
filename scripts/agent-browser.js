@@ -198,6 +198,12 @@ const BUILTIN_SITES = {
                                   loginUrl: 'https://manage.gocardless.com/sign-in' },
   'studio.youtube.com':         { label: 'YouTube Studio',     login: true,
                                   loginUrl: 'https://studio.youtube.com/' },
+  // Facebook (18 Nov 2026). The Content Engine publisher shares each episode's page post to Kevin's
+  // profile with this login (scripts/content-engine/facebook_share.py), and its job entry in
+  // scripts/job-schedule.json lists it under `signins`, so the 06:40 keep-alive asks for a sign-in the
+  // morning it lapses. It sat only in sites.json before: here, that need is on the list on any Mac.
+  'www.facebook.com':           { label: 'Facebook',           login: true,
+                                  loginUrl: 'https://www.facebook.com/login' },
   'www.linkedin.com':           { label: 'LinkedIn',           login: true,
                                   loginUrl: 'https://www.linkedin.com/login' },
   // my.edfenergy.com no longer answers (SSL error, 4 Sep 2026); the account
