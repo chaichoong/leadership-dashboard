@@ -5755,8 +5755,10 @@ def card_dated_siblings(card_id, agent_output):
 
 
 def parked_on_card(notes, card_id):
-    """True when a task's Notes carry this card's park line (decided_on_card)."""
-    return f"on Kevin's answer on card {card_id}" in str(notes or "")
+    """True when a task's Notes carry this card's park line, as decided_on_card stamps it (the dispatcher's
+    own stamp and a dated Parked until, never the phrase typed into a note)."""
+    return bool(re.search(r"^\[\d{1,2} \w{3} \d{4} — agent-dispatch\] Parked until \d{4}-\d{2}-\d{2} "
+                          r"on Kevin's answer on card " + re.escape(card_id) + r"\b", str(notes or ""), re.M))
 
 
 def park_clears_wall(notes, stamp_min, why):
