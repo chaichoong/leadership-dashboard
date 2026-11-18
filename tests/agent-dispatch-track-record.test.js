@@ -344,8 +344,13 @@ m.supersede_attachments = lambda *a, **k: []
 m.upload_attachment = lambda *a, **k: 'x'
 m.load_login_sites = lambda: {}
 import tempfile, os, io, contextlib
+# Since round 2 of PR 962 submit runs the send path's ATTACH type and root checks, so the
+# path has to be one the send path would accept: under the attachments directory, which is
+# read from the environment at call time. The file need not exist yet at submit.
+attach_dir = tempfile.mkdtemp()
+os.environ['SEND_EMAIL_ATTACH_DIR'] = attach_dir
 fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
-fh.write('TRACK RECORD: none found (searched tasks)\\n\\nTO: a@b.com\\nFROM: kevinbrittain@gmail.com\\nSUBJECT: x\\nATTACH: /tmp/x/loa.pdf\\n---\\nDear A\\n\\n**Carrying this out will involve:** sending this email with the LOA attached.')
+fh.write('TRACK RECORD: none found (searched tasks)\\n\\nTO: a@b.com\\nFROM: kevinbrittain@gmail.com\\nSUBJECT: x\\nATTACH: ' + os.path.join(attach_dir, 'loa.pdf') + '\\n---\\nDear A\\n\\n**Carrying this out will involve:** sending this email with the LOA attached.')
 fh.close()
 agent = sorted(m.AGENTS)[0]
 with contextlib.redirect_stdout(io.StringIO()):

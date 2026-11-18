@@ -196,12 +196,14 @@ describe('the report gate', () => {
     expect(py(`print(ad.checked_trigger(${JSON.stringify(ok)}))`)).toBe('deadline');
     expect(py(`print(repr(ad.checked_problem("CHECKED: handled=no | roy=no | machine=no | open-task=no | trigger=other: tenant is vulnerable", "Admin", True)))`)).toBe("''");
   });
-  // THE BANNER IS NOT THE SHAPE (findings 20261016-agent-dispatch-951 and 20261107-agent-dispatch-1242).
+  // THE BANNER IS NOT THE SHAPE (finding 20261016-agent-dispatch-951).
   // cmd_submit prepends TIER1_BANNER before this gate runs, so CHECK_EXEMPT_RE.match never saw the
   // CLOSE PROPOSAL at the start: a tier-1 close on an inbound Admin task was refused for the five
   // questions, and adding a CHECKED line got it refused as "not a report". No honest shape passed
   // and two approved closes sat for a month. Back-test: remove the banner strip and all four fail.
-  it('an exempt shape under the tier-1 banner is still that shape (951, 1242)', () => {
+  // 20261107-agent-dispatch-1242 is the same bug in decision_level, and has its own test in
+  // tests/protocol-enforcement.test.js: one test proves one finding.
+  it('an exempt shape under the tier-1 banner is still that shape (951)', () => {
     const r = j(`
 from agent_email_format import TIER1_BANNER
 print(json.dumps([
@@ -213,7 +215,7 @@ print(json.dumps([
     expect(r).toEqual(['', '', '', '']);
   });
 
-  it('the banner does not excuse a report that answers nothing (951, 1242 control)', () => {
+  it('the banner does not excuse a report that answers nothing (951 control)', () => {
     const p = py(`
 from agent_email_format import TIER1_BANNER
 print(ad.checked_problem(TIER1_BANNER + "\\n\\nFindings: the council replied.", "Analysis", True))`);

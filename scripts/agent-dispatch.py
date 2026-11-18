@@ -3282,11 +3282,23 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     notes = tf.get(AF["notes"], "") or ""
     amount, recurring = spend_declared(out)
     money = money_level(amount, recurring)
+    # THE BANNER HIDES THE SHAPE HERE TOO (round 2 of PR 962, 18 Nov 2026;
+    # reviewer on findings 20261016-agent-dispatch-951 and
+    # 20261107-agent-dispatch-1242). cmd_submit prepends TIER1_BANNER before
+    # this runs, so every shape matched at the START of the output has to be
+    # matched on the body underneath it. checked_problem was fixed in round 1
+    # and this was not: PASS_TO_ROY_RE.match inside certificate_warn_above ran
+    # on the banner-prefixed text, so a tier-1 PASS TO ROY certificate booking
+    # lost its price-warning line — the very line Kevin's 19 Oct 2026 ruling
+    # put on the card. The body is taken once, here, and used by both.
+    body = out
+    if body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
     # A statutory certificate booked through Roy used to have a no-card cap
     # (Kevin, 17 Sep 2026). He deleted it on 19 Oct 2026: every certificate
     # booking is an approval card whatever the quote, and the old figure is a
     # warning line on that card when the quote is above it.
-    cert_warn = certificate_warn_above(name, out)
+    cert_warn = certificate_warn_above(name, body)
     cert_warning = ""
     if cert_warn and amount is not None and amount > cert_warn:
         cert_warning = (f"quote £{amount:g} is above the usual £{cert_warn:g} for "
@@ -3317,9 +3329,7 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     banner = TIER1_BANNER in out
     if agent_banner is not None:
         banner = bool(agent_banner)
-    body = out
-    if body.startswith(TIER1_BANNER):
-        body = body[len(TIER1_BANNER):].strip()
+    # `body` is taken once, above, where cert_warn also reads it.
     # A STATUS-ONLY UPDATE (Kevin, 14 Nov 2026) is decided before the tier check on purpose: the
     # ruling is about creditor and tier-1 chase updates above all. It is Level A only when the code
     # finds nothing in it to carry out and nothing in its own words that asks anything of him;
@@ -7977,7 +7987,11 @@ def cmd_submit(args):
         # sign-off with no contact block). It runs only here, never on the send
         # path, so a draft he already approved is still carried out.
         try:
-            validate_any_submission(output, task_name=_pn)
+            # The task id goes with it so the ATTACH type and root checks the
+            # SEND path runs can run here too, before Kevin decides (round 2 of
+            # PR 962; findings 862, 1143 and 1301). Without it the folder rule
+            # cannot tell this task's run folder from another's, so it is told.
+            validate_any_submission(output, task_name=_pn, task_id=args.task)
         except EmailFormatError as exc:
             sys.exit(
                 f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
