@@ -133,8 +133,8 @@ Route to an **AI agent via Team Member** (`flduCtmQGpOA4eWaj`, the Team Members 
 records with `Is AI Agent` ticked) whenever the work is: reading and triaging an email,
 drafting correspondence, chasing a supplier or a council, filling a form, researching,
 producing a document, checking a certificate or a record, reconciling, or writing code.
-The 17 agents are the 11 department heads, the CEO and 5 workers — writer, researcher,
-analyst, auditor, builder. Pick the one whose remit fits.
+The agents are the Team Members rows with `Is AI Agent` ticked: read them, never a list
+from memory. Pick the one whose remit fits.
 
 Name a **human on Assignee** only when the task genuinely cannot be done without one:
 a signature, a phone call, a physical visit to a property, a credential only they hold,
