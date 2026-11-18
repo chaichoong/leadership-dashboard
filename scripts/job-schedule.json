@@ -610,7 +610,9 @@
    "network"
   ],
   "retryWhenDeferred": false,
-  "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one."
+  "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one.",
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "18 Nov 2026: this job held the queue for 2h14m, 2h10m and over 2h45m on 17-18 Nov (about 71 s per YouTube Studio visit, 106 to 121 videos re-read every six hours) and the 07:30 rent check, the 09:00 inbox run, task-manager and signature-watch gave up behind it. The cause is fixed in publish.py: one sync visits at most MONETISE_PER_RUN videos, and content-engine-publish.sh gives each run a 30-minute budget after which no new Studio visit, Facebook share or episode starts. This ceiling is the backstop: a healthy run takes 4 to 26 minutes, and three episodes published on 18 Nov took about 6 minutes each."
  },
  "content-report-live": {
   "cron": "*/10 * * * *",
