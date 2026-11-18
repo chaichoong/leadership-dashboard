@@ -436,3 +436,48 @@ describe('agent-dispatch exposes the outcome subcommand the gate depends on', ()
     expect(read('scripts/agent-browser.js')).toMatch(/'agent-dispatch\.py'\), 'outcome'/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18 Nov 2026. Finding 20261013-agent-dispatch-857 (re-cut from closed PR #930,
+// whose other finding failed review; this half passed). A robot asked to prove
+// the sign-in app had uploaded to iCloud had no route to the answer: brctl,
+// xattr, stat and osadecompile were all refused, so the task sat for weeks. The
+// routes added are READS. What matters as much is what was NOT added: a bare
+// `launchctl` would let a robot unload the estate, and a bare `brctl` or `xattr`
+// can evict files or rewrite attributes.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('finding 20261013-agent-dispatch-857: the machine-state reads stay narrow', () => {
+  const tools = () => execFileSync('bash', ['-c',
+    `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; printf '%s\\n' "\${AGENT_ALLOWED_TOOLS[@]}"`,
+  ], { encoding: 'utf8' }).trim().split('\n');
+
+  it('the reads a robot needs to prove a file reached iCloud are reachable', () => {
+    const out = tools();
+    for (const t of ['Bash(brctl status:*)', 'Bash(xattr -l:*)', 'Bash(xattr -p:*)',
+      'Bash(stat:*)', 'Bash(osadecompile:*)']) {
+      expect(out, `${t} must be reachable by a headless agent`).toContain(t);
+    }
+  });
+
+  it('no entry hands a robot a binary that can unload the estate or rewrite files', () => {
+    const out = tools();
+    const forbidden = [
+      /^Bash\(launchctl[: ]/,                 // load, unload, bootout, kickstart
+      /^Bash\(brctl:/,                        // evict, download
+      /^Bash\(brctl (evict|download)/,
+      /^Bash\(xattr:/,                        // -w, -d, -c write attributes
+      /^Bash\(xattr -[wdc]/,
+      /^Bash\(\*\)$/,                         // an unrestricted shell
+      /^Bash\((rm|mv|cp|chmod|sudo)[:( ]/,
+    ];
+    const bad = out.filter((t) => forbidden.some((re) => re.test(t)));
+    expect(bad, `these widen the robots' power beyond the fix: ${bad.join(', ')}`).toEqual([]);
+  });
+
+  it('the robot deny list does not take the reads straight back', () => {
+    const settings = JSON.parse(read('scripts/agent-settings.json'));
+    const deny = (settings.permissions && settings.permissions.deny) || [];
+    const blocked = deny.filter((d) => /brctl|xattr|osadecompile|^Bash\(stat/.test(d));
+    expect(blocked, `a deny beats an allow: ${blocked.join(', ')}`).toEqual([]);
+  });
+});

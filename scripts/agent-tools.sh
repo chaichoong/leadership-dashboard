@@ -103,6 +103,19 @@ AGENT_ALLOWED_TOOLS=(
   # which would run anything it is handed.
   "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py verify:*)"
   "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 scripts/agent-dispatch.py verify:*)"
+
+  # READING THIS MACHINE'S OWN FILE STATE (finding 20261013-agent-dispatch-857,
+  # re-cut from closed PR #930 on 18 Nov 2026). A robot asked to prove a file had
+  # uploaded to iCloud had no route to the answer: brctl, xattr, stat and
+  # osadecompile were all refused for the agent AND the dispatcher, so a task that
+  # needed one read sat for weeks. All five are READS. The exact subcommand is
+  # named where the binary also writes: `brctl` on its own can evict and download,
+  # and `xattr` on its own can set (-w) and delete (-d) attributes.
+  "Bash(brctl status:*)"
+  "Bash(xattr -l:*)"
+  "Bash(xattr -p:*)"
+  "Bash(stat:*)"
+  "Bash(osadecompile:*)"
 )
 export AGENT_ALLOWED_TOOLS
 
