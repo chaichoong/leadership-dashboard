@@ -415,7 +415,9 @@ def classify(f, activity_ids, now=None, lane=None):
     # answered on 23 Sep and re-asked on 30 Sep. A live verdict on a DECIDE:
     # card is decided whatever the stamps say; the stamps carry a day and no
     # time, so a card carried out and asked again on one day reads as closed.
-    answered = f.get("Approval Outcome") and str(f.get("Agent Output") or "").lstrip().upper().startswith("DECIDE:")
+    # Read under the tier-1 banner by dispatch's own is_decide_card (finding 20261015-agent-dispatch-907):
+    # one answer from both readers on what a decision card is.
+    answered = f.get("Approval Outcome") and _load_dispatch().is_decide_card(f.get("Agent Output"))
     # A CARD NOBODY RAISED WITH `escalate` IS ANSWERED TOO (15 Oct 2026). Dispatch files every
     # answered DECIDE: card as `decided` ("the Task Manager's move, never a carry-out",
     # agent-dispatch.py is_decide_card), but this board only did so when the card carried the

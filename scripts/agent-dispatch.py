@@ -305,8 +305,16 @@ def in_dispatch_window(status, due_date, today=None, some_day=False):
 
 def is_decide_card(agent_output):
     """A decision card (cmd_escalate): Agent Output opens with DECIDE:. Kevin's
-    answer to one is for the Task Manager's board, never a carry-out."""
-    return str(agent_output or "").lstrip().upper().startswith("DECIDE:")
+    answer to one is for the Task Manager's board, never a carry-out.
+
+    THE BANNER IS NOT THE SHAPE (finding 20261015-agent-dispatch-907): a tier-1 card opens with
+    TIER1_BANNER and its DECIDE: line sits under it, so the card Kevin approved on 24 Oct 2026
+    (hold seven council tax tasks to a date) was never read as a decision card and `decided`
+    refused it. Read under the banner, as checked_problem and decision_level do."""
+    out = str(agent_output or "").strip()
+    if out.startswith(TIER1_BANNER):
+        out = out[len(TIER1_BANNER):].strip()
+    return out.upper().startswith("DECIDE:")
 
 # How many pieces of work one run may take on.
 #
@@ -2123,6 +2131,39 @@ def coverage_parse(text):
     return props, contractors
 
 
+# A COUNTY OR REGION IS AN AREA TOO (finding 20261012-agent-dispatch-844, repeat of
+# 20261012-agent-dispatch-843). On 12 Oct 2026 submit refused a reply to DD Fire Alarms,
+# who say they cover "Lancashire / North West", for FY8 Lytham St Annes — which is in
+# Lancashire. The matcher read postcode districts, area letters and a town named in the
+# address, so a county name matched nothing and the certificate email sat for 35 days.
+# Only the counties and regions Kevin's portfolio and its contractors actually name are
+# listed, each as the Royal Mail postcode AREAS that fall in it (a postcode area straddles
+# borders, so this is the generous reading; the check exists to stop an email that looks
+# clueless, not to adjudicate a boundary). Add an entry when a real coverage line needs it.
+AREA_REGIONS = {
+    "LANCASHIRE": {"BB", "BL", "FY", "LA", "OL", "PR", "WN"},
+    "GREATER MANCHESTER": {"BL", "M", "OL", "SK", "WA", "WN"},
+    "MERSEYSIDE": {"CH", "L", "PR", "WA", "WN"},
+    "CHESHIRE": {"CH", "CW", "SK", "WA"},
+    "CUMBRIA": {"CA", "LA"},
+    "NORTH WEST": {"BB", "BL", "CA", "CH", "CW", "FY", "L", "LA", "M", "OL",
+                   "PR", "SK", "WA", "WN"},
+    "SUFFOLK": {"CB", "CO", "IP", "NR"},
+    "ESSEX": {"CM", "CO", "IG", "RM", "SS"},
+    "CAMBRIDGESHIRE": {"CB", "PE"},
+}
+# "North-West", "North West England" and "the North West" are all the same words.
+AREA_REGION_TRIM_RE = re.compile(r"^(?:THE\s+)?(.*?)(?:\s+(?:ENGLAND|AREA|REGION|COUNTY))?$")
+
+
+def region_areas(stated):
+    """The postcode areas a stated county or region covers, or an empty set."""
+    name = re.sub(r"[-_]+", " ", str(stated or "").upper())
+    name = " ".join(name.split())
+    m = AREA_REGION_TRIM_RE.match(name)
+    return AREA_REGIONS.get(m.group(1) if m else name, set())
+
+
 def area_covers(areas, address):
     """True when the contractor's stated areas include this property."""
     district = postcode_district(address)
@@ -2135,6 +2176,8 @@ def area_covers(areas, address):
             return True
         if letters and a == letters:
             return True            # an area code: "CB" covers CB9
+        if letters and letters in region_areas(a):
+            return True            # a county or region: "Lancashire" covers FY8
         if len(a) >= 4 and not re.match(r"^[A-Z]{1,2}\d", a) and a in addr_up:
             return True            # a town named in the address
     return False
@@ -2387,6 +2430,15 @@ def checked_problem(output, task_type, inbound):
     if not inbound or task_type not in REPORT_TYPES:
         return ""
     out = (output or "").strip()
+    # THE BANNER IS NOT THE SHAPE (findings 20261016-agent-dispatch-951 and
+    # 20261107-agent-dispatch-1242). cmd_submit prepends TIER1_BANNER before this
+    # gate runs, so CHECK_EXEMPT_RE.match never saw the CLOSE PROPOSAL at the
+    # start of a tier-1 close on an inbound task: it was refused as "must open
+    # with the five questions", and adding a CHECKED line got it refused as "not
+    # a report". No honest shape passed, and two approved closes sat for a month.
+    # status_only_line already reads under the banner; this reads under it too.
+    if out.startswith(TIER1_BANNER):
+        out = out[len(TIER1_BANNER):].strip()
     # A STATUS ONLY update under the tier-1 banner is exempt too (14 Nov 2026): it declares
     # nothing to decide, and status_only_problem refuses a CHECKED line naming a trigger.
     if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out) or status_only_line(out):
@@ -3238,11 +3290,23 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     notes = tf.get(AF["notes"], "") or ""
     amount, recurring = spend_declared(out)
     money = money_level(amount, recurring)
+    # THE BANNER HIDES THE SHAPE HERE TOO (round 2 of PR 962, 18 Nov 2026;
+    # reviewer on findings 20261016-agent-dispatch-951 and
+    # 20261107-agent-dispatch-1242). cmd_submit prepends TIER1_BANNER before
+    # this runs, so every shape matched at the START of the output has to be
+    # matched on the body underneath it. checked_problem was fixed in round 1
+    # and this was not: PASS_TO_ROY_RE.match inside certificate_warn_above ran
+    # on the banner-prefixed text, so a tier-1 PASS TO ROY certificate booking
+    # lost its price-warning line — the very line Kevin's 19 Oct 2026 ruling
+    # put on the card. The body is taken once, here, and used by both.
+    body = out
+    if body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
     # A statutory certificate booked through Roy used to have a no-card cap
     # (Kevin, 17 Sep 2026). He deleted it on 19 Oct 2026: every certificate
     # booking is an approval card whatever the quote, and the old figure is a
     # warning line on that card when the quote is above it.
-    cert_warn = certificate_warn_above(name, out)
+    cert_warn = certificate_warn_above(name, body)
     cert_warning = ""
     if cert_warn and amount is not None and amount > cert_warn:
         cert_warning = (f"quote £{amount:g} is above the usual £{cert_warn:g} for "
@@ -3273,9 +3337,7 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     banner = TIER1_BANNER in out
     if agent_banner is not None:
         banner = bool(agent_banner)
-    body = out
-    if body.startswith(TIER1_BANNER):
-        body = body[len(TIER1_BANNER):].strip()
+    # `body` is taken once, above, where cert_warn also reads it.
     # A STATUS-ONLY UPDATE (Kevin, 14 Nov 2026) is decided before the tier check on purpose: the
     # ruling is about creditor and tier-1 chase updates above all. It is Level A only when the code
     # finds nothing in it to carry out and nothing in its own words that asks anything of him;
@@ -5646,6 +5708,145 @@ def cmd_escalate(args):
                       "trackRecord": record.splitlines()[0][:200]}))
 
 
+# A day, a month and a YEAR written out ("31 Mar 2027", "1st June 2027"), the shape a card's own table uses.
+# The year is required (review of finding 907): "14 Dec" would match every December, and "2 March Road" a date.
+CARD_DAY_MONTH_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?\s+(\d{4})\b")
+CARD_REC_RE = re.compile(r"\brec[A-Za-z0-9]{14}\b")
+
+
+def card_line_names_date(line, d):
+    """True when one line of a card names this exact date with its year: ISO, '31 Mar 2027' or
+    '31/03/2027'. A month alone is not enough here (quote_names_date's bar is for Kevin's own words)."""
+    line = str(line or "")
+    if d.isoformat() in line:
+        return True
+    for day, word, year in CARD_DAY_MONTH_RE.findall(line):
+        if _MONTH_NUM.get(word.lower()) == d.month and int(day) == d.day and int(year) == d.year:
+            return True
+    for day, month, year in re.findall(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", line):
+        if (int(day), int(month), int(year)) == (d.day, d.month, d.year):
+            return True
+    return False
+
+
+def card_rows(agent_output):
+    """{task id: [row, ...]} for the card's OWN table rows: lines starting '|' that name exactly one task id,
+    above any earlier draft (EARLIER_OUTPUT_MARK) and above the TRACK RECORD. A history line, a quoted draft,
+    an option he did not pick written as prose, or a row naming two tasks never speaks for a task
+    (review of finding 907)."""
+    body = str(agent_output or "").partition(EARLIER_OUTPUT_MARK)[0]
+    rows = {}
+    for ln in body.splitlines():
+        if ln.lstrip().upper().startswith("TRACK RECORD"):
+            break
+        if not ln.lstrip().startswith("|"):
+            continue
+        ids = set(CARD_REC_RE.findall(ln))
+        if len(ids) == 1:
+            rows.setdefault(ids.pop(), []).append(ln)
+    return rows
+
+
+def card_dated_siblings(card_id, agent_output):
+    """The other task ids the card's own table gives a date to: the tasks its answer parks."""
+    return [i for i, lines in card_rows(agent_output).items()
+            if i != card_id and any(CARD_DAY_MONTH_RE.search(ln) or re.search(r"\b\d{4}-\d{2}-\d{2}\b", ln)
+                                    or re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", ln) for ln in lines)]
+
+
+def parked_on_card(notes, card_id):
+    """True when a task's Notes carry this card's park line, as decided_on_card stamps it (the dispatcher's
+    own stamp and a dated Parked until, never the phrase typed into a note)."""
+    return bool(re.search(r"^\[\d{1,2} \w{3} \d{4} — agent-dispatch\] Parked until \d{4}-\d{2}-\d{2} "
+                          r"on Kevin's answer on card " + re.escape(card_id) + r"\b", str(notes or ""), re.M))
+
+
+def park_clears_wall(notes, stamp_min, why):
+    """The CLEARED line a park writes in the same patch when a TOOL wall is open on the task, or ''.
+    A parked task waits on Kevin's date, not on the wall: left open, the wall's fix would wake the task
+    to Today and undo the park (review of finding 907). Only a TOOL wall: a KEVIN, SIGN-IN or SITE wall is
+    a step someone owes, and is never cleared by a date."""
+    b = task_blocker(notes)
+    if not b or b["kind"] != "TOOL":
+        return ""
+    return blocker_note(stamp_min, "agent-dispatch", BLOCKER_CLEARED_MARK, b, why)
+
+
+def on_card_problem(task_id, tf, lead_rec, until):
+    """'' when Kevin's answer on decision card `lead_rec` parks `task_id` to `until`, else why not.
+
+    ONE CARD, SEVERAL TASKS (finding 20261015-agent-dispatch-907). On 24 Oct 2026 Kevin approved one card
+    covering seven council tax tasks ("hold all seven to 31 March 2027; 5 Woodcock back 14 December"). Only
+    the card itself is a decision card, so `decided` refused the six siblings, and `due` needs his dated
+    words on each task, which a card covering seven never gives: the siblings sat at Today with a wall for
+    25 days. The card's own table is his answer for each row, so it may park a sibling when, and only when:
+    the card is a decision card carrying a REAL approval as it stands (approved, Approved At after the card
+    was created, Sent For Approval By set), he wrote no words with it (his words decide, through the normal
+    route), and one of the card's own table rows names this task alone AND this exact date with its year.
+    Park the siblings before the card itself is closed with `decided` (which refuses until they are)."""
+    lf = (lead_rec or {}).get("fields", {}) or {}
+    lead_id = (lead_rec or {}).get("id") or "the card"
+    status = sel(tf.get(AF["status"]))
+    if status in ("Completed", "Cancelled"):
+        return f"{task_id} is {status}; parking it would reopen it"
+    if status == "Approval":
+        return f"{task_id} is waiting at Approval as its own card; Kevin answers that card, not {lead_id}"
+    if sel(tf.get(AF["approvalOutcome"])):
+        return (f"{task_id} has its own verdict standing ({sel(tf.get(AF['approvalOutcome']))}); carry that "
+                f"out, never park it under {lead_id}")
+    b = task_blocker(tf.get(AF["notes"]))
+    if b and b["kind"] != "TOOL":
+        return f"{task_id} has an open {b['kind']} wall ({b['subject']}): a step someone owes is never parked by a date"
+    if not is_decide_card(lf.get(AF["agentOutput"])):
+        return f"{lead_id} is not a decision card (its Agent Output does not open with DECIDE:)"
+    outcome = sel(lf.get(AF["approvalOutcome"]))
+    if outcome not in APPROVED:
+        return (f"Kevin has not approved {lead_id} (its outcome is {outcome or 'empty'}); if it was already "
+                "closed with `decided`, its approval was archived: siblings are parked BEFORE the card itself")
+    evidence = approval_evidence_problem(lf, (lead_rec or {}).get("createdTime") or "")
+    if evidence:
+        return f"{lead_id} carries no real approval: {evidence}"
+    if str(lf.get(AF["approvalFeedback"]) or "").strip():
+        return (f"Kevin wrote words with his answer on {lead_id}; his words decide, so carry them out through "
+                "the normal route (due --quote, or a fresh card), never by the card's table")
+    if not until:
+        return "--on-card needs --until: the date the card names for this task"
+    try:
+        d = datetime.strptime(until, "%Y-%m-%d").date()
+    except ValueError:
+        return f"--until {until} is not a date (YYYY-MM-DD)"
+    if d.isoformat() <= today_london():
+        return f"--until {until} is not in the future"
+    rows = card_rows(lf.get(AF["agentOutput"])).get(task_id) or []
+    if not rows:
+        return (f"{lead_id} has no table row of its own for {task_id} (a row starting '|' that names it alone, "
+                "above the TRACK RECORD), so Kevin's answer on it gives this task no date")
+    if not any(card_line_names_date(ln, d) for ln in rows):
+        return (f"{lead_id}'s row for {task_id} does not name {d.isoformat()} with its year; park it to the date "
+                "its own row gives")
+    return ""
+
+
+def decided_on_card(task_id, tf, lead_id, until, stamp):
+    """Park a sibling task to the date Kevin's approved decision card gives it (on_card_problem)."""
+    lead_rec = get_task(lead_id)
+    problem = on_card_problem(task_id, tf, lead_rec, until)
+    if problem:
+        sys.exit(f"REFUSED: {problem}.")
+    lf = lead_rec.get("fields", {}) or {}
+    approved = str(lf.get(AF["approvedAt"]) or "")[:10]
+    existing = str(tf.get(AF["notes"]) or "").rstrip()
+    stamp_min = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    cleared = park_clears_wall(existing, stamp_min, f"parked until {until} on Kevin's answer on card {lead_id}; "
+                                                    "nothing is owed before that date")
+    # The same stamped "Parked until" line `decided --until` writes, so task-manager.py files it as parked.
+    note = (f"[{stamp} — agent-dispatch] Parked until {until} on Kevin's answer on card {lead_id} "
+            f"({sel(lf.get(AF['approvalOutcome']))}, {approved}).")
+    notes = "\n\n".join(x for x in (existing, cleared, note) if x)
+    patch_task(task_id, {AF["status"]: "Upcoming", AF["dueDate"]: until, AF["notes"]: notes.strip()[-90000:]})
+    print(json.dumps({"parkedOnCard": task_id, "card": lead_id, "until": until, "wallCleared": bool(cleared)}))
+
+
 def cmd_decided(args):
     """Close an ANSWERED decision card whose answer is to wait.
 
@@ -5661,13 +5862,37 @@ def cmd_decided(args):
     properly, never for "nothing needs doing", which is a `complete`."""
     tf = (get_task(args.task).get("fields", {}) or {})
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    lead = (getattr(args, "on_card", None) or "").strip()
+    if lead and lead != args.task:
+        return decided_on_card(args.task, tf, lead, (getattr(args, "until", None) or "").strip(), stamp)
     fields = decision_carry_out_fields(tf, stamp)
     if not fields:
         sys.exit(f"REFUSED: {args.task} is not an answered decision card (a DECIDE: card with Kevin's verdict "
-                 "on it), so there is no answer to record.")
+                 "on it), so there is no answer to record. If ONE card he answered covers this task and names "
+                 "its date, use --on-card <that card's id> --until <the date>.")
     if sel(tf.get(AF["status"])) == "Completed":
         sys.exit(f"REFUSED: {args.task} is Completed (a rejected card closes its task). Parking it would "
                  "reopen work Kevin closed.")
+    # SIBLINGS FIRST (review of finding 907). Closing the card archives the approval `--on-card` reads, so
+    # a task its own table dates would be stranded with no route left. Read each one live.
+    handled = " ".join(str(getattr(args, "siblings_handled", None) or "").split())
+    if not handled:
+        waiting = []
+        for sib in card_dated_siblings(args.task, tf.get(AF["agentOutput"])):
+            try:
+                sf = (get_task(sib).get("fields", {}) or {})
+            except Exception as e:  # noqa: BLE001 - a read that fails is said, never read as "parked"
+                sys.exit(f"REFUSED: could not read {sib}, a task this card dates ({e}); nothing written.")
+            if sel(sf.get(AF["status"])) not in ("Completed", "Cancelled") \
+                    and not parked_on_card(sf.get(AF["notes"]), args.task):
+                waiting.append(sib)
+        if waiting:
+            sys.exit(f"REFUSED: {args.task}'s own table dates {len(waiting)} other open task(s) not yet parked on "
+                     f"it: {', '.join(waiting)}. Park each first: decided <id> --until <its row's date> "
+                     f"--on-card {args.task}. Closing this card first archives the approval they need. If a row "
+                     "is not a task this answer parks, say why with --siblings-handled \"<why>\".")
+    elif len(handled) < 10:
+        sys.exit("REFUSED: --siblings-handled needs a sentence saying why the dated rows are not parked by this answer.")
     note = fields.pop("_note")
     until = (getattr(args, "until", None) or "").strip()
     if until:
@@ -5684,6 +5909,13 @@ def cmd_decided(args):
         # the board reads a stamp's first line (PARKED_NOTE_MARK in
         # task-manager.py files the task as parked, not stuck, until the date).
         note += f"\n\n[{stamp} — agent-dispatch] Parked until {due} on Kevin's answer; it comes back on the board that day."
+        # A TOOL wall left open would be woken to Today by its fix and undo the park (review of finding 907).
+        cleared = park_clears_wall(tf.get(AF["notes"]), datetime.now(LONDON).strftime("%d %b %Y %H:%M"),
+                                   f"parked until {due} on Kevin's answer; nothing is owed before that date")
+        if cleared:
+            note = cleared + "\n\n" + note
+    if handled:
+        note += f"\n\n[{stamp} — agent-dispatch] Dated rows on this card left as they are: {handled[:300]}"
     existing = str(tf.get(AF["notes"]) or "").rstrip()
     holders = re.findall(r"Escalated to Kevin as a decision card \(holder ([^)]*)\)", existing)
     # An agent or a person on the team (a card Roy held goes back to Roy), never the Task Manager itself.
@@ -7933,7 +8165,11 @@ def cmd_submit(args):
         # sign-off with no contact block). It runs only here, never on the send
         # path, so a draft he already approved is still carried out.
         try:
-            validate_any_submission(output, task_name=_pn)
+            # The task id goes with it so the ATTACH type and root checks the
+            # SEND path runs can run here too, before Kevin decides (round 2 of
+            # PR 962; findings 862, 1143 and 1301). Without it the folder rule
+            # cannot tell this task's run folder from another's, so it is told.
+            validate_any_submission(output, task_name=_pn, task_id=args.task)
         except EmailFormatError as exc:
             sys.exit(
                 f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
@@ -16423,6 +16659,12 @@ def main():
     dd.add_argument("task")
     dd.add_argument("--until", metavar="YYYY-MM-DD",
                     help="park the task until this date; it comes back on the board that day")
+    dd.add_argument("--on-card", dest="on_card", metavar="CARD_ID",
+                    help="the answered decision card that covers this task and names its date on the task's own "
+                         "line (finding 907); park the siblings before closing the card itself")
+    dd.add_argument("--siblings-handled", dest="siblings_handled", metavar="WHY",
+                    help="close the card although its table dates other open tasks, saying why they are not "
+                         "parked by this answer (written to Notes)")
 
     h = sub.add_parser("handover",
                        help="hand an approved task to a named human team member")

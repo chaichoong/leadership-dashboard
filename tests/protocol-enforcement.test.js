@@ -37,6 +37,12 @@ def verdict(name, output, desc=""):
     rec = {"id": "recTASK000000001", "fields": {m.AF["name"]: name, m.AF["description"]: desc, m.AF["notes"]: ""}}
     lv = m.decision_level(output, "Admin", rec, fetch=lambda i: {})
     return {"level": lv["level"], "why": lv["why"], "certificateWarning": lv["certificateWarning"]}
+def banner_verdict(name, output, desc=""):
+    rec = {"id": "recTASK000000001", "fields": {m.AF["name"]: name, m.AF["description"]: desc, m.AF["notes"]: ""}}
+    lv = m.decision_level(m.TIER1_BANNER + "\\n\\n" + output, "Admin", rec,
+                          fetch=lambda i: {}, agent_banner=False)
+    return {"level": lv["level"], "why": lv["why"], "certificateWarning": lv["certificateWarning"],
+            "certificateWarnAbove": lv["certificateWarnAbove"]}
 ${snippet}
 `;
   return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }).trim().split('\n').pop());
@@ -73,6 +79,26 @@ describe('every certificate booking through Roy is a card (Kevin, 19 Oct 2026)',
     expect(out.notCompliance[0]).toBe('B');
     // The Roy veto still reads the whole text: a sale or a mortgage is never a Level A booking.
     expect(out.veto[0]).toBe('B');
+  });
+
+  // THE BANNER HID THE SHAPE HERE TOO (finding 20261107-agent-dispatch-1242, round 2 of PR 962).
+  // cmd_submit prepends TIER1_BANNER before decision_level runs, and certificate_warn_above
+  // matches PASS_TO_ROY_RE at the START of the text, so a tier-1 certificate booking lost the
+  // price-warning line Kevin's 19 Oct 2026 ruling put on the card: he saw the quote with nothing
+  // saying it was above the usual price. Round 1 fixed the same bug in checked_problem only.
+  // Back-test: pass the unstripped output to certificate_warn_above again and both of these fail.
+  it('a tier-1 certificate booking keeps its price-warning line under the banner (1242)', () => {
+    const warn = py(`print(json.dumps({
+  "over": banner_verdict("COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place", roy("the EICR", "£250")),
+  "under": banner_verdict("COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place", roy("the EICR", "£180")),
+}))`);
+    expect(warn.over.certificateWarnAbove).toBe(200);
+    expect(warn.over.certificateWarning).toContain('above the usual £200');
+    // CONTROL: the strip does not invent a warning. A quote under the usual price still has none,
+    // and a tier-1 matter is still Kevin's whatever the shape underneath the banner.
+    expect(warn.under.certificateWarning).toBe(null);
+    expect(warn.over.level).toBe('C');
+    expect(warn.under.level).toBe('C');
   });
 });
 

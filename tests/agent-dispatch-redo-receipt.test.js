@@ -196,6 +196,32 @@ describe('the report gate', () => {
     expect(py(`print(ad.checked_trigger(${JSON.stringify(ok)}))`)).toBe('deadline');
     expect(py(`print(repr(ad.checked_problem("CHECKED: handled=no | roy=no | machine=no | open-task=no | trigger=other: tenant is vulnerable", "Admin", True)))`)).toBe("''");
   });
+  // THE BANNER IS NOT THE SHAPE (finding 20261016-agent-dispatch-951).
+  // cmd_submit prepends TIER1_BANNER before this gate runs, so CHECK_EXEMPT_RE.match never saw the
+  // CLOSE PROPOSAL at the start: a tier-1 close on an inbound Admin task was refused for the five
+  // questions, and adding a CHECKED line got it refused as "not a report". No honest shape passed
+  // and two approved closes sat for a month. Back-test: remove the banner strip and all four fail.
+  // The same bug in decision_level is a separate finding with its own test in
+  // tests/protocol-enforcement.test.js: one test proves one finding.
+  it('an exempt shape under the tier-1 banner is still that shape (951)', () => {
+    const r = j(`
+from agent_email_format import TIER1_BANNER
+print(json.dumps([
+  ad.checked_problem(TIER1_BANNER + "\\n\\nCLOSE PROPOSAL: duplicate of recX", "Admin", True),
+  ad.checked_problem(TIER1_BANNER + "\\n\\nPASS TO ROY: boiler", "Admin", True),
+  ad.checked_problem(TIER1_BANNER + "\\n\\nSTATUS ONLY: no reply yet.\\n\\nNEXT CHECK: 2026-12-01", "Admin", True),
+  ad.checked_problem(TIER1_BANNER + "\\n\\n" + ${JSON.stringify(ok)}, "Research", True),
+]))`);
+    expect(r).toEqual(['', '', '', '']);
+  });
+
+  it('the banner does not excuse a report that answers nothing (951 control)', () => {
+    const p = py(`
+from agent_email_format import TIER1_BANNER
+print(ad.checked_problem(TIER1_BANNER + "\\n\\nFindings: the council replied.", "Analysis", True))`);
+    expect(p).toMatch(/must open with the five questions answered/);
+  });
+
   it('trigger=none files the report instead of queuing it, never on a tier-1 matter', () => {
     expect(SRC).toMatch(/checked_trigger\(output\) == "none" and not is_tier1:\n\s+files_itself = True/);
     expect(SRC).toMatch(/checked = checked_problem\(output, args\.type, is_inbound\)\n\s+if checked:\n\s+sys\.exit\(/);
