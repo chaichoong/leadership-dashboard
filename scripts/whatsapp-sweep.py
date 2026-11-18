@@ -38,6 +38,7 @@ a corrupt ChatStorage.sqlite would cost Kevin his message history, and no sweep
 is worth that.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -421,35 +422,78 @@ LOOKUP_MAX_DAYS = 365
 # leaves the answer in results/, which this same command returns on the agent's next run.
 LOOKUP_DIR = os.environ.get("WHATSAPP_LOOKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/whatsapp-lookup")
 LOOKUP_FRESH_HOURS = 72   # an answer older than this is read again, and the post-run deletes it
+LOOKUP_MAX_ATTEMPTS = 3   # an error answer is asked again until this many reads outside claude have failed
+TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 
-def lookup_file(kind, who):
-    slug = re.sub(r"[^a-z0-9]+", "-", who.lower()).strip("-")[:60] or "unnamed"
-    return os.path.join(LOOKUP_DIR, kind, slug + ".json")
+def lookup_key(task, who, days, limit):
+    """The file name for one ask: a hash of the task and the EXACT who, days and limit (review of PR 983: a
+    letters-only slug merged "Zoë" with "Zo" and turned every non-Latin name into "unnamed")."""
+    return hashlib.sha256(json.dumps([task, who, int(days), int(limit)]).encode("utf-8")).hexdigest()[:32] + ".json"
 
 
-def lookup_refused(who, days, limit, ex):
-    """The answer the post-run step read outside claude, when it is fresh; else queue the lookup."""
-    res = lookup_file("results", who)
+def _read_json(path):
     try:
-        if time.time() - os.path.getmtime(res) <= LOOKUP_FRESH_HOURS * 3600:
-            with open(res) as fh:
-                out = json.load(fh)
-            if isinstance(out, dict):
-                out["readOutsideClaude"] = datetime.fromtimestamp(os.path.getmtime(res), timezone.utc).isoformat(timespec="seconds")
-                print(json.dumps(out, indent=1))
-                return 1 if out.get("error") else 0
+        with open(path) as fh:
+            out = json.load(fh)
+        return out if isinstance(out, dict) else None
     except (OSError, ValueError):
-        pass
-    req = lookup_file("requests", who)
+        return None
+
+
+def _when(stamp):
+    """A stored ISO time as an aware datetime, None when unreadable (python 3.9 does not read a trailing Z)."""
+    try:
+        t = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def lookup_refused(who, days, limit, task, ex):
+    """The answer the post-run step read outside claude for THIS task and THIS ask, when it is fresh and no newer
+    request waits; an error answer is asked again up to LOOKUP_MAX_ATTEMPTS times; else the lookup is queued."""
+    if not TASK_RE.match(str(task or "")):
+        print(json.dumps({"error": f"WhatsApp is closed to this run ({ex}). Run the same lookup again with --task <the "
+                                   "task's record id>: it is then queued for that task alone and read outside claude "
+                                   "after this run. Nothing was queued."}))
+        return 3
+    name = lookup_key(task, who, days, limit)
+    req, res = os.path.join(LOOKUP_DIR, "requests", name), os.path.join(LOOKUP_DIR, "results", name)
+    pending, out = _read_json(req), _read_json(res)
+    try:
+        fresh = out is not None and time.time() - os.path.getmtime(res) <= LOOKUP_FRESH_HOURS * 3600
+    except OSError:
+        fresh = False
+    if fresh and out.get("task") != task:
+        fresh = False
+    answered, asked = _when(out.get("answered")) if out else None, _when(pending.get("asked")) if pending else None
+    if pending and not (fresh and answered and (asked is None or answered >= asked)):
+        print(json.dumps({"error": "still QUEUED: the post-run step has not read this lookup yet (attempt %s). Park the "
+                                   "step until the next run; this is not 'nothing was said'." % pending.get("attempts", 1),
+                          "queued": req}))
+        return 3
+    attempts = 0
+    if fresh:
+        attempts = int(out.get("attempts") or 1)
+        if not out.get("error") or attempts >= LOOKUP_MAX_ATTEMPTS:
+            out["readOutsideClaude"] = out.get("answered")
+            if out.get("error"):
+                out["note"] = (f"the read outside claude failed {attempts} times; that error is the answer until it is "
+                               "fixed, not 'nothing was said'")
+            print(json.dumps(out, indent=1))
+            return 1 if out.get("error") else 0
     os.makedirs(os.path.dirname(req), mode=0o700, exist_ok=True)
     with open(req + ".tmp", "w") as fh:
-        json.dump({"who": who, "days": days, "limit": limit, "asked": datetime.now(timezone.utc).isoformat(timespec="seconds")}, fh)
+        json.dump({"task": task, "who": who, "days": days, "limit": limit, "attempts": attempts + 1,
+                   "asked": datetime.now(timezone.utc).isoformat(timespec="microseconds")}, fh)
     os.replace(req + ".tmp", req)
-    print(json.dumps({"error": f"WhatsApp is closed to this run ({ex}). The lookup is QUEUED, not failed: the slot's "
-                               "post-run step reads it outside claude, and this same command returns the answer on "
-                               "your next run. Park the step until then; this is not 'nothing was said'.",
-                      "queued": req, "answerAt": res}))
+    print(json.dumps({"error": f"WhatsApp is closed to this run ({ex}). The lookup is QUEUED, not failed (attempt "
+                               f"{attempts + 1} of {LOOKUP_MAX_ATTEMPTS}): the slot's post-run step reads it outside "
+                               "claude, and this same command returns the answer on your next run. Park the step "
+                               "until then; this is not 'nothing was said'."
+                               + (f" The last read failed: {out.get('error')}" if fresh and out.get("error") else ""),
+                      "queued": req}))
     return 3
 
 
@@ -463,7 +507,7 @@ def lookup_digits(who):
     return d
 
 
-def lookup(who, days=60, limit=40):
+def lookup(who, days=60, limit=40, task=None):
     who = " ".join(str(who or "").split())
     digits = lookup_digits(who)
     by_number = len(digits) >= 7
@@ -478,7 +522,7 @@ def lookup(who, days=60, limit=40):
     except (sqlite3.DatabaseError, PermissionError) as ex:
         if os.environ.get("WHATSAPP_LOOKUP_SERVING"):   # the post-run step itself: its refusal is the answer
             raise
-        return lookup_refused(who, days, limit, ex)
+        return lookup_refused(who, days, limit, task, ex)
     chats = []
     if not sessions:
         # A blind read (macOS refusing the file, a moved database) returns no
@@ -561,7 +605,7 @@ def main(argv):
         if not who:
             print("lookup requires --who <contact name or phone number>", file=sys.stderr)
             return 2
-        return lookup(who, opt("--days", "60"), opt("--limit", "40"))
+        return lookup(who, opt("--days", "60"), opt("--limit", "40"), opt("--task"))
     print(f"unknown command {cmd}", file=sys.stderr)
     return 2
 

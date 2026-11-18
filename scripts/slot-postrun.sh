@@ -147,29 +147,38 @@ if [ -f "$REPO/scripts/whatsapp-sweep.py" ]; then
   /usr/bin/python3 - "$REPO/scripts/whatsapp-sweep.py" \
     "${WHATSAPP_LOOKUP_DIR:-$HOME/knowledge-os/logs/whatsapp-lookup}" <<'WA_LOOKUPS' || true
 import json, os, subprocess, sys, time
+from datetime import datetime, timezone
 sweep, root = sys.argv[1], sys.argv[2]
 reqs, results = os.path.join(root, "requests"), os.path.join(root, "results")
 for n in (os.listdir(results) if os.path.isdir(results) else []):
-    if time.time() - os.path.getmtime(os.path.join(results, n)) > 72 * 3600: os.remove(os.path.join(results, n))
+    try:
+        if time.time() - os.path.getmtime(os.path.join(results, n)) > 72 * 3600: os.remove(os.path.join(results, n))
+    except OSError as ex: print("whatsapp lookups: an old answer could not be deleted: %s" % ex, file=sys.stderr)
 names = sorted(n for n in os.listdir(reqs) if n.endswith(".json"))[:5] if os.path.isdir(reqs) else []
 env = dict({k: v for k, v in os.environ.items() if k != "CLAUDECODE"}, WHATSAPP_LOOKUP_SERVING="1")
-read = 0
+filed = 0
 for n in names:
-    try:
+    try:                                                      # everything per request, so one bad file never jams the rest
         with open(os.path.join(reqs, n)) as fh: req = json.load(fh)
-        who, days, limit = str(req["who"]).strip(), str(int(req.get("days") or 60)), str(int(req.get("limit") or 40))
-        r = subprocess.run([sys.executable, sweep, "lookup", "--who", who, "--days", days, "--limit", limit],
-                           capture_output=True, text=True, timeout=60, env=env)
-        try: out = json.loads(r.stdout)
-        except ValueError: out = {"error": "the lookup outside claude printed no JSON (rc=%s)" % r.returncode, "stderr": r.stderr[-500:]}
-        read += 1
-    except Exception as ex:                                   # noqa: BLE001: one bad request never stops the rest
-        out = {"error": "the request could not be read outside claude: %s" % ex}
-    os.makedirs(results, mode=0o700, exist_ok=True)
-    with open(os.path.join(results, n + ".tmp"), "w") as fh: json.dump(out, fh, indent=1)
-    os.replace(os.path.join(results, n + ".tmp"), os.path.join(results, n))
-    os.remove(os.path.join(reqs, n))
-if names: print("whatsapp lookups: %d of %d queued request(s) read outside claude" % (read, len(names)), file=sys.stderr)
+        try:
+            who, days, limit = str(req["who"]).strip(), str(int(req.get("days") or 60)), str(int(req.get("limit") or 40))
+            r = subprocess.run([sys.executable, sweep, "lookup", "--who", who, "--days", days, "--limit", limit],
+                               capture_output=True, text=True, timeout=60, env=env)
+            try: out = json.loads(r.stdout)
+            except ValueError: out = {"error": "the lookup outside claude printed no JSON (rc=%s)" % r.returncode, "stderr": r.stderr[-500:]}
+        except Exception as ex:                               # noqa: BLE001: a bad request is answered with why
+            out = {"error": "the request could not be read outside claude: %s" % ex}
+        if not isinstance(out, dict): out = {"error": "the lookup outside claude printed JSON that is not an object"}
+        out.update({k: req.get(k) for k in ("task", "who", "days", "limit", "asked", "attempts")})
+        out["answered"] = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        os.makedirs(results, mode=0o700, exist_ok=True)
+        with open(os.path.join(results, n + ".tmp"), "w") as fh: json.dump(out, fh, indent=1)
+        os.replace(os.path.join(results, n + ".tmp"), os.path.join(results, n))
+        os.remove(os.path.join(reqs, n))
+        filed += 1
+    except Exception as ex:                                   # noqa: BLE001
+        print("whatsapp lookups: request %s not filed (%s); it stays for the next slot" % (n, ex), file=sys.stderr)
+if names: print("whatsapp lookups: %d of %d queued request(s) read outside claude" % (filed, len(names)), file=sys.stderr)
 WA_LOOKUPS
 fi
 

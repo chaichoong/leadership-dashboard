@@ -462,7 +462,8 @@ print(json.dumps({"who": a[a.index("--who") + 1], "args": a[2:], "serving": os.e
     if (!('WHATSAPP_LOOKUP_SERVING' in extra)) delete env.WHATSAPP_LOOKUP_SERVING;
     return env;
   };
-  const agentLookup = (who, extra = {}) => sh('python3', [REAL_SWEEP, 'lookup', '--who', who], { env: waEnv(extra) });
+  const TASK = 'recTEST0000000001';
+  const agentLookup = (who, extra = {}) => sh('python3', [REAL_SWEEP, 'lookup', '--who', who, '--task', TASK], { env: waEnv(extra) });
   const postrun = (extra = {}) => sh('bash', [SCRIPT, 'test-job', '0', log, '1', marker, scratch, LEAK_ERE, BAD_ERE],
     { env: waEnv(extra) });
   const withStub = () => { mkdirSync(join(repo, 'scripts'), { recursive: true }); writeFileSync(join(repo, 'scripts/whatsapp-sweep.py'), STUB); };
@@ -479,35 +480,41 @@ print(json.dumps({"who": a[a.index("--who") + 1], "args": a[2:], "serving": os.e
     expect(first.status).toBe(3);
     const q = JSON.parse(first.stdout);
     expect(q.error).toMatch(/QUEUED, not failed/);
-    expect(existsSync(join(wa, 'requests/pat-example.json'))).toBe(true);
+    expect(readdirSync(join(wa, 'requests')).length).toBe(1);
+    const [qname] = readdirSync(join(wa, 'requests'));
 
     withStub();
     const r = postrun();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('test-job run OK');
     expect(r.stderr).toContain('whatsapp lookups: 1 of 1 queued request(s) read outside claude');
-    expect(existsSync(join(wa, 'requests/pat-example.json'))).toBe(false);
-    const res = JSON.parse(readFileSync(join(wa, 'results/pat-example.json'), 'utf8'));
+    expect(existsSync(join(wa, 'requests', qname))).toBe(false);
+    const res = JSON.parse(readFileSync(join(wa, 'results', qname), 'utf8'));
     expect(res.who).toBe('Pat Example');
     expect(res.args).toEqual(['--who', 'Pat Example', '--days', '60', '--limit', '40']);
     expect(res.serving).toBe('1');          // the refusal of the post-run's own read is final, never re-queued
     expect(res.claudecode).toBe(false);
 
-    const next = agentLookup('pat example');  // the same command, still refused inside claude
+    expect(res.task).toBe(TASK);
+    const next = agentLookup('Pat Example');  // the same command, still refused inside claude
     expect(next.status).toBe(0);
     const ans = JSON.parse(next.stdout);
     expect(ans.chats[0].messages[0].text).toBe('Boiler fixed');
     expect(ans.readOutsideClaude).toMatch(/^\d{4}-\d\d-\d\dT/);
+    expect(sh('python3', [REAL_SWEEP, 'lookup', '--who', 'Pat Example', '--task', 'recTEST0000000009'], { env: waEnv() }).status).toBe(3);
   });
 
   it('a lookup that fails outside claude is a loud answer, and never fails the slot', () => {
     withStub();
-    request('pat-example', 'Pat Example');
+    agentLookup('Pat Example');   // queues it for TASK
     const r = postrun({ STUB_FAIL: '1' });
     expect(r.status).toBe(0);
-    const res = JSON.parse(readFileSync(join(wa, 'results/pat-example.json'), 'utf8'));
+    const [rname] = readdirSync(join(wa, 'results'));
+    const res = JSON.parse(readFileSync(join(wa, 'results', rname), 'utf8'));
     expect(res.error).toMatch(/printed no JSON \(rc=1\)/);
-    expect(agentLookup('Pat Example').status).toBe(1);   // the next run sees the failure, not "nobody said anything"
+    const next = agentLookup('Pat Example');   // the next run sees the failure and asks again, not "nobody said anything"
+    expect(next.status).toBe(3);
+    expect(next.stdout).toMatch(/attempt 2 of 3.*printed no JSON/);
   });
 
   it('reads at most five a run, and leaves the rest for the next slot', () => {
@@ -531,5 +538,109 @@ print(json.dumps({"who": a[a.index("--who") + 1], "args": a[2:], "serving": os.e
     expect(r.status).toBe(0);
     expect(existsSync(join(wa, 'requests/pat-example.json'))).toBe(true);
     expect(existsSync(join(wa, 'results'))).toBe(false);
+  });
+});
+
+// Review of PR 983 (18 Nov 2026). An error answer was served for 72 h and never asked again; a good answer was
+// reused whatever days/limit the new call asked for and even after a newer request; the file name dropped every
+// non a-z0-9 letter ("Zoë" and "Zo" shared a file, a non-Latin name became "unnamed"); any task could be served
+// another task's answer; and one request whose file could not be moved jammed the rest of the queue.
+describe('finding 20261011-agent-dispatch-834 review: the queued answer is the right one, for the right task', () => {
+  const REAL_SWEEP = resolve(ROOT, 'scripts/whatsapp-sweep.py');
+  const TASK = 'recTEST0000000001';
+  const OTHER = 'recTEST0000000002';
+  let wa, notADb;
+  const env = (extra = {}) => {
+    const e = { ...process.env, SLOT_POSTRUN_REPO: repo, WHATSAPP_LOOKUP_DIR: wa, WHATSAPP_DB_PATH: notADb, ...extra };
+    delete e.WHATSAPP_LOOKUP_SERVING;
+    return e;
+  };
+  const lookup = (...args) => {
+    const r = sh('python3', [REAL_SWEEP, 'lookup', ...args], { env: env() });
+    let out = {}; try { out = JSON.parse(r.stdout); } catch { /* the rc says what happened */ }
+    return { rc: r.status, ...out };
+  };
+  const files = (kind) => (existsSync(join(wa, kind)) ? readdirSync(join(wa, kind)).filter((n) => n.endsWith('.json')) : []);
+  const readReq = () => JSON.parse(readFileSync(join(wa, 'requests', files('requests')[0]), 'utf8'));
+  // Play the post-run step's part by hand: answer every waiting request with `answer`, as slot-postrun.sh does.
+  const answerAll = (answer) => {
+    mkdirSync(join(wa, 'results'), { recursive: true });
+    for (const n of files('requests')) {
+      const req = JSON.parse(readFileSync(join(wa, 'requests', n), 'utf8'));
+      writeFileSync(join(wa, 'results', n), JSON.stringify({ ...answer, task: req.task, who: req.who, days: req.days,
+        limit: req.limit, asked: req.asked, answered: new Date(Date.now() + 1000).toISOString(), attempts: req.attempts || 1 }));
+      rmSync(join(wa, 'requests', n));
+    }
+  };
+  const GOOD = { chats: [{ chat: 'Pat Example', messages: [{ from: 'Pat Example', text: 'Boiler fixed' }] }] };
+
+  beforeEach(() => {
+    wa = join(repo, 'wa');
+    notADb = join(repo, 'ChatStorage.sqlite');
+    writeFileSync(notADb, 'not a sqlite database');
+  });
+
+  it('an error answer is asked again, up to three attempts, then given as the final word', () => {
+    expect(lookup('--who', 'Pat Example', '--task', TASK).rc).toBe(3);
+    answerAll({ error: 'authorization denied' });
+    const second = lookup('--who', 'Pat Example', '--task', TASK);
+    expect(second.rc).toBe(3);
+    expect(readReq().attempts).toBe(2);
+    answerAll({ error: 'authorization denied' });
+    expect(lookup('--who', 'Pat Example', '--task', TASK).rc).toBe(3);
+    expect(readReq().attempts).toBe(3);
+    answerAll({ error: 'authorization denied' });
+    const last = lookup('--who', 'Pat Example', '--task', TASK);
+    expect(last.rc).toBe(1);
+    expect(last.error).toBe('authorization denied');
+    expect(files('requests')).toEqual([]);
+  });
+
+  it('an answer is given only for the same who, days and limit, and never when a newer request waits', () => {
+    lookup('--who', 'Pat Example', '--task', TASK, '--days', '60');
+    answerAll(GOOD);
+    expect(lookup('--who', 'Pat Example', '--task', TASK, '--days', '60').rc).toBe(0);
+    expect(lookup('--who', 'Pat Example', '--task', TASK, '--days', '30').rc).toBe(3);   // a different ask: queued
+    expect(lookup('--who', 'Pat Example', '--task', TASK, '--days', '30', '--limit', '5').rc).toBe(3);
+    expect(files('requests').length).toBe(2);
+    // an answer older than a request for the same key is not the answer to it
+    const [n] = files('results');
+    const req = { task: TASK, who: 'Pat Example', days: 60, limit: 40, asked: new Date(Date.now() + 60_000).toISOString(), attempts: 1 };
+    writeFileSync(join(wa, 'requests', n), JSON.stringify(req));
+    expect(lookup('--who', 'Pat Example', '--task', TASK, '--days', '60').rc).toBe(3);
+  });
+
+  it('the file name is a hash of the exact name: "Zoë" and "Zo" never share one, and a non-Latin name is not "unnamed"', () => {
+    for (const who of ['Zoë Example', 'Zo Example', '李小龍', '王小芳']) lookup('--who', who, '--task', TASK);
+    const names = files('requests');
+    expect(names.length).toBe(4);
+    expect(names.some((n) => n.includes('unnamed'))).toBe(false);
+  });
+
+  it('an answer is given only to the task that asked; a lookup with no task id is not queued', () => {
+    lookup('--who', 'Pat Example', '--task', TASK);
+    answerAll(GOOD);
+    expect(lookup('--who', 'Pat Example', '--task', TASK).rc).toBe(0);
+    expect(lookup('--who', 'Pat Example', '--task', OTHER).rc).toBe(3);
+    rmSync(join(wa, 'requests'), { recursive: true, force: true });
+    const bare = lookup('--who', 'Pat Example');
+    expect(bare.rc).toBe(3);
+    expect(bare.error).toMatch(/--task/);
+    expect(files('requests')).toEqual([]);
+  });
+
+  it('one request whose answer cannot be filed never jams the rest of the queue', () => {
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    writeFileSync(join(repo, 'scripts/whatsapp-sweep.py'), 'import json; print(json.dumps({"chats": []}))\n');
+    mkdirSync(join(wa, 'requests'), { recursive: true });
+    for (const n of ['a-first', 'b-second']) {
+      writeFileSync(join(wa, 'requests', `${n}.json`), JSON.stringify({ task: TASK, who: `Contact ${n}`, days: 60, limit: 40 }));
+    }
+    mkdirSync(join(wa, 'results', 'a-first.json'), { recursive: true });   // a directory where the answer must go
+    const r = sh('bash', [SCRIPT, 'test-job', '0', log, '1', marker, scratch, LEAK_ERE, BAD_ERE], { env: env() });
+    expect(r.status).toBe(0);
+    expect(existsSync(join(wa, 'results', 'b-second.json'))).toBe(true);
+    expect(existsSync(join(wa, 'requests', 'b-second.json'))).toBe(false);
+    expect(r.stderr).toMatch(/1 of 2/);
   });
 });
