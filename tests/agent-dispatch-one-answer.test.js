@@ -120,7 +120,9 @@ const WORKED = ['worklist', 'reserve', 'routingNeeded', 'idleHandbacks'];
 const HELD = ['heldUnderLead', 'heldByStandingHold', 'skippedTier2', 'royRequests'];
 const OTHER_ROBOT = ['royLane', 'mergeCards', 'ownGoSignal', 'trialChecked'];
 const DISPATCH_LISTS = [...WORKED, ...HELD, ...OTHER_ROBOT, 'systemAlerts', 'decided', 'noLane', 'formCards', 'unmappedAgent', 'unclassified'];
-const BOARD_LISTS = ['stuck', 'waitingOnKevin', 'inFlight', 'withRoy', 'escalated', 'decided', 'parked', 'ownLane', 'held'];
+const BOARD_LISTS = ['stuck', 'waitingOnKevin', 'inFlight', 'withRoy', 'escalated', 'decided', 'parked', 'ownLane', 'held',
+  // 18 Nov 2026: stored at Upcoming with the date ahead, outside dispatch's window (task-manager-scheduled.test.js)
+  'scheduled'];
 
 let run;
 
@@ -288,13 +290,24 @@ describe('one task, one answer: the dispatcher and the task board on every lane 
     // 23 Oct 2026: was 17. The fixture set grew and the stale number turned main RED for a day,
     // so no fixer PR could merge (finding 20261022-queue-fixer-1040). The lane invariant in the
     // loop below was re-proved unchanged; only the count moved.
-    expect(full.length).toBe(20);
+    // 18 Nov 2026: was 20. recLaterAaaaaaaaa (Upcoming, due 2099) left `stuck` for the slim `scheduled`
+    // list, pinned in the next test; the lane invariant below is unchanged.
+    expect(full.length).toBe(19);
     for (const [id, v] of full) {
       const dsp = (dispatchOf[id] || [])[0];
       if (!dsp) { expect(v.dispatchLane ?? '', id).toBe(''); continue; }
       if (queueLane(dsp)) expect(v.dispatchLane, id).toBe(dsp);
       else expect(['approvedHandbacks', 'changesRequested', 'routingNeeded', 'newWork'], id).toContain(v.dispatchLane);
     }
+  });
+});
+
+describe('a task not due yet: one answer from both readers (18 Nov 2026)', () => {
+  it('dispatch has no lane for a stored-Upcoming task with its date ahead, and the board calls it scheduled', () => {
+    const { dispatchOf, boardOf, ownerless } = answers();
+    expect(dispatchOf.recLaterAaaaaaaaa).toBeUndefined();
+    expect(boardOf.recLaterAaaaaaaaa).toEqual(['scheduled']);
+    expect(ownerless.recLaterAaaaaaaaa).toBeUndefined();
   });
 });
 

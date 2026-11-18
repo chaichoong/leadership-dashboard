@@ -133,7 +133,12 @@ gets the same finding asking the engine to resubmit it, recorded as `leave`. The
 cards, such as the monthly performance read, do not close themselves and stay
 ordinary board work),
 `parked` (Some Day, or held until a date on Kevin's own answer by
-`decided --until`: not yours to touch before that date), `held` (ONE TASK, ONE
+`decided --until`: not yours to touch before that date), `scheduled` (18 Nov
+2026: stored at Upcoming with its due date still ahead and no dispatch lane: a
+month-end stepping stone, a standing hold, the work parked to January. It is not
+due, so it is never stuck and never a move, and you write no `leave` on it. Each
+carries `dueDate`; on that date it flips to Today and is ordinary board work. A
+scheduled task nobody holds still comes to you on `ownerless`), `held` (ONE TASK, ONE
 ANSWER, 15 Oct 2026: tasks the dispatcher holds on a door, by its own
 `task_lane`, each with `lane` and `why`: held under an open lead (Roy's request
 or a property group's lead), Roy's own request for his assistant job, creditor
@@ -441,7 +446,8 @@ out of your list — the board subtracted dispatch's tasks in code):
 9. **Small generic admin you can finish now** (under 15 minutes, internal, no
    external send) → `finish` in-house: do the work, submit the result through
    the gate as your own output, type `Admin`.
-10. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
+10. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date;
+    a stored-Upcoming one is on `scheduled` and never reaches you)
     → `leave` with the reason noted. Never on a view carrying `blocker`: a
     wall is not "fine to sit", and leave is not a move on a blocked task (Step
     1a: the clock already moved it).
@@ -610,7 +616,8 @@ is the PUBLIC repo),
 LEADING with what should have moved and did not:
 
 1. Stuck backlog: count, the 10 oldest by name and days still, and what stops
-   each (one line).
+   each (one line). Then one line with `counts.scheduled` (not due yet, never
+   stuck) and the soonest date on the `scheduled` list.
 2. Duplicate threads: the board's `duplicateGroups` and `duplicateExtras`
    counts, and what was proposed for each group this slot. Zero is the only
    healthy number. `duplicateExtras` counts only `closable`. Two keys on a group
