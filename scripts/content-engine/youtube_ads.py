@@ -57,9 +57,8 @@ def _node():
 
 def _run(argv, timeout=7500):      # longer than youtube_ads.js's own two-hour watchdog, so the JS reports first
     r = subprocess.run([_node(), JS] + argv, capture_output=True, text=True, timeout=timeout)
-    out = (r.stdout or "").strip()
-    if "{" not in out: raise SystemExit("youtube_ads.js gave nothing back: %s" % ((r.stderr or out)[-240:]))
-    return json.loads(out[out.index("{"):])
+    import youtube_studio      # one reader for both: the first whole result, so a watchdog line after it is no "Extra data"
+    return youtube_studio._result(r.stdout, r.stderr, "youtube_ads.js gave nothing back")
 
 
 def midroll(ids):

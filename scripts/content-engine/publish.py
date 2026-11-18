@@ -860,6 +860,9 @@ GHL_SLOT_GRACE_MIN = 60   # a GHL post still 'scheduled' this long after its slo
 # later run, in turn; none is dropped (the morning report lists every video not On).
 MONETISE_PER_RUN = 6
 MONETISE_UNREADABLE_STOP = 3
+# Signed out, every page is: one visit says so and the sweep stops (16 Oct to 18 Nov 2026, the robot's Google sign-in had
+# lapsed and three 71 s visits a run found it again). The sign-in is the one thing that fixes it, so the line names it.
+STUDIO_SIGNED_OUT = "Studio is signed out. SIGN-IN NEEDED: studio.youtube.com (https://studio.youtube.com/), with the Robot sign-in app"
 _studio = None    # this sync's Studio visits: set by sync() from studio_plan(); no plan means no visit
 
 
@@ -998,7 +1001,9 @@ def monetise_long_video(day, entry):
             if res.get("error"): p["monetisation_error"] = res["error"][-200:]
             else: p.pop("monetisation_error", None)
             studio_visited(day, key, not res.get("raised") and p["monetisation"] != "unknown")
-            print("episode %s: YouTube %s monetisation %s" % (day, what, p["monetisation"]))
+            if res.get("signed_out"): _studio["stopped"] = STUDIO_SIGNED_OUT
+            print("episode %s: YouTube %s monetisation %s%s" % (day, what, p["monetisation"],
+                                                               " (%s)" % STUDIO_SIGNED_OUT if res.get("signed_out") else ""))
         # mid-roll only once the master switch is On: the checkbox does nothing on a video that is not earning
         if p.get("clip") == "full" and p.get("monetisation") in MONETISED \
                 and studio_wants(p) == "midroll" and not studio_refusal(day, key):
@@ -2171,6 +2176,14 @@ def _selftest_time_budget():
         assert seen == ["vf000003019", "vs000003019", "vf000003020"], "3 visits, never-read first, then stop: %s" % seen
         assert "stopped: 3 Studio pages in a row could not be read" in out.getvalue(), out.getvalue()[-300:]
         assert len(shares) == 40, "the Facebook share check still runs for every episode inside the budget"
+
+        # Studio signed out (16 Oct to 18 Nov 2026): the first page names the sign-in, and no second visit is made
+        answer["res"] = {"status": "unknown", "signed_out": True,
+                         "error": "SIGN-IN NEEDED studio.youtube.com: Studio sent the robot to Google sign-in (/v3/signin/confirmidentifier)"}
+        st = fresh(); seen = sync_(st)
+        assert seen == ["vf000003019"], "one visit, then stop: %s" % seen
+        assert "(stopped: %s)" % STUDIO_SIGNED_OUT in out.getvalue() and "monetisation unknown (%s)" % STUDIO_SIGNED_OUT in out.getvalue(), out.getvalue()[-400:]
+        assert "SIGN-IN NEEDED" in st["3019"]["posts"]["youtube|full|yt"].get("monetisation_error", ""), "the reason is on the post"
 
         # Studio readable but every video still 'Checking': six posts a run, oldest first, and seven runs reach all 40
         answer["res"] = {"status": "Checking"}

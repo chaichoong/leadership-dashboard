@@ -693,6 +693,60 @@ function ledger(entry) {
 // once, and an agent never types it. In code, like the rest, not in a prompt.
 const SECRET_NAME_RE = /pass(word|code)|secret|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(code|answer)|auth(entication)?.?code|token|api.?key/i;
 
+// What a credential LOOKS LIKE as a value (18 Nov 2026). The value check used to run the field-NAME words above over
+// the whole value as a bare substring. Episode 2187's Spotify description ("Add friction, such as a password after a
+// set daily limit") was refused three times, and 2162's Facebook shares were refused because the YouTube link id
+// 7CvvmiB_5rw holds "Cvv"; while a real key (sk-ant-..., an Airtable token) passed, because it holds none of the words.
+// A value is refused for what it is, never for a word in a sentence:
+const SECRET_SHAPES = [
+  ['an API key', /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/],
+  ['a Stripe key', /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/],
+  ['a GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})/],
+  ['an Airtable token', /\bpat[A-Za-z0-9]{14}\.[a-f0-9]{32,}/],
+  ['a Slack token', /\bxox[abposr]-[A-Za-z0-9-]{10,}/],
+  ['a cloud key', /\b(?:AKIA[0-9A-Z]{16}\b|AIza[0-9A-Za-z_-]{35})/],
+  ['a Google sign-in token', /\b(?:ya29\.[A-Za-z0-9_-]{20,}|1\/\/0[A-Za-z0-9_-]{20,})/],
+  ['a GoHighLevel token', /\bpit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+  ['an API key', /\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b/],    // capital-letter UUID (ClickSend's key)
+  ['a signed token', /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
+  ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  // a credential word labelling a value: "api_key=abc", "Password: correcthorse", "OTP: 123456"
+  ['a labelled secret', new RegExp('(?:pass(?:word|code)|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(?:code|answer)|' +
+    'auth(?:entication)?.?code|token|api.?key)\\s*(?:=\\s*\\S|:\\s*\\S{4,})', 'i')],
+  // "secret" is an everyday word ("The secret: 10,000 steps"), so after a colon only a key-like run counts
+  ['a labelled secret', /secret\s*(?:=\s*\S|:\s*(?=[\w-]*[A-Za-z])(?=[\w-]*\d)[\w-]{8,}(?!\S))/i],
+];
+
+// Links and hashtags are copy, never a secret by their shape: a YouTube id, a playlist id, #UltraMarathon2026Challenge.
+const COPY_NOT_SECRET_RE = /(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*|#\w+/gi;
+
+function luhnCard(text) {
+  // 13 to 19 digits, single spaces or dashes allowed, first digit 2 to 6 (a 16-digit Facebook reel id starts with 1)
+  for (const m of text.matchAll(/(?<!\d)[2-6](?:[ -]?\d){12,18}(?!\d)/g)) {
+    const d = m[0].replace(/\D/g, '');
+    let sum = 0;
+    for (let i = 0; i < d.length; i++) { let n = +d[d.length - 1 - i]; if (i % 2) { n *= 2; if (n > 9) n -= 9; } sum += n; }
+    if (sum % 10 === 0) return true;
+  }
+  return false;
+}
+
+function secretValueReason(value) {
+  const v = String(value === undefined || value === null ? '' : value).trim();
+  if (!v) return '';
+  for (const [why, re] of SECRET_SHAPES) if (re.test(v)) return why;
+  // one word that names a secret ("MyPassword123"), as the check always refused; a link is not a word
+  const copy = v.replace(COPY_NOT_SECRET_RE, ' ');
+  if (!/\s/.test(v) && v.length <= 64 && copy === v && SECRET_NAME_RE.test(v)) return 'a secret-named word';
+  if (luhnCard(copy)) return 'a card number';
+  if (/\b[0-9a-f]{40,}\b/i.test(copy)) return 'a long hex secret';
+  // a long random run: mixed case and digits, 32 characters or more, no word breaks
+  for (const run of copy.match(/[A-Za-z0-9+/=]{32,}/g) || []) {
+    if (/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run)) return 'a long random string';
+  }
+  return '';
+}
+
 async function assertNotCredential(page, selector, value) {
   const kind = await page.$eval(selector, el => ({
     type: (el.getAttribute('type') || '').toLowerCase(),
@@ -707,8 +761,9 @@ async function assertNotCredential(page, selector, value) {
   if (SECRET_NAME_RE.test(kind.name)) {
     die(`${selector} looks like a credential or payment field (${kind.name.trim()}). Refusing.`);
   }
-  if (SECRET_NAME_RE.test(String(value))) {
-    die(`the value for ${selector} looks like a secret. Refusing.`);
+  const why = secretValueReason(value);
+  if (why) {
+    die(`the value for ${selector} looks like a secret (${why}). Refusing.`);
   }
 }
 
@@ -4996,7 +5051,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, secretValueReason, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile, retiredSite, retiredRefusal, retiredSites, withRetiredRules, retiredResolverRules,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
