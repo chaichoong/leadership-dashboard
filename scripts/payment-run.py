@@ -2174,8 +2174,18 @@ def cmd_write(args):
             duplicates.append({"id": twin["id"], "fields": {"Notes": append_note(
                 twin, "The same bill arrived again in email %s; kept off the list as a duplicate." % mid)}})
         else:
-            cover = off_list_cover(existing, item, covered)
-            if cover is not None:
+            cover, is_bill = off_list_cover(existing, item, covered)
+            if cover is not None and not is_bill:
+                # The same payee and amount was paid off the list lately, but nothing
+                # proves this is that bill: listed as owed, with the payment named where
+                # Kevin reads it (the 31 Oct 2026 rule: payee and amount alone is a CHECK).
+                cf = cover["fields"]
+                fields[WRITABLE["description"]] = ("CHECK: may already be paid off the list (row %s, %s £%.2f on "
+                                                   "%s). %s" % (cover["id"], cf.get("Payee") or "",
+                                                                float(cf.get("Amount") or 0),
+                                                                (cf.get("Paid Date") or "")[:10],
+                                                                item.get("description") or "")).strip()
+            elif cover is not None:
                 # Already paid off the list, and the bill only came by email afterwards
                 # (review of PR #982): listed Unpaid, it would be owed beside its own
                 # payment, settle could never close it (that bank line is claimed), and
@@ -2228,12 +2238,18 @@ LINKABLE_STATUSES = ("Unpaid", "", "Paid")
 # The marker on every row this door writes, with the transaction id after it, so a
 # re-run finds its own row and writes nothing twice.
 OFF_LIST_NOTE = "Paid off the list (Kevin's ruling, 27 Sep 2026)"
+# On the row this door CREATED, never on a row it settled with --row: only a row with
+# no bill of its own can stand in for a bill that arrives later (re-review of PR #982).
+OFF_LIST_NEW = "Added as a new row for this payment"
 # Written on an off-list row once a bill emailed later is taken as its bill (cmd_write),
 # so one payment covers one bill and a second bill of the same size is still listed.
 OFF_LIST_COVER_MARK = "This payment's bill came later by"
-# An emailed bill for the same payee and amount this many days either side of an
-# off-list payment is that payment's bill. Further apart, it is listed as owed.
-OFF_LIST_COVER_DAYS = 14
+# An emailed bill is taken as an off-list payment's bill only within this many days of
+# it: a contractor paid the same sum every week sends next week's bill seven days on.
+OFF_LIST_COVER_DAYS = 3
+# Within this many days, a bill of the same payee and amount that is not taken as the
+# payment's bill is listed with a CHECK line naming the payment, never silently.
+OFF_LIST_CHECK_DAYS = 14
 # A row marked Paid by hand, with no bank line, this close to the payment may be its bill.
 HAND_PAID_TWIN_DAYS = 14
 # The shortest --bank-line-names-other reason taken as a reason.
@@ -2400,32 +2416,51 @@ def door_row(rows, tx):
     return None
 
 
+def bill_details(item):
+    """True when an emailed bill names a house or a reference: then only a row
+    carrying the same one is that bill (same_bill's own test)."""
+    text = " ".join(str(item.get(k) or "") for k in ("payee", "description", "reference"))
+    return bool(house_places(text) or norm_ref(item.get("reference")))
+
+
 def off_list_cover(records, item, taken=()):
-    """The Paid row this door wrote that an emailed bill IS, or None: the same
-    payee words and amount, its payment within OFF_LIST_COVER_DAYS of the email,
-    and no earlier bill already taken as that payment's bill."""
+    """(row, covered) for an emailed bill against the rows this door CREATED (no
+    Gmail message id, no bill of their own, none already taken as a payment's
+    bill), or (None, False).
+
+    covered=True only when the payee words and amount agree, the email is within
+    OFF_LIST_COVER_DAYS of the payment, and the bill names no house or reference
+    the row does not carry: same_bill's own house and reference test decides when
+    either names one (re-review of PR #982: an off-list payment for one house hid
+    the same engineer's bill for another). A near miss within OFF_LIST_CHECK_DAYS
+    comes back with covered=False, for a CHECK line on the listed bill."""
     try:
         amount = round(abs(float(item.get("amount"))), 2)
     except (TypeError, ValueError):
-        return None
+        return None, False
     words = twin_words(item.get("payee"))
     day = str(item.get("emailDate") or "")[:10]
     if not words or not day:
-        return None
+        return None, False
+    near = None
     for r in records:
         f = r.get("fields", {})
         notes = f.get("Notes") or ""
         if (r["id"] in taken or status_of(r) != "Paid" or not f.get("Matched Transaction")
-                or OFF_LIST_NOTE not in notes or OFF_LIST_COVER_MARK in notes or not same_size(f, amount)
-                or not twin_words(f.get("Payee")) & words):
+                or f.get(FIELD_MSG_ID) or OFF_LIST_NEW not in notes or OFF_LIST_COVER_MARK in notes
+                or not same_size(f, amount) or not twin_words(f.get("Payee")) & words):
             continue
         paid = str(f.get("Paid Date") or "")[:10]
         try:
-            if paid and days_between(day, paid) <= OFF_LIST_COVER_DAYS:
-                return r
+            apart = days_between(day, paid) if paid else None
         except ValueError:
             continue
-    return None
+        if apart is None or apart > OFF_LIST_CHECK_DAYS:
+            continue
+        if apart <= OFF_LIST_COVER_DAYS and (same_bill(f, item) or not bill_details(item)):
+            return r, True
+        near = near or r
+    return near, False
 
 
 def split_siblings(tx):
@@ -2489,8 +2524,8 @@ def run_paid(args):
                            split_parts=split_siblings(tx), other_name=other_name)
     if problem:
         raise Refused(problem)
-    note = "%s: %s (%s). Recorded for task %s.%s%s" % (
-        OFF_LIST_NOTE, tx_line(tx), tx["id"], args.task,
+    note = "%s: %s (%s).%s Recorded for task %s.%s%s" % (
+        OFF_LIST_NOTE, tx_line(tx), tx["id"], "" if row is not None else " %s." % OFF_LIST_NEW, args.task,
         (" The bank line names someone else: %s" % other_name) if row is not None and other_name else "",
         (" " + " ".join(args.note.split())) if args.note else "")
     if row is not None:

@@ -243,9 +243,19 @@ def approved_lines(task):
 
 
 # The values a minor-edit note names: £ amounts and figures written with pence, and dates written 2026-10-24 or
-# 24 Oct 2026. A bare whole number is not read: "due 28" or "2 houses" is not a price.
+# 24 Oct 2026. A bare number counts when it is written as money ("16 pounds"), follows "make it", "change it to",
+# "set it to" or "should be", or sits in a note that names money at all ("the price is 16 now"): a note that says
+# "make it 16" must never let 16.36 through (re-review of PR #982). Otherwise "due 28" or "2 houses" is no price.
 NOTE_AMOUNT_RE = re.compile(r"(?:£|\bGBP\s*)\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"
                             r"|(?<![\d.,])(\d+\.\d{2})(?![\d.])", re.I)
+NUMBER = r"(\d{1,7}(?:\.\d{1,2})?)(?![\d.])"
+NOTE_BARE_AMOUNT_RES = (
+    re.compile(r"(?<![\d.,])" + NUMBER + r"\s*(?:pounds?|quid|gbp)\b", re.I),
+    re.compile(r"\b(?:make it|change it to|change to|set it to|set to|should be)\s+£?" + NUMBER, re.I),
+)
+NOTE_MONEY_WORD_RE = re.compile(r"£|\b(?:pounds?|quid|gbp|price|cost|costs|amount|fee|charge|premium|rent|"
+                                r"per month|a month|monthly|per year|a year|annual)\b", re.I)
+NOTE_ANY_NUMBER_RE = re.compile(r"(?<![\d.,/-])" + NUMBER + r"(?![\d/-])")
 NOTE_ISO_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 NOTE_WORD_DATE_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3})[a-z]*\.?,?\s+(\d{4})\b")
 MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
@@ -255,7 +265,14 @@ MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", 
 def note_values(text):
     """(amounts, dates) Kevin's note names, as Decimals to the penny and YYYY-MM-DD strings."""
     text = str(text or "")
-    amounts = {amount(a or b) for a, b in NOTE_AMOUNT_RE.findall(text)} - {None}
+    amounts = {amount(a or b) for a, b in NOTE_AMOUNT_RE.findall(text)}
+    for rx in NOTE_BARE_AMOUNT_RES:
+        amounts |= {amount(x) for x in rx.findall(text)}
+    if NOTE_MONEY_WORD_RE.search(text):
+        # Dates are taken out first, so a day or a year in "from 24 Oct 2026" is never read as a price.
+        plain = NOTE_WORD_DATE_RE.sub(" ", NOTE_ISO_RE.sub(" ", text))
+        amounts |= {amount(x) for x in NOTE_ANY_NUMBER_RE.findall(plain)}
+    amounts -= {None}
     dates = {day(x) for x in NOTE_ISO_RE.findall(text)}
     for d, mon, y in NOTE_WORD_DATE_RE.findall(text):
         if mon.lower() in MONTHS:

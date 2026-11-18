@@ -317,9 +317,9 @@ describe('payment-run.py paid-off-list: a payment already made goes on the list 
   it('a bill emailed AFTER an off-list payment is kept off the list, so it is never owed and paid twice', () => {
     const { flow } = paid({ flow: { db: DB(), steps: [
       { argv: NEW(['--apply']) },
-      { write: [BILL('18a0f00dcafe0101', '2021-03-15')] },
+      { write: [BILL('18a0f00dcafe0101', '2021-03-13')] },
       // A second bill of the same size from the same firm is a second bill: it is listed.
-      { write: [BILL('18a0f00dcafe0102', '2021-03-16')] },
+      { write: [BILL('18a0f00dcafe0102', '2021-03-14')] },
     ] } });
     expect(flow.steps.map((s) => s.code)).toEqual([0, 0, 0]);
     const rows = flow.rows.filter((x) => x.fields['Gmail Message ID']);
@@ -337,6 +337,55 @@ describe('payment-run.py paid-off-list: a payment already made goes on the list 
       { write: [BILL('18a0f00dcafe0201', '2021-04-20'), BILL('18a0f00dcafe0202', '2021-03-12', { amount: 70.1 })] },
     ] } });
     expect(far.rows.filter((x) => x.fields['Gmail Message ID']).map((x) => x.fields.Status)).toEqual(['Unpaid', 'Unpaid']);
+    // Weeks after the payment nothing ties them, so no CHECK line either.
+    expect(far.rows.find((x) => x.fields['Gmail Message ID'] === '18a0f00dcafe0201').fields.Description)
+      .toBe('Garden clearance, 18 Birch Row');
+  });
+
+  it('a row settled with --row, or one that holds a bill of its own, never swallows the next bill', () => {
+    const next = { messageId: '18a0f00dcafe0501', payee: 'Pine Labour Services', amount: 412.75,
+      emailDate: '2021-03-14', description: 'Labour', status: 'Unpaid' };
+    const madeWithBill = row(ROW_CLAIM, { Status: 'Paid', Payee: 'Pine Labour Services', Amount: 412.75,
+      'Paid Date': '2021-03-13', 'Matched Transaction': [TXLAB], 'Gmail Message ID': '18a0f00dcafe0502',
+      Notes: `[13 Mar 2021 — payment-run] Paid off the list (Kevin's ruling, 27 Sep 2026): a payment (${TXLAB}). ` +
+        'Added as a new row for this payment. Recorded for task recTASK0000000001.' });
+    const r = paid({
+      emailed: { db: DB({ rows: [OTHER, OPEN_LAB({ 'Gmail Message ID': '18a0f00dcafe0500' })] }),
+        steps: [{ argv: LINK([...WHY, '--apply']) }, { write: [next] }] },
+      handRow: { db: DB({ rows: [OTHER, OPEN_LAB()] }), steps: [{ argv: LINK([...WHY, '--apply']) }, { write: [next] }] },
+      madeWithBill: { db: DB({ rows: [OTHER, madeWithBill] }), steps: [{ write: [next] }] },
+    });
+    for (const c of Object.values(r)) {
+      expect(c.steps.every((s) => s.code === 0)).toBe(true);
+      const bill = c.rows.find((x) => x.fields['Gmail Message ID'] === '18a0f00dcafe0501');
+      expect(bill.fields.Status).toBe('Unpaid');
+      expect(c.owed).toEqual([bill.id]);
+    }
+  });
+
+  it('a bill naming another house, or a reference the payment does not carry, stays owed with a CHECK line', () => {
+    const { other } = paid({ other: { db: DB(), steps: [
+      { argv: NEW(['--apply']) },
+      { write: [BILL('18a0f00dcafe0601', '2021-03-12', { description: 'Gas safety check, 9 Elm Road' }),
+        BILL('18a0f00dcafe0602', '2021-03-12', { description: 'Invoice', reference: 'INV-2207' })] },
+    ] } });
+    const bills = other.rows.filter((x) => x.fields['Gmail Message ID']);
+    expect(bills.map((x) => x.fields.Status)).toEqual(['Unpaid', 'Unpaid']);
+    for (const b of bills) {
+      expect(b.fields.Description).toMatch(new RegExp(`^CHECK: may already be paid off the list \\(row ${NEWROW}`));
+    }
+    expect(other.owed).toEqual(bills.map((x) => x.id).sort());
+  });
+
+  it("a weekly contractor's next bill, a week after the payment, stays owed with a CHECK line", () => {
+    const { weekly } = paid({ weekly: { db: DB(), steps: [
+      { argv: NEW(['--apply']) },
+      { write: [BILL('18a0f00dcafe0701', '2021-03-18', { description: 'Weekly clearance, 18 Birch Row' })] },
+    ] } });
+    const next = weekly.rows.find((x) => x.fields['Gmail Message ID'] === '18a0f00dcafe0701');
+    expect(next.fields.Status).toBe('Unpaid');
+    expect(next.fields.Description).toMatch(/^CHECK: may already be paid off the list/);
+    expect(weekly.owed).toEqual([next.id]);
   });
 
   it('settles a named row: Paid, the bank date and the bank line appended, and the absence check clears', () => {
@@ -587,6 +636,21 @@ describe('cost-record.py accepts "Approved with minor edits", for the lines Kevi
     for (const c of Object.values(r)) expect(c.code).toBe(2);
     expect(r.prepended.out.refused).toMatch(/which names £15\.99, and this writes £16\.36/);
     expect(r.newCostPrepended.out.refused).toMatch(/which names £29\.99, and this writes £31\.27/);
+  });
+
+  it('a note that names the new price as a bare number still stops 16.36 being written unchanged', () => {
+    const notes = ['make it 16', 'Should be 16 pounds a month', 'change to 16', 'The price is 16 now'];
+    const cases = Object.fromEntries(notes.map((n, i) => [`n${i}`, { task: { ...MINOR, feedback: n },
+      revise: { original: CARD, revised: `Kevin asked: ${n}.\n\n${CARD}` }, argv: EXPECTED('16.36') }]));
+    cases.changed = { task: { ...MINOR, feedback: 'make it 16' },
+      revise: { original: CARD, revised: CARD.replace('16.36', '16.00') }, argv: EXPECTED('16') };
+    const r = costRecord(cases);
+    notes.forEach((_n, i) => {
+      expect(r[`n${i}`].code).toBe(2);
+      expect(r[`n${i}`].out.refused).toMatch(/which names £16\.00, and this writes £16\.36/);
+    });
+    expect(r.changed.code).toBe(0);
+    expect(r.changed.out.dryRun).toBe(true);
   });
 
   it('"make it 15.99": once revise has changed the line, the value his note gives is written', () => {
