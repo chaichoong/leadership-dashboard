@@ -159,14 +159,17 @@ env = dict({k: v for k, v in os.environ.items() if k != "CLAUDECODE"}, WHATSAPP_
 filed = 0
 for n in names:
     try:                                                      # everything per request, so one bad file never jams the rest
-        with open(os.path.join(reqs, n)) as fh: req = json.load(fh)
-        try:
+        req = {}                                              # never the previous request's fields on this one's answer
+        try:                                                  # a broken request is answered with why and removed
+            with open(os.path.join(reqs, n)) as fh: loaded = json.load(fh)
+            if not isinstance(loaded, dict): raise ValueError("not a JSON object")
+            req = loaded
             who, days, limit = str(req["who"]).strip(), str(int(req.get("days") or 60)), str(int(req.get("limit") or 40))
             r = subprocess.run([sys.executable, sweep, "lookup", "--who", who, "--days", days, "--limit", limit],
                                capture_output=True, text=True, timeout=60, env=env)
             try: out = json.loads(r.stdout)
             except ValueError: out = {"error": "the lookup outside claude printed no JSON (rc=%s)" % r.returncode, "stderr": r.stderr[-500:]}
-        except Exception as ex:                               # noqa: BLE001: a bad request is answered with why
+        except Exception as ex:                               # noqa: BLE001
             out = {"error": "the request could not be read outside claude: %s" % ex}
         if not isinstance(out, dict): out = {"error": "the lookup outside claude printed JSON that is not an object"}
         out.update({k: req.get(k) for k in ("task", "who", "days", "limit", "asked", "attempts")})

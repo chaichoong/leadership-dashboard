@@ -423,6 +423,7 @@ LOOKUP_MAX_DAYS = 365
 LOOKUP_DIR = os.environ.get("WHATSAPP_LOOKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/whatsapp-lookup")
 LOOKUP_FRESH_HOURS = 72   # an answer older than this is read again, and the post-run deletes it
 LOOKUP_MAX_ATTEMPTS = 3   # an error answer is asked again until this many reads outside claude have failed
+LOOKUP_REREAD_MINUTES = 30   # an answer is given once; the same run may re-read it this long, then it is asked again
 TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 
@@ -467,6 +468,12 @@ def lookup_refused(who, days, limit, task, ex):
         fresh = False
     if fresh and out.get("task") != task:
         fresh = False
+    if fresh and out.get("served"):
+        # Given once already (re-review of PR 983): past the re-read window the same question is asked again, so a
+        # stale answer is never handed back for the rest of its 72 hours.
+        served = _when(out.get("served"))
+        if served is None or (datetime.now(timezone.utc) - served).total_seconds() > LOOKUP_REREAD_MINUTES * 60:
+            fresh, out = False, None
     answered, asked = _when(out.get("answered")) if out else None, _when(pending.get("asked")) if pending else None
     if pending and not (fresh and answered and (asked is None or answered >= asked)):
         print(json.dumps({"error": "still QUEUED: the post-run step has not read this lookup yet (attempt %s). Park the "
@@ -477,6 +484,11 @@ def lookup_refused(who, days, limit, task, ex):
     if fresh:
         attempts = int(out.get("attempts") or 1)
         if not out.get("error") or attempts >= LOOKUP_MAX_ATTEMPTS:
+            if not out.get("served"):
+                out["served"] = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+                with open(res + ".tmp", "w") as fh:
+                    json.dump(out, fh, indent=1)
+                os.replace(res + ".tmp", res)
             out["readOutsideClaude"] = out.get("answered")
             if out.get("error"):
                 out["note"] = (f"the read outside claude failed {attempts} times; that error is the answer until it is "

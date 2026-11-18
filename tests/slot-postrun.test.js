@@ -644,3 +644,51 @@ describe('finding 20261011-agent-dispatch-834 review: the queued answer is the r
     expect(r.stderr).toMatch(/1 of 2/);
   });
 });
+
+// Re-review of PR 983 (18 Nov 2026): a good answer was served for 72 h to the same task asking the same question, and
+// while it existed no new request was written, so a stale answer kept coming back. And a request file that is not
+// valid JSON was never answered or removed, so it took one of the five places on every run.
+describe('finding 20261011-agent-dispatch-834 re-review: an answer is given once, and a broken request is answered', () => {
+  const REAL_SWEEP = resolve(ROOT, 'scripts/whatsapp-sweep.py');
+  const TASK = 'recTEST0000000001';
+  let wa, notADb;
+  const env = () => {
+    const e = { ...process.env, SLOT_POSTRUN_REPO: repo, WHATSAPP_LOOKUP_DIR: wa, WHATSAPP_DB_PATH: notADb };
+    delete e.WHATSAPP_LOOKUP_SERVING;
+    return e;
+  };
+  const ask = () => sh('python3', [REAL_SWEEP, 'lookup', '--who', 'Pat Example', '--task', TASK], { env: env() });
+  const postrun = () => sh('bash', [SCRIPT, 'test-job', '0', log, '1', marker, scratch, LEAK_ERE, BAD_ERE], { env: env() });
+
+  beforeEach(() => {
+    wa = join(repo, 'wa');
+    notADb = join(repo, 'ChatStorage.sqlite');
+    writeFileSync(notADb, 'not a sqlite database');
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    writeFileSync(join(repo, 'scripts/whatsapp-sweep.py'), 'import json; print(json.dumps({"chats": [{"chat": "Pat Example", "messages": []}]}))\n');
+  });
+
+  it('a good answer is given once (and re-read for 30 minutes); after that the same question is asked again', () => {
+    expect(ask().status).toBe(3);
+    postrun();
+    expect(ask().status).toBe(0);                 // the first read after it was answered
+    expect(ask().status).toBe(0);                 // the same run reading it again
+    const [n] = readdirSync(join(wa, 'results'));
+    const p = join(wa, 'results', n);
+    const res = JSON.parse(readFileSync(p, 'utf8'));
+    res.served = new Date(Date.now() - 31 * 60_000).toISOString();   // first given 31 minutes ago
+    writeFileSync(p, JSON.stringify(res));
+    const later = ask();
+    expect(later.status).toBe(3);
+    expect(readdirSync(join(wa, 'requests')).length).toBe(1);
+  });
+
+  it('a request that is not valid JSON is answered with an error and removed, so it never holds a place', () => {
+    mkdirSync(join(wa, 'requests'), { recursive: true });
+    writeFileSync(join(wa, 'requests', 'broken.json'), '{not json');
+    const r = postrun();
+    expect(r.status).toBe(0);
+    expect(existsSync(join(wa, 'requests', 'broken.json'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(wa, 'results', 'broken.json'), 'utf8')).error).toMatch(/could not be read/);
+  });
+});
