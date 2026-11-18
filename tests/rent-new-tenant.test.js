@@ -1248,8 +1248,9 @@ print(json.dumps({"unit": res["tenancies"][0]["unit"], "names": [x["name"] for x
                   "problem": bout["problems"]}))`);
     expect(r.problem).toEqual(['a tenancy with no unit linked is a new cash flow void whose tenant has no rent payment type, so its clock cannot start']);
     expect(r.unit).toBe('Sample (no unit linked)');
-    expect(r.names).toEqual(['NEW TENANT RENT: housing costs check: a tenancy with no unit linked', 'RENT ASK: costs check 1: a tenancy with no unit linked']);
-    expect(r.labels).toEqual(['Roy, costs check 1: a tenancy with no unit linked', 'tenant draft, costs check 1: a tenancy with no unit linked']);
+    // Roy's check carries the tenancy record's last four characters, a reference that names nobody (finding 971, item 6).
+    expect(r.names).toEqual(['NEW TENANT RENT: housing costs check: a tenancy with no unit linked (ref 0001)', 'RENT ASK: costs check 1: a tenancy with no unit linked']);
+    expect(r.labels).toEqual(['Roy, costs check 1: a tenancy with no unit linked (ref 0001)', 'tenant draft, costs check 1: a tenancy with no unit linked']);
     // Roy still reads who it is, in the words of the task, and never the stand-in.
     expect(r.told).toEqual([true, false]);
   });

@@ -102,8 +102,10 @@ def household_gap(fields, tenant_count):
     if tenant_count > 1 and household in ("", "Single"):
         return ("household (two tenants on one tenancy, the record says Single)" if household
                 else "household (two tenants on one tenancy)")
-    if not household and adults.strip() and not _NO_ADULTS_RE.match(adults):
-        return "household (other adults are on the record)"
+    # "Single" beside named adults waits for a real answer too (finding 20261017-agent-dispatch-971, item 7).
+    if household in ("", "Single") and adults.strip() and not _NO_ADULTS_RE.match(adults):
+        return ("household (the record says Single but names other adults)" if household
+                else "household (other adults are on the record)")
     return ""
 # Each council's claim form, by postcode district (researched 4 Oct 2026; all three run the CRF Housing Payment).
 COUNCILS = {

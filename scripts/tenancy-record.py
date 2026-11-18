@@ -297,12 +297,43 @@ def cmd_status(a):
     return write_field(a.tenancy, PAY_STATUS, a.value, "Payment Status", task, a.why, a.dry_run)
 
 
+def whole_periods(start, until, due_day):
+    """True when a set-off from `start` to `until` covers whole rent periods for this due day: From is a due date and
+    Until the day before one."""
+    after = until + timedelta(days=1)
+    return rc.due_on(start.year, start.month, due_day) == start and rc.due_on(after.year, after.month, due_day) == after
+
+
+def card_set_off(task, tenancy_id):
+    """(from, until) of the Set-off line for this tenancy on the card Kevin approved, or None."""
+    for m in CHANGE_RE.finditer(approved_original((task.get("fields") or {}).get(TK["agentOutput"]))):
+        if m.group("tenancy") == tenancy_id and m.group("label") == "Set-off":
+            parts = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", m.group("value").strip())
+            if parts:
+                return rc.parse_day(parts.group(1)), rc.parse_day(parts.group(2))
+    return None
+
+
 def cmd_due_day(a):
     if not (1 <= a.day <= 31):
         raise Refused(f"a due day is 1 to 31, not {a.day}")
     tenancy, task = gate(a.tenancy, a.task, ("Due Day", str(a.day)))
     if ended(tenancy):
         raise Refused(f"tenancy {a.tenancy} has ended; its due day is not changed")
+    # A set-off still running must stay whole rent periods (finding 20261017-agent-dispatch-971, item 2): a new due
+    # day that leaves it mid-period would read a whole month as paid in the rent check and a few days in the rent
+    # statement. The set-off is re-recorded with it, on the same card, lined up with the new day; a window already over
+    # has been read for the periods it ran and is left alone.
+    f = tenancy.get("fields") or {}
+    so_from, so_until = rc.parse_day(f.get(SET_OFF_FROM)), rc.parse_day(f.get(SET_OFF_UNTIL))
+    if (so_from and so_until and so_from <= so_until and so_until >= rc.today_london()
+            and not whole_periods(so_from, so_until, a.day)):
+        again = card_set_off(task, a.tenancy)
+        if not (again and again[0] and again[1] and again[0] <= again[1] and whole_periods(again[0], again[1], a.day)):
+            raise Refused(f"tenancy {a.tenancy} has rent paid by set-off from {so_from} to {so_until}, which would no "
+                          f"longer be whole rent periods with due day {a.day}: re-record the set-off first. Put a "
+                          f"'RECORD CHANGE: {a.tenancy} Set-off = <a due date> to <the day before one>' line lined up "
+                          f"with the {a.day}th on the same card as the Due Day line, then run due-day, then set-off")
     return write_field(a.tenancy, DUE_DAY, str(a.day), "Due Day of Month", task, a.why, a.dry_run)
 
 
@@ -326,8 +357,7 @@ def cmd_set_off(a):
         due_day = int(rc.sel((tenancy.get("fields") or {}).get(DUE_DAY)))
     except ValueError:
         raise Refused(f"tenancy {a.tenancy} has no due day, so a set-off cannot be lined up with its rent")
-    after = until + timedelta(days=1)
-    if rc.due_on(start.year, start.month, due_day) != start or rc.due_on(after.year, after.month, due_day) != after:
+    if not whole_periods(start, until, due_day):
         raise Refused(f"a set-off covers whole rent periods: --from must be a due date (the {due_day}th) and --until "
                       "the day before one")
     tenancy, task = gate(a.tenancy, a.task, ("Set-off", f"{start.isoformat()} to {until.isoformat()}"))

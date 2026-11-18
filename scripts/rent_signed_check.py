@@ -241,14 +241,43 @@ def on_record(agreement, tenancies, tenant_names, day=None):
     return renewal
 
 
+FOLD_MINUTES = 15
+
+
+def _signed_at(a):
+    """The `signed` stamp ("9 Oct 2026 12:59", London) as a datetime, or None."""
+    try:
+        return datetime.strptime(str(a.get("signed") or ""), "%d %b %Y %H:%M")
+    except ValueError:
+        return None
+
+
 def one_per_agreement(agreements):
-    """Adobe can email info@ two copies of one "Signed and Filed" (review, 9 Oct 2026): the same document signed in
-    the same minute is ONE agreement, keyed by its lowest Gmail id, carrying every copy's id in `copies`."""
-    groups = {}
+    """Adobe can email info@ two copies of one "Signed and Filed" (review, 9 Oct 2026): the same document signed
+    within FOLD_MINUTES of its first copy is ONE agreement (finding 20261017-agent-dispatch-971, item 5: the copies
+    can straddle a minute, 12:59 and 13:01), keyed by its lowest Gmail id, carrying every copy's id in `copies`. The
+    same document signed hours apart is two. A stamp that cannot be read folds only with the identical stamp."""
+    def folds(first, a):
+        f, t = _signed_at(first), _signed_at(a)
+        if f and t:
+            return (t - f).total_seconds() <= FOLD_MINUTES * 60
+        return not f and not t and first.get("signed") == a.get("signed")
+
+    by_doc = {}
     for a in agreements:
-        groups.setdefault((str(a.get("doc") or "").lower(), a.get("signed")), []).append(a)
+        by_doc.setdefault(str(a.get("doc") or "").lower(), []).append(a)
+    groups = []
+    for same in by_doc.values():
+        same.sort(key=lambda c: (_signed_at(c) or datetime.max, str(c.get("signed") or ""), c["mail"]))
+        mine = []
+        for a in same:
+            if mine and folds(mine[-1][0], a):
+                mine[-1].append(a)
+            else:
+                mine.append([a])
+        groups += mine
     out = []
-    for copies in groups.values():
+    for copies in groups:
         copies.sort(key=lambda c: c["mail"])
         out.append(dict(copies[0], copies=[c["mail"] for c in copies]))
     return out

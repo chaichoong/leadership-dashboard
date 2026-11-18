@@ -69,6 +69,9 @@ ABOUT_RE = re.compile(r"\bhousing\s+(?:costs?|element)\b|\bverif\w*|\buniversal\
 # The thread of a housing costs check: its task name, "NEW TENANT RENT: housing costs check[ N]: <place>".
 THREAD_RE = re.compile(r"\bhousing\s+costs\s+check\b", re.I)
 TASK_PLACE_RE = re.compile(r"housing\s+costs\s+check(?:\s+\d+)?\s*:\s*(?P<place>\S.*?)\s*$", re.I)
+# A no-unit check's short reference, the last four characters of its tenancy record (rent_new_tenant.place_name;
+# finding 20261017-agent-dispatch-971, item 6). Matched exactly, case and all.
+REF_RE = re.compile(r"\(ref ([0-9A-Za-z]{4})\)")
 _GATE = []
 
 
@@ -118,9 +121,16 @@ def task_place(name):
 
 
 def in_thread(subject, place):
-    """True when a subject is a reply in this check's thread: "housing costs check" and the check's place words."""
+    """True when a subject is a reply in this check's thread: "housing costs check" and the check's place words. A
+    no-unit check is told apart by its reference, matched exactly; one named before references existed answers only a
+    subject that carries none, so a reply to a newer no-unit check is never also read as an answer to it."""
     s = SUBJECT_LEAD_RE.sub("", norm(subject))
-    return bool(place) and THREAD_RE.search(s) is not None and rsc.same_house(place, s)
+    if not (bool(place) and THREAD_RE.search(s) is not None and rsc.same_house(place, s)):
+        return False
+    want, got = REF_RE.findall(place), REF_RE.findall(s)
+    if want:
+        return want[0] in got
+    return not got if "no unit linked" in place.lower() else True
 
 
 def name_words(name):
