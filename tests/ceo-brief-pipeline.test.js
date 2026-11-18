@@ -204,7 +204,7 @@ describe('the brief never routes work to Mica or Ericamae (Kevin, 25 Aug 2026)',
     expect(system).not.toMatch(/^\s*\d\.\s+Ericamae\s+[—-]/m);
     expect(system).toMatch(/^\s*2\.\s+Roy\s+—/m);
   });
-  it('it names the role agents, not only the five workers', () => {
+  it('it names the role agents, not only the workers', () => {
     for (const a of ['Customer Service', 'Accounts Payable', 'Compliance'])
       expect(system).toContain(a);
   });

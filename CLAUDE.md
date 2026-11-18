@@ -233,7 +233,7 @@ gate, Kevin's surfaces and the clocks fit together. The CEO, every head, every w
 - `python3 scripts/agent-estate-drift.py` is the check (daily 07:00 as the wrapped job
   `estate-drift`, and before every huddle). Red is fixed the same day, never silenced.
 - Never state a register count or a persona list in a prompt; the register is read live and
-  the eleven heads are the `dept-*` files.
+  the heads are the `dept-*` files.
 
 ## Deployment
 
