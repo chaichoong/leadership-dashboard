@@ -45,6 +45,46 @@ describe('the session verdict reads a door that shows no password box', () => {
     expect(signedIn('https://app.gohighlevel.com/?url=%252Fsettings%252Fbilling', GHL)).toBe(false);
     expect(b.onSigninPage('https://app.gohighlevel.com/?url=%252Fsettings%252Fbilling', 0, '', '', walk(GHL))).toBe(true);
   });
+  // A PASSWORDLESS DOOR IS STILL A DOOR (finding 20261117-agent-dispatch-1340).
+  // portal.gascaresolutions.co.uk asks for an email address and emails a login code back: no
+  // password box, an ordinary address, no /login in the path, no door entry in sites.json. Every
+  // test above read "not a door", so `session` answered signedIn true while the page WAS the
+  // sign-in form, and at 07:31 on 17 Nov 2026 the wall-clearing check wrote BLOCKER CLEARED on
+  // task rechq1EFCIurfoeaa for a sign-in that had never happened. The robot met the same wall again.
+  // Back-test: take the SIGNIN_TEXT_RE branch out of sessionVerdict and every case here fails.
+  it('a sign-in form that emails a login code is a door, whatever the address says (1340)', () => {
+    // The portal's own page, in the order it reads: the site's header and cookie line first, so
+    // the words that give the door away sit past the 600 characters `session` used to read.
+    const portal = 'Gas Care Solutions\nCustomer Portal\n'
+      + 'We use cookies to make this site work. '.repeat(14)
+      + '\nSign in to view your documents\nEmail address\nEmail me a login code\n'
+      + 'We will send a 6 digit code to your email address.';
+    expect(portal.length).toBeGreaterThan(600);
+    const v = b.sessionVerdict('https://portal.gascaresolutions.co.uk/', 0, portal, 'Customer Portal');
+    expect(v.signedIn).toBe(false);
+    expect(v.atDoor).toBe(true);
+    expect(v.door).toMatch(/emails a login code/);
+    // And the sign-in app must be told it is the sign-in page, or nothing acts on the verdict.
+    expect(b.onSigninPage('https://portal.gascaresolutions.co.uk/', 0, portal, 'Customer Portal')).toBe(true);
+    // Every other wording of the same door, each on an ordinary address with no password box.
+    for (const t of ['Text me a one-time code to continue', 'Request a login code',
+      "We'll email you a security code", 'Enter the code we emailed to you',
+      'Log in to access your account', 'Sign in to continue']) {
+      expect(b.sessionVerdict('https://x.example/account', 0, t).signedIn, t).toBe(false);
+    }
+  });
+
+  // CONTROL: the cost of a false "signed out" is one sign-in prompt, so the phrases are narrow.
+  // A signed-in page that merely carries the words, or a nav with Sign in and Sign out links,
+  // must still read signed in — otherwise the keep-warm sweep would ask Kevin for every site.
+  it('the words alone are not a door: a signed-in page still reads signed in (1340 control)', () => {
+    for (const t of ['Welcome back, Kevin. Sign out', 'Your documents\nSign in\nHelp\nContact us',
+      'Your code of practice is attached', 'Sign in details updated successfully',
+      'We emailed you a copy of your invoice', 'Login history']) {
+      expect(b.sessionVerdict('https://x.example/account', 0, t).signedIn, t).toBe(true);
+    }
+  });
+
   it('every other sign-out spelling, and only as a word of the address', () => {
     for (const u of ['https://x.example/logout', 'https://x.example/log-out?next=/', 'https://x.example/signout',
       'https://x.example/sign-out/', 'https://x.example/LogOff.aspx', 'https://x.example/account?action=log-off']) {
