@@ -22,20 +22,20 @@
         // Home tab, shown as "My Dashboard" (Kevin, 19 Oct 2026): approvals, CEO brief, Leadership Dashboard, cash flow voids and Wealth in one scroll.
         // It replaced the Leadership Dashboard sidebar item; the 'overview' entry below is still the page it shows, and opens by link.
         { id: 'home',        name: 'My Dashboard',                   icon: '📊', pageVer: '1.17', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.158', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.159', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.88', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.199', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.46', sopFile: 'sop-cfvs.html',               sopVer: '1.46', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         // Wardrobe (Leadership, 27 Oct 2026): clothes, spring buys and the clear-out. Its "What to wear today" card sits at the top of My Dashboard.
         { id: 'wardrobe',   name: 'Wardrobe',                      icon: '👕', pageVer: '1.18', sopFile: 'sop-wardrobe.html',           sopVer: '1.15', standalone: 'index.html#wardrobe' },
-        { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
+        { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.25', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.10', sopFile: 'sop-invoices.html',           sopVer: '3.10', standalone: 'index.html#invoices' },
-        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.35', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
-        { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
+        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.36', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
+        { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.83', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
@@ -62,7 +62,7 @@
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.20', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.25', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
-        { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.1', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
+        { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.2', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];
 
