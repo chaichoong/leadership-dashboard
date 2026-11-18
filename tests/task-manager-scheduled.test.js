@@ -119,6 +119,20 @@ print(json.dumps({"bucket": [b for b, vs in buckets.items() if any(x["id"] == "r
     expect(r.ownerless).toEqual(['recORPHANxxxxxxx1']);
   });
 
+  it('a scheduled task nobody works can be handed to Roy when it is his lane (royAllowed)', () => {
+    // Review of this change: royLane was read only for stuck, moving and held views, so a hand-over
+    // to Roy never counted as placing a scheduled task held by an agent no robot works.
+    const r = py(`${FIXTURES}
+BK = "recBOOKKEEPERxxx1"
+v = rec("recROYSCHEDxxxxx1", {"Task Name": "MAINTENANCE: fence repair at 1 Example Road", "Due Date": "2026-11-30",
+                              "Team Member": [BK], "Maintenance Ticket": True})
+b, _, view = m.task_view(v, set(), set(), now)
+ow = m.ownerless_views({b: [view]}, {BK: "AI Bookkeeper"}, roster={BK: {"name": "Bookkeeper", "status": "Live", "dispatchable": False}})
+print(json.dumps({"bucket": b, "ownerless": [(x["id"], x.get("royAllowed")) for x in ow]}))`);
+    expect(r.bucket).toBe('scheduled');
+    expect(r.ownerless).toEqual([['recROYSCHEDxxxxx1', true]]);
+  });
+
   it("cmd_board's own output: stuck leaves them out, scheduled lists each with its date, soonest first", () => {
     const r = py(`
 import io, contextlib
@@ -129,12 +143,13 @@ def fake_query_all(table, formula, fields, why, **kw):
     if why != "board read":
         return []
     base = {"Assignee": None, "Due Date": None}
+    # The review's order: the scheduled twin is the OLDER task, so it would be the keeper.
     return [rec("recLATERxxxxxxxx1", dict(base, **{"Due Date": ahead(40)})),
             rec("recSOONERxxxxxxx1", dict(base, **{"Due Date": ahead(5), "Inbound Note URL Link": THREAD,
-                                                    "Task Name": "INBOUND: Example Lettings asks for the gas certificate"})),
-            rec("recOLDTWINxxxxxx1", dict(base, **{"Status": "Today", "Due Date": ahead(-9), "Inbound Note URL Link": THREAD,
                                                     "Task Name": "INBOUND: Example Lettings asks for the gas certificate",
                                                     "Created Time": "2026-09-01T09:00:00.000Z"})),
+            rec("recDUETWINxxxxxx1", dict(base, **{"Status": "Today", "Due Date": ahead(-9), "Inbound Note URL Link": THREAD,
+                                                    "Task Name": "INBOUND: Example Lettings asks for the gas certificate"})),
             rec("recNODATExxxxxxx1", base)]
 m.query_all = fake_query_all
 m.read_ai_agents = lambda: ({}, "")
@@ -150,10 +165,12 @@ print(json.dumps({"counts": {k: b["counts"][k] for k in ("stuck", "scheduled", "
                   "scheduled": [(v["id"], v["dueDate"] == ahead(5) or v["dueDate"] == ahead(40)) for v in b["scheduled"]],
                   "dupes": [sorted([g["keeper"]] + list(g["closable"])) for g in b["duplicates"]]}))`);
     expect(r.counts).toEqual({ stuck: 2, scheduled: 2, openTasksRead: 4 });
-    expect(r.stuck).toEqual(['recNODATExxxxxxx1', 'recOLDTWINxxxxxx1']);
+    expect(r.stuck).toEqual(['recDUETWINxxxxxx1', 'recNODATExxxxxxx1']);
     expect(r.scheduled).toEqual([['recSOONERxxxxxxx1', true], ['recLATERxxxxxxxx1', true]]);
-    // a scheduled twin of a stuck task is still a second card for one thread
-    expect(r.dupes).toEqual([['recOLDTWINxxxxxx1', 'recSOONERxxxxxxx1']]);
+    // Due work is never folded into a task that is not due yet (review of this change): the older
+    // scheduled twin would be the keeper, and the due one would leave every worked list with it.
+    // The scheduled twin joins the duplicate check on its date, as a parked twin does.
+    expect(r.dupes).toEqual([]);
   });
 
   it('the skill tells the foreman scheduled work is never a move and is reported as a count', () => {

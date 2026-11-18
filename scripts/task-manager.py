@@ -784,7 +784,9 @@ def task_view(rec, activity_ids, dispatch_ids, now, lanes=None):
         view["heldWhy"] = held_why(lane, detail)
         if detail.get("groupLead"):
             view["groupLead"] = detail["groupLead"]
-    if bucket in ("stuck", "moving", "held") and team:
+    # `scheduled` too (18 Nov 2026): it is on the ownerless scan, and without its lane a hand-over to
+    # Roy would never count as placing it (review of the scheduled bucket).
+    if bucket in ("stuck", "moving", "held", "scheduled") and team:
         # Read here, where the Notes are in hand, for the ownerless check's `royAllowed`.
         view["royLane"] = roy_lane(f)
     wall = open_wall(f.get("Notes"))
@@ -1370,11 +1372,11 @@ def cmd_board(dispatch_queue_path=None):
     # Approval twin can surface as untouchable.
     # Held twins are duplicate-checked too (review of PR #794): a held task is not the foreman's to
     # move, but a second task on its thread is still a second card for one matter.
-    # Scheduled twins too (18 Nov 2026): they sat in `stuck` before, and a second task on one thread
-    # is a second card for one matter whatever its date.
+    # NOT scheduled twins (18 Nov 2026), for the parked twins' reason: the keeper is the OLDEST task,
+    # so a twin due now would fold into one not due until January and leave every list that is worked.
+    # A scheduled twin joins the check on its date. The stated cost: until then the pair is two tasks.
     dupes = duplicate_groups(
-        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"] + buckets["held"]
-        + buckets["scheduled"])
+        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"] + buckets["held"])
     # A door can stay shut (a lead kept open for weeks): a held task past the stuck clock needs a
     # move this slot, and verify names each one that has none (held_problems).
     for v in buckets["held"]:
