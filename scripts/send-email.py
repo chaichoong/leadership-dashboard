@@ -111,6 +111,11 @@ from agent_email_format import (  # noqa: E402
     ALLOWED_SENDERS,
     rule_send_problem,
     trial_problem,
+    ATTACH_EXTENSIONS as FMT_ATTACH_EXTENSIONS,
+    ATTACH_MAX_BYTES as FMT_ATTACH_MAX_BYTES,
+    ATTACH_MIME as FMT_ATTACH_MIME,
+    attach_root_problem,
+    attach_type_problem,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -565,19 +570,21 @@ def cmd_preview(args):
 ATTACH_DIR = os.path.realpath(os.path.expanduser(
     os.environ.get("SEND_EMAIL_ATTACH_DIR")
     or "~/knowledge-os/attachments"))
-# THE RUN FOLDER IS THE SECOND ROOT (findings 20261030-agent-dispatch-1143 and
-# 20261113-agent-dispatch-1301). Twice, an approved email could not be sent
-# because its ATTACH header named the file where the agent had built it — the
-# dispatcher's own run folder — and changing the path would change the text
-# Kevin approved. Re-approving a card to move a file is work for nothing.
-# This is NOT a loosening of the injection guard: it is a second FIXED root the
-# dispatcher owns and writes (STATE_DIR in agent-dispatch.py), chosen in code
-# and never taken from the header, and every other guard still runs on the file
-# — symlinks resolved, the extension allowlist, the size cap, the Adobe audit
-# check. A secret under ~/.config/od is outside both roots, as before.
-# The run folder IS cleaned between runs, so the attachments directory remains
-# the right place to write anything that must survive the draft; the
-# does-not-exist refusal below says so.
+# THE TASK'S OWN RUN FOLDER IS THE SECOND ROOT (findings
+# 20261030-agent-dispatch-1143 and 20261113-agent-dispatch-1301). Twice, an
+# approved email could not be sent because its ATTACH header named the file
+# where the agent had built it — the dispatcher's own run folder — and changing
+# the path would change the text Kevin approved. Re-approving a card to move a
+# file is work for nothing.
+#
+# NARROWED in round 2 of PR 962 (18 Nov 2026). The first draft made the whole
+# dispatcher STATE_DIR a root, which is not a run folder: it holds queue.json
+# (tenant names, rent figures, email bodies), the run's own prep and report
+# scripts, and every other task's scratch. The reviewer refused that, rightly.
+# Only `<state dir>/<run>/<this task's id>/<file>` is sendable now, which is
+# where both stuck files actually sat. The rule itself lives in
+# agent_email_format.attach_root_problem, so SUBMIT runs the same one and an
+# unsendable ATTACH is refused before Kevin decides, not days after.
 RUN_ATTACH_DIR = os.path.realpath(os.path.expanduser(
     os.environ.get("AGENT_DISPATCH_DIR") or "~/knowledge-os/logs/agent-dispatch"))
 
@@ -598,11 +605,10 @@ def attach_roots():
 # needed. NOTE: workers/drive-upload/worker.js carries the same allowlist
 # (ATTACH_MIME_ALLOWED) and must be deployed with `npx --yes wrangler deploy`
 # for a .docx to reach Gmail; until it is, the worker refuses it loudly.
-ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx"}
-ATTACH_MAX_BYTES = 5 * 1024 * 1024
-ATTACH_MIME = {".pdf": "application/pdf", ".png": "image/png",
-               ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-               ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+# The allowlist itself lives in agent_email_format, so submit and send share it.
+ATTACH_EXTENSIONS = FMT_ATTACH_EXTENSIONS
+ATTACH_MAX_BYTES = FMT_ATTACH_MAX_BYTES
+ATTACH_MIME = FMT_ATTACH_MIME
 
 
 # The hand-off stamp names the file: "SIGNED COPY BACK: <agreement> came back
@@ -632,20 +638,21 @@ def load_attachment(attach, task_id):
     """Path from the approved ATTACH header → worker payload dict, or refuse."""
     import base64
     real = os.path.realpath(os.path.expanduser(attach))
-    if not any(real.startswith(root + os.sep) for root in attach_roots()):
-        sys.exit(f"REFUSED: task {task_id} ATTACH is outside the attachments "
-                 f"directory ({ATTACH_DIR}) and the dispatcher's run folder "
-                 f"({RUN_ATTACH_DIR}). Files are only ever sent from there — "
-                 "put the file in the attachments directory and reference that path.")
+    # The SAME two functions submit runs (agent_email_format), so a card cannot
+    # be approved with an attachment this would refuse. Round 2 of PR 962.
+    root_problem = attach_root_problem(real, task_id, attach_roots())
+    if root_problem:
+        sys.exit(f"REFUSED: task {task_id} ATTACH {root_problem}.")
     name = os.path.basename(real)
     ext = os.path.splitext(name)[1].lower()
-    if name.startswith(".") or ext not in ATTACH_EXTENSIONS:
-        sys.exit(f"REFUSED: task {task_id} ATTACH type {ext or '(none)'} is "
-                 f"not allowed. Allowed: {', '.join(sorted(ATTACH_EXTENSIONS))}.")
+    type_problem = attach_type_problem(real)
+    if type_problem:
+        sys.exit(f"REFUSED: task {task_id} ATTACH {type_problem}.")
     if not os.path.isfile(real):
         sys.exit(f"ERROR: task {task_id} ATTACH file does not exist: {name}. "
-                 "It must exist at send time — agents write attachments to "
-                 "the attachments directory at draft time, never a scratch dir.")
+                 "It must exist at send time — a run folder is cleaned between "
+                 "runs, so anything that must survive the draft is written to "
+                 "the attachments directory.")
     size = os.path.getsize(real)
     if size > ATTACH_MAX_BYTES:
         sys.exit(f"REFUSED: task {task_id} ATTACH is {size} bytes — over the "
@@ -1594,10 +1601,14 @@ def cmd_selftest(args):
             "TO: a@b.com\nSUBJECT: x\nATTACH: a.pdf, b.pdf\n---\nb")
 
     import tempfile
-    global ATTACH_DIR
-    real_dir = ATTACH_DIR
-    with tempfile.TemporaryDirectory() as tmp:
+    # BOTH roots are reassigned, which is what attach_roots() reads at call time.
+    # Round 2 of PR 962: the first draft reset only ATTACH_DIR, so every run-folder
+    # case ran against the real ~/knowledge-os/logs/agent-dispatch and proved nothing.
+    global ATTACH_DIR, RUN_ATTACH_DIR
+    real_dir, real_run_dir = ATTACH_DIR, RUN_ATTACH_DIR
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as runtmp:
         ATTACH_DIR = os.path.realpath(tmp)
+        RUN_ATTACH_DIR = os.path.realpath(runtmp)
         try:
             inside = os.path.join(ATTACH_DIR, "pages.pdf")
             with open(inside, "wb") as fh:
@@ -1633,8 +1644,32 @@ def cmd_selftest(args):
                 fh.seek(ATTACH_MAX_BYTES)
                 fh.write(b"x")
             guard_refuses("refuses an oversize file", big)
+
+            # THE RUN FOLDER, AT ITS ONE SENDABLE DEPTH (round 2 of PR 962).
+            # The task's own folder loads; the run's own files, another task's
+            # folder and anything deeper do not.
+            own = os.path.join(RUN_ATTACH_DIR, "20261118-070000", "recOWNTASK0000001")
+            os.makedirs(own)
+            mine = os.path.join(own, "title-register.pdf")
+            with open(mine, "wb") as fh:
+                fh.write(b"%PDF-1.4 run")
+            cases.append(("loads this task's own file from its run folder",
+                          load_attachment(mine, "recOWNTASK0000001")["filename"]
+                          == "title-register.pdf"))
+            guard_refuses("refuses another task's run folder", mine)
+            run_level = os.path.join(RUN_ATTACH_DIR, "20261118-070000", "queue.pdf")
+            with open(run_level, "wb") as fh:
+                fh.write(b"%PDF-1.4 queue")
+            guard_refuses("refuses a file at the run level, never a task's own", run_level)
+            deeper = os.path.join(own, "scratch")
+            os.makedirs(deeper)
+            nested = os.path.join(deeper, "pages.pdf")
+            with open(nested, "wb") as fh:
+                fh.write(b"%PDF-1.4 deep")
+            guard_refuses("refuses a file nested below the task folder", nested)
         finally:
             ATTACH_DIR = real_dir
+            RUN_ATTACH_DIR = real_run_dir
 
     failed = [n for n, ok in cases if not ok]
     for n, ok in cases:

@@ -144,16 +144,61 @@ except SystemExit as e:
     print(json.dumps({"ok": False, "error": str(e)}))
 `;
 
-function loadAttachment({ file, inAttachDir }) {
+// The task the harness sends as. The run folder is named for it on purpose: round 2 of
+// PR 962 made the ONE sendable shape under the dispatcher's state directory
+// `<run>/<this task's id>/<file>`, so a folder named for anything else is refused.
+const TASK = 'recTEST';
+
+function attachTree(file, where) {
   const base = mkdtempSync(resolve(tmpdir(), 'attach-'));
   const attachDir = resolve(base, 'attachments');
   const runRoot = resolve(base, 'runs');
-  const runDir = resolve(runRoot, '20261117-070000', 'recTASK');
+  const runDir = resolve(runRoot, '20261118-070000', TASK);
   mkdirSync(attachDir, { recursive: true });
   mkdirSync(runDir, { recursive: true });
-  const path = resolve(inAttachDir ? attachDir : runDir, file);
+  const dirs = {
+    attach: attachDir,
+    run: runDir,
+    runLevel: resolve(runRoot, '20261118-070000'),
+    otherTask: resolve(runRoot, '20261118-070000', 'recOTHERTASK'),
+    nested: resolve(runDir, 'scratch'),
+  };
+  const dir = dirs[where];
+  mkdirSync(dir, { recursive: true });
+  const path = resolve(dir, file);
   writeFileSync(path, 'file bytes');
-  const out = execFileSync('python3', ['-c', LOAD_PY, attachDir, runRoot, path], { encoding: 'utf8' });
+  return { attachDir, runRoot, path };
+}
+
+function loadAttachment({ file, inAttachDir, where }) {
+  const t = attachTree(file, where || (inAttachDir ? 'attach' : 'run'));
+  const out = execFileSync('python3', ['-c', LOAD_PY, t.attachDir, t.runRoot, t.path], { encoding: 'utf8' });
+  return JSON.parse(out.trim());
+}
+
+// The SUBMIT gate, through the real validate_submission_any — the same two checks the
+// send path runs, run before Kevin decides (round 2 of PR 962).
+const SUBMIT_PY = `
+import json, os, sys
+sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
+os.environ["SEND_EMAIL_ATTACH_DIR"] = sys.argv[1]
+os.environ["AGENT_DISPATCH_DIR"] = sys.argv[2]
+import agent_email_format as fmt
+out = ("TO: office@example-agents.test\\nFROM: " + fmt.PROPERTY_SENDER + "\\n"
+       "SUBJECT: Title register for 57 Example Street\\n"
+       "ATTACH: " + sys.argv[3] + "\\n---\\nDear Sir or Madam,\\n\\n"
+       "The title register is attached.\\n\\nKind regards\\nRoy Lavin\\nAgile Lets\\n\\n"
+       "**Carrying this out will involve:** sending this email.")
+try:
+    fmt.validate_submission_any(out, task_name="INBOUND: title register", task_id=${JSON.stringify(TASK)})
+    print(json.dumps({"ok": True}))
+except fmt.EmailFormatError as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+`;
+
+function submitAttach({ file, where }) {
+  const t = attachTree(file, where);
+  const out = execFileSync('python3', ['-c', SUBMIT_PY, t.attachDir, t.runRoot, t.path], { encoding: 'utf8' });
   return JSON.parse(out.trim());
 }
 
@@ -165,10 +210,23 @@ describe('load_attachment (real scripts/send-email.py)', () => {
     expect(r.payload.filename).toBe('police-form.docx');
   });
 
-  it('takes a file the agent built in the run folder, approved path untouched (1143, 1301)', () => {
-    const r = loadAttachment({ file: 'title-register.png', inAttachDir: false });
+  it('takes a file the agent built in this task\'s own run folder, approved path untouched (1143)', () => {
+    const r = loadAttachment({ file: 'title-register.png', where: 'run' });
     expect(r.ok, r.error).toBe(true);
     expect(r.payload.mimeType).toBe('image/png');
+  });
+
+  // CONTROL for the narrowing the reviewer asked for in round 2 of PR 962. The dispatcher's
+  // state directory is NOT an attachments directory: it holds queue.json (tenant names, rent
+  // figures, email bodies), the run's own prep and report scripts, and every other task's
+  // scratch. Exactly one shape under it is sendable — <run>/<this task's id>/<file> — so the
+  // run level, another task's folder and anything nested deeper are all still refused.
+  it('the dispatcher state directory is not a root: only this task\'s own run folder is', () => {
+    for (const where of ['runLevel', 'otherTask', 'nested']) {
+      const r = loadAttachment({ file: 'queue.pdf', where });
+      expect(r.ok, where).toBe(false);
+      expect(r.error, where).toMatch(/not in this task's own run folder/);
+    }
   });
 
   // CONTROL: the injection guard is what this function exists for. A path outside BOTH
@@ -193,6 +251,28 @@ describe('load_attachment (real scripts/send-email.py)', () => {
       expect(r.ok, file).toBe(false);
       expect(r.error).toMatch(/not allowed/);
     }
+  });
+
+  // THE CAUSE, NOT THE SYMPTOM (round 2 of PR 962). Submit read ATTACH for shape only, so an
+  // output naming a type or a folder the send path refuses was approved first and refused days
+  // later, after Kevin had decided. Both paths now run the same two functions.
+  // Back-test: drop the attach_submit_problem call from validate_submission_any and both fail.
+  it('submit refuses a type the send path would refuse, before Kevin decides (862)', () => {
+    const bad = submitAttach({ file: 'form.docm', where: 'attach' });
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toMatch(/type \.docm is not allowed/);
+    const good = submitAttach({ file: 'police-form.docx', where: 'attach' });
+    expect(good.ok, good.error).toBe(true);
+  });
+
+  it('submit refuses a folder the send path would refuse, before Kevin decides (1301)', () => {
+    const bad = submitAttach({ file: 'queue.pdf', where: 'runLevel' });
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toMatch(/not in this task's own run folder/);
+    // And it accepts the path that got the two cards stuck, so nothing has to be re-approved
+    // just to move a file: this task's own run folder.
+    const good = submitAttach({ file: 'title-register.png', where: 'run' });
+    expect(good.ok, good.error).toBe(true);
   });
 
   it('the worker allowlist agrees with the script, or the send fails at the worker (862)', () => {

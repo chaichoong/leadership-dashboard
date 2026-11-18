@@ -67,6 +67,7 @@ guessing a recipient.
 """
 
 import html
+import os
 import re
 from datetime import datetime, timezone
 
@@ -1654,7 +1655,101 @@ def parse_any(output):
     return parsed
 
 
-def validate_submission_any(output, task_name=None):
+# ─── THE ATTACH GUARDS, WHERE BOTH PATHS READ THEM ──────────────────────
+#
+# Round 2 of PR 962 (18 Nov 2026). The reviewer's point on findings
+# 20261014-agent-dispatch-862, 20261030-agent-dispatch-1143 and
+# 20261113-agent-dispatch-1301: widening what the SEND path accepts does not
+# touch the reason those three cards got stuck. Submit read ATTACH for shape
+# only, so an output naming a type or a folder the send path refuses was
+# approved first and refused days later, after Kevin had decided. That is the
+# cause. The rules are one set of rules, so they live in one place — this
+# module, which submit and send both already import — and submit runs them.
+ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx"}
+ATTACH_MAX_BYTES = 5 * 1024 * 1024
+ATTACH_MIME = {".pdf": "application/pdf", ".png": "image/png",
+               ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+
+
+def attach_dir():
+    """The outbound attachments directory. Read at CALL time, never bound at import,
+    so a test or a selftest can point it at a throwaway directory."""
+    return os.path.realpath(os.path.expanduser(
+        os.environ.get("SEND_EMAIL_ATTACH_DIR") or "~/knowledge-os/attachments"))
+
+
+def run_attach_dir():
+    """The dispatcher's state directory (STATE_DIR in agent-dispatch.py). NOT an
+    attachments directory: see attach_root_problem for how little of it is sendable."""
+    return os.path.realpath(os.path.expanduser(
+        os.environ.get("AGENT_DISPATCH_DIR") or "~/knowledge-os/logs/agent-dispatch"))
+
+
+def attach_type_problem(path):
+    """'' when the file's extension may be emailed, else why it may not."""
+    name = os.path.basename(os.path.realpath(os.path.expanduser(str(path or ""))))
+    ext = os.path.splitext(name)[1].lower()
+    if name.startswith(".") or ext not in ATTACH_EXTENSIONS:
+        return ("type %s is not allowed. Allowed: %s"
+                % (ext or "(none)", ", ".join(sorted(ATTACH_EXTENSIONS))))
+    return ""
+
+
+def attach_root_problem(path, task_id, roots=None):
+    """'' when this file may be sent for this task, else why it may not.
+
+    TWO ROOTS, READ DIFFERENTLY — and the difference is the whole guard.
+
+    The attachments directory exists for outbound attachments and nothing
+    else, so anything under it, at any depth, is sendable.
+
+    The dispatcher's state directory is not that. It holds `queue.json` (tenant
+    names, rent figures, email bodies), the run's own prep and report scripts,
+    and every OTHER task's scratch folder. The first draft of this fix made the
+    whole of it a root, which would have let an injected or mistaken ATTACH mail
+    any of that out; the reviewer refused it, rightly. So exactly ONE shape
+    under it is sendable: `<state dir>/<run>/<this task's own id>/<file>`, at
+    that depth and no other. The folder must be named for the task being sent,
+    which is the strong part: another task's scratch, the run's own files and
+    anything nested deeper are all outside. That covers both cards that got
+    stuck (each file sat in its own task's run folder) and widens nothing else.
+    """
+    real = os.path.realpath(os.path.expanduser(str(path or "")))
+    plain, run_root = (roots or (attach_dir(), run_attach_dir()))[:2]
+    if plain and real.startswith(plain + os.sep):
+        return ""
+    if run_root and real.startswith(run_root + os.sep):
+        rel = real[len(run_root) + 1:].split(os.sep)
+        if len(rel) != 3 or not task_id or rel[1] != str(task_id):
+            return ("is under the dispatcher's state directory (%s) but not in this task's own "
+                    "run folder. Only <run>/<task id>/<file> there is sendable — the state "
+                    "directory also holds the queue, the run's own scripts and every other "
+                    "task's scratch, and none of that is ever emailed" % run_root)
+        return ""
+    return ("is outside the attachments directory (%s) and this task's run folder. Files are "
+            "only ever sent from there — put the file in the attachments directory and "
+            "reference that path" % plain)
+
+
+def attach_submit_problem(parsed, task_id):
+    """'' when a parsed submission's ATTACH is one the send path will accept.
+
+    The type and root checks only: existence and size are the send path's, because
+    a file can honestly be rebuilt between the draft and the carry-out, while a
+    type and a folder cannot change without changing the text Kevin approved.
+    """
+    attach = (parsed or {}).get("attach")
+    if not attach:
+        return ""
+    for problem in (attach_type_problem(attach), attach_root_problem(attach, task_id)):
+        if problem:
+            return ("ATTACH %s. An approved email whose attachment cannot be sent is worse "
+                    "than a refused draft: the refusal arrives after the decision" % problem)
+    return ""
+
+
+def validate_submission_any(output, task_name=None, task_id=None):
     """The SUBMIT gate for all three shapes. Raises EmailFormatError.
 
     Email keeps its strict extra rules (a FROM identity, no contact details
@@ -1693,6 +1788,14 @@ def validate_submission_any(output, task_name=None):
         return parsed
     parsed = validate_submission(output, task_name=task_name)
     attach = parsed.get("attach")
+    # The type and root checks the SEND path runs, run here too, before Kevin
+    # decides (round 2 of PR 962; findings 862, 1143 and 1301). Only when the
+    # caller named the task: the folder rule is about the task's own run folder,
+    # and a check that cannot see which task it is would be guessing.
+    if task_id:
+        bad = attach_submit_problem(parsed, task_id)
+        if bad:
+            raise EmailFormatError(bad)
     text = None if (not attach or as_received(attach)) else letter_text(attach)
     bad = placeholder_problem(text, "the attached document") if text is not None else ""
     if bad:

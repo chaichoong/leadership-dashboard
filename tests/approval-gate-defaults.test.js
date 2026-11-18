@@ -201,8 +201,10 @@ describe('the rules are enforced where they cannot be skipped', () => {
     // strict checks as before, and post/sign to their own parsers, which ARE
     // their strict layer. The property under test is unchanged: submit
     // validates strictly, and never with the permissive parser.
+    // 18 Nov 2026: the call also carries task_id, so the ATTACH type and root checks the send
+    // path runs can run here, before Kevin decides (round 2 of PR 962). Still the strict one.
     const src = readFileSync(DISPATCH, 'utf8');
-    expect(src).toMatch(/validate_any_submission\(output(?:, task_name=_pn)?\)/);
+    expect(src).toMatch(/validate_any_submission\(output(?:, task_name=_pn)?(?:, task_id=args\.task)?\)/);
     expect(src, 'submit fell back to the permissive parser')
       .not.toMatch(/^\s*parse_email_output\(output\)/m);
   });
