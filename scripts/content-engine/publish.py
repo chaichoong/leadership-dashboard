@@ -902,15 +902,15 @@ def studio_plan(state, limit=MONETISE_PER_RUN):
     """The posts this sync may visit in Studio: at most `limit`, never-read first, then the longest since read."""
     due = []
     for day, entry in state.items():
-        if not str(day).isdigit() or not isinstance(entry, dict): continue
+        if not str(day).isdecimal() or not isinstance(entry, dict): continue
         for key, p in youtube_posts(entry):
             want = studio_wants(p)
             if not want or not youtube_ads.video_id(entry, p): continue
-            due.append((p.get("monetisation_checked" if want == "switch" else "midroll_checked") or "", int(day), key))
+            due.append((p.get("monetisation_checked" if want == "switch" else "midroll_checked") or "", int(day), str(day), key))
     due.sort()
     rank = {}
-    for _, d, _k in due[:limit]: rank.setdefault(str(d), len(rank))
-    return {"allowed": {(str(d), k) for _, d, k in due[:limit]}, "rank": rank, "due": len(due), "visits": 0,
+    for _, _n, d, _k in due[:limit]: rank.setdefault(d, len(rank))
+    return {"allowed": {(d, k) for _, _n, d, k in due[:limit]}, "rank": rank, "due": len(due), "visits": 0,
             "visited": set(), "unreadable": 0, "stopped": None}
 
 
@@ -1002,7 +1002,10 @@ def monetise_long_video(day, entry):
         # mid-roll only once the master switch is On: the checkbox does nothing on a video that is not earning
         if p.get("clip") == "full" and p.get("monetisation") in MONETISED \
                 and studio_wants(p) == "midroll" and not studio_refusal(day, key):
-            res = youtube_ads.midroll([vid])
+            try:
+                res = youtube_ads.midroll([vid])
+            except (Exception, SystemExit) as ex:     # stamped like a read that raises, or it would hold slot 1 every run
+                res = {}; p["midroll_error"] = str(ex)[-200:]
             p["midroll"] = res.get(vid) or "failed"; p["midroll_checked"] = now_utc(); changed = True
             studio_visited(day, key, p["midroll"] != "failed")
             print("episode %s: YouTube episode mid-roll ads %s" % (day, p["midroll"]))
@@ -1418,10 +1421,12 @@ def run(dry_run=False, limit=3):
             done += 1 if n else 0
             # Same day, not the day after (Kevin, 10 Sep 2026). The direct upload hands back the YouTube link at
             # once, so the socials, the blog, the podcast and Spotify go out this afternoon instead of tomorrow.
-            if st_no == 1 and n and stage_for(entry, yt_ok) == "socials":
+            # Past the run's budget the socials and extras wait an hour: the next run takes them at the "socials" or
+            # "done" stage (18 Nov 2026), so the queue is not held for uploads that can go next hour.
+            if st_no == 1 and n and stage_for(entry, yt_ok) == "socials" and not out_of_time():
                 if schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=per_stage[2], save=save):
                     per_stage[2] += 1
-            if stage_for(entry, yt_ok) == "done" and not dry_run:
+            if stage_for(entry, yt_ok) == "done" and not dry_run and not out_of_time():
                 finish_extras(day, entry, recs, test, save)
             save()
         except (Exception, SystemExit) as ex:
@@ -1565,7 +1570,7 @@ def sync():
             except (Exception, SystemExit) as ex:
                 print("episode %s: Facebook %s profile share skipped this run (%s)" % (day, clip, str(ex)[-160:]), file=sys.stderr)
         pod = entry.get("podcast") or {}
-        if spotify_link_due(pod):
+        if spotify_link_due(pod) and not out_of_time():
             # the public link arrives once Spotify has processed the video (a few minutes after Publish)
             import spotify
             link = spotify.public_link(pod["title"])
@@ -2118,10 +2123,20 @@ def _selftest_time_budget():
     calls, shares, out = [], [], _io.StringIO()
     answer = {"res": {"status": "unknown", "error": "locator.waitFor: Timeout 60000ms exceeded."}}
 
+    mids = []
+
     def monetise_(vid, certify_none=False):
         calls.append(vid)
-        if isinstance(answer["res"], BaseException): raise answer["res"]
-        return dict(answer["res"])
+        res = answer["seq"].pop(0) if answer.get("seq") else answer["res"]
+        if answer.get("deadline_after") and len(calls) >= answer["deadline_after"]:
+            os.environ["CE_PUBLISH_DEADLINE"] = str(time.time() - 1)     # the budget runs out during this visit
+        if isinstance(res, BaseException): raise res
+        return dict(res)
+
+    def midroll_(ids):
+        mids.extend(ids)
+        if isinstance(answer.get("mid"), BaseException): raise answer["mid"]
+        return {i: "on" for i in ids}
 
     def fresh():
         # 20 invented episodes, a long video and a Short each: 40 posts not earning. 3020 and 3019 were never read.
@@ -2138,14 +2153,14 @@ def _selftest_time_budget():
 
     def sync_(st):
         g["load_state"] = lambda: st
-        del calls[:]; del shares[:]
+        del calls[:]; del shares[:]; del mids[:]
         with _cl.redirect_stdout(out), _cl.redirect_stderr(_io.StringIO()): sync()
         return list(calls)
 
     try:
         sys.modules["youtube_studio"] = _types.SimpleNamespace(monetise=monetise_)
         approval.load_state = lambda: {}
-        youtube_ads.midroll = lambda ids: {i: "on" for i in ids}
+        youtube_ads.midroll = midroll_
         g.update({"save_state": lambda st: None, "_cfg": lambda brand="Runpreneur": ("k", "loc", "user"),
                   "youtube_truth": lambda st: {}, "prune_publish_cache": lambda st, now=None, root=None: [],
                   "share_to_facebook_profile": lambda day, entry, st, clip="summary": shares.append((day, clip)) and False,
@@ -2175,6 +2190,44 @@ def _selftest_time_budget():
         assert len(seen) == MONETISE_UNREADABLE_STOP, seen
         p = st["3019"]["posts"]["youtube|full|yt"]
         assert p.get("monetisation_checked") and "Extra data" in p.get("monetisation_error", ""), p
+
+        # unreadable pages count IN A ROW: a readable one between them resets the count
+        answer["seq"] = [{"status": "unknown"}, {"status": "unknown"}, {"status": "Checking"},
+                         {"status": "unknown"}, {"status": "unknown"}, {"status": "unknown"}]
+        st = fresh(); seen = sync_(st)
+        assert len(seen) == MONETISE_PER_RUN, "two unreadable, one readable, three unreadable: all six visits made: %s" % seen
+        answer.pop("seq", None)
+
+        # the deadline passes during the Studio pass: no visit starts after it
+        answer["res"] = {"status": "Checking"}; answer["deadline_after"] = 2
+        st = fresh(); seen = sync_(st)
+        assert len(seen) == 2, "the visit in hand finishes, no new one starts: %s" % seen
+        answer.pop("deadline_after", None); os.environ.pop("CE_PUBLISH_DEADLINE", None)
+
+        # a switch read that comes back On is followed by its mid-roll in the same slot, Shorts have none
+        answer["res"] = {"status": "On"}
+        st = fresh(); seen = sync_(st)
+        assert len(seen) == MONETISE_PER_RUN and mids == ["vf000003019", "vf000003020", "vf000003001"], (seen, mids)
+        # videos already earning with mid-roll unsettled: the mid-roll visits are capped by the plan too
+        st = fresh()
+        for day in range(3001, 3011):
+            st[str(day)]["posts"]["youtube|full|yt"].update({"monetisation": "On", "monetisation_checked": "2026-11-17T00:00:00Z"})
+            st[str(day)]["posts"]["youtube|lfmd|yt"].update({"monetisation": "On", "monetisation_checked": "2026-11-17T00:00:00Z"})
+        for day in range(3011, 3021): del st[str(day)]
+        seen = sync_(st)
+        assert seen == [] and len(mids) == MONETISE_PER_RUN, "ten mid-rolls due, six this run: %s" % mids
+        # a mid-roll call that raises is stamped and counted as unreadable, so the next run moves on to others
+        answer["mid"] = SystemExit("mid-roll run failed: watchdog")
+        st = fresh()
+        for day in range(3001, 3021):
+            st[str(day)]["posts"]["youtube|full|yt"].update({"monetisation": "On", "monetisation_checked": "2026-11-17T00:00:00Z"})
+            st[str(day)]["posts"]["youtube|lfmd|yt"].update({"monetisation": "On", "monetisation_checked": "2026-11-17T00:00:00Z"})
+        first = sync_(st) or list(mids)
+        assert len(first) == MONETISE_UNREADABLE_STOP, first
+        assert all(st[str(int(v[2:]))]["posts"]["youtube|full|yt"].get("midroll_checked") for v in first), "each failed mid-roll is stamped"
+        second = sync_(st) or list(mids)
+        assert len(second) == MONETISE_UNREADABLE_STOP and not set(first) & set(second), "the next run reaches other videos: %s %s" % (first, second)
+        answer.pop("mid", None)
 
         # no plan means no visit: monetise_long_video called outside sync() never opens Studio
         answer["res"] = {"status": "On"}
@@ -2209,12 +2262,12 @@ def _selftest_time_budget():
                   "watch": _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: set()),
                   "schedule_stage": schedule_, "finish_extras": lambda *a, **k: [], "fill_learnings": lambda *a, **k: False})
         with _cl.redirect_stdout(out), _cl.redirect_stderr(_io.StringIO()): run()
-        assert booked == [(3001, 1), (3001, 2)], "the episode in hand finishes both stages, the next never starts: %s" % booked
+        assert booked == [(3001, 1)], "the upload in hand finishes; its socials and the next episode wait: %s" % booked
         assert "episode 3002 and the ones after it wait for the next hourly run" in out.getvalue(), out.getvalue()[-300:]
         os.environ["CE_PUBLISH_DEADLINE"] = str(time.time() + 1800)
         del booked[:]
         with _cl.redirect_stdout(out), _cl.redirect_stderr(_io.StringIO()): run()
-        assert booked[:2] == [(3002, 1), (3002, 2)], "the next run carries on in the same order: %s" % booked
+        assert booked == [(3001, 2), (3002, 1)], "the next run takes 3001's socials first, then 3002, in order: %s" % booked
     finally:
         g.update(saved); g["_studio"] = None
         approval.load_state, youtube_ads.midroll = saved_approval, saved_midroll
@@ -2393,6 +2446,7 @@ def _selftest_fill_learnings():
 
 
 def selftest():
+    os.environ.pop("CE_PUBLISH_DEADLINE", None)     # a deadline left in the caller's shell would stop the run() checks
     ent_h = {"youtube_link": "y", "blog": {"url": "u"}, "podcast": {"status": "failed", "upload_attempts": 3, "error": "Timeout"}}
     import io as _io3, contextlib as _cl3, blog as _blog3
     # 29 Sep 2026: unfaked, this check fetched 2070's real podcast from Drive and uploaded it to GoHighLevel with curl on

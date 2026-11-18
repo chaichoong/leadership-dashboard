@@ -123,14 +123,15 @@ describe('content-engine publish (GHL)', () => {
   // 18 Nov 2026: the daytime publisher held the job queue from 07:15 to past 10:00 and the 07:30 rent check, the 09:00
   // inbox run, task-manager and signature-watch gave up behind it. Every sync re-read in YouTube Studio each video not
   // yet earning (106 to 121 of them, about 71 s a visit, Studio unreadable since 16 Oct), every six hours. Drives the
-  // real sync() and run(). Back-tested on a scratch copy: no cap, visits in episode order, a raised read left unstamped
-  // and no deadline check in run() each make it fail.
+  // real sync() and run(). Back-tested on a scratch copy, each of these makes it fail: no cap, visits in episode order,
+  // a raised read or mid-roll left unstamped, a mid-roll that ignores the plan, the deadline read only once, unreadable
+  // pages counted in total rather than in a row, no deadline check in run(), stage 2 started past the deadline.
   it('caps the Studio visits per run, oldest first, and starts no new work once the run budget is used', () => {
     const out = execFileSync('python3', ['-c', 'import publish; publish._selftest_time_budget(); print("OK")'],
       { encoding: 'utf8', cwd: DIR });
     expect(out.trim().split('\n').pop()).toBe('OK');
     const src = readFileSync(PUBLISH, 'utf8');
-    expect(src).toMatch(/^MONETISE_PER_RUN = [1-9]\d?$/m);   // a small number, never "all of them"
+    expect(src).toMatch(/^MONETISE_PER_RUN = ([1-9]|1[0-2])$/m);   // a small number (about 71 s a visit), never "all of them"
   });
 
   it('never holds the job queue past its ceiling: a 30-minute work budget inside a 60-minute queue limit', () => {
