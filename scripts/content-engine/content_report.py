@@ -150,7 +150,7 @@ def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0
     for v in ledger.values():
         d = v.get("episode") or (v.get("day") if v.get("status") != "broll" else None)
         if d: days.add(d); clips.setdefault(d, []).append(v.get("status"))
-    settled = ("new", "rendered", "broll")                   # waiting its turn, or already done: neither is stuck
+    settled = ("new", "rendered", "broll", watch.SET_ASIDE)  # waiting its turn, done, or set aside: none is stuck
     queued = {d for d, sts in clips.items() if "new" in sts and all(s in settled for s in sts)}
     rows = [{"day": d, "why": why(d)} for d in sorted(days)
             if d >= start and (d < cursor or d in named) and (d not in gaps or d in dead) and d not in out and d not in ready]

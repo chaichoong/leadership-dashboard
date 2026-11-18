@@ -32,6 +32,10 @@ import argparse, datetime as dt, json, os, re, shutil, subprocess, sys, time, ur
 RAW_ROOT = os.path.expanduser("~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/Shared drives/Marketing/Runpreneur/Runpreneur - Raw Video")
 LEDGER = os.path.expanduser("~/knowledge-os/logs/content-engine/ledger.json")
 AGENT_FILE = os.path.expanduser("~/.claude/agents/content-engine.md")   # the agent's definition; lessons land in it
+# A clip the night has decided is not part of its day's episode, on purpose: a second long recording that is not a
+# part, or the short recording that follows it (finding 20261020-agent-dispatch-1016). It is settled, not failed, so
+# it never holds a card for "a ruling from Kevin" and never goes back in the queue; redo-day still resets it.
+SET_ASIDE = "set-aside"
 
 
 def kevin_lessons(path=None):
@@ -836,13 +840,13 @@ def clear_leftovers(ledger, work=WORK, attach=ATTACH_DIR, publishing=None, now=N
     daytime one-offs kept their 5-9 GB raw copies and render folders, and every Spotify upload kept its staged episode,
     until 34 GB sat unused and 2072's pull was refused 1 GB short: no card, nothing to publish the next day. Only copies
     are removed: a raw clip's original is on Drive and every render output is filed there before its status is set.
-      - a clip (and its render_ folder) whose ledger status is rendered or broll; never pulled/pulling/rendering/new
+      - a clip (and its render_ folder) whose ledger status is rendered, broll or set aside; never pulled/pulling/rendering/new
       - any other loose file in the work folder older than LOOSE_KEEP_DAYS (hand-made test copies, old upload shrinks)
       - a staged Spotify file once that episode's podcast is published, or older than STAGED_KEEP_DAYS"""
     import time as _t
     now = now or _t.time()
     remove = remove or (lambda p: shutil.rmtree(p) if os.path.isdir(p) else os.remove(p))
-    done_keys = {k for k, v in ledger.items() if v.get("status") in ("rendered", "broll")}
+    done_keys = {k for k, v in ledger.items() if v.get("status") in ("rendered", "broll", SET_ASIDE)}
     busy_keys = {k for k, v in ledger.items() if v.get("status") in ("pulled", "pulling", "rendering", "new") or v.get("keep_masters")}   # kept for the next part (render.py)
     def size(p):
         if os.path.isfile(p): return os.path.getsize(p)

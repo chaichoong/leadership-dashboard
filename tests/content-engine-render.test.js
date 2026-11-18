@@ -206,3 +206,84 @@ print(json.dumps(render.summary_rival(${JSON.stringify(key)}, ${day}, ${JSON.str
     expect(a).toMatch(/build_card\(day, full, recs\["Learnings From My Diary"\], recs\["Short Form Video"\], headline, pans_for\(day, ledger\), proof\)/);  // pans and the output gate's proof (10 Sep 2026)
   });
 });
+
+// 18 Nov 2026, finding 20261020-agent-dispatch-1016 (with 20261020-agent-dispatch-1015, the same fix). Day 2106 holds
+// long 001 (14:18:15, 428.2 s), short 002 (14:25:28), a second long 003 (14:26:34, 384.5 s) and short 004 (14:33:12).
+// Kevin's 10 Oct note: the episode is 001 with its own summary 002. On 18 Oct the redo let 004, which names no day,
+// replace 002, and 003 sat "failed, needs a person", which held the card for a ruling he had already given. Invented
+// clip names on the real clock; the Python is driven, not grepped.
+describe('finding 20261020-agent-dispatch-1016: a teaser is the summary of the long recording it follows', () => {
+  const run = (body) => JSON.parse(execFileSync('python3', ['-c', `
+import sys, os, json, tempfile, io, contextlib, datetime as dt
+sys.path.insert(0, ${JSON.stringify(DIR)})
+import render, watch
+watch.save_ledger = lambda l: None
+D, FLAG, NO_DAY = "2026-03-07", "spoken day 2101 disagrees with the date (2106); date used, flagged", "no spoken day, date used"
+led = {"VID_A_141815_001.insv": {"date": D, "hms": "141815", "duration": 428.2, "role": "episode", "episode": 2106,
+                                 "status": "rendered", "rendered": "2026-11-19T01:00:00", "episode_reason": FLAG, "day": 2106},
+       "VID_A_142528_002.insv": {"date": D, "hms": "142528", "duration": 47.5, "status": "new", "day": 2106},
+       "VID_A_142634_003.insv": {"date": D, "hms": "142634", "duration": 384.5, "role": "episode", "episode": 2106,
+                                 "status": watch.SET_ASIDE, "day": 2106},
+       "VID_A_143312_004.insv": {"date": D, "hms": "143312", "duration": 35.8, "status": "new", "day": 2106}}
+res = None
+with contextlib.redirect_stdout(io.StringIO()):
+${body.split('\n').map((l) => '    ' + l).join('\n')}
+print(json.dumps(res))
+`], { encoding: 'utf8', cwd: DIR }));
+
+  it('pairs each short clip with the long recording before it, by start time and length', () => {
+    const r = run(`res = [render.long_recording_before(k, led) and render.long_recording_before(k, led)[0] for k in sorted(led)]`);
+    // 003 also follows 001; only a SHORT clip is ever paired to one (summary_rival)
+    expect(r).toEqual([null, 'VID_A_141815_001.insv', 'VID_A_141815_001.insv', 'VID_A_142634_003.insv']);
+  });
+
+  it('sets 004 aside with the refused 003, whichever teaser renders first, and 002 stays the summary', () => {
+    const r = run(`
+first = render.summary_rival("VID_A_143312_004.insv", 2106, NO_DAY, led)[0]
+ok = render.summary_rival("VID_A_142528_002.insv", 2106, FLAG, led)
+led["VID_A_142528_002.insv"].update(role="teaser", episode=2106, status="rendered", episode_reason=FLAG)
+after = render.summary_rival("VID_A_143312_004.insv", 2106, NO_DAY, led)[0]
+res = [first, ok, after]`);
+    expect(r).toEqual(['set-aside', ['', ''], 'set-aside']);
+  });
+
+  it('on the ledger the 18 Oct night left (004 the summary, 003 failed), 002 takes the summary back', () => {
+    const r = run(`
+led["VID_A_142634_003.insv"].update(status="failed", error=render.SECOND_LONG + " 2106 (VID_A_141815_001.insv is already its episode)",
+                                    requeued="not requeued: it needs a person")
+led["VID_A_143312_004.insv"].update(role="teaser", episode=2106, status="rendered", episode_reason=NO_DAY)
+res = render.summary_rival("VID_A_142528_002.insv", 2106, FLAG, led)[0]`);
+    expect(r).toBe('replace');
+  });
+
+  it('a teaser that names no day never replaces a flagged summary, even with no camera times to pair by', () => {
+    const r = run(`res = render.summary_rival("b.insv", 2106, NO_DAY, {"a.insv": {"episode": 2106, "role": "teaser", "status": "rendered", "episode_reason": FLAG}})`);
+    expect(r[0]).toBe('refuse');
+    expect(r[1]).toContain('names no day');
+  });
+
+  it('the card goes back when 003 and 004 are set aside, where "failed, needs a person" held it', () => {
+    const r = run(`
+led["VID_A_142528_002.insv"].update(role="teaser", episode=2106, status="rendered", episode_reason=FLAG)
+led["VID_A_143312_004.insv"].update(role="teaser", episode=2106, status=watch.SET_ASIDE)
+copy = {"YouTube Copy": "copy", "AI Last Run": "2026-11-19T02:00:00Z"}
+receipt = dt.datetime(2026, 11, 18, 12, 0).timestamp()
+now = render.resubmit_due(2106, led, receipt, {"verdict": "changes"}, copy)
+led["VID_A_142634_003.insv"].update(status="failed", error="x", requeued="not requeued: it needs a person")
+before = render.resubmit_due(2106, led, receipt, {"verdict": "changes"}, copy)
+res = [now, before]`);
+    expect(r[0]).toBe('');
+    expect(r[1]).toContain('needs a ruling from Kevin');
+  });
+
+  it('redo-day puts a set-aside clip back to new and decides it again', () => {
+    const r = run(`
+tmp = tempfile.mkdtemp()
+led["VID_A_143312_004.insv"].update(role="teaser", episode=2106, status=watch.SET_ASIDE, set_aside="follows 003")
+state = {"2106": {"task": "recFAKE0000002106", "verdict": "changes", "feedback": "The summary is from the wrong recording."}}
+rp = os.path.join(tmp, "r.md"); open(rp, "w").write("- The summary is from the wrong recording. → re-rendered\\n")
+render.redo_day(2106, rp, "test", ledger=led, state=state, root=tmp, today=dt.date(2026, 11, 18), last_night=None, running=False)
+res = [[led[k]["status"], led[k].get("set_aside"), led[k].get("role")] for k in ("VID_A_142634_003.insv", "VID_A_143312_004.insv")]`);
+    expect(r).toEqual([['new', null, null], ['new', null, null]]);
+  });
+});
