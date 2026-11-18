@@ -186,6 +186,8 @@ print(json.dumps({
                       DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-08-15 to 2026-09-14"),
     "overThreeYears": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-10-15 to 2030-10-14"),
     "unrelated": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2027-06-15 to 2027-07-14"),
+    # Re-review: a line the set-off command's own gate would not take is refused before the due day is written.
+    "twoSpaces": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-10-15 to  2026-12-14"),
 }))
 `);
     expect(r.refused[0]).toBe(2);
@@ -202,13 +204,15 @@ print(json.dumps({
     expect(r.over[0]).toBe(0);                                     // a window already over is left alone
     // Each refused case writes nothing: the due day and the running window are as they were.
     for (const [k, why] of [['pastWindow', /the card's set-off ended on 2026-09-14/],
-      ['overThreeYears', /longer than three years/], ['unrelated', /does not carry on from the running one/]]) {
+      ['overThreeYears', /longer than three years/], ['unrelated', /does not carry on from the running one/],
+      ['twoSpaces', /has no line 'RECORD CHANGE: recDUEDAYTEST0001 Set-off = 2026-10-15 to 2026-12-14'/]]) {
       expect(r[k][0], k).toBe(2);
       expect(r[k][1].refused, k).toMatch(why);
       expect(r[k][2], k).toBe('1');
     }
     expect(r.pastWindow[3]).toEqual(['2026-08-01', '2026-11-30']);
     expect(r.overThreeYears[3]).toEqual(['2026-10-01', '2026-11-30']);
+    expect(r.twoSpaces[3]).toEqual(['2026-10-01', '2026-11-30']);
   });
 });
 

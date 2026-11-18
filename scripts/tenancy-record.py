@@ -336,6 +336,10 @@ def cmd_due_day(a):
             why = "the card has no Set-off line for this tenancy"
         else:
             why = set_off_problem(tenancy, again[0], again[1], a.day)
+            # The set-off command's own card check (its gate), before anything is written: a line it would not take
+            # (two spaces, say) must refuse here, never after the due day has landed.
+            if not why and again[0] and again[1]:
+                why = change_problem(task, a.tenancy, "Set-off", f"{again[0].isoformat()} to {again[1].isoformat()}")
             if not why and not (again[0] <= so_until and again[1] >= so_from):
                 why = f"the card's set-off ({again[0]} to {again[1]}) does not carry on from the running one"
             if not why and again[1] < rc.today_london():
