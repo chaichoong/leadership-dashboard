@@ -619,7 +619,7 @@
         const panel = document.getElementById('pnlAiPanel');
         if (!panel) return;
         _pnlAiLoading = true;
-        panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:13px;padding:16px"><div class="ai-typing-dot" style="animation:blink 1.4s infinite both"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.2s"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.4s"></div><span style="margin-left:8px">Analysing P&L data…</span></div>';
+        panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:13px;padding:16px"><div class="ai-typing-dot"></div><div class="ai-typing-dot"></div><div class="ai-typing-dot"></div><span style="margin-left:8px">Analysing P&L data…</span></div>';
 
         const keys = _pnlCache.monthKeys;
         const ctx = pnlBuildAIContext(_pnlCache, keys);
