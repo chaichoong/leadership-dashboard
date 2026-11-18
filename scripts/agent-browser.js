@@ -693,6 +693,97 @@ function ledger(entry) {
 // once, and an agent never types it. In code, like the rest, not in a prompt.
 const SECRET_NAME_RE = /pass(word|code)|secret|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(code|answer)|auth(entication)?.?code|token|api.?key/i;
 
+// What a credential LOOKS LIKE as a value (18 Nov 2026). The value check used to run the field-NAME words above over
+// the whole value as a bare substring. Episode 2187's Spotify description ("Add friction, such as a password after a
+// set daily limit") was refused three times, and 2162's Facebook shares were refused because the YouTube link id
+// 7CvvmiB_5rw holds "Cvv"; while a real key (sk-ant-..., an Airtable token) passed, because it holds none of the words.
+// A value is refused for what it is, never for a word in a sentence:
+const SECRET_SHAPES = [
+  ['an API key', /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/],
+  ['a Stripe key', /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/],
+  ['a GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})/],
+  ['an Airtable token', /\bpat[A-Za-z0-9]{14}\.[a-f0-9]{32,}/],
+  ['a Slack token', /\bxox[abposr]-[A-Za-z0-9-]{10,}/],
+  ['a cloud key', /\b(?:AKIA[0-9A-Z]{16}\b|AIza[0-9A-Za-z_-]{35})/],
+  ['a Google sign-in token', /\b(?:ya29\.[A-Za-z0-9_-]{20,}|1\/\/0[A-Za-z0-9_-]{20,})/],
+  ['a GoHighLevel token', /\bpit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+  ['a signed token', /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
+  ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+];
+
+// Links and hashtags are copy, never a secret by their shape: a YouTube id, a playlist id, #UltraMarathon2026Challenge.
+// (?<![\w.-]) rather than \b: \b fires at every hyphen and made this quadratic on a long value (review, 18 Nov 2026).
+const COPY_NOT_SECRET_RE = /(?:https?:\/\/|www\.)\S+|(?<![\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*|#\w+/gi;
+
+// A credential word labelling a value. "=" is code ("api_key=abc", "token = x"). After ":", "is", "was" or a dash it
+// counts when the word after it is key-like ("Your OTP is 483920", "My password is Tr0ub4dor&3", "Password - Hunter22!"),
+// and after ":" also when it is glued to the label or stands alone at the end of its line ("Password: correcthorsebattery").
+// A sentence passes: "Turn on 2FA: always.", "Every token: earned", "OTP: never share it", "Token: 10,000 steps".
+// "secret" alone is an everyday word ("The secret: consistency."): only glued "=", a run with a letter and a digit, or a
+// lone run of 16 or more counts.
+const CRED_LABEL_RE = /(pass(?:word|code)|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(?:code|answer)|auth(?:entication)?.?code|token|api.?key|secret)(\s*[:=]\s*|\s+(?:is|was)\s+|\s+[-–]\s+)(?=([^\n]{0,200}))/gi;   // 200: a capped look, so a long line stays linear
+const keyLike = (w) => !/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(w)
+  && (/\d/.test(w) || /[^A-Za-z0-9.,;:!?'"()[\]-]/.test(w) || /[a-z][A-Z]/.test(w));
+
+function labelledSecret(v) {
+  for (const m of v.matchAll(CRED_LABEL_RE)) {
+    const [, label, sepRaw, rest] = m;
+    const sep = sepRaw.trim();
+    const glued = sepRaw === sep;                                           // client_secret=abc, token:abc
+    const word = (rest.trim().split(/\s+/)[0] || '').replace(/[.,;:!?)\]"']+$/, '');
+    const alone = word.length > 0 && !/\s/.test(rest.trim());              // the only word left on its line
+    if (/^secret$/i.test(label)) {
+      if (glued && sep === '=') return true;
+      if (word.length >= 8 && /[A-Za-z]/.test(word) && /\d/.test(word)) return true;
+      if ((sep === ':' || sep === '=') && alone && word.length >= 16) return true;
+      continue;
+    }
+    if (sep === '=') return true;
+    if (word.length >= 4 && keyLike(word)) return true;
+    if (sep === ':' && word.length >= 4 && glued) return true;
+    if ((sep === ':' || /^(?:is|was)$/i.test(sep)) && alone && word.length >= 8) return true;   // "The WiFi password is sunflower"
+  }
+  return false;
+}
+
+function luhnCard(text) {
+  // real card shapes only (Visa 4, Mastercard 51-55 and 22-27, Discover 6011/65/644-649 as 4-4-4-4; Amex 34/37 as 4-6-5),
+  // one separator throughout: an Amazon order number (203-1234566-7654321) or a meter number is not one
+  const re = /(?<![\d-])(?:(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|6(?:011|5\d{2}|4[4-9]\d))([ -]?)\d{4}\1\d{4}\1\d{4}|3[47]\d{2}([ -]?)\d{6}\2\d{5})(?![\d-])/g;
+  for (const m of text.matchAll(re)) {
+    const d = m[0].replace(/\D/g, '');
+    let sum = 0;
+    for (let i = 0; i < d.length; i++) { let n = +d[d.length - 1 - i]; if (i % 2) { n *= 2; if (n > 9) n -= 9; } sum += n; }
+    if (sum % 10 === 0) return true;
+  }
+  return false;
+}
+
+// A random key changes between lower case, capitals and digits at most characters; a long word does not
+// ("TheUltimateUltraMarathon2026Challenge" changes 7 times in 37).
+function looksRandom(run) {
+  if (!(/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run))) return false;
+  const cls = (c) => (/[a-z]/.test(c) ? 1 : /[A-Z]/.test(c) ? 2 : /\d/.test(c) ? 3 : 4);
+  let changes = 0;
+  for (let i = 1; i < run.length; i++) if (cls(run[i]) !== cls(run[i - 1])) changes++;
+  return changes >= run.length / 3;
+}
+
+function secretValueReason(value) {
+  const v = String(value === undefined || value === null ? '' : value).trim();
+  if (!v) return '';
+  for (const [why, re] of SECRET_SHAPES) if (re.test(v)) return why;
+  if (labelledSecret(v)) return 'a labelled secret';
+  const copy = v.replace(COPY_NOT_SECRET_RE, ' ');
+  // one word that names a secret ("MyPassword123"), as the check always refused; a link is not a word
+  if (!/\s/.test(v) && v.length <= 64 && copy === v && SECRET_NAME_RE.test(v)) return 'a secret-named word';
+  if (luhnCard(copy)) return 'a card number';
+  if (/\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b/.test(copy)) return 'an API key';   // ClickSend's shape
+  if (/\b[0-9a-f]{40,}\b/i.test(copy)) return 'a long hex secret';
+  for (const run of copy.match(/[A-Za-z0-9+/=]{32,}/g) || []) if (looksRandom(run)) return 'a long random string';
+  return '';
+}
+
 async function assertNotCredential(page, selector, value) {
   const kind = await page.$eval(selector, el => ({
     type: (el.getAttribute('type') || '').toLowerCase(),
@@ -707,8 +798,9 @@ async function assertNotCredential(page, selector, value) {
   if (SECRET_NAME_RE.test(kind.name)) {
     die(`${selector} looks like a credential or payment field (${kind.name.trim()}). Refusing.`);
   }
-  if (SECRET_NAME_RE.test(String(value))) {
-    die(`the value for ${selector} looks like a secret. Refusing.`);
+  const why = secretValueReason(value);
+  if (why) {
+    die(`the value for ${selector} looks like a secret (${why}). Refusing.`);
   }
 }
 
@@ -4996,7 +5088,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, secretValueReason, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile, retiredSite, retiredRefusal, retiredSites, withRetiredRules, retiredResolverRules,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
