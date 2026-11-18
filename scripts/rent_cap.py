@@ -1,4 +1,4 @@
-"""Benefit-cap claims: lane C of the Cash Flow Voids agent (Kevin approved "Build as-is" on 4 Oct 2026; brain:
+"""Benefit-cap claims: lane C of the Accounts Receivable agent (Kevin approved "Build as-is" on 4 Oct 2026; brain:
 Decisions/2026-10-04 Rent agent - replies, payment plans and benefit-cap claims).
 
 A Universal Credit tenant whose housing money is cut by the benefit cap pays short. The council's Crisis and
@@ -953,7 +953,7 @@ def line(out):
     if out.get("failed"):
         return f"Benefit-cap claims FAILED: {out['failed']}{check}"
     if not out.get("on"):
-        return f"Benefit-cap claims: nothing raised, the Cash Flow Voids agent is switched off or unread.{check}"
+        return f"Benefit-cap claims: nothing raised, the Accounts Receivable agent is switched off or unread.{check}"
     bits = []
     for k, what in (("caps", "benefit-cap tasks for the agent (trial, nothing is sent)"), ("claims", "claim cards for Kevin"),
                     ("decisions", "questions to Kevin about the council's answer")):

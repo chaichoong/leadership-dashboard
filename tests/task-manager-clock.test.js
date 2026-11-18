@@ -1,4 +1,4 @@
-// The Task Board Manager's clock (Kevin, 7 Oct 2026): "a wall past its clock is stuck, and the
+// The Operations Manager's clock (Kevin, 7 Oct 2026): "a wall past its clock is stuck, and the
 // move is the conversion that clears it, never leave". Measured 23 Sep to 6 Oct 2026: 1,346 board
 // moves, 1,020 of them "leave"; 39 tasks on walls, 24 of them three days or more and 24 never
 // touched; the skill never said BLOCKER and task-manager.py had no wall logic.
@@ -322,7 +322,7 @@ describe('Roy hand-offs: 7 days with no movement', () => {
     const f = r.patches[0].fields;
     expect(f[TF.team]).not.toContain(ROY);
     expect(f[TF.notes]).toMatch(/Admin moved to the agent under the 5 Oct 2026 ruling/);
-    expect(dec(r, 'recR1').done).toMatch(/moved to Property Administration/);
+    expect(dec(r, 'recR1').done).toMatch(/moved to Compliance/);
     expect(r.calls).toHaveLength(0);
   });
   it('a physical step gets one reminder (notify, again after 7 days) and the marker', () => {

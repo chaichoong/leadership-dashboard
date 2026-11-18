@@ -22,7 +22,7 @@ WHAT IT DOES, each rent check
      rent, for a tenant whose name shares the agreement's name words: a move-in (a new tenant and tenancy) or a rent
      change (a NEW tenancy at the new rent: Kevin, 5 Oct 2026). It is on record too as a RENEWAL: the same tenant
      still has a live tenancy at that house at that same rent, so nothing changed.
-  4. Otherwise ONE task for the Cash Flow Voids agent, who owns the tenancy record (Kevin, 9 Oct 2026):
+  4. Otherwise ONE task for the Accounts Receivable agent, who owns the tenancy record (Kevin, 9 Oct 2026):
      `TENANCY RECORD: signed agreement with no tenancy: <house>`, carrying the agreement's facts on fixed lines
      (AGREEMENT NAME/RENT/START/HOUSE) that scripts/tenancy-record.py `onboard` and `rent-change` hold the agent to.
      Key `TENANCY RECORD KEY: <message id>` in Notes and the Description: never raised twice for one agreement.
@@ -33,7 +33,7 @@ WHAT IT DOES, each rent check
 
 WHAT IT NEVER DOES
 Writes no tenancy or tenant: the agent does that through the door. Sends nothing. Raises nothing on a dry run or
-while the Cash Flow Voids agent is switched off or unread.
+while the Accounts Receivable agent is switched off or unread.
 """
 import json
 import os
@@ -403,7 +403,7 @@ def brief(out):
     """Home's words, or ""."""
     if out.get("unrecorded"):
         n = len(out["unrecorded"])
-        return f"Signed agreements with no tenancy record: {n}. The Cash Flow Voids agent has the task."
+        return f"Signed agreements with no tenancy record: {n}. The Accounts Receivable agent has the task."
     if out.get("failed"):
         return "Signed-agreement check FAILED: see the rent check row."
     return ""
@@ -411,7 +411,7 @@ def brief(out):
 
 def line(out):
     if not out.get("on"):
-        return "Signed agreements: not checked, the Cash Flow Voids agent is switched off or unread."
+        return "Signed agreements: not checked, the Accounts Receivable agent is switched off or unread."
     bits = []
     if out.get("unrecorded"):
         bits.append("NO TENANCY RECORD for: " + "; ".join(out["unrecorded"]))

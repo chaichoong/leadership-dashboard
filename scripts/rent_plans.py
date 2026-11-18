@@ -1,4 +1,4 @@
-"""Payment plans: the rent check keeps every promise a tenant made (Cash Flow Voids step 3b).
+"""Payment plans: the rent check keeps every promise a tenant made (Accounts Receivable step 3b).
 
 Kevin approved the plan "Build as-is" on 4 Oct 2026 (brain: Decisions/2026-10-04 Rent agent - replies,
 payment plans and benefit-cap claims). A tenant who is late replies; the agent drafts the answer, and when

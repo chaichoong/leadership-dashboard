@@ -27,8 +27,9 @@ function loadFn(name) {
   return new Function(`${m[0]}; return ${name};`)();
 }
 
-// The board after the 9 Oct 2026 trim (brain Decisions/2026-10-09).
-const BOARD_SEATS = ['Keller', 'Wickman', 'Crabtree', 'Cunningham'];
+// The board after the 9 Oct 2026 trim (brain Decisions/2026-10-09), named by seat
+// since 18 Nov 2026 (Kevin approved the plain names).
+const BOARD_SEATS = ['Head of Strategy', 'Head of Operations', 'Head of Finance', 'Head of Legal'];
 const OFF_BOARD = ['Hormozi', 'Belfort', 'Jenyns', 'Lencioni', 'Kiyosaki', 'Bailey', 'DeMartini'];
 
 describe('board flag seats match the org chart', () => {
@@ -42,7 +43,7 @@ describe('board flag seats match the org chart', () => {
   });
 
   it('names the four live heads and nothing else', () => {
-    const surnames = [...block[1].matchAll(/'([A-Za-z]+) \(/g)].map((m) => m[1]);
+    const surnames = [...block[1].matchAll(/'([A-Za-z ]+) \(/g)].map((m) => m[1]);
     expect(surnames.sort()).toEqual([...BOARD_SEATS].sort());
   });
 
@@ -204,7 +205,7 @@ describe('the brief never routes work to Mica or Ericamae (Kevin, 25 Aug 2026)',
     expect(system).toMatch(/^\s*2\.\s+Roy\s+—/m);
   });
   it('it names the role agents, not only the five workers', () => {
-    for (const a of ['Inbox Response', 'Supplier and Creditor Manager', 'Property Administration'])
+    for (const a of ['Customer Service', 'Accounts Payable', 'Compliance'])
       expect(system).toContain(a);
   });
   it('it says the tap happens in the dashboard queue, not Slack (1 Sep 2026 contract)', () => {

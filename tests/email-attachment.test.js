@@ -1,4 +1,4 @@
-// Gmail send-path attachments (built 25 Aug 2026 for the Creditor Management
+// Gmail send-path attachments (built 25 Aug 2026 for the Accounts Payable
 // agent: its standing debt-correspondence letter attaches the first three
 // pages of a legal document).
 //

@@ -3,8 +3,8 @@
 //
 // Every report counts a cost by its Payment Status alone, so a cost whose End Date (its last payment) has passed
 // stays in Monthly Costs until someone marks it. On 14 Oct 2026 seven counted costs were past their End Date and
-// three of them were still being paid, so the check never changes a record: it raises ONE task for the Creditor
-// Management agent, at most once a day and never while one is open. Drives the REAL ensure_ended_costs in
+// three of them were still being paid, so the check never changes a record: it raises ONE task for the Accounts
+// Payable agent, at most once a day and never while one is open. Drives the REAL ensure_ended_costs in
 // scripts/agent-dispatch.py with the reads and the task create swapped for recorders. Every id, name and amount
 // below is invented; the rows are shaped from the live ones.
 import { describe, it, expect } from 'vitest';
@@ -54,7 +54,7 @@ print(json.dumps({"out": out, "err": err, "raised": raised, "taskReads": task_re
 }
 
 describe('agent-dispatch.py ensure_ended_costs', () => {
-  it('raises ONE task for Creditor Management naming every ended cost, its evidence, and the door to use', () => {
+  it('raises ONE task for Accounts Payable naming every ended cost, its evidence, and the door to use', () => {
     const r = run();
     expect(r.err).toBe('');
     expect(r.out.created).toBe(true);

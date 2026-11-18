@@ -1,6 +1,6 @@
 // The one door through which an agent changes a tenancy record (Kevin, 9 Oct 2026).
 //
-// Until then the Cash Flow Voids agent was forbidden to write to a tenancy and no other agent owned
+// Until then the Accounts Receivable agent was forbidden to write to a tenancy and no other agent owned
 // the job, so a ruling Kevin gave on an approval card ("not a cash flow void, that needs updating";
 // "move the due day to the 9th") reached no record. scripts/tenancy-record.py is the door, and
 // agent-dispatch.py `due` puts "chase it next week" on the date he gave.

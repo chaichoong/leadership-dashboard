@@ -1,4 +1,4 @@
-// The daily rent check (Kevin, 2 Oct 2026): scripts/rent-check.py, phase 1 of the Cash Flow Voids agent.
+// The daily rent check (Kevin, 2 Oct 2026): scripts/rent-check.py, phase 1 of the Accounts Receivable agent.
 //
 // These drive the REAL rule with fixture records shaped exactly as Airtable returns them
 // (returnFieldsByFieldId, selects as strings, links as id arrays). The first three cases are the
@@ -1165,7 +1165,7 @@ done = rc.lane_a(res, ts, DAY, True)
 print(json.dumps({"off": off, "offLine": rc.lane_a_line(off), "dryRaised": dry["raised"], "dryPlanned": len(dry["planned"]), "dryLine": rc.lane_a_line(dry),
                   "on": on["raised"], "made": made, "onLine": rc.lane_a_line(on), "doneLine": rc.lane_a_line(done)}))`);
     expect(r.off).toEqual({ on: false, status: 'Building', raised: [], planned: [], failed: '' });
-    expect(r.offLine).toBe('Late-rent tasks: none raised, the Cash Flow Voids agent is switched off (register status Building).');
+    expect(r.offLine).toBe('Late-rent tasks: none raised, the Accounts Receivable agent is switched off (register status Building).');
     expect([r.dryRaised, r.dryPlanned]).toEqual([[], 1]);
     expect(r.dryLine).toMatch(/^Late-rent tasks a real run would raise: RENT LATE: Unit recLate/);
     expect(r.on).toEqual(['RENT LATE: Unit recLate, rent due 30 Sep (reminder)']);
@@ -1247,7 +1247,7 @@ print(json.dumps({"on": [live["on"], built["on"], building["on"], paused["on"]],
     expect(r.on).toEqual([true, true, false, false]);
     expect(r.keys).toEqual({ 'recLate:2026-09-30:1': '2026-10-02', 'recLate:2026-09-30:2': '2026-10-05' });
     expect(r.formulas).toEqual(["RECORD_ID()='reclaAzGLA4utssxx'", "LEFT({Task Name}, 11)='RENT LATE: '"]);
-    expect(r.unread).toContain('control failed: the Cash Flow Voids register row could not be read');
+    expect(r.unread).toContain('control failed: the Accounts Receivable register row could not be read');
   });
 
   it('when the agent\'s switch cannot be read, lane B is told so and never reports it as switched off', () => {
@@ -1256,7 +1256,7 @@ rows = []
 today = rc.today_london()
 ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
 rc.load = lambda day: world(ts, [tx for i in range(20) for tx in paid_up("recG%02d" % i, today, 500)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
-def unread(): raise RuntimeError("control failed: the Cash Flow Voids register row could not be read")
+def unread(): raise RuntimeError("control failed: the Accounts Receivable register row could not be read")
 rc.read_task_state = unread
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 rc.append_history = lambda res, now: None
@@ -1267,7 +1267,7 @@ line = lambda start: next(l for l in rows[0][1].splitlines() if l.startswith(sta
 print(json.dumps({"code": code, "status": rows[0][0], "laneB": line("New-tenant tasks"), "agentLate": line("Agent-managed late rent")}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
-    expect(r.laneB).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
+    expect(r.laneB).toBe("New-tenant tasks: none raised, the Accounts Receivable agent's switch could not be read.");
     // Roy's notice is gated on the same switch: unread raises nothing either.
     expect(r.agentLate).toMatch(/^Agent-managed late rent: none raised/);
   });

@@ -42,7 +42,7 @@ function stubFetch(records) {
         const u = String(url);
         const ok = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
         if (u.includes('api.airtable.com') && (init.method || 'GET') === 'GET') {
-            if (u.includes('tblco0p2OnlLQVAX7')) return ok({ fields: { Name: 'Property Administration' } });
+            if (u.includes('tblco0p2OnlLQVAX7')) return ok({ fields: { Name: 'Compliance' } });
             return ok({ records });
         }
         if (u.includes('api.airtable.com') && init.method === 'PATCH') {

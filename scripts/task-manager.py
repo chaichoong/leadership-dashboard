@@ -52,11 +52,11 @@ ACTIVITY_TABLE = "tbl2ZTHBDBPo681UL"
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 DAILY_LOG_TABLE = "tbl6VQKVMnK0Q7hbJ"
 TEAM_TABLE = "tblco0p2OnlLQVAX7"
-CEO_TEAM_REC = "reciHUAEcEkbctnZ6"           # Team Members "AI CEO (Dan Martell)": the roster read's control
+CEO_TEAM_REC = "reciHUAEcEkbctnZ6"           # Team Members "AI CEO": the roster read's control
 
-AGENT_NAME = "Task Board Manager"
+AGENT_NAME = "Operations Manager"
 TASKMGR_REGISTER_ROW = "reczg8BygPFnJMQnh"   # AI Agents register
-TASKMGR_TEAM_REC = "rec1hYELb4zS8pjjO"       # Team Members "AI Task Board Manager"
+TASKMGR_TEAM_REC = "rec1hYELb4zS8pjjO"       # Team Members "AI Operations Manager"
 METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"
 KEVIN_REC = "recHEt2VPYothaqTd"
 KEVIN_EMAIL = "kevin@runpreneur.org.uk"
@@ -70,7 +70,7 @@ ROY_REC = "reclbdjfVev3bqNHS"
 # agent-dispatch.py carries the same prefix; tests/task-manager.test.js fails if they drift.
 EPISODE_CARD_PREFIX = "CONTENT: Publish Episode "
 FORM_CARD_MARKS = {"rec7aHLK1Q8fMLRXH": {"prefix": "RENT FORM: ", "note": "RENT FORM KEY: "}}
-# Kevin's own claim cards (Cash Flow Voids lane C, 5 Oct 2026): the rent check works them in code too.
+# Kevin's own claim cards (Accounts Receivable lane C, 5 Oct 2026): the rent check works them in code too.
 # Kept identical to KEVIN_CARDS in scripts/agent_email_format.py (tests/rent-cap.test.js).
 KEVIN_CARD_MARKS = {"rec7aHLK1Q8fMLRXH": {"prefix": "RENT CLAIM", "note": "RENT CLAIM KEY: "}}
 
@@ -80,7 +80,7 @@ def episode_card(f):
 
 
 def form_card_task(f):
-    """A robot form card (Cash Flow Voids lane B, 3 Oct 2026): the rent check withdraws, re-raises and
+    """A robot form card (Accounts Receivable lane B, 3 Oct 2026): the rent check withdraws, re-raises and
     finishes it in code, and only Kevin's turn in the robot window moves it. Kept identical to
     FORM_CARDS in scripts/agent_email_format.py (tests/task-manager.test.js). Kevin's own claim cards
     (lane C) are the rent check's lane in the same way."""
@@ -877,7 +877,7 @@ def held_why(lane, detail):
     if lane == "royRequests":
         return "Roy's own request: worked by his assistant job, never by a slot"
     if lane == "skippedTier2":
-        return "creditor correspondence parked while the Creditor Management agent is not live"
+        return "creditor correspondence parked while the Accounts Payable agent is not live"
     return lane
 
 
@@ -1216,7 +1216,7 @@ def roy_lane(f):
     d = _load_dispatch()
     name, desc, notes = f.get("Task Name") or "", f.get("Description") or "", f.get("Notes") or ""
     # A BUYING TASK is never Roy's lane by the name of the item (as task_lane, 12 Nov 2026):
-    # "SOURCING: a replacement boiler" is a buy for Inbox Response, not a repair, so handing it
+    # "SOURCING: a replacement boiler" is a buy for Customer Service, not a repair, so handing it
     # to Roy never counts as placing it.
     if d.sourcing_task(name):
         return ""

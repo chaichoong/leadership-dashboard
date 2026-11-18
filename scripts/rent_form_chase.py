@@ -6,7 +6,7 @@ A capped tenant is sent a link to the tenant details form (Property Manager Work
 follow-up process for those and get Roy's involvement when we get to a certain stage where we're not getting
 engagement." He approved the plan as-is the same day:
 
-  day 3 after the link reached them   reminder 1, drafted by the Cash Flow Voids agent (email + text, his approval)
+  day 3 after the link reached them   reminder 1, drafted by the Accounts Receivable agent (email + text, his approval)
   day 7                               reminder 2, the same
   day 10                              a task for Roy to reach the tenant in person or by phone
 
@@ -257,7 +257,7 @@ def line(out):
     if out.get("failed"):
         return f"Form chase FAILED: {out['failed']}{check}"
     if not out.get("on"):
-        return f"Form chase: nothing raised, the Cash Flow Voids agent is switched off or unread.{check}"
+        return f"Form chase: nothing raised, the Accounts Receivable agent is switched off or unread.{check}"
     bits = []
     if out.get("raised"):
         bits.append("raised: " + "; ".join(out["raised"]))

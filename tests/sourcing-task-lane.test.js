@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url';
 
 // A BUYING TASK STAYS WITH INBOX RESPONSE (Kevin, 11 Nov 2026: sourcing is that agent's work).
 // On 12 Nov 2026 the first buying task raised by hand, "SOURCING: mains smoke alarms and a heat
-// alarm ...", sat with Inbox Response and the dispatcher's queue listed it under routingNeeded with
-// Property Administration as its target, because its words match the compliance lane ("smoke
+// alarm ...", sat with Customer Service and the dispatcher's queue listed it under routingNeeded with
+// Compliance as its target, because its words match the compliance lane ("smoke
 // alarm"). That agent has no buying rules. The same words in Roy's lane would hand a boiler to buy
 // to Roy as a repair. Every case drives the real task_lane; the smoke alarm name is the real one.
 
@@ -28,9 +28,9 @@ import urllib.request; urllib.request.urlopen = boom
 spec = importlib.util.spec_from_file_location("m", ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 AF = m.AF
-roster = {"${RESPONSE}": {"name": "Inbox Response", "status": "Live", "dispatchable": True},
-          "${PROPERTY}": {"name": "Property Administration", "status": "Live", "dispatchable": True},
-          m.CREDITOR_REC_ID: {"name": "Creditor Management", "status": "Live", "dispatchable": True}}
+roster = {"${RESPONSE}": {"name": "Customer Service", "status": "Live", "dispatchable": True},
+          "${PROPERTY}": {"name": "Compliance", "status": "Live", "dispatchable": True},
+          m.CREDITOR_REC_ID: {"name": "Accounts Payable", "status": "Live", "dispatchable": True}}
 ctx = m.lane_context([], roster, "", [], {})
 T = {"id": "recSourcingLaneAa", "createdTime": "2026-11-12T09:45:00.000Z",
      "fields": {AF["name"]: ${JSON.stringify(name)}, AF["description"]: ${JSON.stringify(description)},
@@ -44,8 +44,8 @@ print(json.dumps({"lane": l, "property": t.get("property") or "", "target": t.ge
   return JSON.parse(out.trim().split('\n').pop());
 }
 
-describe('a buying task stays with Inbox Response whatever is being bought', () => {
-  it('the real smoke alarm task is new work for Inbox Response, not a move to Property Administration', () => {
+describe('a buying task stays with Customer Service whatever is being bought', () => {
+  it('the real smoke alarm task is new work for Customer Service, not a move to Compliance', () => {
     // CONTROL: the same words without the prefix are still the compliance lane's, and still move.
     const control = lane(REAL.replace('SOURCING: ', 'Buy '));
     expect(control.property).not.toBe('');
@@ -98,13 +98,13 @@ describe('a buying task stays with Inbox Response whatever is being bought', () 
 // A BUYING REQUEST THAT ARRIVES BY EMAIL (Kevin, 13 Nov 2026: "Yes, fix it"). The inbox sorter
 // named every emailed request "INBOUND: ...", so PR #911's rule never saw one: Roy's own fridge
 // freezer request of 29 Oct was "INBOUND: Roy asks us to source 4 fridge freezers ..." and stayed
-// with Inbox Response only because a fridge freezer is in no lane's word list. The sorter now names
+// with Customer Service only because a fridge freezer is in no lane's word list. The sorter now names
 // a buying request SOURCING: at birth (its skill, rule 1d). A sorter task is born inbound and held
 // by the AI CEO, so the dispatcher's FRESH routes place it: these drive that path.
-describe('a buying request born from an email reaches Inbox Response', () => {
+describe('a buying request born from an email reaches Customer Service', () => {
   const born = (name) => lane(name, { inbound: true, holder: CEO });
 
-  it('a compliance item to buy goes to Inbox Response, not Property Administration', () => {
+  it('a compliance item to buy goes to Customer Service, not Compliance', () => {
     // CONTROL: the name the sorter gave it before, the same request, moves to the compliance lane.
     const before = born('INBOUND: Roy asks us to source 6 smoke alarms for 5 Example Street');
     expect(before.lane).toBe('routingNeeded');
@@ -115,7 +115,7 @@ describe('a buying request born from an email reaches Inbox Response', () => {
     expect(r.property).toBe('');
   });
 
-  it('a repair item to buy goes to Inbox Response, not to Roy', () => {
+  it('a repair item to buy goes to Customer Service, not to Roy', () => {
     // CONTROL: named as before, a boiler is Roy's repair lane and never reaches a buying agent.
     expect(born('INBOUND: Roy asks us to buy a replacement boiler for 5 Example Street').lane).toBe('royLane');
     const r = born('SOURCING: a replacement boiler for 5 Example Street');
@@ -139,7 +139,7 @@ describe('a buying request born from an email reaches Inbox Response', () => {
   });
 });
 
-// The Task Board Manager offers Roy a stuck task that is "his lane" (task-manager.py roy_lane, which
+// The Operations Manager offers Roy a stuck task that is "his lane" (task-manager.py roy_lane, which
 // reads the dispatcher's own lane words). It must not offer him a buy.
 describe("the Task Manager's Roy check leaves a buying task alone", () => {
   function royLane(fields) {
@@ -173,7 +173,7 @@ print(json.dumps({"why": tm.roy_lane(json.loads(sys.argv[1]))}))`, JSON.stringif
 // BUYING IS ITS OWN FOLD LANE (review, 13 Nov 2026). The creation gate folds a new task into an
 // open one about the same matter. A request to buy alarms folded into an open "INBOUND: ... smoke
 // alarms ..." reply task would keep that task's name, and the name is what the dispatcher routes
-// on, so the buy would go to Property Administration after all. These drive the gate's real
+// on, so the buy would go to Compliance after all. These drive the gate's real
 // decide(); every "create" has a control showing the same pair folds when the lanes agree.
 describe('the creation gate keeps a buying task apart from a reply task', () => {
   const GATE = resolve(SCRIPTS, 'create-agent-task.py');

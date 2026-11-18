@@ -167,7 +167,7 @@ print(json.dumps({"err": res["err"], "calls": CALLS, "blk": m.task_blocker(notes
     // Every agent files under the one routine agent-dispatch; the name is what gives each its own cap.
     const r = py(`
 rec("t1")
-TASKS["t1"]["fields"][AF["teamMember"]] = ["recwWvBju2ycB63i4"]   # AI Property Administration
+TASKS["t1"]["fields"][AF["teamMember"]] = ["recwWvBju2ycB63i4"]   # AI Compliance
 CALLS = []
 m.file_tool_finding = lambda t, s, w, agent="": (CALLS.append([t, agent]), "20260925-agent-dispatch-777")[1]
 res = run(m.cmd_block, {"task": "t1", "kind": "TOOL", "subject": "node missing from PATH", "why": "command not found: node", "finding": None})
@@ -184,7 +184,7 @@ os.environ["FINDINGS_FILE"] = os.path.join(d, "q.jsonl")
 os.environ["FINDINGS_OVERFLOW_FILE"] = os.path.join(d, "o.jsonl")
 os.environ["FINDINGS_AGENTS_CACHE"] = os.path.join(d, "agents.json")      # never the live list, never Airtable
 os.environ["FINDINGS_AGENTS_DIR"] = d
-json.dump({"fetchedAt": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "names": ["AI Property Administration"]},
+json.dump({"fetchedAt": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "names": ["AI Compliance"]},
           open(os.environ["FINDINGS_AGENTS_CACHE"], "w"))
 fid = m.file_tool_finding("t1", "no retype command", "send-email refuses an Admin task", "property-administration")
 rows = [json.loads(l) for l in open(os.environ["FINDINGS_FILE"])]

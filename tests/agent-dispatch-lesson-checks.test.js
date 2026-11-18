@@ -7,7 +7,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
 
 // FOUR MORE LESSONS BECOME REFUSALS AT SUBMIT (Kevin, "Do it now", 16 Nov 2026, evening).
-//   9   inbound-comms-response 27 Aug: an Inbox Response card while its twin already waits on Kevin
+//   9   inbound-comms-response 27 Aug: a Customer Service card while its twin already waits on Kevin
 //   10  inbound-comms-response 25 Sep: "it will be paid" with no MARK FOR PAYMENT card anywhere
 //   11  property-administration 15 Sep: a second card on one house and one certificate
 //   12  property-administration 2 Oct: a quote, chase or booking with no certificate search written up
@@ -126,7 +126,7 @@ function py(snippet) {
   return JSON.parse(out.trim().split('\n').pop());
 }
 
-describe('9. an Inbox Response card is refused while its twin already waits on Kevin', () => {
+describe('9. a Customer Service card is refused while its twin already waits on Kevin', () => {
   it('a second card on one cancellation is refused; naming the other card, or closing as its duplicate, lands', () => {
     const r = py(`
 WAITING[:] = [card("recTwinCardAaaaaa", "FIXED COST: Fixture Fitness renews 15 Dec at GBP 20.00, keep or cancel", sender=RESPONSE,
@@ -159,7 +159,7 @@ print(json.dumps(out))`);
     expect(r.namedBody).toMatch(/Please confirm the plan is cancelled/);
     expect(r.namedBody).not.toMatch(/DUPLICATE CHECK/);           // in the closing line: never sent
     expect(r.closed.err).toBeNull();
-    expect(r.otherAgent.err).toBeNull();               // the lesson is Inbox Response's
+    expect(r.otherAgent.err).toBeNull();               // the lesson is Customer Service's
   });
 
   it('two bills for two flats, another sender, another house, a sibling held under it and the card itself are not twins', () => {
@@ -305,7 +305,7 @@ print(json.dumps({
   });
 });
 
-describe('11. a second card on one house and one certificate is refused for Property Administration', () => {
+describe('11. a second card on one house and one certificate is refused for Compliance', () => {
   it('a booking while a card asking the letting agent for the same certificate waits is refused; naming it lands', () => {
     const r = py(`
 WAITING[:] = [card("recAskAgentAaaaaa", "COMPLIANCE: 9 Sample Street gas safety check - ask the letting agent for an access day", sender=PROPERTY)]

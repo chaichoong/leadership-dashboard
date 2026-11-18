@@ -1,4 +1,4 @@
-// The direct rent payment form for a new tenant (Cash Flow Voids lane B, 3 Oct 2026; Kevin's
+// The direct rent payment form for a new tenant (Accounts Receivable lane B, 3 Oct 2026; Kevin's
 // ruling "Robot fills, you pick reason"): scripts/rent_form_plan.py builds the answers and the
 // robot's plan, scripts/rent_new_tenant.py raises the card and finishes it once Kevin says he
 // sent it, scripts/agent-dispatch.py lets that one card open the robot's window and nothing else,
@@ -41,11 +41,11 @@ const PY = `
 import importlib.util, json, sys, os, io, contextlib, tempfile, argparse, re
 from datetime import date, datetime, timedelta, timezone
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
-# The Cash Flow Voids trial ended on 5 Oct 2026; these cases were written for the trial and prove its doors, so
+# The Accounts Receivable trial ended on 5 Oct 2026; these cases were written for the trial and prove its doors, so
 # each run puts the agent back on trial in its own process (tests/cash-flow-voids-agent.test.js block 10 reads
 # the real lists).
 import agent_email_format as _aef_trial
-_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Accounts Receivable agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
 _aef_trial.TRIAL_ENDED.pop("rec7aHLK1Q8fMLRXH", None)
 def load_mod(name, file):
     spec = importlib.util.spec_from_file_location(name, os.path.join(${JSON.stringify(SCRIPTS)}, file))

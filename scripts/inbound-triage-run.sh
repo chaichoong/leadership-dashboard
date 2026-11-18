@@ -279,7 +279,7 @@ pre_read "$SCRATCH/open-matters.json" \
 # KEVIN'S NOTES ON INBOX CARDS REACH THE TRIAGE (Kevin, 14 Oct 2026). Mail he
 # should read comes to him as an INBOX card, and "I don't need to see this" on
 # one must change what the NEXT run shows him. The dispatcher's lesson writer
-# files a note on the card's sender (Inbox Response), so this copies every
+# files a note on the card's sender (Customer Service), so this copies every
 # remembered note on an INBOX card into the triage agent's own file, BEFORE
 # claude starts and reads that file at step 0. `|| true`: a failure lands in
 # the JSON as NOT CHECKED, and the slot still triages on the lessons it has.

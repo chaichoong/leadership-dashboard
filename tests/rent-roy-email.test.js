@@ -230,7 +230,7 @@ print(json.dumps({"dry": dry, "patches": store.patches, "blind": blind, "quiet":
     expect(r.blind.failed).toMatch(/^control failed: no email at all reached info@agilelets.co.uk in \d+ days/);
     expect(r.blindBrief).toBe("Roy's email check FAILED: see the rent check row.");
     expect(r.quiet.failed).toBe('');
-    expect(r.off).toBe("Roy's emails: not read, the Cash Flow Voids agent is switched off or unread.");
+    expect(r.off).toBe("Roy's emails: not read, the Accounts Receivable agent is switched off or unread.");
   });
 
   it('no open housing costs check reads no mailbox; Notes that read blank are a STOP, never a write', () => {

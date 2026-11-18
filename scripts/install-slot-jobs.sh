@@ -112,7 +112,7 @@ JOBS=(
   # The tenant-finding chain (Kevin, 25 Sep 2026). Rules only, no model: it raises
   # cards for Kevin's queue and tasks for Roy, and writes the tenant-chain status row.
   "tenant-leads|8:10|/usr/bin/python3 $REPO/scripts/tenant-leads.py run"
-  # The daily rent check (Kevin, 2 Oct 2026), phase 1 of the Cash Flow Voids agent.
+  # The daily rent check (Kevin, 2 Oct 2026), phase 1 of the Accounts Receivable agent.
   # Rules only, no model: it reads, judges and writes the rent-position status row.
   # It changes no tenancy. Its one email of its own is a new tenant's signed proof of
   # residency, sent from info@ to the tenant and Roy (Kevin, 8 Oct 2026,
@@ -121,13 +121,13 @@ JOBS=(
   # 12:00, so 07:30 gives the morning line and 12:30 picks up the day's payments.
   "rent-check|7:30,12:30|/usr/bin/python3 $REPO/scripts/rent-check.py run"
   # The daily certificate watch (Kevin, 7 Oct 2026). Rules only, no model: one task for
-  # the Property Administration agent per required certificate with nothing in date and
+  # the Compliance agent per required certificate with nothing in date and
   # no open task, and the landlord insurance checkpoints. Writes only through
   # create-agent-task.py. Exits 1 on a morning it found something, by design.
   "compliance-watch|6:05|/usr/bin/python3 $REPO/scripts/certificate_watch.py daily --apply"
   # The Preferred Products re-price clock (Kevin, 11 Nov 2026). Rules only, no model: when
   # any bought, priced item was last checked 30 or more days ago and no review task is
-  # open, raises ONE review task for Inbox Response through create-agent-task.py. Daily,
+  # open, raises ONE review task for Customer Service through create-agent-task.py. Daily,
   # because there is no day-of-month here and a daily check heals after a sleeping Mac.
   "preferred-list|6:20|/usr/bin/python3 $REPO/scripts/preferred-list.py due --apply"
 )

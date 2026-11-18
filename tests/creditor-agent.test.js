@@ -1,7 +1,7 @@
-// Guards the Creditor Management agent's dispatch wiring (25 Aug 2026).
+// Guards the Accounts Payable agent's dispatch wiring (25 Aug 2026).
 //
 // WHAT THIS EXISTS FOR
-// The Creditor Management agent only works if six pieces stay true at once:
+// The Accounts Payable agent only works if six pieces stay true at once:
 //   1. Its Team Members record is a dispatchable role agent (ROLE_AGENTS).
 //   2. Inbound creditor tasks auto-route to it deterministically, AHEAD of
 //      the generic inbound Response route — and ONLY inbound tasks: the
@@ -384,8 +384,11 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
   it.skipIf(!existsSync(skill))('the dispatch skill keys creditor dispatch on the ROUTED agent, not the flag', () => {
     const s = readFileSync(skill, 'utf8');
     // Renamed to the universal name on 6 Sep 2026 (PR #279); the register slug
-    // is unchanged. The guard is the wiring, not the wording.
-    expect(s).toMatch(/Supplier and Creditor Manager agent/);
+    // is unchanged. The guard is the wiring, not the wording. Renamed again on
+    // 18 Nov 2026 (Accounts Payable); the live copy outside the repo is synced
+    // after the merge, so either name passes here and the gate stays green
+    // on both sides of the switch.
+    expect(s).toMatch(/(Accounts Payable|Supplier and Creditor Manager) agent/);
     // The flag stays true while the pause lever is on; dispatching on it
     // alone bypasses the lever or fails the submit (review, 25 Aug 2026).
     expect(s).toMatch(/ROUTED agent/);
@@ -428,7 +431,8 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
   });
 
   it.skipIf(!existsSync(responseDef))('the Response agent hands creditor matters to the specialist', () => {
-    expect(readFileSync(responseDef, 'utf8')).toMatch(/Supplier and Creditor Manager agent/);
+    // Either name: the live file is renamed after the 18 Nov 2026 merge (see above).
+    expect(readFileSync(responseDef, 'utf8')).toMatch(/(Accounts Payable|Supplier and Creditor Manager) agent/);
   });
 
   it.skipIf(!existsSync(responseDef) || !existsSync(agentDef))(

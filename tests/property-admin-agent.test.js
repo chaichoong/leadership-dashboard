@@ -1,4 +1,4 @@
-// Guards the Property Administration agent's dispatch wiring (build session,
+// Guards the Compliance agent's dispatch wiring (build session,
 // 2 Sep 2026; chain map approved by Kevin at the agent gate the same day;
 // rebuilt after the independent review the same afternoon).
 //
@@ -63,7 +63,7 @@ const P = (over) => ({ managerEmail: '', postcode: '', manager: '', units: [], a
 const C = (over) => ({ unitIds: [], status: 'Active', hasFile: true, taskIds: [], ...over });
 
 describe('roster wiring', () => {
-  it('the Property Administration agent is a dispatchable role agent with the right identities', () => {
+  it('the Compliance agent is a dispatchable role agent with the right identities', () => {
     const out = pyEval(`{
       "inRole": ${JSON.stringify(PROPERTY_TM)} in mod.ROLE_AGENTS,
       "agent": mod.ROLE_AGENTS[${JSON.stringify(PROPERTY_TM)}]["agent"],
@@ -72,7 +72,7 @@ describe('roster wiring', () => {
       "row": mod.PROPERTY_REGISTER_ROW,
       "scoreName": mod.SCORE_AGENT_NAMES.get("property")}`);
     expect(out).toEqual({ inRole: true, agent: 'property-administration', dispatch: true,
-                          rec: PROPERTY_TM, row: PROPERTY_ROW, scoreName: 'Property Administration' });
+                          rec: PROPERTY_TM, row: PROPERTY_ROW, scoreName: 'Compliance' });
   });
 });
 
@@ -322,7 +322,7 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
     expect(skill).toMatch(/agent-dispatch\.py certificate TASKID/);
     expect(skill).toMatch(/"complianceBookError": <copied VERBATIM/);
     expect(skill).toMatch(new RegExp(PROPERTY_TM));
-    expect(skill).toMatch(/Property Administration agent's outstanding-issues reading/);
+    expect(skill).toMatch(/Compliance agent's outstanding-issues reading/);
   });
   it('the triage skill names compliance tasks so the engine can route them', () => {
     const skill = readFileSync(resolve(ROOT, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md'), 'utf8');

@@ -33,7 +33,7 @@ test.describe('AI Agents page tabs', () => {
 
     // One scorecard per register row, with the stats Kevin manages by.
     await expect(page.locator('.sc-card')).toHaveCount(2);
-    const creditor = page.locator('.sc-card', { hasText: 'Creditor Management' });
+    const creditor = page.locator('.sc-card', { hasText: 'Accounts Payable' });
     await expect(creditor).toContainText('Guardrails');
     await expect(creditor).toContainText('Approval required');
     await expect(creditor).toContainText('Correspondence 100% (1)'); // accuracy by kind of work
@@ -46,7 +46,7 @@ test.describe('AI Agents page tabs', () => {
   });
 
   test('a robot form card is nobody\'s draft: it never moves an agent\'s accuracy, known by either mark', async ({ page }) => {
-    // Cash Flow Voids lane B (3 Oct 2026): the rent check raises the direct rent payment form card under an
+    // Accounts Receivable lane B (3 Oct 2026): the rent check raises the direct rent payment form card under an
     // agent's id, but no agent writes it. Two rejected form cards against AGENT_A would read 33% (3) unfiltered.
     const now = new Date().toISOString();
     const base = defaultFixtures();
@@ -59,7 +59,7 @@ test.describe('AI Agents page tabs', () => {
       card('recForm1', 'RENT FORM: direct rent payment form: Unit 9', 'RENT FORM KEY: recX:form:1'),
       card('recForm2', 'Renamed by hand', 'RENT FORM KEY: recX:form:2')] });
     await loadAgentsPage(page);
-    const creditor = page.locator('.sc-card', { hasText: 'Creditor Management' });
+    const creditor = page.locator('.sc-card', { hasText: 'Accounts Payable' });
     await expect(creditor).toContainText('Correspondence 100% (1)');
     // Nor its done and went-through-Kevin counts: the 15-Minute Dashboard reads one finished task for this agent.
     // eslint-disable-next-line no-undef
@@ -88,7 +88,7 @@ test.describe('AI Agents page tabs', () => {
 
     // Chips carry counts; clicking one narrows the list.
     await expect(page.locator('.apv-filter', { hasText: 'All (3)' })).toHaveCount(1);
-    await page.locator('.apv-filter', { hasText: 'Creditor Management (2)' }).click();
+    await page.locator('.apv-filter', { hasText: 'Accounts Payable (2)' }).click();
     await expect(page.locator('.apv-card')).toHaveCount(2);
     await expect(page.locator('.apv-card', { hasText: 'Reply to tenant email' })).toHaveCount(0);
 
@@ -229,10 +229,10 @@ test.describe('AI Agents page tabs', () => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
 
-    await page.locator('.sc-card', { hasText: 'Creditor Management' }).locator('.sc-wait-link').click();
+    await page.locator('.sc-card', { hasText: 'Accounts Payable' }).locator('.sc-wait-link').click();
     await expect(page.locator('#view-approvals')).toBeVisible();
     await expect(page.locator('.apv-card')).toHaveCount(2);
-    await expect(page.locator('.apv-filter.active', { hasText: 'Creditor Management' })).toHaveCount(1);
+    await expect(page.locator('.apv-filter.active', { hasText: 'Accounts Payable' })).toHaveCount(1);
   });
 
   test('the Duplicates lane collides same-job open tasks despite different reference numbers', async ({ page }) => {

@@ -361,7 +361,7 @@ print(json.dumps([m.signin_domain(h) for h in json.loads(sys.argv[1])]))`, JSON.
   });
 });
 
-// Sourcing (11 Nov 2026): the Inbox Response agent reads listings and prices for a SOURCING card
+// Sourcing (11 Nov 2026): the Customer Service agent reads listings and prices for a SOURCING card
 // (scripts/agent_sourcing_format.py). On 2 Nov eBay was "NOT CHECKED" because the robot refused it.
 // These sites are READ-ONLY: allowed for `read`, never a login site, never in the sign-in list.
 describe('the read-only sourcing sites', () => {

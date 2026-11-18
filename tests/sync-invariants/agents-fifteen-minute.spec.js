@@ -67,7 +67,7 @@ test.describe('Handled without you — every Level A action is listed and revers
     const body = page.locator('#checksBody');
     await expect(body).toContainText('Inbound Comms Response handled "INBOUND: Sefton licence fee reminder" without you (close: duplicate).');
     await expect(body).toContainText('folded into keeper recKEEPER00000001');
-    await expect(body).toContainText('Creditor Management handled "MAINTENANCE: boiler repair 6 Chedburgh Place" without you (pass to Roy).');
+    await expect(body).toContainText('Accounts Payable handled "MAINTENANCE: boiler repair 6 Chedburgh Place" without you (pass to Roy).');
     await expect(body).not.toContainText('something Kevin took back');
   });
   test('Reverse reopens a close on today\'s board and notes the reversal; a handover has no Reverse button', async ({ page }) => {
@@ -109,7 +109,7 @@ test.describe('the 15-Minute Dashboard', () => {
     const ex = zone.locator('[data-f15="exceptions"]');
     await expect(ex).toContainText('33%');
     await expect(ex).toContainText('of 12 tasks finished in 30 days ran without a card from you (4)');
-    await expect(ex.locator('tr', { hasText: 'Creditor Management' })).toContainText('(2 Level A)');
+    await expect(ex.locator('tr', { hasText: 'Accounts Payable' })).toContainText('(2 Level A)');
     // 2. Quality: 8 decisions, 1 relevance failure = 88% worth his time.
     const q = zone.locator('[data-f15="quality"]');
     await expect(q).toContainText('88%');

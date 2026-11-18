@@ -659,8 +659,8 @@ function buildRawEmail({ to, subject, text, cc, from, attachment }) {
         ];
         return b64url(enc.encode(lines.join('\r\n')));
     }
-    // One attachment → multipart/mixed (added 25 Aug 2026 for the Creditor
-    // Management agent's restraint-order pages; send-email.py is the only
+    // One attachment → multipart/mixed (added 25 Aug 2026 for the Accounts
+    // Payable agent's restraint-order pages; send-email.py is the only
     // caller and enforces the file guards). Every part below is ASCII by
     // construction — the body and the file ride as base64, the subject as an
     // encoded-word — so the whole raw message goes through btoa directly.

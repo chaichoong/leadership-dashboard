@@ -26,7 +26,7 @@ const AGENTS_DIR = join(BOX, 'agents');
 mkdirSync(AGENTS_DIR);
 for (const f of ['creditor-management.md', 'worker-builder.md', 'ESTATE.md']) writeFileSync(join(AGENTS_DIR, f), '# agent');
 writeFileSync(AGENTS_CACHE, JSON.stringify({ fetchedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-  names: ['AI Property Administration', 'AI Supplier and Creditor Manager', 'AI Cash Flow Voids', 'AI Task Board Manager'] }));
+  names: ['AI Compliance', 'AI Accounts Payable', 'AI Accounts Receivable', 'AI Operations Manager'] }));
 const AGENT_ENV = { FINDINGS_AGENTS_CACHE: AGENTS_CACHE, FINDINGS_AGENTS_DIR: AGENTS_DIR };
 
 let store; let overflow; let n = 0;
@@ -242,7 +242,7 @@ describe('review of PR #784: chains, explicit retags and named agents', () => {
   it('high and critical findings never count toward the ceiling (round 2 review)', () => {
     // agent-dispatch held 61 high/critical robot walls: counted, they kept every medium refused for ever.
     seed(Array.from({ length: 50 }, (_, i) => ({ title: `robot wall ${i}`, severity: i % 2 ? 'high' : 'critical' })));
-    const medium = add('an ordinary medium', 'm.js', { agent: 'Cash Flow Voids' });
+    const medium = add('an ordinary medium', 'm.js', { agent: 'Accounts Receivable' });
     expect(medium.code, medium.err).toBe(0);
   });
 
@@ -257,7 +257,7 @@ describe('review of PR #784: chains, explicit retags and named agents', () => {
   });
 
   it('one agent has one cap under every spelling agent-dispatch maps to its file (round 2 review)', () => {
-    expect(add('board 0', 'b0.js', { agent: 'AI Task Board Manager' }).code).toBe(0);
+    expect(add('board 0', 'b0.js', { agent: 'AI Operations Manager' }).code).toBe(0);
     expect(byId(listOpen()[0].id).agent).toBe('task-manager');           // stored under its one name
     seed(Array.from({ length: 15 }, (_, i) => ({ title: `board ${i}`, agent: 'task-manager' })));
     const again = add('board 15', 'b15.js', { agent: 'task-manager' });
@@ -290,7 +290,7 @@ print(json.dumps({"good": good, "broken": broken, "missing": missing}))`);
   it('a name table or name check that breaks never stops a filing (round 3)', () => {
     const out = py(`
 fm.DISPATCH_SOURCE = ${JSON.stringify(join(BOX, 'no-such-file.py'))}
-rc1 = fm.main(["add", "--routine", "agent-dispatch", "--title", "one", "--where", "a.js", "--agent", "AI Cash Flow Voids"])
+rc1 = fm.main(["add", "--routine", "agent-dispatch", "--title", "one", "--where", "a.js", "--agent", "AI Accounts Receivable"])
 def boom(name): raise RuntimeError("the list exploded")
 fm.resolve_agent = boom
 rc2 = fm.main(["add", "--routine", "agent-dispatch", "--title", "two", "--where", "b.js", "--agent", "cash-flow-voids"])
@@ -305,13 +305,13 @@ print(json.dumps({"rc": [rc1, rc2]}))`);
     mkdirSync(`${cache}.tmp`);                    // the fixed name the old writer used, taken
     const out = py(`
 fm.AGENTS_CACHE = ${JSON.stringify(cache)}
-fm._write_agents_cache({"fetchedAt": "2026-10-14T20:00:00Z", "names": ["AI Cash Flow Voids"]})
+fm._write_agents_cache({"fetchedAt": "2026-10-14T20:00:00Z", "names": ["AI Accounts Receivable"]})
 print(json.dumps(json.load(open(fm.AGENTS_CACHE))))`);
-    expect(JSON.parse(out.out).names).toEqual(['AI Cash Flow Voids']);
+    expect(JSON.parse(out.out).names).toEqual(['AI Accounts Receivable']);
   });
 
   it('a failed agent-list refresh is not retried for 10 minutes (round 2 review)', () => {
-    writeFileSync(AGENTS_CACHE + '.stale', JSON.stringify({ fetchedAt: '2026-10-01T00:00:00Z', names: ['AI Cash Flow Voids'] }));
+    writeFileSync(AGENTS_CACHE + '.stale', JSON.stringify({ fetchedAt: '2026-10-01T00:00:00Z', names: ['AI Accounts Receivable'] }));
     const out = py(`
 from datetime import datetime, timedelta
 fm.AGENTS_CACHE = ${JSON.stringify(AGENTS_CACHE + '.stale')}
@@ -324,7 +324,7 @@ now = datetime(2026, 10, 14, 20, 0)
 k1, p1 = fm.known_agents(now)
 k2, p2 = fm.known_agents(now + timedelta(minutes=5))
 k3, p3 = fm.known_agents(now + timedelta(minutes=11))
-print(json.dumps({"calls": len(calls), "p1": p1, "p2": p2, "kept": k2.get("cashflowvoids")}))`);
+print(json.dumps({"calls": len(calls), "p1": p1, "p2": p2, "kept": k2.get("accountsreceivable")}))`);
     const r = JSON.parse(out.out);
     expect(r.calls).toBe(2);                              // once at 20:00, once after the pause, none at 20:05
     expect(r.p1).toMatch(/could not be refreshed .*using the cached list/);
@@ -381,14 +381,14 @@ print("RC", rc)`, { recDONEDONEDONExx: 'Completed', recOPENOPENOPENxx: 'Today' }
 
 describe('the cap counts each filer, and never throws a finding away unread', () => {
   it('one agent at its cap does not gag another agent filing under the same routine', () => {
-    for (let i = 0; i < 15; i += 1) add(`property admin noise ${i}`, `p${i}.js`, { agent: 'Property Administration' });
+    for (let i = 0; i < 15; i += 1) add(`property admin noise ${i}`, `p${i}.js`, { agent: 'Compliance' });
     const over = add('one too many', 'z.js', { agent: 'property-administration' });   // the same agent, spelt differently
     expect(over.code).toBe(2);
     expect(over.err).toMatch(/REFUSED: agent-dispatch \/ property-administration already has 15/);
-    expect(add('a creditor fault', 'c.js', { agent: 'Creditor Management' }).code).toBe(0);
+    expect(add('a creditor fault', 'c.js', { agent: 'Accounts Payable' }).code).toBe(0);
     expect(add('an unnamed filing', 'u.js').code).toBe(0);                              // the unnamed pool is its own
     const viaEnv = fnd(['add', '--routine', 'agent-dispatch', '--title', 'by env', '--severity', 'low'],
-      { FINDINGS_AGENT: 'Cash Flow Voids' });
+      { FINDINGS_AGENT: 'Accounts Receivable' });
     expect(viaEnv.code).toBe(0);
     expect(byId(viaEnv.out.trim()).agent).toBe('cash-flow-voids');   // one name per agent: its file
   });

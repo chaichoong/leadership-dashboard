@@ -34,7 +34,7 @@ WHAT IT DOES, each rent check, before lane B reads its tasks
      task is read fresh first; Notes that read blank are a STOP (a lane B task always carries its key there).
 
 WHAT IT NEVER DOES
-Sends nothing and decides nothing (lane B's reader does). Writes nothing on a dry run, or while the Cash Flow Voids
+Sends nothing and decides nothing (lane B's reader does). Writes nothing on a dry run, or while the Accounts Receivable
 agent is switched off or unread.
 
 KNOWN LIMITS (said, not hidden): an email sent before a costs task exists, or between a "no" and the next ask (the
@@ -332,7 +332,7 @@ def brief(out):
 
 def line(out):
     if not out.get("on"):
-        return "Roy's emails: not read, the Cash Flow Voids agent is switched off or unread."
+        return "Roy's emails: not read, the Accounts Receivable agent is switched off or unread."
     bits = []
     if out.get("written"):
         bits.append("written on his housing costs task: " + "; ".join(out["written"]))

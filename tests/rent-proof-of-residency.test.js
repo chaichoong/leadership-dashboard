@@ -581,7 +581,7 @@ print(json.dumps({"sent": len(sent), "readsOff": reads_off, "ledger": rows(p), "
     expect(r.ledger).toEqual([]);
     expect(r.writes).toEqual([]);
     expect(r.lock).toBe(false);
-    expect(r.offLine).toBe('Proof of residency: nothing sent, the Cash Flow Voids agent is switched off or unread.');
+    expect(r.offLine).toBe('Proof of residency: nothing sent, the Accounts Receivable agent is switched off or unread.');
     expect(r.dryLine).toBe('Proof of residency: a real run would send: Ann Lee to ann.lee@example.com, roy.example@example.com.');
   });
 

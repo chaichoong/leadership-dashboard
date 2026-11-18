@@ -761,10 +761,10 @@ print(json.dumps({'ids': [rr.AGENT_REC, rr.RENT_AGENT_REC, rr.MONEY_AGENT_REC],
                       'MAINTENANCE: Larchmont flats Example Energy landlord supply',
                       'COMPLIANCE: energy performance certificate - 9 Alder Row')]}))`, { dispatch: true });
     expect(r.ids).toEqual(['recwWvBju2ycB63i4', 'rec7aHLK1Q8fMLRXH', 'recjh6mmaF8KJW8t3']);
-    expect(r.to).toEqual(['Cash Flow Voids', 'Cash Flow Voids', 'Supplier and Creditor Manager',
-      'Supplier and Creditor Manager', 'Property Administration', 'Property Administration', 'Cash Flow Voids',
-      'Supplier and Creditor Manager', 'Property Administration', 'Supplier and Creditor Manager',
-      'Supplier and Creditor Manager', 'Property Administration']);
+    expect(r.to).toEqual(['Accounts Receivable', 'Accounts Receivable', 'Accounts Payable',
+      'Accounts Payable', 'Compliance', 'Compliance', 'Accounts Receivable',
+      'Accounts Payable', 'Compliance', 'Accounts Payable',
+      'Accounts Payable', 'Compliance']);
   });
   it('placing a tenant stays with Roy: viewings and the move-in are in person', () => {
     for (const n of ['Room 2: sign a tenant', 'Find tenants for Room 3 if confirmed empty', 'Let Unit 1 and get the tenant into payment',

@@ -101,12 +101,12 @@ function defaultFixtures() {
   const today = londonTodayISO();
   return {
     team: [
-      { id: AGENT_A, createdTime: now, fields: { [TM.name]: 'Creditor Management', [TM.active]: true, [TM.isAi]: true } },
+      { id: AGENT_A, createdTime: now, fields: { [TM.name]: 'Accounts Payable', [TM.active]: true, [TM.isAi]: true } },
       { id: AGENT_B, createdTime: now, fields: { [TM.name]: 'Inbound Comms Response', [TM.active]: true, [TM.isAi]: true } },
     ],
     agents: [
       { id: 'recRegCreditor', createdTime: now, fields: {
-        [AG.name]: 'Creditor Management', [AG.goal]: 'Freeze first, plan second', [AG.status]: 'Live',
+        [AG.name]: 'Accounts Payable', [AG.goal]: 'Freeze first, plan second', [AG.status]: 'Live',
         [AG.guardrail]: 'Approval required', [AG.teamMember]: [AGENT_A],
       } },
       { id: 'recRegInbound', createdTime: now, fields: {

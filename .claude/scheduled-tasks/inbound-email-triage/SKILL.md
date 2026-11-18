@@ -12,7 +12,7 @@ receive, and KEVIN is the approver on everything you route while trust builds.
 
 You TRIAGE ONLY. You never send, reply, delete, or mark spam — the worker
 endpoints you use hold a read-and-label-only key and refuse SPAM/TRASH.
-Every reply you queue up is drafted by another agent (Inbox Response
+Every reply you queue up is drafted by another agent (Customer Service
 is next to be built) and approved by a human before it goes anywhere.
 Archiving removes an email from the inbox but never destroys it, so every
 action you take is reversible.
@@ -44,7 +44,7 @@ accordingly). The numbered labels and what you may do with each:
   label carried no task and maintenance mail relied on someone reading the
   Gmail label; that was the one lane where something could sit unseen).
 - **10 "property compliance"** — certificates and compliance paperwork. Label
-  10 PLUS a task for the Property Administration agent (Step 4c). NEVER
+  10 PLUS a task for the Compliance agent (Step 4c). NEVER
   file-only (Kevin, 2 Oct 2026): a certificate that sat in this label with no
   task was never filed in the compliance book, and the visit nearly got bought
   twice. `act --do file --label-num 10` refuses without `--task <rec id>`.
@@ -182,7 +182,7 @@ the `list-unsubscribe` header (its presence = machine mail).
    key relationships. The AI CEO routes the task to the right role agent.
    PROPERTY COMPLIANCE (build 2 Sep 2026): a certificate, licence, landlord
    insurance or council inspection matter about one of Kevin's properties is
-   the Property Administration agent's lane, and the dispatch engine routes
+   the Compliance agent's lane, and the dispatch engine routes
    it there BY THE TASK NAME. So name it for the matter: start the Task Name
    with `COMPLIANCE:` and name the item and the property ("COMPLIANCE: gas
    safety certificate due - 22 Newton Street", "COMPLIANCE: landlord
@@ -232,9 +232,9 @@ the `list-unsubscribe` header (its presence = machine mail).
    boiler, a bed, paint), it is rule 1 (label 12, an ordinary Step 4 task) with ONE difference:
    the Task Name starts `SOURCING:` and names the item and the property ("SOURCING: 4 fridge
    freezers for the Haverhill HMOs", "SOURCING: smoke alarms for 13 Chedburgh Place"). The
-   dispatch engine routes BY THE TASK NAME. A buying task belongs to Inbox Response, which holds
+   dispatch engine routes BY THE TASK NAME. A buying task belongs to Customer Service, which holds
    the buying rules, and only that prefix keeps it there: named `INBOUND:`, `COMPLIANCE:` or
-   `MAINTENANCE:`, a request for alarms moves to Property Administration and one for a boiler
+   `MAINTENANCE:`, a request for alarms moves to Compliance and one for a boiler
    goes to Roy as a repair, and neither has buying rules. The item never decides the lane: the
    ask does. So a smoke alarm to BUY is `SOURCING:`, while a smoke alarm certificate is rule 3
    and a broken smoke alarm is rule 2. NOT a buying task: a tenant, or anyone else, reporting
@@ -577,7 +577,7 @@ line (an unknown value is refused, never minted as a new option):
   good response covers, and the tier-1 prepare-only note when Step 2 flagged
   it. For a creditor thread (any thread you file label 18 on top of), START
   the Description with the line `CREDITOR MATTER` — the dispatch engine
-  routes on that marker to the Supplier and Creditor Manager agent (25 Aug 2026).
+  routes on that marker to the Accounts Payable agent (25 Aug 2026).
 - `fldueazD67F7fUGee` Inbound Communication Task: true
 - `fldiXSzcMol6Tdwij` Inbound Source Type: `Gmail`
 - `fldiSNijdCy5GXuzL` Inbound Message Content: the email body from the scan
@@ -620,7 +620,7 @@ no per-task ask, and NOT the agent lane shape above. Fields:
 - `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the `#all/{threadId}` URL (the
   same dedupe key as lane 12)
 - Do NOT set Inbound Communication Task — that flag auto-routes a task to the
-  Inbox Response agent for a reply draft, and a maintenance job is
+  Customer Service agent for a reply draft, and a maintenance job is
   work for Roy, not a reply.
 - Do NOT tick Maintenance Ticket — that checkbox is the contractor-job flow
   (owner from Contractor); Roy raises contractor jobs in the dashboard's
@@ -638,17 +638,17 @@ Log each with `note --id <id> --do task-created` (or `--do updated --reason
 "joined open matter: <matchedName>"` when the gate answered `updated`). The
 label move itself is still `act --do label13` exactly as before.
 
-### Step 4c — Certificate tasks for Property Administration (lane 10; Kevin's ruling, 2 Oct 2026)
+### Step 4c — Certificate tasks for Compliance (lane 10; Kevin's ruling, 2 Oct 2026)
 
 Every lane-10 THREAD that survives the Step 3 dedupe gets one task for the
-Property Administration agent. The label move happens AFTER the task exists,
+Compliance agent. The label move happens AFTER the task exists,
 because `act --do file --label-num 10` refuses without the task's id. Fields:
 
 - `fldgFjGBw6bTKJFCD` Task Name: "COMPLIANCE: file certificate - <type> - <property>"
   (type in plain words: gas safety record, EICR, EPC, insurance schedule)
 - `fldx4qCw17UfrKpaN` Status: `Today`
 - `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD)
-- `flduCtmQGpOA4eWaj` Team Member: `["recwWvBju2ycB63i4"]` (Property Administration)
+- `flduCtmQGpOA4eWaj` Team Member: `["recwWvBju2ycB63i4"]` (Compliance)
 - Assignee: leave BLANK (a blank Assignee means an AI agent owns it)
 - `fldZ2moDV2041Sobc` Task Type: `Admin`
 - `fldRGhBQViKZKtkQ6` Description: start with `CERTIFICATE ATTACHED` when the
@@ -671,10 +671,10 @@ the compliance book with its document, or the agent has said on the record what
 the file really is (`agent-dispatch.py complete` refuses otherwise), so nothing
 here depends on anyone remembering.
 
-### Step 4d — Diary tasks for Inbox Response (rule 1c; Kevin's ruling, 18 Oct 2026)
+### Step 4d — Diary tasks for Customer Service (rule 1c; Kevin's ruling, 18 Oct 2026)
 
-Every diary date that survives the Step 3 dedupe gets one task for the Inbox
-Response agent. Always create it through the gate below, never by appending to
+Every diary date that survives the Step 3 dedupe gets one task for the Customer
+Service agent. Always create it through the gate below, never by appending to
 an open diary task yourself: the gate folds a reminder into the diary task for
 the same event and date while that task is still being drafted, and keeps a
 new message apart once its card waits on Kevin. Name every diary task the same
@@ -800,7 +800,7 @@ INBOX card ("INBOX: N emails for you to read, since <date> <slot>"): added
 under a dated heading to the card he has not decided yet, or on a new card
 when none is open, so he never has two reading lists to tell apart. Grouped
 by sender type, each with its sender, subject, your one-line summary and its
-Gmail link, owned by Inbox Response so a "reply to 2 saying yes" note gets
+Gmail link, owned by Customer Service so a "reply to 2 saying yes" note gets
 worked. `"card": "none"` means nothing was queued. A failure keeps the emails
 queued for the next card: report it loudly. The runner calls the same command
 after you finish, so a skipped step is caught, but do not rely on that.

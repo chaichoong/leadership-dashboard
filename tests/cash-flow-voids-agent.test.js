@@ -1,4 +1,4 @@
-// Guards the Cash Flow Voids agent, lane A, in TRIAL (build 2 Oct 2026; chain map and trial mode
+// Guards the Accounts Receivable agent, lane A, in TRIAL (build 2 Oct 2026; chain map and trial mode
 // approved by Kevin the same day; map on register row reclaAzGLA4utssxx).
 //
 // WHAT THIS EXISTS FOR
@@ -59,12 +59,12 @@ aef.TRIAL_AGENTS.clear()
 `;
 
 // The trial ENDED on 5 Oct 2026 (Kevin: "Let's take it off trial"). The doors that hold a trial agent back stay
-// in the code for the next agent on trial, so this file still proves every one of them: each run puts the Cash
-// Flow Voids agent back on trial inside its own Python process, unless it is the real-state check (pyReal), which
+// in the code for the next agent on trial, so this file still proves every one of them: each run puts the Accounts
+// Receivable agent back on trial inside its own Python process, unless it is the real-state check (pyReal), which
 // reads the lists as they ship.
 const ON_TRIAL = `
 import agent_email_format as _aef
-_aef.TRIAL_AGENTS["${RENT_TM}"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef.TRIAL_AGENTS["${RENT_TM}"] = "the Accounts Receivable agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
 _aef.TRIAL_ENDED.pop("${RENT_TM}", None)
 `;
 const pyReal = (snippet, input) => py(snippet, input, true);
@@ -92,7 +92,7 @@ rc = load_mod("rc", "rent-check.py")
 e = ad.ROLE_AGENTS.get("${RENT_TM}") or {}
 print(json.dumps({"entry": e, "alias": [ad.RENT_REC_ID, ad.RENT_REGISTER_ROW], "rentCheck": [rc.AGENT_TEAM_MEMBER, rc.REGISTER_ROW],
                   "ownSignal": ad.own_go_signal("${RENT_TM}"), "inAll": "${RENT_TM}" in ad.ALL_AGENTS}))`);
-    expect(r.entry).toEqual({ name: 'AI Cash Flow Voids', agent: 'cash-flow-voids', role: 'worker', registerRow: RENT_ROW });
+    expect(r.entry).toEqual({ name: 'AI Accounts Receivable', agent: 'cash-flow-voids', role: 'worker', registerRow: RENT_ROW });
     expect(r.alias).toEqual([RENT_TM, RENT_ROW]);
     expect(r.rentCheck).toEqual([RENT_TM, RENT_ROW]);
     expect(r.ownSignal).toBe(false);
@@ -611,8 +611,8 @@ const b = require(${JSON.stringify(resolve(ROOT, 'scripts/agent-browser.js'))});
 try { b.assertApproved('recAAAAAAAAAAAAAA'); console.log('passed'); } catch (e) { console.log(e.message); }`],
         { encoding: 'utf8', env: { ...process.env, AGENT_OUTCOME_SCRIPT: fake } }).trim();
     };
-    expect(gate({ outcome: 'Approved as-is', approved: false, trial: 'the Cash Flow Voids agent is on its trial run' }))
-      .toMatch(/is a trial task and no form is submitted for it: the Cash Flow Voids agent is on its trial run/);
+    expect(gate({ outcome: 'Approved as-is', approved: false, trial: 'the Accounts Receivable agent is on its trial run' }))
+      .toMatch(/is a trial task and no form is submitted for it: the Accounts Receivable agent is on its trial run/);
     expect(gate({ outcome: 'Approved as-is', approved: false, trial: '' })).toMatch(/is a trial task and no form is submitted/);
     expect(gate({ outcome: 'Approved as-is', approved: true, trial: '' })).toBe('passed');
     expect(gate({ outcome: '', approved: false, trial: '' })).toMatch(/is not approved/);

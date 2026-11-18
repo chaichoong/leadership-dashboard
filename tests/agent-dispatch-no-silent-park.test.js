@@ -26,8 +26,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
-const INBOX = 'recJ8J8idWE8d97tH';      // AI Inbox Response (RESPONSE_REC_ID)
-const TASKMGR = 'rec1hYELb4zS8pjjO';    // AI Task Board Manager (TASKMGR_REC_ID): escalate's sender
+const INBOX = 'recJ8J8idWE8d97tH';      // AI Customer Service (RESPONSE_REC_ID)
+const TASKMGR = 'rec1hYELb4zS8pjjO';    // AI Operations Manager (TASKMGR_REC_ID): escalate's sender
 
 const UC47 = 'recUCFORTYSEVEN01';
 // The 13 Oct shape: no tenancy link, a name carrying "decision" and "submitted", and a robot that cites a
@@ -269,7 +269,7 @@ describe('a park is a park whatever it says, in the order the run acted', () => 
   it('a route with a note saying so, and no failure: no card', () => {
     const T = 'recROUTEDTASK0001';
     const r = verify({ tasks: { [T]: { name: GENERIC } }, actions: [
-      { task: T, kind: 'route', ok: true, to: INBOX }, { task: T, kind: 'annotate', ok: true, note: 'no card: routed to Inbox Response' }] });
+      { task: T, kind: 'route', ok: true, to: INBOX }, { task: T, kind: 'annotate', ok: true, note: 'no card: routed to Customer Service' }] });
     expect(r.writes).toEqual([]);
   });
 

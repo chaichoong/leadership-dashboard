@@ -491,7 +491,7 @@ html.home-embed .main{max-width:none;margin:0;padding:0}
             <div class="zone-header">
                 <span class="zone-title">Recording brief for your runs</span>
                 <span class="zone-count" id="briefCount">0</span>
-                <span class="zone-sub">Topics the Content Engine wants you to talk about on camera. Say them in your own words; the transcript becomes the post. Tick one when you have recorded it.</span>
+                <span class="zone-sub">Topics the Social Media Manager wants you to talk about on camera. Say them in your own words; the transcript becomes the post. Tick one when you have recorded it.</span>
             </div>
             <div id="briefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the recording brief…</span></div></div>
         </div>
@@ -550,7 +550,7 @@ html.home-embed .main{max-width:none;margin:0;padding:0}
     </div>
 
     <!-- Estate status (Kevin's audit, 14 Sep 2026): which jobs ran, which
-         stopped and why; what the Content Engine published and where; which
+         stopped and why; what the Social Media Manager published and where; which
          tasks are not moving. Read live from the Estate Status table, which
          scripts/estate-status.py refreshes every ten minutes. -->
     <div class="page-view" id="view-estate">
@@ -572,9 +572,9 @@ html.home-embed .main{max-width:none;margin:0;padding:0}
         </div>
         <div class="zone" id="zoneEstateContent" style="margin-top:16px">
             <div class="zone-header">
-                <span class="zone-title">Published by the Content Engine</span>
+                <span class="zone-title">Published by the Social Media Manager</span>
                 <span class="zone-count" id="estateContentCount">0</span>
-                <span class="zone-sub">Every episode the engine has worked on in the last five weeks, with a link for each channel it is live on.</span>
+                <span class="zone-sub">Every episode the Social Media Manager has worked on in the last five weeks, with a link for each channel it is live on.</span>
             </div>
             <div id="estateContentBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading the content table…</span></div></div>
         </div>
@@ -8308,10 +8308,12 @@ function registerAgentsSyncBar(){
                 }
             },
             {
-                name: 'Inbox Response metric fresh', kind: 'automation', run: () => {
+                name: 'Customer Service metric fresh', kind: 'automation', run: () => {
                     if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Register not loaded yet' };
-                    const row = allAgents.find(a=>String(gf(a,AG.name)||'').toLowerCase().includes('inbox response'));
-                    if(!row) return { status:'fail', detail:'No "Inbox Response" row in the register — the agent lost its home row' };
+                    // By record id, never by name: the agent was renamed (Inbox Response to
+                    // Customer Service, 18 Nov 2026) and the old name match would have gone red.
+                    const row = allAgents.find(a=>a.id==='recHfhVDb6BfQYco5');
+                    if(!row) return { status:'fail', detail:'No Customer Service row (recHfhVDb6BfQYco5) in the register — the agent lost its home row' };
                     const score = gf(row,AG.metricScore);
                     if(!score) return { status:'fail', detail:'Metric Score is empty — the agent\'s runtime has stopped publishing its score' };
                     return { status:'pass', detail:'Metric Score: '+String(score).split('\n')[0].slice(0,120) };

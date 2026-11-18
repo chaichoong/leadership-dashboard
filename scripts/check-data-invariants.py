@@ -850,7 +850,7 @@ INVARIANTS = [
     },
     {
         # The rent-position row is the Rent line on Kevin's Home screen (2 Oct 2026, phase 1 of
-        # the Cash Flow Voids agent). Home says "has not run today" when the row is old, but only
+        # the Accounts Receivable agent). Home says "has not run today" when the row is old, but only
         # to someone looking at Home; this check finds a stopped rent check whoever is looking.
         # It runs at 07:30 and 12:30, so 26 hours is a whole day of missed runs.
         "name": "rent-position-is-current",

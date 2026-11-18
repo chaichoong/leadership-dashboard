@@ -35,7 +35,7 @@ def fake_query_all(table, formula, fields, why, **kw):
     asked.append({"why": why, "fields": list(fields)})
     if why == "AI agent roster read":
         # the roster read's control: the AI CEO's row is always there (15 Oct 2026)
-        return [{"id": "reciHUAEcEkbctnZ6", "fields": {"Name": "AI CEO (Dan Martell)"}}]
+        return [{"id": "reciHUAEcEkbctnZ6", "fields": {"Name": "AI CEO"}}]
     if why != "board read":
         return []
     def rec(rid, name, created, desc=None):
