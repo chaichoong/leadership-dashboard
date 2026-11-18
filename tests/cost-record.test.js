@@ -66,6 +66,8 @@ def task_row():
     if t.get("outcome"): f[tr.TK["approvalOutcome"]] = t["outcome"]
     if t.get("sentFor"): f["fld30Yw8SWYVp049g"] = t["sentFor"]
     if t.get("approvedAt"): f["fldr4Mvf2RzKvhZhi"] = t["approvedAt"]
+    if t.get("feedback"): f[tr.TK["approvalFeedback"]] = t["feedback"]
+    if t.get("notes"): f[tr.TK["notes"]] = t["notes"]
     return {"id": cfg["TASK"], "createdTime": t["created"], "fields": f}
 def fetch_all(table, params=None):
     formula = (params or {}).get("filterByFormula") or ""
@@ -123,10 +125,13 @@ describe('cost-record.py: what it refuses', () => {
     expect([...none.writes, ...typed.writes, ...none.comments, ...typed.comments]).toEqual([]);
   });
 
-  it('an approval with minor edits: the card may not say what he read', () => {
-    const r = expected('16.36', { task: { ...APPROVED, outcome: 'Approved with minor edits', output: LINE } });
+  it('an approval with minor edits whose note was never applied: the card may not say what he read', () => {
+    // Accepted since 18 Nov 2026 (finding 20261016-agent-dispatch-945) only once `revise` has applied his note;
+    // the full rules are in tests/payment-run-paid-off-list-945.test.js.
+    const r = expected('16.36', { task: { ...APPROVED, outcome: 'Approved with minor edits', output: LINE,
+      feedback: 'Make it 15.99' } });
     expect(r.code).toBe(2);
-    expect(r.json.refused).toMatch(/was Approved with minor edits, not Approved as-is/);
+    expect(r.json.refused).toMatch(/Approved with minor edits and his note has not been applied/);
     expect(r.writes).toEqual([]);
   });
 
