@@ -15,5 +15,15 @@ const PRIVATE_QUESTION_RE = /\b(card|cvv|cvc|security code|sort code|account (nu
 // Losses and disputes (review R1): never declaration topics for the facts file, but a page that mentions one is
 // never recorded from, in case its question is a declaration the topic list misses. Capture only.
 const CAPTURE_LOSS_RE = /\b(loss(?:es)?|damage|theft|stolen|fire|flood\w*|subsid\w*|heave|landslip|incident|accident|dispute|arrears|evict\w*)\b/i;
+// The gas question (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB, ruling 4): answered only from the
+// house's own record, never one answer for every house. GAS_RE is any gas word (gas, LPG, CP12, LGSR, Gas Safe, a
+// landlord safety certificate): form-facts.js refuses one in a general or owner fact's key or label. A text NAMES
+// GAS SAFETY when it holds a gas word AND a safety word, in any order and any distance apart ("a valid safety
+// certificate for all gas appliances"), never a plain "mains gas" or "gas heating". A house's gas safety fact
+// carries its certificate's expiry, and agent-browser.js answers a step that names it only from that one house's
+// own gas safety line. Wider than the topic by design: a stray match sends a question to Kevin, never answers one.
+const GAS_RE = /\b(?:gas|lpg|cp[\s-]?12s?|lgsrs?)\b|gas\s*safe|\blandlord(?:'?s)?\s+safety\b/i;
+const SAFETY_WORD_RE = /\b(?:safe|safety|certificates?|certs?|certified|records?|checks?|checked|inspections?|inspected|cp[\s-]?12s?|lgsrs?)\b|gas\s*safe/i;
+const namesGasSafety = text => { const t = String(text || ''); return GAS_RE.test(t) && SAFETY_WORD_RE.test(t); };
 
-module.exports = { DECLARATION_TOPIC_RE, NEARBY_DECLARATION_RE, NEVER_ROBOT_RE, PRIVATE_QUESTION_RE, CAPTURE_LOSS_RE };
+module.exports = { DECLARATION_TOPIC_RE, NEARBY_DECLARATION_RE, NEVER_ROBOT_RE, PRIVATE_QUESTION_RE, CAPTURE_LOSS_RE, GAS_RE, namesGasSafety };
