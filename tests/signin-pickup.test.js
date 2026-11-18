@@ -1237,3 +1237,141 @@ describe('the Robot sign-in app opens a window only for a site that is really si
     expect(src).toMatch(/counts a sign-in as a hand-back/);
   });
 });
+
+// 18 Nov 2026: the podcast upload runs on the robot's separate `spotify` profile, which the 06:40
+// keep-alive now checks and, when it is signed out, asks for with a SIGN-IN wall on that profile. A
+// main-profile check or sign-in says nothing about that profile, so it must never clear the wall; and
+// the keep-alive's own card closes when its wall clears, never going back to an agent with nothing to do.
+// An invented site shaped like Spotify for Creators: a main sign-in and one separate profile.
+describe('a sign-in on a separate profile (18 Nov 2026)', () => {
+  const POD = 'creators.example-pods.co.uk';
+  const SETUP = `
+sites = json.loads(sys.argv[1])
+POD = ${JSON.stringify(POD)}
+sites[POD] = {'label': 'Pods', 'login': True, 'loginUrl': 'https://' + POD + '/login',
+              'profiles': [{'profile': 'podcast', 'label': 'Pods (podcast upload)', 'loginUrl': 'https://' + POD + '/login'}]}
+b = {'kind': 'SIGN-IN', 'subject': POD}
+wall = m.blocker_note('18 Nov 2026 06:41', 'agent', m.BLOCKER_OPEN_MARK, b, 'signed out Fix: x [since 2026-11-18T06:41:00Z] [profile podcast]')
+main_wall = m.blocker_note('18 Nov 2026 06:41', 'agent', m.BLOCKER_OPEN_MARK, b, 'signed out Fix: x [since 2026-11-18T06:41:00Z]')
+`;
+
+  it('a wall on the profile is its own group, never walked, opened or handed back as the main profile', () => {
+    const out = py(`${SETUP}
+recs = [
+  {'id': 'recProf', 'fields': {m.AF['name']: 'SIGN-IN: Pods (podcast upload) session lapsed', m.AF['status']: 'Approval',
+                               m.AF['notes']: m.KEEPALIVE_MARK + ' x\\n\\n' + wall, m.AF['teamMember']: ['rec1hYELb4zS8pjjO']}},
+  {'id': 'recMain', 'fields': {m.AF['name']: 'Read the show stats', m.AF['status']: 'Today',
+                               m.AF['notes']: main_wall, m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+]
+m.query_tasks = lambda formula, **kw: recs if 'BLOCKER' in formula else []
+m.get_task = lambda tid: next(r for r in recs if r['id'] == tid)
+m.load_login_sites = lambda: sites
+woken = []
+m.wake_blocked = lambda tid, b, reason, **k: woken.append([tid, b.get('profile')]) or {'task': tid, 'name': 'n'}
+m.patch_task = lambda tid, fields: None
+walked = []
+m.session_check = lambda host, **k: walked.append(host) or {'signedIn': True, 'url': 'https://' + host + '/home', 'at': 't', 'source': 'walk'}
+import io, contextlib, os
+os.environ.pop('SIGNIN_SKIP_WALK', None)
+groups = m.signin_waiting(sites)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_signin_waiting(types.SimpleNamespace(no_walk=False, dry_run=False))
+d = json.loads(buf.getvalue())
+done = m.signin_done(POD, sites, groups)
+print('---JSON---'); print(json.dumps({
+  'groups': [[g['host'], g.get('profile'), g['loginUrl'], g['label'], [t['id'] for t in g['tasks']]] for g in groups],
+  'walked': walked, 'waiting': [[g['host'], g.get('profile')] for g in d['sites']],
+  'profileWalls': [[g['host'], g.get('profile'), [t['id'] for t in g['tasks']]] for g in d.get('profileWalls', [])],
+  'live': [[g['host'], [h['task'] for h in g['handedBack']]] for g in d['alreadyLive']],
+  'woken': woken, 'done': [h['task'] for h in done['handedBack']]}))`, SITES);
+    expect(out.groups).toEqual([
+      [POD, null, `https://${POD}/login`, 'Pods', ['recMain']],
+      [POD, 'podcast', '', 'Pods (podcast upload)', ['recProf']],
+    ]);
+    expect(out.walked).toEqual([POD]);                              // the main group only
+    expect(out.waiting).toEqual([]);                                // never in the app's main-profile window list
+    expect(out.profileWalls).toEqual([[POD, 'podcast', ['recProf']]]);  // listed apart, for the keep-alive's dedupe
+    expect(out.live).toEqual([[POD, ['recMain']]]);
+    expect(out.woken.filter(w => w[0] === 'recProf')).toEqual([]);  // the main profile's live session never clears it
+    expect(out.done).toEqual(['recMain']);
+  });
+
+  it('the card the keep-alive creates is one `block` accepts, and the wall turns it into a Sign in card for that profile', () => {
+    const out = py(`${SETUP}
+from datetime import datetime
+spec2 = importlib.util.spec_from_file_location('ka', ${JSON.stringify(join(ROOT, 'scripts', 'session-keepalive.py'))})
+ka = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(ka)
+fields = ka.profile_card_fields(POD, 'podcast', 'Pods (podcast upload)', datetime.now(ka.LONDON), ['uploader'])
+t = m.task_view({'id': 'recNew', 'fields': fields})
+wb = dict(b, profile='podcast')
+f = m.robot_step_fields(t, wb, sites)
+print('---JSON---'); print(json.dumps({'refusal': m.robot_step_refusal(t, wb), 'status': f.get(m.AF['status']),
+  'step': m.robot_step({'agentOutput': f.get(m.AF['agentOutput']), 'status': 'Approval'}),
+  'drift': {k: v for k, v in ka.F.items() if m.AF.get(k) != v}}))`, SITES);
+    expect(out.refusal).toBe('');
+    expect(out.status).toBe('Approval');
+    expect(out.step).toEqual(['SIGN-IN', POD, 'podcast']);          // the page's button opens robotsignin://profile/podcast
+    expect(out.drift).toEqual({});
+  });
+
+  it('"I can\'t do this" on the keep-alive\'s card closes it and is recorded for the keep-alive; any other card goes back to its agent', () => {
+    const run = (keepalive, name = 'SIGN-IN: Pods (podcast upload) session lapsed') => py(`${SETUP}
+import os, tempfile
+m.KEEPALIVE_DECLINED = os.path.join(tempfile.mkdtemp(), 'declined.jsonl')
+original = "The robot's login to Pods (podcast upload) has lapsed."
+notes = (m.KEEPALIVE_MARK + ' Pods (podcast upload) signed out.\\n\\n' if ${keepalive ? 'True' : 'False'} else '') + wall
+bb = m.task_blocker(notes)
+rec = {'id': 'recProf', 'fields': {m.AF['name']: ${JSON.stringify(name)}, m.AF['status']: 'Approval',
+       m.AF['notes']: notes, m.AF['teamMember']: ['rec1hYELb4zS8pjjO'], m.AF['sentForApprovalBy']: ['rec1hYELb4zS8pjjO'],
+       m.AF['approvalFeedback']: m.KEVIN_CANT_MARK + ' [2026-11-18T08:00:00.000Z]: I have no login for that account',
+       m.AF['agentOutput']: m.your_step_output(m.robot_step_text(bb, sites), original)}}
+m.get_task = lambda tid: rec
+m.step_line_settling = lambda fb: False
+patched = {}
+m.patch_task = lambda tid, fields: patched.update(fields)
+m.ledger_append = lambda *a, **k: None
+res = m.send_back_blocked('recProf', bb)
+declined = open(m.KEEPALIVE_DECLINED).read().splitlines() if os.path.exists(m.KEEPALIVE_DECLINED) else []
+print('---JSON---'); print(json.dumps({'res': bool(res), 'closed': (res or {}).get('closed', False), 'status': patched.get(m.AF['status']),
+  'sfab': patched.get(m.AF['sentForApprovalBy'], 'unchanged'), 'declined': [json.loads(x) for x in declined]}))`, SITES);
+    const ka = run(true);
+    expect(ka).toMatchObject({ res: true, closed: true, status: 'Completed', sfab: [] });
+    expect(ka.declined).toHaveLength(1);
+    expect(ka.declined[0]).toMatchObject({ host: POD, profile: 'podcast', task: 'recProf', why: 'I have no login for that account' });
+    const other = run(false);
+    expect(other).toMatchObject({ res: true, closed: false, status: 'Today', sfab: 'unchanged', declined: [] });
+    // The mark quoted in a work task's TRACK RECORD is not the card: sent back, nothing recorded.
+    expect(run(true, 'Upload episode 2190 to the podcast')).toMatchObject({ closed: false, status: 'Today', declined: [] });
+  });
+
+  it('the wall clearing closes the keep-alive\'s own card; any other walled task still goes back to its agent', () => {
+    const run = (keepalive, name = 'SIGN-IN: Pods (podcast upload) session lapsed') => py(`${SETUP}
+original = "The robot's login to Pods (podcast upload) has lapsed."
+notes = (m.KEEPALIVE_MARK + ' Pods (podcast upload) signed out.\\n\\n' if ${keepalive ? 'True' : 'False'} else '') + wall
+bb = m.task_blocker(notes)
+rec = {'id': 'recProf', 'fields': {m.AF['name']: ${JSON.stringify(name)}, m.AF['status']: 'Approval',
+       m.AF['notes']: notes, m.AF['teamMember']: ['rec1hYELb4zS8pjjO'], m.AF['sentForApprovalBy']: ['rec1hYELb4zS8pjjO'],
+       m.AF['agentOutput']: m.your_step_output(m.robot_step_text(bb, sites), original)}}
+m.get_task = lambda tid: rec
+patched = {}
+m.patch_task = lambda tid, fields: patched.update(fields)
+m.ledger_append = lambda *a, **k: None
+res = m.wake_blocked('recProf', bb, 'the robot session on ' + POD + ' (podcast) is live', by='agent-dispatch')
+print('---JSON---'); print(json.dumps({'profile': bb['profile'], 'closed': res.get('closed', False),
+  'status': patched.get(m.AF['status']), 'completion': bool(patched.get(m.AF['completion'])),
+  'sfab': patched.get(m.AF['sentForApprovalBy'], 'unchanged'), 'output': patched.get(m.AF['agentOutput']) == original,
+  'note': patched[m.AF['notes']].split('\\n')[-1]}))`, SITES);
+    const ka = run(true);
+    expect(ka).toMatchObject({ profile: 'podcast', closed: true, status: 'Completed', completion: true, sfab: [], output: true });
+    expect(ka.note).toMatch(/BLOCKER CLEARED .*its next check decides whether to ask again\.$/);
+    expect(ka.note).not.toMatch(/session is back/);               // true whether he got in or not
+    const other = run(false);
+    expect(other).toMatchObject({ closed: false, status: 'Today', completion: false, sfab: 'unchanged', output: true });
+    expect(other.note).toMatch(/Carry on from where you stopped/);
+    // A work task whose TRACK RECORD quotes a keep-alive card carries the mark but not the card's name:
+    // it goes back to its agent, never closed (review, 18 Nov 2026).
+    const quoted = run(true, 'Upload episode 2190 to the podcast');
+    expect(quoted).toMatchObject({ closed: false, status: 'Today', sfab: 'unchanged' });
+  });
+});

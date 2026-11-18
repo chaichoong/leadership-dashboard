@@ -10244,6 +10244,16 @@ SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<rest>.+?)\s*$", re.I | r
 SIGNIN_URL_RE = re.compile(r"https?://[^\s)>\]]+", re.I)
 SIGNIN_DONE_MARK = "SIGNED IN:"
 KEEPALIVE_MARK = "KEEPALIVE CHECK:"
+# The name session-keepalive.py gives its own cards (its KEEPALIVE_NAME_RE).
+KEEPALIVE_NAME_RE = re.compile(r"^SIGN-IN: .+ session lapsed$")
+
+
+def keepalive_sign_in_card(t, b):
+    """True when T is the keep-alive's own card and B its SIGN-IN wall: its mark in Notes AND its
+    own name. The mark alone is not enough, because a work task's TRACK RECORD can quote a
+    keep-alive card's Notes lines (review, 18 Nov 2026), and closing that task would lose real work."""
+    return (b.get("kind") == "SIGN-IN" and KEEPALIVE_MARK in str(t.get("notes") or "")
+            and bool(KEEPALIVE_NAME_RE.match(str(t.get("name") or ""))))
 SIGNIN_PICKUP_DIR = os.environ.get("SIGNIN_PICKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/signin-pickup")
 # A submit checks the session before it accepts a SIGN-IN NEEDED line (15 Sep
 # 2026). When the check itself cannot run (robot profile busy, walk timed out)
@@ -10806,9 +10816,23 @@ def signin_waiting(sites=None):
             signin_site_for("", "https://" + b["subject"] + "/", sites) or "unknown")
         entry = sites.get(host, {})
         key = host if host != "unknown" else "unknown:" + b["subject"]
-        g = groups.setdefault(key, {"host": host, "label": entry.get("label") or b["subject"],
-                                    "loginUrl": entry.get("loginUrl") or "",
-                                    "shortSession": bool(entry.get("shortSession")), "tasks": []})
+        profile = b.get("profile") or ""
+        if profile:
+            # A wall on one of a site's separate sign-in profiles (a Utilita flat, the robot's Spotify
+            # profile) is its own group, with no main-profile door (18 Nov 2026): a check or a sign-in
+            # on the site's main profile says nothing about it, so it is never walked as the main one,
+            # never opened in the main window, and signin_done leaves it to the sweep, which walks that
+            # profile's own door. Before, the Spotify profile's wall would have been cleared by the main
+            # profile's live session.
+            door = next((p for p in entry.get("profiles") or [] if isinstance(p, dict) and p.get("profile") == profile), {})
+            key = f"{key} ({profile})"
+            g = groups.setdefault(key, {"host": host, "profile": profile,
+                                        "label": door.get("label") or f"{entry.get('label') or b['subject']} ({profile})",
+                                        "loginUrl": "", "shortSession": bool(entry.get("shortSession")), "tasks": []})
+        else:
+            g = groups.setdefault(key, {"host": host, "label": entry.get("label") or b["subject"],
+                                        "loginUrl": entry.get("loginUrl") or "",
+                                        "shortSession": bool(entry.get("shortSession")), "tasks": []})
         if any(x["id"] == rec["id"] for x in g["tasks"]):
             continue
         g["tasks"].append({"id": rec["id"], "name": f.get(AF["name"], ""),
@@ -10836,9 +10860,15 @@ def cmd_signin_waiting(args):
     walk = not getattr(args, "no_walk", False) and not os.environ.get("SIGNIN_SKIP_WALK")
     dry = bool(getattr(args, "dry_run", False))
     only = (getattr(args, "site", "") or "").strip().lower()
-    waiting, already_live, bot_checked = [], [], []
+    waiting, already_live, bot_checked, profile_walls = [], [], [], []
     groups = signin_waiting(sites)
     for g in groups:
+        if g.get("profile"):
+            # A wall on a separate profile has its own Sign in button on its card, which opens that
+            # profile; the app's waiting list opens main-profile windows and read one with no main door
+            # as "a site the robot cannot sign into" (review, 18 Nov 2026). Listed apart, never walked.
+            profile_walls.append(g)
+            continue
         if not walk or g["host"] == "unknown" or not g["loginUrl"] or (only and g["host"] != only):
             waiting.append(g)
             continue
@@ -10867,7 +10897,7 @@ def cmd_signin_waiting(args):
                              "landedOn": v["url"][:160], "handedBack": done["handedBack"],
                              "wouldHandBack": [t["id"] for t in g["tasks"]] if dry else None})
     print(json.dumps({"sites": waiting, "alreadyLive": already_live, "botCheck": bot_checked,
-                      "dryRun": dry, "at": now_iso()}, indent=2))
+                      "profileWalls": profile_walls, "dryRun": dry, "at": now_iso()}, indent=2))
     return 0
 
 
@@ -10906,7 +10936,8 @@ def signin_done(host, sites, groups=None):
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     handed = []
     for g in (groups if groups is not None else signin_waiting(sites)):
-        if g["host"] != host:
+        # A wall on a separate profile is not answered by the main profile's session (18 Nov 2026).
+        if g["host"] != host or g.get("profile"):
             continue
         for t in g["tasks"]:
             rec = get_task(t["id"])
@@ -12272,14 +12303,24 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch", done_stamp=""):
         if not said or said[1] != done_stamp or step_line_settling(fresh):
             return None
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    # The keep-alive's own card for a lapsed sign-in on a separate profile (session-keepalive.py,
+    # 18 Nov 2026): the sign-in IS the whole job, so the wall clearing closes it, as signin_done
+    # closes the keep-alive's main-profile cards. Never sent back to an agent with nothing to do.
+    keepalive = keepalive_sign_in_card(t, b)
     note = blocker_note(stamp, by, BLOCKER_CLEARED_MARK, b,
+                        f"{reason}. The keep-alive's own card closes here; its next check decides whether to "
+                        "ask again." if keepalive else
                         f"{reason}. Carry on from where you stopped and finish the job. "
                         "Do not close it until the job itself is done.")
     fields = {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:]}
     step, original = your_step_split(t["agentOutput"])
     if step is not None:
         fields[AF["agentOutput"]] = original
-    if (t["outcome"] not in APPROVED and t["status"] not in ("Approval", "Completed")) \
+    if keepalive:
+        # Not agent work that skipped its approval: the submitter link goes, as in signin_done.
+        fields.update({AF["status"]: "Completed", AF["completion"]: now_iso(), AF["deferredUntil"]: None,
+                       AF["sentForApprovalBy"]: []})
+    elif (t["outcome"] not in APPROVED and t["status"] not in ("Approval", "Completed")) \
             or (step is not None and t["status"] == "Approval"):
         fields[AF["status"]] = "Today"
         fields[AF["dueDate"]] = today_london()
@@ -12292,7 +12333,7 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch", done_stamp=""):
     patch_task(task_id, fields)
     ledger_append(task_id, "unblocked")
     return {"task": task_id, "name": t["name"][:80], "kind": b["kind"],
-            "subject": b["subject"], "reason": reason}
+            "subject": b["subject"], "reason": reason, **({"closed": True} if keepalive else {})}
 
 
 KEVIN_CANT_NOTE = "Kevin cannot take this step:"
@@ -12359,6 +12400,25 @@ def send_back_blocked(task_id, b):
             print(f"WARNING: the Your turn plan for {task_id} could not be retired: {e}", file=sys.stderr)
             retired = ""
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    if keepalive_sign_in_card(t, b):
+        # The keep-alive's own card for a separate profile (18 Nov 2026): there is no other way for an
+        # agent to find, so it closes with his reason, and the keep-alive reads keepalive_declined()
+        # and does not ask for that sign-in again for KEEPALIVE_DECLINED_DAYS.
+        note = blocker_note(stamp, "Kevin", BLOCKER_CLEARED_MARK, b,
+                            f"{KEVIN_CANT_NOTE} {why.rstrip('.!? ')}. The keep-alive's own card closes here, and it "
+                            f"does not ask for this sign-in again for {KEEPALIVE_DECLINED_DAYS} days."
+                            + (f" [profile {b['profile']}]" if b.get("profile") else ""))
+        step, original = your_step_split(t["agentOutput"])
+        fields = {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:],
+                  AF["approvalFeedback"]: f"I can't do this step: {why}", AF["status"]: "Completed",
+                  AF["completion"]: now_iso(), AF["deferredUntil"]: None, AF["sentForApprovalBy"]: []}
+        if step is not None:
+            fields[AF["agentOutput"]] = original
+        patch_task(task_id, fields)
+        ledger_append(task_id, "unblocked")
+        keepalive_decline(b, task_id, why)
+        return {"task": task_id, "name": t["name"][:80], "kind": b["kind"], "subject": b["subject"],
+                "reason": why[:400], "planRetired": False, "closed": True}
     note = blocker_note(stamp, "Kevin", BLOCKER_CLEARED_MARK, b,
                         f"{KEVIN_CANT_NOTE} {why.rstrip('.!? ')}. "
                         + ("Sent back to you as Changes requested. " if t["outcome"] in APPROVED else "Sent back to you. ")
@@ -12385,6 +12445,23 @@ def send_back_blocked(task_id, b):
     ledger_append(task_id, "unblocked")
     return {"task": task_id, "name": t["name"][:80], "kind": b["kind"],
             "subject": b["subject"], "reason": why[:400], "planRetired": bool(retired)}
+
+
+KEEPALIVE_DECLINED = os.environ.get("KEEPALIVE_DECLINED_FILE") or os.path.expanduser(
+    "~/knowledge-os/logs/session-keepalive/declined.jsonl")
+KEEPALIVE_DECLINED_DAYS = 7       # as long as the "Kevin tried" rule waits after a sign-in that did not work
+
+
+def keepalive_decline(b, task_id, why):
+    """Record Kevin's "I can't do this" on a keep-alive card where session-keepalive.py reads it. Never
+    fatal: the card is already closed, and a lost line only means he is asked again next morning."""
+    try:
+        os.makedirs(os.path.dirname(KEEPALIVE_DECLINED), exist_ok=True)
+        with open(KEEPALIVE_DECLINED, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": now_iso(), "host": b["subject"], "profile": b.get("profile") or "",
+                                 "task": task_id, "why": str(why)[:300]}) + "\n")
+    except OSError as e:
+        print(f"WARNING: Kevin's 'I can't' on {task_id} was not recorded for the keep-alive: {e}", file=sys.stderr)
 
 
 def same_wall(a, b):
