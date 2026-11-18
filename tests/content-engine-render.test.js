@@ -221,7 +221,8 @@ watch.save_ledger = lambda l: None
 D, FLAG, NO_DAY = "2026-03-07", "spoken day 2101 disagrees with the date (2106); date used, flagged", "no spoken day, date used"
 led = {"VID_A_141815_001.insv": {"date": D, "hms": "141815", "duration": 428.2, "role": "episode", "episode": 2106,
                                  "status": "rendered", "rendered": "2026-11-19T01:00:00", "episode_reason": FLAG, "day": 2106},
-       "VID_A_142528_002.insv": {"date": D, "hms": "142528", "duration": 47.5, "status": "new", "day": 2106},
+       "VID_A_142528_002.insv": {"date": D, "hms": "142528", "duration": 47.5, "status": "new", "day": 2106,
+                                 "role": "teaser", "episode": 2106},   # as redo-day leaves a clip that had rendered
        "VID_A_142634_003.insv": {"date": D, "hms": "142634", "duration": 384.5, "role": "episode", "episode": 2106,
                                  "status": watch.SET_ASIDE, "day": 2106},
        "VID_A_143312_004.insv": {"date": D, "hms": "143312", "duration": 35.8, "status": "new", "day": 2106}}
@@ -384,8 +385,8 @@ ${body.split('\n').map((l) => '    ' + l).join('\n')}
 print(json.dumps(res))
 `], { encoding: 'utf8', cwd: DIR }));
 
-  it('004 saying "day 2106" after the set-aside 003 never replaces 002, which follows the episode', () => {
-    expect(py(`res = render.summary_rival("c004", 2106, "spoken day matches the date", led)[0]`)).toBe('refuse');
+  it('004 saying "day 2106" after the set-aside 003 never replaces 002, which follows the episode: it is set aside', () => {
+    expect(py(`res = render.summary_rival("c004", 2106, "spoken day matches the date", led)[0]`)).toBe('set-aside');
   });
 
   it("a second long recording naming the episode's own day is held for a person; one naming another day is set aside", () => {
@@ -397,10 +398,57 @@ res = [same["status"], same.get("requeued"), other["status"]]`);
     expect(r).toEqual(['failed', 'not requeued: it needs a person', 'set-aside']);
   });
 
-  it('004 rendering before 002 (no length or role recorded for 002 yet) is still set aside', () => {
+  it('whichever renders first, 002 ends as the summary: set aside at once when redo-day kept its role, else taken back', () => {
     const r = py(`
-led["c002"] = {"date": D, "hms": "142528", "status": "pulled", "day": 2106}
-res = render.summary_rival("c004", 2106, "no spoken day, date used", led)[0]`);
-    expect(r).toBe('set-aside');
+kept = render.summary_rival("c004", 2106, "no spoken day, date used", dict(led, c002=dict(led["c002"], status="pulled")))[0]
+led["c002"] = {"date": D, "hms": "142528", "status": "pulled", "day": 2106}   # a fresh day: 002 not yet known as a teaser
+first = render.summary_rival("c004", 2106, "no spoken day, date used", led)
+led["c004"].update(role="teaser", episode=2106, status="rendered", episode_reason="no spoken day, date used")
+led["c002"].update(role="teaser", episode=2106, duration=47.5)
+res = [kept, first, render.summary_rival("c002", 2106, FLAG, led)[0]]`);
+    expect(r).toEqual(['set-aside', ['', ''], 'replace']);
+  });
+});
+
+// Third review of PR 979 (18 Nov 2026): the refuse branch for a clip after the set-aside recording marked it "failed,
+// needs a person", which held the card for a ruling: the very symptom 1016 removes. And an UNRENDERED clip counted as
+// the day's other summary on the gap to the next clip alone, so unrendered B-roll (redo-day resets it to new) let 004
+// be set aside and left the day with no summary. Only a clip in the summary role, rendered or waiting, counts now.
+describe('finding 20261020-agent-dispatch-1016 third review: set aside, never held; B-roll is never the other summary', () => {
+  const py = (body) => JSON.parse(execFileSync('python3', ['-c', `
+import sys, os, json, io, contextlib, datetime as dt
+sys.path.insert(0, ${JSON.stringify(DIR)})
+import render, watch
+FLAG = "spoken day 2101 disagrees with the date (2106); date used, flagged"
+D = "2026-03-07"
+led = {"c001": {"date": D, "hms": "141815", "duration": 428.2, "role": "episode", "episode": 2106, "status": "rendered",
+                "day": 2106, "rendered": "2099-01-01T00:00:00"},
+       "c002": {"date": D, "hms": "142528", "duration": 47.5, "role": "teaser", "episode": 2106, "status": "rendered",
+                "episode_reason": FLAG, "day": 2106},
+       "c003": {"date": D, "hms": "142634", "duration": 384.5, "role": "episode", "episode": 2106, "status": watch.SET_ASIDE, "day": 2106},
+       "c004": {"date": D, "hms": "143312", "status": "pulled", "day": 2106}}
+res = None
+with contextlib.redirect_stdout(io.StringIO()):
+${body.split('\n').map((l) => '    ' + l).join('\n')}
+print(json.dumps(res))
+`], { encoding: 'utf8', cwd: DIR }));
+
+  it('004 saying "day 2106" is set aside, the card is not held, and 002 stays the summary', () => {
+    const r = py(`
+what, why = render.summary_rival("c004", 2106, "spoken day matches the date", led)
+if what == "set-aside": render.set_aside(led["c004"], why)
+led["c004"].update(role="teaser", episode=2106)
+copy = {"YouTube Copy": "c", "AI Last Run": "2099-01-01T01:00:00Z"}
+res = [what, led["c004"]["status"], render.resubmit_due(2106, led, dt.datetime(2026, 3, 8).timestamp(), {"verdict": "changes"}, copy),
+       led["c002"]["status"]]`);
+    expect(r).toEqual(['set-aside', 'set-aside', '', 'rendered']);
+  });
+
+  it("an unrendered B-roll clip in the gap after the episode is never the day's other summary", () => {
+    const r = py(`
+led.pop("c002")
+led["cb"] = {"date": D, "hms": "142528", "status": "new", "day": 2106, "reset": "redo-day"}
+res = render.summary_rival("c004", 2106, "no spoken day, date used", led)`);
+    expect(r).toEqual(['', '']);
   });
 });
