@@ -71,6 +71,13 @@ if [ -n "$CE_RUNTIME_UPDATED" ] && [ "${CE_RUNTIME_REEXEC:-}" != "$$" ]; then
   exec /bin/bash "$SELF" "$@"
 fi
 # --- end runtime-update-block ---
+# THE RUN'S TIME BUDGET (18 Nov 2026). This job holds the whole job queue while it runs, so its length is every other
+# job's wait: on 18 Nov it held the queue from 07:15 to past 10:00, and the 07:30 rent check and the 09:00 inbox run gave
+# up behind it. Thirty minutes after the start no new piece of work begins (a YouTube Studio visit, a Facebook share, the
+# next episode); the piece in hand finishes and the rest waits for the next hourly run (publish.py budget_left). The
+# queue's own ceiling, maxRuntimeMinutes 60 in job-schedule.json, stops the run outright if anything still overruns.
+# Set after the runtime update, so the pass that does the work is the one that sets it.
+export CE_PUBLISH_DEADLINE=$(( $(date +%s) + 30 * 60 ))
 # Strava and the How far I've run numbers, every hour (15 Sep 2026). They lived only in the nightly render job, so the
 # four nights the disk rule skipped it (9-12 Sep) renamed no run until the 13th. A run is renamed within the hour of
 # reaching Strava; the map is redrawn only when a new run was folded, so main gets one map commit a day, not fourteen.

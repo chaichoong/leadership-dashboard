@@ -120,6 +120,35 @@ describe('content-engine publish (GHL)', () => {
     expect(readFileSync(path.join(DIR, 'blog.py'), 'utf8')).toContain('blog REFUSED, placeholder');
   });
 
+  // 18 Nov 2026: the daytime publisher held the job queue from 07:15 to past 10:00 and the 07:30 rent check, the 09:00
+  // inbox run, task-manager and signature-watch gave up behind it. Every sync re-read in YouTube Studio each video not
+  // yet earning (106 to 121 of them, about 71 s a visit, Studio unreadable since 16 Oct), every six hours. Drives the
+  // real sync() and run(). Back-tested on a scratch copy, each of these makes it fail: no cap, visits in episode order,
+  // a raised read or mid-roll left unstamped, a mid-roll that ignores the plan, the deadline read only once, unreadable
+  // pages counted in total rather than in a row, no deadline check in run(), stage 2 started past the deadline.
+  it('caps the Studio visits per run, oldest first, and starts no new work once the run budget is used', () => {
+    const out = execFileSync('python3', ['-c', 'import publish; publish._selftest_time_budget(); print("OK")'],
+      { encoding: 'utf8', cwd: DIR });
+    expect(out.trim().split('\n').pop()).toBe('OK');
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toMatch(/^MONETISE_PER_RUN = ([1-9]|1[0-2])$/m);   // a small number (about 71 s a visit), never "all of them"
+  });
+
+  it('never holds the job queue past its ceiling: a 30-minute work budget inside a 60-minute queue limit', () => {
+    const sched = JSON.parse(readFileSync(path.join(ROOT, 'scripts', 'job-schedule.json'), 'utf8'));
+    const ceiling = Number(sched['content-engine-publish'].maxRuntimeMinutes);
+    expect(ceiling).toBeGreaterThan(0);                         // 0 would switch the queue's ceiling off
+    expect(ceiling).toBeLessThanOrEqual(60);
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-publish.sh'), 'utf8');
+    const m = sh.match(/^export CE_PUBLISH_DEADLINE=\$\(\( \$\(date \+%s\) \+ (\d+) \* 60 \)\)$/m);
+    expect(m).not.toBeNull();
+    const budget = Number(m[1]);
+    expect(budget).toBeLessThanOrEqual(ceiling / 2);            // room for the episode in hand to finish before the ceiling
+    // set after the runtime update (the pass that does the work sets it) and before the first step that can run long
+    expect(sh.indexOf('export CE_PUBLISH_DEADLINE')).toBeGreaterThan(sh.indexOf('# --- end runtime-update-block ---'));
+    expect(sh.indexOf('export CE_PUBLISH_DEADLINE')).toBeLessThan(sh.indexOf('publish.py sync'));
+  });
+
   it('an approved episode never waits for another day (Kevin, 2 Oct 2026: 2081 sent back held 2082 and 2083)', () => {
     // drives the real run() on the real records' shape; back-tested against the strict-order publisher, where it fails
     const out = execFileSync('python3', ['-c', 'import publish; publish._selftest_never_waits(); print("OK")'],
