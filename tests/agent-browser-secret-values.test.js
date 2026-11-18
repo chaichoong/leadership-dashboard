@@ -68,7 +68,7 @@ describe('browser lane: the value guard reads what a value IS, not a word inside
     'OTP: 123456', 'token = x', 'client_secret=abc', 'Secret: abcd1234efgh', 'MyPassword123', 'cvv',
     // third review (18 Nov 2026): the ways a robot passes on a code or a login, which the old guard refused
     'Your OTP is 483920', 'My password is Tr0ub4dor&3', 'Password - Hunter22!', 'Here is the password: correcthorsebattery',
-    'client secret: abcdefghijklmnopqrst'])
+    'client secret: abcdefghijklmnopqrst', 'The WiFi password is sunflower', 'The password is correcthorsebattery'])
     ('still refuses a labelled secret or a secret-named word: %s', (v) => {
       expect(browser.secretValueReason(v)).not.toBe('');
     });
@@ -94,7 +94,7 @@ describe('browser lane: the value guard reads what a value IS, not a word inside
     'Turn on 2FA: always.', 'Every token: earned', 'Your card number: never share it', 'The secret = showing up',
     'Order 203-1234566-7654321 arrived', 'Meter 2012345670007 read today', 'TheUltimateUltraMarathon2026Challenge',
     'See https://example.org/item/1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D for the form',
-    'Passcode: lock apps after 9pm', 'OTP: never share it', 'Token: 10,000 steps', 'A password is a lock, not a wall'])
+    'Passcode: lock apps after 9pm', 'OTP: never share it', 'Token: 10,000 steps', 'A password is a lock, not a wall', 'A password is a lock on your phone', 'Your password is weak'])
     ('allows ordinary text: %s', (v) => {
       expect(browser.secretValueReason(v)).toBe('');
     });

@@ -741,7 +741,7 @@ function labelledSecret(v) {
     if (sep === '=') return true;
     if (word.length >= 4 && keyLike(word)) return true;
     if (sep === ':' && word.length >= 4 && glued) return true;
-    if (sep === ':' && alone && word.length >= 8) return true;
+    if ((sep === ':' || /^(?:is|was)$/i.test(sep)) && alone && word.length >= 8) return true;   // "The WiFi password is sunflower"
   }
   return false;
 }
