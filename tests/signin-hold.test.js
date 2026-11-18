@@ -241,12 +241,17 @@ describe('the 06:40 keep-alive (session-keepalive.py cmd_run)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'od-keepalive-'));
     const ledger = join(dir, 'runs.jsonl');
     writeFileSync(ledger, events.map(e => JSON.stringify(e)).join('\n') + '\n');
+    // The job schedule the run reads for each job's `signins` (18 Nov 2026): none by default, so the
+    // real scripts/job-schedule.json never decides a test that is not about it.
+    const schedule = join(dir, 'job-schedule.json');
+    writeFileSync(schedule, typeof opts.schedule === 'string' ? opts.schedule : JSON.stringify(opts.schedule || {}));
     return py(`
 import contextlib, io
 ka = load('ka', 'session-keepalive.py')
 sh.LEDGER = arg['ledger']
+ka.SCHEDULE = arg['schedule']
 ka.STATE_DIR = arg['dir']; ka.STATUS = os.path.join(arg['dir'], 'status.json')
-ka.load_sites = lambda: {
+ka.load_sites = lambda: arg.get('sites') or {
   'www.edfenergy.com': {'label': 'EDF Energy', 'login': True, 'loginUrl': 'https://www.edfenergy.com/myaccount/login'},
   'www.topcashback.co.uk': {'label': 'TopCashback', 'login': True, 'loginUrl': 'https://www.topcashback.co.uk/logon/'}}
 def read_site(host, entry):
@@ -268,19 +273,21 @@ def waiting_groups():
 ka.waiting_groups = waiting_groups
 # The read before 7 Oct 2026, stubbed as well: a revert of that change must never reach Airtable from a test.
 ka.already_waiting = lambda host: False
-created = []
-ka.create_task = lambda fields, dry_run: created.append(fields[ka.F['name']]) or {'created': True}
+created, outputs = [], []
+ka.create_task = lambda fields, dry_run: created.append(fields[ka.F['name']]) or outputs.append(fields[ka.F['agentOutput']]) or {'created': True}
 if arg.get('broken'):
     def boom(*a, **k): raise RuntimeError('ledger unreadable')
     sh.unheld_signins = boom
 if arg.get('triedBroken'):
     def boom2(*a, **k): raise RuntimeError('ledger unreadable')
     sh.kevin_signin_failed = boom2
-buf = io.StringIO()
-with contextlib.redirect_stdout(buf):
+buf, err = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
     code = ka.cmd_run()
-print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'said': json.loads(buf.getvalue()),
-  'status': json.load(open(ka.STATUS))['sites'], 'reads': len(reads)}))`, { ledger, dir, ...opts });
+report = json.load(open(ka.STATUS))
+print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'outputs': outputs, 'said': json.loads(buf.getvalue()),
+  'status': report['sites'], 'report': {k: v for k, v in report.items() if k != 'sites'}, 'stderr': err.getvalue(),
+  'reads': len(reads)}))`, { ledger, dir, ...opts, schedule });
   };
 
   it('raises no card for EDF, still raises one for a site that held and then lapsed, and says so', () => {
@@ -349,6 +356,148 @@ print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'said':
     // His window a day earlier, read next morning: it may have worked and expired, so he is asked.
     expect(run([...ONE_SIGNIN, login(ago(20), TCB)], { ...waiting, readAt: ago(0.5) }).created)
       .toEqual(['SIGN-IN: TopCashback session lapsed']);
+  });
+
+  // 18 Nov 2026: the robot's YouTube Studio sign-in read signed out every morning from 17 Oct, and
+  // no card was raised for 33 days because the hourly publisher that uses it is a scheduled job,
+  // not a task. A job lists the sign-ins it uses under `signins` on its job-schedule.json entry.
+  const JOB = { publisher: { cron: '15 7-20 * * *', mode: 'wrapped', signins: [TCB] } };
+  it('a signed-out site a scheduled job uses raises ONE card with no task waiting; a site no job uses raises none', () => {
+    const got = run(ONE_SIGNIN, { groups: [], schedule: JOB });
+    expect(got.code).toBe(0);
+    expect(got.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(got.outputs[0]).toMatch(/^SIGN-IN NEEDED: TopCashback \(https:\/\/www\.topcashback\.co\.uk\/logon\/\)/);
+    expect(got.outputs[0]).toContain('and a scheduled job uses it (publisher).');
+    expect(got.outputs[0]).not.toContain('0 tasks');
+    expect(got.status[TCB].neededBy).toEqual(['publisher']);
+    expect(got.status[TCB].nothingWaiting).toBeUndefined();
+    expect(got.status[EDF].nothingWaiting).toBe(true);           // no task, no job: recorded, never asked for
+    expect(got.status[EDF].neededBy).toBeUndefined();
+    expect(got.said.neededByJob).toEqual(['TopCashback']);
+    expect(got.said.nothingWaiting).toEqual(['EDF Energy']);
+    expect(got.said.jobNeedsUnchecked).toEqual({});
+  });
+
+  it('once per lapse: while its card is open the next morning raises nothing, and after the card closes a new lapse raises one', () => {
+    const own = { id: 'recOwn', name: 'SIGN-IN: TopCashback session lapsed' };
+    const open = run(ONE_SIGNIN, { groups: [{ host: TCB, tasks: [own] }], schedule: JOB });
+    expect(open.created).toEqual([]);
+    expect(open.status[TCB].task).toBe('already waiting');
+    // His sign-in closed the card (signin-done) and the site lapsed again: one new card.
+    expect(run(ONE_SIGNIN, { groups: [], schedule: JOB }).created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+  });
+
+  it('a site whose sign-in page is another login site finds its open card where signin-waiting files it, so it is not raised twice', () => {
+    // An invented pair shaped like go.xero.com and login.xero.com: the app host signs in on the login host,
+    // and signin-waiting files the app host's card under the login host (signin_door_host).
+    const APP = 'app.example-books.co.uk', DOOR = 'login.example-books.co.uk';
+    const sites = {
+      [APP]: { label: 'Books (app)', login: true, loginUrl: `https://${DOOR}/identity/user/login` },
+      [DOOR]: { label: 'Books', login: true, loginUrl: `https://${DOOR}/identity/user/login` },
+    };
+    const schedule = { publisher: { cron: '15 7-20 * * *', signins: [APP] } };
+    const first = run([], { sites, schedule, groups: [] });
+    expect(first.created).toEqual(['SIGN-IN: Books (app) session lapsed']);
+    const open = run([], { sites, schedule, groups: [{ host: DOOR, tasks: [{ id: 'recOwn', name: 'SIGN-IN: Books (app) session lapsed' }] }] });
+    expect(open.created).toEqual([]);
+    expect(open.status[APP].task).toBe('already waiting');
+    // Work filed under the door is still the door's own, never this host's (unchanged).
+    const work = run([], { sites, groups: [{ host: DOOR, tasks: [{ id: 'recWork', name: 'Read the ledger' }] }] });
+    expect(work.status[APP].nothingWaiting).toBe(true);
+    expect(work.created).toEqual(['SIGN-IN: Books session lapsed']);
+    // Both lapse the same morning, a job using one and a task waiting on the other: ONE card, because
+    // the card raised first counts for the rest of the run where tomorrow's read will file it.
+    const same = run([], { sites, schedule, groups: [{ host: DOOR, tasks: [{ id: 'recWork', name: 'Read the ledger' }] }] });
+    expect(same.created).toEqual(['SIGN-IN: Books (app) session lapsed']);
+    expect(same.status[DOOR].task).toBe('already waiting');
+  });
+
+  it('card_host files a card exactly where signin-waiting files it, through the real card text and agent-dispatch.py\'s own rule', () => {
+    // The builtin list (no sites.json), plus an invented site whose sign-in page sits on a sub-domain of
+    // another login site that has no entry of its own: signin-waiting takes the longest parent entry.
+    const builtin = JSON.parse(execFileSync('node', [join(SCRIPTS, 'agent-browser.js'), 'sites'], {
+      encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_SITES_FILE: join(tmpdir(), 'od-no-sites-file.json') } }));
+    const sites = { ...builtin,
+      'portal.example-cover.co.uk': { label: 'Example Cover portal', login: true, loginUrl: 'https://auth.example-cover.co.uk/login' },
+      'example-cover.co.uk': { label: 'Example Cover', login: true, loginUrl: 'https://www.example-cover.co.uk/account' },
+      'www.example-cover.co.uk': { label: 'Example Cover (www)', login: true, loginUrl: 'https://www.example-cover.co.uk/account' } };
+    const got = py(`
+from datetime import datetime
+ka = load('ka', 'session-keepalive.py')
+spec = importlib.util.spec_from_file_location('ad', os.path.join(${JSON.stringify(SCRIPTS)}, 'agent-dispatch.py'))
+ad = importlib.util.module_from_spec(spec); spec.loader.exec_module(ad)
+sites = arg['sites']
+out = {}
+for host, entry in sorted(ka.keepalive_sites(sites).items()):
+    card = ka.signin_task_fields(host, entry, datetime(2026, 11, 18, 6, 40), [], ['a-job'])[ka.F['agentOutput']]
+    m = ad.parse_signin_line(card)
+    out[host] = [ka.card_host(host, entry, sites), ad.signin_site_for(m['site'], m['url'], sites) if m else None]
+print('---JSON---'); print(json.dumps(out))`, { sites });
+    expect(Object.keys(got).length).toBeGreaterThan(10);                     // control: the real list was walked
+    for (const [host, [mine, theirs]] of Object.entries(got)) expect([host, mine]).toEqual([host, theirs]);
+    expect(got['portal.example-cover.co.uk'][0]).toBe('www.example-cover.co.uk');
+    expect(got['studio.youtube.com'][0]).toBe('studio.youtube.com');
+    expect(got['www.facebook.com'][0]).toBe('www.facebook.com');
+  });
+
+  it('a site a job uses still follows the "did not hold" and "Kevin tried" rules unchanged', () => {
+    // EDF did not stay signed in after his last two sign-ins: no card, even though a job uses it.
+    const held = run(BEFORE, { groups: [], schedule: { publisher: { cron: '15 7-20 * * *', signins: [EDF, TCB] } } });
+    expect(held.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(held.status[EDF].notHolding).toBe(true);
+    expect(held.status[EDF].neededBy).toEqual(['publisher']);
+    // His own window an hour ago and a signed-out read since: asking again cannot help.
+    const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+    const tried = run([...ONE_SIGNIN, login(ago(1), TCB)], { groups: [], schedule: JOB, readAt: ago(0.5) });
+    expect(tried.created).toEqual([]);
+    expect(tried.status[TCB].kevinTried).toBe(true);
+  });
+
+  it('a job switched off uses nothing', () => {
+    const off = run(ONE_SIGNIN, { groups: [], schedule: { publisher: { ...JOB.publisher, enabled: false } } });
+    expect(off.created).toEqual([]);
+    expect(off.status[TCB].nothingWaiting).toBe(true);
+  });
+
+  it('a job sign-in the run does not check, or a schedule it cannot read, fails the run and says so; every site is still checked', () => {
+    const offList = run(ONE_SIGNIN, { groups: [], schedule: { publisher: { cron: '15 7-20 * * *', signins: [TCB, 'www.facebook.com'] } } });
+    expect(offList.code).toBe(1);
+    expect(offList.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(offList.said.jobNeedsUnchecked).toEqual({ 'www.facebook.com': ['publisher'] });
+    expect(offList.stderr).toMatch(/ERROR: a scheduled job uses a sign-in this run does not check.*www\.facebook\.com \(publisher\)/);
+    const unreadable = run(ONE_SIGNIN, { schedule: '{ not json' });
+    expect(unreadable.code).toBe(1);
+    expect(unreadable.report.jobNeedsError).toMatch(/Expecting property name/);
+    expect(unreadable.stderr).toMatch(/ERROR: scripts\/job-schedule\.json could not be read/);
+    // The run went on: a task waiting on a site still raises its card.
+    expect(unreadable.created).toEqual(['SIGN-IN: EDF Energy session lapsed', 'SIGN-IN: TopCashback session lapsed']);
+    // One job's malformed list is that job's alone: the other job's site is still asked for.
+    const oneBad = run(ONE_SIGNIN, { groups: [], schedule: { broken: { cron: '0 9 * * *', signins: EDF }, publisher: JOB.publisher } });
+    expect(oneBad.code).toBe(1);
+    expect(oneBad.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(oneBad.said.jobNeedsProblems).toEqual(['broken: signins must be a list of hosts']);
+    expect(oneBad.stderr).toMatch(/ERROR: scripts\/job-schedule\.json has a job whose sign-ins could not be read/);
+  });
+
+  it('the real schedule: every sign-in a job lists is a site the keep-alive checks on any Mac, and the publisher lists Studio and Facebook', () => {
+    // The builtin list only (no sites.json), as a fresh Mac would read it, so the need never rests on a local file.
+    const sites = JSON.parse(execFileSync('node', [join(SCRIPTS, 'agent-browser.js'), 'sites'], {
+      encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_SITES_FILE: join(tmpdir(), 'od-no-sites-file.json') } }));
+    // Every job's list as written, switched on or not, so parking a job never hides a bad host.
+    const schedule = JSON.parse(readFileSync(join(SCRIPTS, 'job-schedule.json'), 'utf8'));
+    const declared = Object.entries(schedule).filter(([k, v]) => !k.startsWith('_') && v && v.signins);
+    const got = py(`
+ka = load('ka', 'session-keepalive.py')
+print('---JSON---'); print(json.dumps({'parsed': ka.job_signins(), 'checked': sorted(ka.keepalive_sites(arg['sites']))}))`, { sites });
+    expect(declared.length).toBeGreaterThan(0);                               // control: there are declarations to check
+    expect(got.parsed[1]).toEqual([]);                                        // and every list reads
+    for (const [, cfg] of declared) for (const host of cfg.signins) expect(got.checked).toContain(host);
+    const publisher = schedule['content-engine-publish'].signins;
+    expect(publisher).toContain('studio.youtube.com');
+    expect(publisher).toContain('www.facebook.com');
+    // The podcast upload runs on the robot's separate `spotify` profile, which the keep-alive never
+    // reads: a card for the default profile's Spotify would ask for a sign-in that never reaches the job.
+    expect(publisher).not.toContain('creators.spotify.com');
   });
 
   it('a waiting read that fails raises nothing and says NOT CHECKED, never a quiet board', () => {

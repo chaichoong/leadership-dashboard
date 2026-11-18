@@ -35,6 +35,20 @@ SIGN-IN NEEDED line or a SIGN-IN wall) other than a card of this file's own.
 Otherwise its state is recorded in status.json and nothing is raised: the job
 that next needs the site asks for the sign-in then, and the pickup works it.
 
+Or when a scheduled job uses it (18 Nov 2026). The hourly Content Engine
+publisher is not a task and raises no wall, so the robot's YouTube Studio
+sign-in read signed out every morning from 17 Oct and sat under nothingWaiting
+for 33 days while the publisher could not open Studio. A job lists the sign-ins
+it uses under `signins` on its own entry in scripts/job-schedule.json, the one
+place (a job switched off needs nothing), and a signed-out site a job uses
+raises the same card: one while it is open, and the "did not hold" and "Kevin
+tried" rules below apply to it unchanged. A listed site this run cannot check
+(not a login site on the robot's list, or a short-session one) is named under
+jobNeedsUnchecked and fails the run, and so does a schedule it cannot read:
+never a quiet board. The stated cost: a job never stops using its site, so a
+card closed without a sign-in comes back the next morning while the site is
+still signed out. Take the site off the job's list to stop that.
+
 No task for a site that did not stay signed in after his last two sign-ins,
 or his last four for a site that has held one before (2 Oct 2026,
 signin_hold.py): EDF had 15 of these cards, Amazon 7 and BW Legal's portal,
@@ -75,6 +89,7 @@ except Exception:                                   # noqa: BLE001
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/session-keepalive")
 STATUS = os.path.join(STATE_DIR, "status.json")
+SCHEDULE = os.path.join(REPO, "scripts", "job-schedule.json")     # each job's `signins` (18 Nov 2026)
 TASK_MANAGER = "rec1hYELb4zS8pjjO"      # Team Members row of the Task Manager agent
 F = {                                   # Tasks field ids (drift-tested in agent-dispatch.py's AF)
     "name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "dueDate": "fld7XP8w8kbxfETV4",
@@ -194,7 +209,68 @@ def waiting_on(host, groups):
     return [t for t in tasks if t not in ours], ours
 
 
-def signin_task_fields(host, entry, when, work=()):
+def _url_host(url):
+    try:
+        return (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def card_host(host, entry, sites):
+    """The host `agent-dispatch.py signin-waiting` files this site's card under, by its own rule
+    (signin_site_for on the card's sign-in address, then signin_door_host): the longest entry on
+    the list that the sign-in page's host is or sits under, folded onto that entry's own sign-in
+    page when that is a login site. go.xero.com's card sits under login.xero.com, so its own open
+    card is looked for there too (review, 18 Nov 2026), or a job's card for it would be raised
+    again every morning. tests/signin-hold.test.js holds the two rules together on the real list."""
+    url_host = _url_host(entry.get("loginUrl"))
+    best = None
+    for h in sites:
+        if url_host and (url_host == h or url_host.endswith("." + h)) and (best is None or len(h) > len(best)):
+            best = h
+    if not best:
+        return host
+    door = _url_host((sites.get(best) or {}).get("loginUrl"))
+    return door if door and door != best and (sites.get(door) or {}).get("login") else best
+
+
+def job_signins(path=None):
+    """({host: [job, ...]}, [problem, ...]): the robot sign-ins each scheduled job uses, from the
+    `signins` list on its entry in scripts/job-schedule.json. A job switched off (`enabled: false`)
+    uses nothing. A malformed list is a problem for that job alone, named, while every other job's
+    sign-ins are still read. Raises when the file cannot be read: never an empty map, because an
+    empty map reads as "no job needs anything" and silences the ask (18 Nov 2026)."""
+    with open(path or SCHEDULE, encoding="utf-8") as fh:
+        schedule = json.load(fh)
+    if not isinstance(schedule, dict):
+        raise ValueError("job-schedule.json is not a map of jobs")
+    needs, problems = {}, []
+    for job, cfg in sorted(schedule.items()):
+        if job.startswith("_") or not isinstance(cfg, dict) or cfg.get("enabled") is False:
+            continue
+        hosts = cfg.get("signins")
+        if hosts is None:
+            continue
+        if not isinstance(hosts, list) or not all(isinstance(h, str) and h.strip() for h in hosts):
+            problems.append("%s: signins must be a list of hosts" % job)
+            continue
+        for h in hosts:
+            needs.setdefault(h.strip().lower(), []).append(job)
+    return needs, problems
+
+
+def job_names(jobs):
+    """The plain names the estate's job list gives JOBS (js/automations-data.js, as built_inventory
+    reads it), each falling back to its key: a card names the job in words Kevin knows."""
+    try:
+        import built_inventory
+        named = built_inventory.automation_entries(built_inventory.automations_text())[0]
+    except Exception:                                       # noqa: BLE001
+        named = {}
+    return [str((named.get(j) or {}).get("name") or j) for j in jobs]
+
+
+def signin_task_fields(host, entry, when, work=(), jobs=()):
     label = entry.get("label") or host
     url = entry["loginUrl"]
     stamp = when.strftime("%d %b %Y %H:%M")
@@ -204,12 +280,20 @@ def signin_task_fields(host, entry, when, work=()):
     parked_for = when if when.hour < 8 else when + timedelta(days=1)
     tomorrow = parked_for.strftime("%Y-%m-%d")
     names = "; ".join(str(t.get("name") or t.get("id") or "")[:80] for t in work[:5])
+    why, after = [], []
+    if work or not jobs:
+        why.append(f"{len(work)} task{'s' if len(work) != 1 else ''} wait{'s' if len(work) == 1 else ''} on it"
+                   + (f": {names}" if names else ""))
+        after.append("the waiting work is handed back to its robot")
+    if jobs:
+        # A job is not a task: the card says which one uses the site, so the ask is never unexplained.
+        why.append(f"{'a scheduled job uses' if len(jobs) == 1 else 'scheduled jobs use'} it ({', '.join(job_names(jobs))})")
+        after.append(f"{'its next run has' if len(jobs) == 1 else 'their next runs have'} the session")
     output = (f"SIGN-IN NEEDED: {label} ({url})\n\n"
               f"The robot's login to {label} has lapsed (daily session check, {stamp}), and "
-              f"{len(work)} task{'s' if len(work) != 1 else ''} wait{'s' if len(work) == 1 else ''} on it"
-              + (f": {names}" if names else "") + ".\n\n"
+              + ", and ".join(why) + ".\n\n"
               "**Carrying this out will involve:** Nothing until you sign in; the moment you do, "
-              "the robot's session is back, the waiting work is handed back to its robot, and this closes itself.")
+              "the robot's session is back, " + ", ".join(after) + ", and this closes itself.")
     return {
         F["name"]: f"SIGN-IN: {label} session lapsed",
         F["description"]: f"Daily session keep-alive found {label} signed out on {stamp}.",
@@ -240,10 +324,24 @@ def create_task(fields, dry_run):
 
 
 def cmd_run(dry_run=False):
-    sites = keepalive_sites(load_sites())
+    all_sites = load_sites()
+    sites = keepalive_sites(all_sites)
     when = now_london()
     report = {"at": when.isoformat(), "sites": {}}
     groups = None                                   # read once, and only if a site is signed out
+    # The sign-ins scheduled jobs use (18 Nov 2026), read once before any site. A schedule that
+    # cannot be read, or a job whose list is malformed, is said and fails the run; the sites are
+    # still checked, and every other job's sign-ins still count.
+    try:
+        (needs, needs_problems), needs_error = job_signins(), ""
+    except Exception as e:                                  # noqa: BLE001
+        needs, needs_problems, needs_error = {}, [], str(e)[:300]
+    unchecked = {h: jobs for h, jobs in sorted(needs.items()) if h not in sites}
+    report["jobNeeds"], report["jobNeedsUnchecked"] = needs, unchecked
+    if needs_error:
+        report["jobNeedsError"] = needs_error
+    if needs_problems:
+        report["jobNeedsProblems"] = needs_problems
     for host, entry in sites.items():
         # One site's failure must never stop the rest being checked, and an
         # unchecked site must read as unknown, never as fine.
@@ -253,6 +351,9 @@ def cmd_run(dry_run=False):
             res = {"error": str(e)[:300]}
         state = session_state(res)
         row = {"label": entry.get("label"), "state": state, "landedOn": str(res.get("url") or "")[:120]}
+        jobs = needs.get(host, [])
+        if jobs:
+            row["neededBy"] = jobs
         if state == "signed-out":
             # A rule that cannot be worked out never silences the ask: the site goes on to the waiting check.
             try:
@@ -266,11 +367,17 @@ def cmd_run(dry_run=False):
                     if groups is None:
                         groups = waiting_groups()
                     work, ours = waiting_on(host, groups)
+                    door = card_host(host, entry, all_sites)
+                    if door != host:
+                        # signin-waiting files this site's card under its sign-in page's host: its
+                        # own open card is looked for there too (work stays this host's alone).
+                        ours = ours + waiting_on(door, groups)[1]
                     row["waiting"] = [t.get("id") for t in work]
-                    if not work:
-                        # Recorded, never asked for: nothing needs this site today (7 Oct 2026).
+                    if not work and not jobs:
+                        # Recorded, never asked for: no task and no scheduled job needs this site (7 Oct 2026).
                         row["nothingWaiting"], row["task"] = True, "not raised: no task is waiting on this site"
                     elif ours:
+                        # The card's own open copy is the dedupe, for a job as for a task: one card per lapse.
                         row["task"] = "already waiting"
                     else:
                         # His own window closed and this check still found it signed out: asking him
@@ -283,7 +390,11 @@ def cmd_run(dry_run=False):
                         if tried:
                             row["kevinTried"], row["task"] = True, "not raised: his own sign-in did not get the robot in"
                         else:
-                            row["task"] = create_task(signin_task_fields(host, entry, when, work), dry_run)
+                            fields = signin_task_fields(host, entry, when, work, jobs)
+                            row["task"] = create_task(fields, dry_run)
+                            # A card raised this run counts for the rest of it, where tomorrow's waiting
+                            # read will file it: a site sharing its sign-in page finds it as its own.
+                            groups.append({"host": door, "tasks": [{"id": "", "name": fields[F["name"]]}]})
             except Exception as e:                          # noqa: BLE001
                 # The waiting read failed: NOT CHECKED, and said so in the summary, never a quiet board.
                 row["task"] = {"error": str(e)[:200]}
@@ -300,14 +411,32 @@ def cmd_run(dry_run=False):
                       "signedOut": [r["label"] for r in report["sites"].values() if r["state"] == "signed-out"],
                       "signInWhenNeeded": [r["label"] for r in report["sites"].values() if r.get("notHolding")],
                       "nothingWaiting": [r["label"] for r in report["sites"].values() if r.get("nothingWaiting")],
+                      "neededByJob": [r["label"] for r in report["sites"].values()
+                                      if r.get("neededBy") and r["state"] == "signed-out"],
+                      "jobNeedsUnchecked": unchecked,
+                      "jobNeedsProblems": needs_problems,
                       "notChecked": [r["label"] for r in report["sites"].values()
                                      if isinstance(r.get("task"), dict) and r["task"].get("error")],
                       "unknown": [r["label"] for r in report["sites"].values() if r["state"] == "unknown"]}, indent=1))
+    code = 0
+    if needs_error:
+        print("ERROR: scripts/job-schedule.json could not be read, so no job's sign-ins were asked for: "
+              + needs_error, file=sys.stderr)
+        code = 1
+    if needs_problems:
+        print("ERROR: scripts/job-schedule.json has a job whose sign-ins could not be read, so none of that job's "
+              "sign-ins were asked for: " + "; ".join(needs_problems), file=sys.stderr)
+        code = 1
+    if unchecked:
+        print("ERROR: a scheduled job uses a sign-in this run does not check (not a login site with a sign-in "
+              "page on the robot's list, or a short-session one): "
+              + "; ".join("%s (%s)" % (h, ", ".join(j)) for h, j in unchecked.items()), file=sys.stderr)
+        code = 1
     # An all-unknown run means the browser lane is broken, not that everything is fine.
     if report["sites"] and counts["unknown"] == len(report["sites"]):
         print("ERROR: every site read as unknown — the browser lane failed, nothing was checked", file=sys.stderr)
-        return 1
-    return 0
+        code = 1
+    return code
 
 
 # ── Kept warm (16 Oct 2026) ──────────────────────────────────────────────────
@@ -539,11 +668,52 @@ def selftest():
         bad.append(("two sign-ins that did not hold", "no task, with the reason", not_holding_note("www.edfenergy.com", edf, lines)))
     if not_holding_note("www.edfenergy.com", edf, lines[2:]) != "":
         bad.append(("one sign-in that did not hold", "a task as before", not_holding_note("www.edfenergy.com", edf, lines[2:])))
+    # A scheduled job's sign-ins (18 Nov 2026): read from its job-schedule.json entry, a job switched
+    # off uses nothing, a malformed list raises rather than reading as "nothing needed".
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        sched = os.path.join(tmp, "job-schedule.json")
+        with open(sched, "w") as fh:
+            json.dump({"_comment": "not a job", "publisher": {"cron": "15 7-20 * * *", "signins": ["Studio.YouTube.com", "www.facebook.com"]},
+                       "sharer": {"cron": "0 9 * * *", "signins": ["www.facebook.com"]},
+                       "retired": {"cron": "0 9 * * *", "enabled": False, "signins": ["app.pingen.com"]},
+                       "plain": {"cron": "0 9 * * *", "needs": ["network"]}}, fh)
+        want = ({"studio.youtube.com": ["publisher"], "www.facebook.com": ["publisher", "sharer"]}, [])
+        if job_signins(sched) != want:
+            bad.append(("job sign-ins from the schedule", want, job_signins(sched)))
+        # One malformed list is that job's problem alone: the other job's sign-ins still count.
+        with open(sched, "w") as fh:
+            json.dump({"publisher": {"signins": "studio.youtube.com"}, "sharer": {"signins": ["www.facebook.com"]}}, fh)
+        if job_signins(sched) != ({"www.facebook.com": ["sharer"]}, ["publisher: signins must be a list of hosts"]):
+            bad.append(("a malformed signins list", "named, the rest read", job_signins(sched)))
+    # The publisher's own declaration, read off the file as written (parking the job must not break this).
+    with open(SCHEDULE, encoding="utf-8") as fh:
+        declared = (json.load(fh).get("content-engine-publish") or {}).get("signins") or []
+    if "studio.youtube.com" not in declared:
+        bad.append(("the publisher's Studio sign-in is declared", "studio.youtube.com", declared))
+    # A site whose sign-in page is another login site's host has its card filed under that host.
+    door_sites = {"go.xero.com": {"login": True, "loginUrl": "https://login.xero.com/identity/user/login"},
+                  "login.xero.com": {"login": True, "loginUrl": "https://login.xero.com/identity/user/login"}}
+    if (card_host("go.xero.com", door_sites["go.xero.com"], door_sites), card_host("studio.youtube.com", {"loginUrl": "https://studio.youtube.com/"}, {})) \
+            != ("login.xero.com", "studio.youtube.com"):
+        bad.append(("card host", ("login.xero.com", "studio.youtube.com"), card_host("go.xero.com", door_sites["go.xero.com"], door_sites)))
+    yt = {"label": "YouTube Studio", "loginUrl": "https://studio.youtube.com/"}
+    plain = job_names(["content-engine-publish"])[0]
+    if plain == "content-engine-publish":
+        bad.append(("the job's plain name from the estate's job list", "a name", plain))
+    j = signin_task_fields("studio.youtube.com", yt, datetime(2026, 10, 17, 6, 40), [], ["content-engine-publish"])
+    if f"has lapsed (daily session check, 17 Oct 2026 06:40), and a scheduled job uses it ({plain})." \
+            not in j[F["agentOutput"]] or "0 tasks" in j[F["agentOutput"]] or not KEEPALIVE_NAME_RE.match(j[F["name"]]):
+        bad.append(("card names the job, not 0 tasks", "a scheduled job uses it (...)", j[F["agentOutput"]][:220]))
+    both = signin_task_fields("studio.youtube.com", yt, datetime(2026, 10, 17, 6, 40), [{"id": "recA", "name": "Check the adverts"}],
+                              ["content-engine-publish"])
+    if f"1 task waits on it: Check the adverts, and a scheduled job uses it ({plain})." not in both[F["agentOutput"]]:
+        bad.append(("card names the task and the job", "1 task waits on it: ..., and a scheduled job ...", both[F["agentOutput"]][:220]))
     if bad:
         for b in bad:
             print("FAIL", b, file=sys.stderr)
         return 1
-    print(f"selftest OK ({len(cases) + 10} checks)")
+    print(f"selftest OK ({len(cases) + 17} checks)")
     return 0
 
 
