@@ -32,7 +32,6 @@ These have caused production bugs in this codebase. Check for them during every 
 | CFVs | `js/cfv.js` | Other js/ files |
 | Fintable monitor | `js/fintable.js` | Other js/ files |
 | Site map & links | `js/sitemap.js` | Other js/ files |
-| AI assistant | `js/ai-assistant.js` | Other js/ files |
 | Styling/CSS | `css/styles.css` | js/ files |
 | Sidebar menu items | `index.html` | js/ files |
 | Config/constants/field IDs | `js/config.js` | Feature js/ files |

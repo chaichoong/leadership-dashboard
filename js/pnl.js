@@ -583,6 +583,33 @@
         return data;
     }
 
+    // The Claude relay and the markdown renderer below used to be borrowed from
+    // js/ai-assistant.js (the chat panel, retired 18 Nov 2026), so they live here now.
+    const PNL_AI_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
+
+    // SECURITY: the raw text is HTML-escaped FIRST so model (or error) output can
+    // never inject markup; only the markdown patterns below produce HTML.
+    function pnlRenderMarkdown(text) {
+        const escaped = String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        return escaped
+            .replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg-subtle);padding:8px;border-radius:6px;font-size:var(--fs-xs);overflow-x:auto"><code>$1</code></pre>')
+            .replace(/`([^`]+)`/g, '<code style="background:var(--bg-subtle);padding:1px 4px;border-radius:3px;font-size:var(--fs-sm)">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:var(--fs-base);color:var(--text-primary)">$1</h4>')
+            .replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 6px;font-size:var(--fs-md);color:var(--text-primary)">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;font-size:var(--fs-lg);color:var(--text-primary)">$1</h2>')
+            .replace(/^- (.+)$/gm, '<div style="padding-left:12px">\u2022 $1</div>')
+            .replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px">$&</div>')
+            .replace(/(https?:\/\/[^\s<]+[^\s<.,)])/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--accent)">$1</a>')
+            .replace(/\n/g, '<br>');
+    }
+
     async function pnlRunAIAnalysis() {
         if (_pnlAiLoading || !_pnlCache) return;
         // Look the panel up BEFORE claiming the in-flight flag. The flag used to be set
@@ -610,7 +637,7 @@ RULES:
         const userMsg = `Here is the P&L data:\n\`\`\`json\n${JSON.stringify(ctx, null, 0)}\n\`\`\`\n\nProvide your analysis.`;
 
         try {
-            const resp = await fetch(typeof AI_PROXY !== 'undefined' ? AI_PROXY : 'https://claude-proxy.kevinbrittain.workers.dev', {
+            const resp = await fetch(PNL_AI_PROXY, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 1500, system: systemPrompt, messages: [{ role: 'user', content: userMsg }] })
@@ -618,7 +645,7 @@ RULES:
             if (!resp.ok) throw new Error(`API ${resp.status}`);
             const data = await resp.json();
             const text = data.content?.[0]?.text || 'No analysis available.';
-            panel.innerHTML = `<div style="font-size:13px;line-height:1.7;color:var(--text-primary)">${typeof renderMarkdown === 'function' ? renderMarkdown(text) : text.replace(/\n/g, '<br>')}</div>
+            panel.innerHTML = `<div style="font-size:13px;line-height:1.7;color:var(--text-primary)">${pnlRenderMarkdown(text)}</div>
                 <div style="margin-top:8px;display:flex;gap:6px">
                     <button onclick="pnlRunAIAnalysis()" class="od-btn-secondary od-btn-sm">↻ Refresh Analysis</button>
                 </div>`;

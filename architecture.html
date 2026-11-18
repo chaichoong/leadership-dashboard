@@ -310,7 +310,7 @@
                         <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/dashboard.js</span></div>
                         <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenancies, Transactions, Costs, Tenants, Properties, Rental Units, Businesses, Categories, Sub-Categories, Accounts</span></div>
                         <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Financial KPIs, portfolio overview, tenancy metrics, 31-day cash flow forecast, AI analysis, balance calculator, strategic KPIs</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Depends on</span><span class="arch-detail-value">cashflow.js, reconciliation.js, arrears.js, sync-bar.js, ai-assistant.js, quick-task.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Depends on</span><span class="arch-detail-value">cashflow.js, reconciliation.js, arrears.js, sync-bar.js, quick-task.js</span></div>
                     </div>
                 </div>
                 <div class="arch-node" onclick="toggleNode(this)">
@@ -549,18 +549,6 @@
                         <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Page registry, SOP version tracking, git sync status, integrity checks</span></div>
                     </div>
                 </div>
-                <div class="arch-node" onclick="toggleNode(this)">
-                    <div class="arch-node-header">
-                        <span class="arch-node-icon">⭐</span>
-                        <span class="arch-node-name">AI Assistant</span>
-                        <span class="arch-node-type inline">Inline</span>
-                    </div>
-                    <div class="arch-node-detail">
-                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/ai-assistant.js</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Integration</span><span class="arch-detail-value">Anthropic API (via anthropic-proxy worker)</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Context-aware AI chat, tab-specific prompts, SOP awareness, streaming responses</span></div>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -626,18 +614,6 @@
                     <div class="arch-flow-box output">Gmail (via Resend)</div>
                 </div>
                 <div class="arch-flow-label">Polls GHL every 60 seconds → deduplicates via KV state → forwards new SMS to Gmail</div>
-            </div>
-
-            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.05em">AI Assistant</h3>
-            <div class="arch-flow-diagram">
-                <div class="arch-flow-row">
-                    <div class="arch-flow-box app">Dashboard AI Panel</div>
-                    <span class="arch-flow-arrow">→</span>
-                    <div class="arch-flow-box worker">anthropic-proxy Worker</div>
-                    <span class="arch-flow-arrow">→</span>
-                    <div class="arch-flow-box source">Anthropic API</div>
-                </div>
-                <div class="arch-flow-label">Gathers tab context + data → CORS proxy → Claude streaming response</div>
             </div>
         </div>
 
@@ -707,7 +683,7 @@
                     </div>
                     <div class="arch-node-detail">
                         <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">CORS relay for Anthropic API calls from the dashboard</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">HTTP POST from AI Assistant panel</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">HTTP POST from the dashboard AI features (P&amp;L and Wealth analysis, Strategy, Systemisation, AI Agents) and the agent workers</span></div>
                     </div>
                 </div>
             </div>
@@ -796,8 +772,8 @@
                         <span class="arch-node-type external">AI</span>
                     </div>
                     <div class="arch-node-detail">
-                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">AI Assistant, AI commentary, intent classification</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Models</span><span class="arch-detail-value">Claude Sonnet (contractor-bot), Claude (AI assistant)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">AI commentary, intent classification</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Models</span><span class="arch-detail-value">Claude Sonnet (contractor-bot), Claude (dashboard AI features)</span></div>
                         <div class="arch-detail-row"><span class="arch-detail-label">Access</span><span class="arch-detail-value">Via anthropic-proxy worker (CORS)</span></div>
                     </div>
                 </div>

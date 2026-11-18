@@ -136,9 +136,10 @@ protects Kevin when a prospect probes it on a Rocket Demo.
 ### AI assistants (real, substantial, human-invoked)
 
 Systemisation, Inbound Comms, Tasks & Projects team comms, Objective & Strategy planning,
-Leadership Dashboard, Finance, Content Machine. Verified by AI call sites in
+Finance, Content Machine. Verified by AI call sites in
 `os/systemisation/index.html` (25), `follow-up.html` (13), `os/tasks/index.html`,
-`os/strategy/strategy.js`, `js/ai-assistant.js`, `js/pnl.js`, and the `content-machine` repo.
+`os/strategy/strategy.js`, `js/pnl.js`, and the `content-machine` repo. The Leadership
+Dashboard chat panel (`js/ai-assistant.js`) was retired on 18 Nov 2026: do not describe it.
 
 ### Engines that are not AI, and must never be described as AI
 

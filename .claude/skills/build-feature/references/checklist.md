@@ -56,7 +56,6 @@ Use this as a final gate before committing. Every box must be checked. Mark N/A 
 - [ ] `tabLabelMap` entry in shared.js
 - [ ] `PAGE_REGISTRY` entry in config.js
 - [ ] OS-INTEGRATION sections untouched
-- [ ] AI Assistant context block added in ai-assistant.js (if feature has queryable data)
 - [ ] Iframe postMessage wiring (iframe pages only)
 
 ## Cross-Feature Regression
