@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The daily rent check (Kevin, 2 Oct 2026): phase 1 of the Cash Flow Voids agent.
+"""The daily rent check (Kevin, 2 Oct 2026): phase 1 of the Accounts Receivable agent.
 
 WHY THIS IS A SCRIPT AND NOT THE AGENT
 The chain map Kevin approved (AI Agents register row reclaAzGLA4utssxx, Notes dated 2026-10-02)
@@ -17,7 +17,7 @@ WHAT ONE RUN DOES
 
 WHAT IT NEVER DOES
 It sends nothing to a tenant. It writes its own Estate Status row, (lane A, 2 Oct 2026) one RENT
-LATE task per late tenancy per stage for the Cash Flow Voids agent, (lane B) the tasks that walk
+LATE task per late tenancy per stage for the Accounts Receivable agent, (lane B) the tasks that walk
 a new tenant into payment, and (3 Oct 2026) AGENT RENT LATE tasks for a late agent-managed rent (the
 letting agent collects it, so the letting agent is asked; no tenant is contacted), only while that
 agent's register row is Built or Live. Since 16 Nov 2026 that is ONE task per letting agent per due
@@ -26,7 +26,7 @@ property, not one email per property). Its one tenancy write is lane B's: CFV to
 comment, after Kevin confirms he sent the direct rent payment form.
 
 LANE A, IN TRIAL (Kevin, 2 Oct 2026)
-A tenancy that reads late on trusted bank data becomes a task for the Cash Flow Voids agent. The
+A tenancy that reads late on trusted bank data becomes a task for the Accounts Receivable agent. The
 first task for an owed payment is always the reminder, whenever it is first seen. The follow-up is
 raised 3 days after the reminder's task, the firmer message 4 days after the follow-up's (day 0, 3
 and 7: the stages in js/cfv.js CFV_CHASE_STAGES). The agent drafts the email, the card goes to Kevin's queue, and
@@ -42,7 +42,7 @@ housing costs check onto his task's Notes, in the shape lane B already reads as 
 
 SIGNED AGREEMENTS (9 Oct 2026)
 scripts/rent_signed_check.py matches every tenancy agreement Adobe says was signed since 10 Sep 2026 to a
-tenancy, and raises ONE TENANCY RECORD task for the Cash Flow Voids agent for one with none.
+tenancy, and raises ONE TENANCY RECORD task for the Accounts Receivable agent for one with none.
 
 NOT CHASED (Kevin's standing instruction)
 A tenant on the private "noChaseTenants" list, or a tenancy on "noChaseTenancies" (both in
@@ -182,7 +182,7 @@ IN_PAYMENT, CFV, CFV_ACTIONED = "In Payment", "CFV", "CFV Actioned"
 AGENT_MANAGED = "Agent-Managed"
 # A LATE AGENT-MANAGED RENT: the letting agent collects it, so no tenant is contacted. Since 5 Oct 2026 (Kevin:
 # "Roy only gets escalations for things that we can't physically do. Anything administrative, the AI agent can
-# do.") the Cash Flow Voids agent emails the letting agent, twice at most, and Roy phones them only after that
+# do.") the Accounts Receivable agent emails the letting agent, twice at most, and Roy phones them only after that
 # (agent_late_plan). Before, Roy got every one (3 Oct 2026). Since 16 Nov 2026 one task covers every unpaid unit of
 # one letting agent with the same due date at the same step; it carries one key line per unit (agent_late_plan).
 AGENT_LATE_PREFIX, AGENT_LATE_MARK = "AGENT RENT LATE: ", "RENT AGENT KEY: "
@@ -806,7 +806,7 @@ def read_task_state():
     row = api("GET", T_REGISTER, params={"filterByFormula": f"RECORD_ID()='{REGISTER_ROW}'",
                                          "returnFieldsByFieldId": "true", "pageSize": 1}).get("records") or []
     if len(row) != 1:
-        raise RuntimeError("control failed: the Cash Flow Voids register row could not be read")
+        raise RuntimeError("control failed: the Accounts Receivable register row could not be read")
     status = sel((row[0].get("fields") or {}).get(REGISTER_STATUS))
     keys = {}
     for rec in fetch_all(T_TASKS, {"fields[]": [TK["notes"], TK["description"]],
@@ -882,7 +882,7 @@ def agent_late_plan(res, tenancies, existing, day, tenants=()):
     """The AGENT RENT LATE steps today's result calls for, from every late agent-managed tenancy per owed payment, on
     trusted bank data, never for a tenant on the do-not-chase list. Pure. Kevin, 5 Oct 2026: "Roy only gets
     escalations for things that we can't physically do. Anything administrative, the AI agent can do." So, per unit:
-      1  the Cash Flow Voids agent drafts the email to the letting agent (key <tenancy>:<owed>, as before)
+      1  the Accounts Receivable agent drafts the email to the letting agent (key <tenancy>:<owed>, as before)
       2  AGENT_CHASE_DAYS after it went and the rent still late: a second, firmer email (key ...:2)
       roy AGENT_ROY_DAYS after that and still late: Roy's task to phone them (key ...:roy), emailed to him
     A step waits while the one before is with Kevin; Kevin turning one down ends the chase (his call).
@@ -1095,7 +1095,7 @@ def agent_late_line(late):
     if late["failed"]:
         return f"Agent-managed late rent FAILED: {late['failed']}{check}"
     if not late["on"]:
-        return f"Agent-managed late rent: none raised, the Cash Flow Voids agent is switched off or unread.{check}"
+        return f"Agent-managed late rent: none raised, the Accounts Receivable agent is switched off or unread.{check}"
     if late["raised"]:
         return "Agent-managed late rent raised: " + "; ".join(late["raised"]) + "." + check
     if late["planned"]:
@@ -1107,7 +1107,7 @@ def lane_a_line(tasks):
     if tasks["failed"]:
         return f"Late-rent tasks FAILED: {tasks['failed']}"
     if not tasks["on"]:
-        return f"Late-rent tasks: none raised, the Cash Flow Voids agent is switched off (register status {tasks['status'] or 'unread'})."
+        return f"Late-rent tasks: none raised, the Accounts Receivable agent is switched off (register status {tasks['status'] or 'unread'})."
     if tasks["raised"]:
         return "Late-rent tasks raised for the agent (trial, nothing is sent): " + "; ".join(tasks["raised"]) + "."
     if tasks["planned"]:

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 // A task is never left with an AI agent no robot works, and none is ever lost (Kevin, 15 Oct
 // 2026, after PR #792; design per the review of PR #793).
 //
-// PR #792 taught the Task Board Manager to move a live task held by an AI agent no robot works.
+// PR #792 taught the Operations Manager to move a live task held by an AI agent no robot works.
 // Two sources still MADE such tasks: scripts/create-agent-task.py accepted any Team Member, and
 // daily-ops phase 2 gave its data-invariant tasks to the AI Bookkeeper (the Reconciliation tab's
 // matcher, which takes no tasks) on 30 Sep, 3, 5, 11 and 15 Oct; each waited until the board moved
@@ -31,20 +31,20 @@ const SMS_SKILL = readFileSync(resolve(ROOT, '.claude/scheduled-tasks/inbound-me
 const BOOKKEEPER = 'recAdy3T0lcr4I9eZ';   // AI Bookkeeper (Team Members, live 15 Oct 2026)
 const ANALYST = 'recqmKBmq8ZGkxVH9';      // AI Worker — Analyst
 const CEO = 'reciHUAEcEkbctnZ6';
-const RESPONSE = 'recJ8J8idWE8d97tH';     // AI Inbox Response (role agent, Built)
-const CFV = 'rec7aHLK1Q8fMLRXH';          // AI Cash Flow Voids (role agent)
-const PROPERTY = 'recwWvBju2ycB63i4';     // AI Property Administration (role agent, Built)
-const PRODUCER = 'recRcy1Edas6rGaaF';     // AI Content Producer (own schedule)
+const RESPONSE = 'recJ8J8idWE8d97tH';     // AI Customer Service (role agent, Built)
+const CFV = 'rec7aHLK1Q8fMLRXH';          // AI Accounts Receivable (role agent)
+const PROPERTY = 'recwWvBju2ycB63i4';     // AI Compliance (role agent, Built)
+const PRODUCER = 'recRcy1Edas6rGaaF';     // AI Social Media Manager (own schedule)
 const TRIAGE = 'recCUfsTXzmVZynEI';       // AI Inbox Triage (own schedule)
 const LEAD_FINDER = 'rec0unnz5sNaBoIG2';  // AI Lead Finder (Paused, outside ALL_AGENTS)
 const ROY = 'reclbdjfVev3bqNHS';          // a person: no Is AI Agent tick
 const KEVIN = 'recHEt2VPYothaqTd';        // a person
 
 const AI_ROWS = {
-  [CEO]: 'AI CEO (Dan Martell)', [BOOKKEEPER]: 'AI Bookkeeper', [ANALYST]: 'AI Worker — Analyst',
-  [RESPONSE]: 'AI Inbox Response', [CFV]: 'AI Cash Flow Voids', [PRODUCER]: 'AI Content Producer',
+  [CEO]: 'AI CEO', [BOOKKEEPER]: 'AI Bookkeeper', [ANALYST]: 'AI Worker — Analyst',
+  [RESPONSE]: 'AI Customer Service', [CFV]: 'AI Accounts Receivable', [PRODUCER]: 'AI Social Media Manager',
   [TRIAGE]: 'AI Inbox Triage', [LEAD_FINDER]: 'AI Lead Finder',
-  [PROPERTY]: 'AI Property Administration', 'rec1hYELb4zS8pjjO': 'AI Task Board Manager',
+  [PROPERTY]: 'AI Compliance', 'rec1hYELb4zS8pjjO': 'AI Operations Manager',
 };
 const REGISTER = {
   [BOOKKEEPER]: 'Live', [RESPONSE]: 'Built', [CFV]: 'Live', [PRODUCER]: 'Built', [TRIAGE]: 'Live',
@@ -183,7 +183,7 @@ describe('1. a task for an AI agent no robot works is CREATED with a working age
       { fields: held([BOOKKEEPER, LEAD_FINDER]) },
       // A link given by NAME: the typecast retry would link it to the Bookkeeper's row.
       { fields: held(['AI Bookkeeper']) },
-      // The review's case: certificate mail for a paused Property Administration is never lost.
+      // The review's case: certificate mail for a paused Compliance is never lost.
       { fields: held([PROPERTY], { [NAME]: 'COMPLIANCE: gas safety certificate arrived for 23 Viola Street' }), register: { [PROPERTY]: 'Paused' } },
     ]);
     for (const r of [paused, outside, both, byName, pausedProperty]) {
@@ -204,7 +204,7 @@ describe('1. a task for an AI agent no robot works is CREATED with a working age
 });
 
 describe('2. a working agent, a person and a blank owner are created as before', () => {
-  it('the Analyst, Inbox Response, Roy, Kevin, a person beside the Bookkeeper, an Assignee, and no owner at all', () => {
+  it('the Analyst, Customer Service, Roy, Kevin, a person beside the Bookkeeper, an Assignee, and no owner at all', () => {
     const rs = gate([
       { fields: held([ANALYST]) },
       { fields: held([RESPONSE]) },
@@ -237,7 +237,7 @@ describe('2. a working agent, a person and a blank owner are created as before',
     const [producer, triage, producerByName] = gate([
       { fields: { [NAME]: 'CONTENT: Publish Episode 2090', [STATUS]: 'Today', [TEAM]: [PRODUCER] }, argv: ['--force'] },
       { fields: { [NAME]: 'TRIAGE: inbox note', [STATUS]: 'Today', [TEAM]: [TRIAGE] }, argv: ['--force'] },
-      { fields: { [NAME]: 'CONTENT: Publish Episode 2091', [STATUS]: 'Today', [TEAM]: ['AI Content Producer'] }, argv: ['--force'] },
+      { fields: { [NAME]: 'CONTENT: Publish Episode 2091', [STATUS]: 'Today', [TEAM]: ['AI Social Media Manager'] }, argv: ['--force'] },
     ]);
     for (const r of [producer, triage, producerByName]) {
       expect(r.rc).toBe(0);
@@ -245,7 +245,7 @@ describe('2. a working agent, a person and a blank owner are created as before',
       expect(r.out.rerouted).toBeUndefined();
     }
     expect(producer.posted[TEAM]).toEqual([PRODUCER]);
-    expect(producerByName.posted[TEAM]).toEqual(['AI Content Producer']);
+    expect(producerByName.posted[TEAM]).toEqual(['AI Social Media Manager']);
   });
 });
 
@@ -262,7 +262,7 @@ describe('3. nothing that cannot be checked ever blocks or moves a task: it is c
       expect(r.out.rerouted).toBeUndefined();
       expect(r.out.holderCheck).toMatch(/^NOT CHECKED: the Team Members read failed/);
       expect(r.err).toContain('HOLDER NOT CHECKED');
-      expect(r.err).toContain("The Task Board Manager's ownerless step is the backstop");
+      expect(r.err).toContain("The Operations Manager's ownerless step is the backstop");
     }
     expect(down.out.holderCheck).toContain('HTTP 503');
     expect(broken.out.holderCheck).toContain("not the AI CEO's");
@@ -367,7 +367,7 @@ describe('4. daily-ops raises its data-invariant tasks with the Analyst as owner
     expect(unknown.out.rerouted.why).toBe("--owner the dispatcher works no single agent under 'bookkeeper' (0 found)");
     expect(unknown.posted[NOTES]).toMatch(REROUTE_LINE);
     expect(paused.posted[TEAM]).toEqual([CEO]);
-    expect(paused.out.rerouted.from).toEqual([{ id: CFV, name: 'AI Cash Flow Voids' }]);
+    expect(paused.out.rerouted.from).toEqual([{ id: CFV, name: 'AI Accounts Receivable' }]);
     // The fields' own Team Member is kept and checked (here moved off the Bookkeeper), and the
     // unused --owner is said.
     expect(twice.posted[TEAM]).toEqual([ANALYST]);
@@ -454,7 +454,7 @@ describe("7. agent-dispatch.py's plan_repair_task still gets its task when the c
   // plan_repair_task raises a YOUR TURN PLAN REFUSED: task for the card's own agent through
   // cmd_create(force=True), and raises RuntimeError unless the answer is "created". A refusal for
   // a paused agent would have made it raise; the reroute design creates it for the AI CEO.
-  it('the real plan_repair_task, a paused Property Administration card: created, for the AI CEO, no error', () => {
+  it('the real plan_repair_task, a paused Compliance card: created, for the AI CEO, no error', () => {
     const dir = mkdtempSync(join(tmpdir(), 'od-plan-repair-'));
     writeFileSync(join(dir, 'recCARD000000001.json'), '{"steps": []}');
     const r = JSON.parse(execFileSync('python3', ['-c', `

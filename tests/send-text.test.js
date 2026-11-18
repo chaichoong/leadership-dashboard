@@ -1,4 +1,4 @@
-// The text route (Cash Flow Voids cut-over build, 3 Oct 2026; Kevin approved "Build as-is"):
+// The text route (Accounts Receivable cut-over build, 3 Oct 2026; Kevin approved "Build as-is"):
 // scripts/send-text.py sends an approved card's TEXT line from the Agile Lets ClickSend number, by
 // ClickSend's email-to-text through the Gmail worker (Kevin, 5 Oct 2026), and refuses everything else.
 // These drive the REAL script with Airtable and the worker stubbed: no test reaches either, and no test

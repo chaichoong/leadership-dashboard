@@ -5,7 +5,7 @@ Kevin, 24 Sep 2026: feedback is sometimes only relevant to one time or one situa
 was a council's tax accounts, where everything waits on one officer's reply, and "once he responds,
 that rule will no longer exist". A permanent "Lessons from Kevin" line cannot express that, because
 lessons are never deleted, so a stale hold would block the work for ever. It also reached only the
-agent whose card carried it: on 23 Sep 2026 the Task Board Manager raised eight cards Kevin had
+agent whose card carried it: on 23 Sep 2026 the Operations Manager raised eight cards Kevin had
 already ruled on, because the ruling sat in the two inbox agents' files and not in its own.
 
 A hold is written ONCE, for the whole team, with its end condition:

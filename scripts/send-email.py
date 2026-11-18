@@ -551,7 +551,7 @@ def cmd_preview(args):
     print("\n--- body ---\n" + mail["body"])
 
 
-# ─── Attachments (25 Aug 2026, Creditor Management agent) ────────────
+# ─── Attachments (25 Aug 2026, Accounts Payable agent) ────────────
 #
 # ATTACH names one local file that goes out with the email. The guards live
 # HERE, not in the format parser, because this is the process that reads the
@@ -1116,7 +1116,7 @@ def rent_landed_refusal(task_id, task_name, fields=None):
 def notify_due_again(task_id, days, now=None):
     """True when a REMINDER notify may go: the newest notify that went for this task is DAYS old or
     more, and nothing since is a send that was cut off (intent or uncertain may have gone, so it
-    never sends twice). The Task Board Manager's clock (7 Oct 2026) nudges Roy once a week on a
+    never sends twice). The Operations Manager's clock (7 Oct 2026) nudges Roy once a week on a
     physical task he has held seven days with no movement; without this the first handover's
     notify refused every later one for ever."""
     newest = sent = None

@@ -192,7 +192,7 @@ describe('due: the daily clock', () => {
     expect(r.out).toContain('ERROR: duplicate Item Key(s): a');
   });
 
-  it('--apply with due rows calls the real create exactly once, owned by Inbox Response', () => {
+  it('--apply with due rows calls the real create exactly once, owned by Customer Service', () => {
     const r = py(`
 S.rows = [row("r1", "a"), row("r2", "b"), row("r3", "c", **{"Last Checked": "2026-11-01"})]
 res = run("due", "--apply")

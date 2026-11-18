@@ -850,7 +850,7 @@ out["noPage"] = tl.room_blockers(wp, tl.openings(wp, DAY))["recP1"]["blockers"]
 # The monitor: amber for blockers, red once someone has waited 14 days on a house that is not legal,
 # red when a person securing a room has no move-in task.
 out["unowned"] = next(x for x in tl.monitor(w, DAY, tl.openings(w, DAY), [])["steps"] if x["key"] == "rooms")
-# The rooms step hands the house to AI Property Administration once; a second run adds nothing.
+# The rooms step hands the house to AI Compliance once; a second run adds nothing.
 fwr = FakeWriter(); made = []
 fwr.create_task = lambda name, desc, notes="": made.append((name, desc, notes)) or "recROOMS"
 tl.run(w, DAY, fwr, only="rooms", replies=lambda: [])
@@ -940,14 +940,14 @@ out["notGiven"] = len(madec)
     expect(r.noBook[0]).toMatch(/could not be read/);
     expect(r.noPage[0]).toMatch(/no page in the compliance book/);
   });
-  it('a house that is not legal goes to AI Property Administration once, and is red while nobody holds it', () => {
+  it('a house that is not legal goes to AI Compliance once, and is red while nobody holds it', () => {
     expect(r.unowned.state).toBe('fail');
     expect(r.unowned.note).toMatch(/^Nobody is working on 5 Dalham Place/);
     expect(r.roomsMade).toEqual([['TENANT ROOMS: 5 Dalham Place', 'TENANT CHAIN IDS: recP1']]);
     expect(r.roomsDesc).toMatch(/gas safety certificate expired 8 Sep 2026/);
     expect(r.roomsDesc).toMatch(/Search every record first/);
     expect(r.roomsAgain).toEqual([]);
-    expect(r.rooms.note).toMatch(/AI Property Administration holds a task for 5 Dalham Place/);
+    expect(r.rooms.note).toMatch(/AI Compliance holds a task for 5 Dalham Place/);
   });
   it('the monitor: amber while a house is not legal, red once someone has waited 14 days on it or has no move-in task', () => {
     expect(r.rooms.state).toBe('warn');
@@ -1208,7 +1208,7 @@ out["docsBody"] = [c["output"] for c in fw.cards if c["kind"] == "docs"][0]
 wd = world(); wd["linkLive"] = False; wd["leads"] = [lead("recS", name="Sam Secure", stage="Securing room", email="sam@example.com")]
 fwd = FakeWriter(); tl.run(wd, DAY, fwd, only="move-in", replies=lambda: [])
 out["deadLink"] = ([c["kind"] for c in fwd.cards], [t["kind"] for t in fwd.roy])
-# A submission with Sam's id: linked, stamped and handed to Property Administration once.
+# A submission with Sam's id: linked, stamped and handed to Compliance once.
 w["docs"] = [rec("recDOC1", {tl.D["name"]: "Sam Secure", tl.D["leadId"]: "recS", tl.D["refName"]: "Pat Landlord",
                              tl.D["refContact"]: "07000 000000", tl.D["refIs"]: "Previous landlord"}),
              rec("recDOC2", {tl.D["name"]: "Nobody", tl.D["leadId"]: "recNOPE"})]
@@ -1236,7 +1236,7 @@ out["movein"] = next(x for x in m["steps"] if x["key"] == "movein")
     // It carries no short link, so a dead short link does not hold it.
     expect(r.deadLink).toEqual([['docs'], ['movein']]);
   });
-  it('a submission is linked to its person, stamped, and its check handed to Property Administration once', () => {
+  it('a submission is linked to its person, stamped, and its check handed to Compliance once', () => {
     expect(Object.values(r.docRows.recDOC1)).toContain('Linked');
     expect(Object.values(r.docRows.recDOC2)).toEqual(['No match']);
     expect(r.leadNotes[0]).toMatch(/DOCS REPLIED 25 Sep 2026 \(form\)/);

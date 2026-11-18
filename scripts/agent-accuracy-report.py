@@ -42,7 +42,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_email_format import FORM_CARDS, KEVIN_CARDS, form_card  # noqa: E402
 
-# A robot form card (Cash Flow Voids lane B, 3 Oct 2026) is raised by the rent check's rules under the
+# A robot form card (Accounts Receivable lane B, 3 Oct 2026) is raised by the rent check's rules under the
 # agent's id; the agent drafts none of it. Its verdicts are Kevin's business calls on a government
 # form, never a score of the agent's drafting, so they are left out: by name here, and by the key
 # line in the query (the Notes are not fetched for every decided task).
@@ -354,10 +354,10 @@ PART_OF_REASON = {
 # Keys are Team Members record ids (agent-dispatch.py ROLE_AGENTS).
 AGENT_JOBS = {
     "recCUfsTXzmVZynEI": ("inbound-triage",),                    # AI Inbox Triage
-    "rec1hYELb4zS8pjjO": ("task-manager",),                      # AI Task Board Manager
+    "rec1hYELb4zS8pjjO": ("task-manager",),                      # AI Operations Manager
     "recRcy1Edas6rGaaF": ("content-engine", "content-engine-publish",
-                          "content-engine-redo"),                # AI Content Producer
-    "reciHUAEcEkbctnZ6": ("ceo-agent",),                         # AI CEO (Dan Martell)
+                          "content-engine-redo"),                # AI Social Media Manager
+    "reciHUAEcEkbctnZ6": ("ceo-agent",),                         # AI CEO
 }
 SHARED_JOBS = ("agent-dispatch", "handback-poll")
 JOB_STATUS = os.path.expanduser("~/knowledge-os/logs/job-status.jsonl")
@@ -905,7 +905,7 @@ def main():
             flag = f"{r['total']}/{MIN_SAMPLE} to the bar"
         elif r["days_to_go"]:
             # Passes on volume and rate; only time is short. This is the state
-            # Creditor Management was in on 28 Aug 2026 — 100% over 26, all of
+            # Accounts Payable was in on 28 Aug 2026 — 100% over 26, all of
             # it inside three days.
             flag = (f"holding {round(r['rate'] * 100)}% — {r['days_to_go']}d more "
                     f"(only {r['span_days']}d of history)")

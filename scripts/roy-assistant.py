@@ -15,8 +15,8 @@ HOW
      folder, and mail from outside never carries the SENT label, so the folder
      itself proves someone signed in to info@ wrote it. That is the same trust
      the SMS bridge rests on (workers/sms-email-bridge/worker.js).
-  2. `poll` reads that folder and makes ONE "ROY:" task per message for Inbox
-     Response, stamped `ROY REQUEST` (agent-dispatch.py is_roy_request), then
+  2. `poll` reads that folder and makes ONE "ROY:" task per message for Customer
+     Service, stamped `ROY REQUEST` (agent-dispatch.py is_roy_request), then
      emails Roy "Got it". Open tasks already on the board from the same sender
      are marked ROY IS HANDLING THIS, and the queue holds them while his
      request is open, so Kevin never gets two cards for one tenant.

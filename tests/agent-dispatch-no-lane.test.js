@@ -34,8 +34,8 @@ const CEO = 'reciHUAEcEkbctnZ6';
 const ANALYST = 'recqmKBmq8ZGkxVH9';
 const KEVIN = 'recHEt2VPYothaqTd';        // a person: no Is AI Agent tick
 const TRIAGE_ID = 'recCUfsTXzmVZynEI';    // AI Inbox Triage (own schedule)
-const PRODUCER_ID = 'recRcy1Edas6rGaaF';  // AI Content Producer (own schedule)
-const AI = { [BOOKKEEPER]: 'AI Bookkeeper', [CEO]: 'AI CEO (Dan Martell)', [ANALYST]: 'AI Worker — Analyst' };
+const PRODUCER_ID = 'recRcy1Edas6rGaaF';  // AI Social Media Manager (own schedule)
+const AI = { [BOOKKEEPER]: 'AI Bookkeeper', [CEO]: 'AI CEO', [ANALYST]: 'AI Worker — Analyst' };
 // A value handed to Python as data (JSON true/false/null are not Python literals).
 const PYJ = (x) => `json.loads(${JSON.stringify(JSON.stringify(x))})`;
 
@@ -273,14 +273,14 @@ print(json.dumps({"err": err, "holder": held, "orphan": m.no_lane_holders(held, 
 
 // ─── Review of PR #792 (15 Oct 2026): one test per point, each failing on the first version ───
 
-const RENT = 'rec7aHLK1Q8fMLRXH';       // AI Cash Flow Voids: a role agent, paused in these fixtures
+const RENT = 'rec7aHLK1Q8fMLRXH';       // AI Accounts Receivable: a role agent, paused in these fixtures
 const TRIAGE = 'recCUfsTXzmVZynEI';     // AI Inbox Triage: own schedule, never handed work
-const PRODUCER = 'recRcy1Edas6rGaaF';   // AI Content Producer: own schedule, works its own answered cards
-const ALL_AI = { ...AI, [RENT]: 'AI Cash Flow Voids', [TRIAGE]: 'AI Inbox Triage', [PRODUCER]: 'AI Content Producer' };
+const PRODUCER = 'recRcy1Edas6rGaaF';   // AI Social Media Manager: own schedule, works its own answered cards
+const ALL_AI = { ...AI, [RENT]: 'AI Accounts Receivable', [TRIAGE]: 'AI Inbox Triage', [PRODUCER]: 'AI Social Media Manager' };
 const ROSTER = {
-  [RENT]: { name: 'Cash Flow Voids', status: 'Paused', dispatchable: false },
+  [RENT]: { name: 'Accounts Receivable', status: 'Paused', dispatchable: false },
   [TRIAGE]: { name: 'Inbox Triage', status: 'Live', dispatchable: false },
-  [PRODUCER]: { name: 'Content Producer', status: 'Built', dispatchable: false },
+  [PRODUCER]: { name: 'Social Media Manager', status: 'Built', dispatchable: false },
 };
 
 describe('review 1: an approved card nobody escalated is carried out, never asked again', () => {

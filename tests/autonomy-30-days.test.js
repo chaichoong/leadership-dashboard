@@ -11,7 +11,7 @@ const PY = readFileSync(resolve(ROOT, 'scripts/agent-accuracy-report.py'), 'utf8
 // ── VOLUME IS NOT CONSISTENCY (Kevin's ruling, 28 Aug 2026) ────────────────
 //
 // On 28 Aug 2026 the first agent in the estate's history cleared the autonomy
-// bar: AI Creditor Management, Correspondence, 92% over 24 approvals with no
+// bar: AI Accounts Payable, Correspondence, 92% over 24 approvals with no
 // rejections in the last ten. The report recommended granting it.
 //
 // Then the sample was checked. All 26 of its decisions had happened in THREE

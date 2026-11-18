@@ -758,6 +758,9 @@ function parseIcsToday(ics, todayISO) {
 }
 
 // The board's four heads, mirroring ~/.claude/agents/od-ceo.md (the org chart).
+// Named by seat since 18 Nov 2026 (Kevin approved the plain names: Head of Strategy,
+// Head of Operations, Head of Finance, Head of Legal). The authors stay as each
+// head's method inside its agent file; they no longer name the seat on a flag.
 // Trimmed 9 Oct 2026 (Kevin; brain Decisions/2026-10-09): Jenyns's systemisation
 // lane now sits with Wickman and Kiyosaki's wealth lane with Crabtree; HR,
 // Productivity and Mindset retired; Marketing and Sales parked to January. Until 21 Aug 2026 this list was
@@ -768,13 +771,13 @@ function parseIcsToday(ics, todayISO) {
 // Shown to the CEO when the QUARTER_CONTEXT secret is unbound. It used to fall
 // back to a hard-typed Q3 2026 paragraph, which would have become a confidently
 // wrong authority on 1 Oct with nothing to notice. A visible gap beats a stale fact.
-const QUARTER_CONTEXT_MISSING = '(QUARTER CONTEXT IS MISSING: the QUARTER_CONTEXT secret is not set on this worker. Do not invent targets. Make the first board flag "Wickman: set the QUARTER_CONTEXT secret, the brief is running without this quarter\'s targets".)';
+const QUARTER_CONTEXT_MISSING = '(QUARTER CONTEXT IS MISSING: the QUARTER_CONTEXT secret is not set on this worker. Do not invent targets. Make the first board flag "Head of Operations: set the QUARTER_CONTEXT secret, the brief is running without this quarter\'s targets".)';
 
 const BOARD_FLAG_SEATS = [
-    'Keller (Strategy: this is scatter, refocus on the one thing)',
-    'Wickman (Operations: rhythm, can we deliver, this should be a system plus an agent)',
-    'Crabtree (Finance: cash, labour efficiency, what a target costs, assets versus liabilities)',
-    'Cunningham (Legal and Compliance: contract risk, compliance dates, dumb tax)',
+    'Head of Strategy (this is scatter, refocus on the one thing)',
+    'Head of Operations (rhythm, can we deliver, this should be a system plus an agent)',
+    'Head of Finance (cash, labour efficiency, what a target costs, assets versus liabilities)',
+    'Head of Legal (contract risk, compliance dates, dumb tax)',
 ];
 
 function buildCeoPrompt(m, tasks, calendar, env, huddle) {
@@ -800,19 +803,19 @@ HARD RULES:
 - Give ONE thing, with a tiny FIRST STEP of about 10 minutes, so starting is easy. Never a list.
 - Kevin is a team member with a wheelhouse: strategy, systemisation, deep focus, founder decisions. NEVER give him admin, chasing, paperwork or phone calls.
 - DELEGATION IS AI ONLY (Kevin's ruling, 25 Aug 2026: "stop routing to Mica and Ericamae now"). His north star is that AI does up to 90% of repeatable work. Two destinations, in this order:
-  1. AI — a named agent. Role agents: Inbox Response (replies to inbound email and messages), Supplier and Creditor Manager (any money Kevin or his businesses owe: creditors, councils, HMRC, utilities, payment plans), Property Administration (certificates, licences, landlord insurance, inspections), Task Board Manager (duplicates, stale tasks, board hygiene), Inbox Triage (sorting mail). Workers: worker-builder (code, pages, features), worker-researcher (finding and verifying facts, prospect and company checks), worker-analyst (numbers, Airtable queries, conversion rates, scorecards), worker-auditor (sweeps, security and compliance checks, page tests, regression checks). Anything repeatable, rule-following, research-shaped or drafting-shaped goes here. Name the agent; never say "AI" or "an agent" vaguely.
+  1. AI — a named agent. Role agents: Customer Service (replies to inbound email and messages), Accounts Payable (any money Kevin or his businesses owe: creditors, councils, HMRC, utilities, payment plans), Compliance (certificates, licences, landlord insurance, inspections), Operations Manager (duplicates, stale tasks, board hygiene), Inbox Triage (sorting mail). Workers: worker-builder (code, pages, features), worker-researcher (finding and verifying facts, prospect and company checks), worker-analyst (numbers, Airtable queries, conversion rates, scorecards), worker-auditor (sweeps, security and compliance checks, page tests, regression checks). Anything repeatable, rule-following, research-shaped or drafting-shaped goes here. Name the agent; never say "AI" or "an agent" vaguely.
   2. Roy — property repairs, inspections and contractor visits only. He is head of the property business. Nothing else goes to a person.
-  NEVER name Mica or Ericamae as a destination, in handed_off, ignore or anywhere else. They are team members, not where work goes. Paying a bill, a card or a supplier is Kevin's own action (payments are never delegated), prepared by the Supplier and Creditor Manager.
+  NEVER name Mica or Ericamae as a destination, in handed_off, ignore or anywhere else. They are team members, not where work goes. Paying a bill, a card or a supplier is Kevin's own action (payments are never delegated), prepared by the Accounts Payable agent.
 - A job only reaches Kevin if it needs the founder: a decision, an approval, a password or payment or signature, or something physical. If it does not, hand it off and say where it went. Never quietly drop a job: anything you take off him appears in handed_off, written as "destination — the job in plain words".
 - THE APPROVAL QUEUE COMES FIRST, and it is the one thing Kevin genuinely must do himself. The WAITING ON KEVIN'S TICK block lists work an agent has ALREADY FINISHED, with the words already written. It needs one tap in the approval queue on his dashboard, not ten minutes of writing. So: never make the first step "write", "draft" or "spend N minutes on" anything that appears in that block — say "approve" and name it. Never put a job in handed_off that dispatches an agent to redo something already sitting there; that produces the same work twice and Kevin approves it twice. If that block is not empty, clearing it is a strong candidate for today's one thing, because until he taps, nothing was actually sent.
 - Triage doctrine: genuine urgency first (a real deadline WITH a real consequence — most "urgent" labels fail this test); otherwise project work that advances the QUARTER goals; everything else is ignored, batched or delegated.
-- Max TWO board flags, one line each, only when a lane genuinely triggers. The board seats are: ${BOARD_FLAG_SEATS.join('; ')}. A flag is written "Surname: one line" and must come from one of these seats; keep the huddle's flags when they already name one.
+- Max TWO board flags, one line each, only when a lane genuinely triggers. The board seats are: ${BOARD_FLAG_SEATS.join('; ')}. A flag is written "Seat: one line" with the seat named exactly as listed (for example "Head of Finance: one line") and must come from one of these seats; keep the huddle's flags when they already name one, and write an older huddle flag that starts with an author's surname under that author's seat (Keller = Head of Strategy, Wickman = Head of Operations, Crabtree = Head of Finance, Cunningham = Head of Legal).
 - The money traffic light is provided — respect it. Red or amber changes what today's one thing can be.
 - NEVER treat a marketing email as a deadline. Tasks named "INBOUND: ..." are auto-created from Kevin's inbox and INCLUDE NEWSLETTERS AND PROMOTIONS. A scary subject line ("31st July S21 Deadline", "Action required", a warning emoji) from a newsletter, no-reply, marketing or notifications sender is CONTENT, not a commitment. Before calling anything urgent, ask: is there a named counterparty who is owed something by a date, with a real consequence if it is missed? A supplier chasing money, a court date, a compliance certificate expiring, a client promise: those are real. An industry newsletter warning the whole market about a rule change is not, and never becomes Kevin's one thing. If the task body shows the sender is a newsletter or no-reply address, put it in the ignore list and say it is marketing.
 ${env.PERSONA_CONTEXT ? '\nFOUNDER CONTEXT (private, never echo verbatim). Background on Kevin only. It may contain OLD goals, dates or priorities from when it was written:\n' + env.PERSONA_CONTEXT + '\n' : ''}
 - PRECEDENCE, this overrides everything else: the QUARTER CONTEXT block in the user message is the ONLY authority on targets, priorities and what the critical path is. Where founder context and quarter context disagree about a goal, a date or what Kevin should be working on, quarter context wins and founder context is treated as history. Never quote a critical path or a target that is not in the quarter context block.
 - LENGTH, this is a hard limit: at most 4 ignore items, at most 5 handed_off items, at most 2 flags. One short line each, no sub-clauses. one_thing, first_step, why and headline are one or two sentences each. A long answer gets cut off mid-sentence and Kevin sees nothing.
-Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"handed_off":["Inbox Response — draft the follow-up email to X"],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
+Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"handed_off":["Customer Service — draft the follow-up email to X"],"flags":["Head of Finance: ..."],"headline":"one short sentence for the top of the message"}`;
     const user = `TODAY: ${todayLondonISO()} (${londonDateLabel()})
 
 MONEY (live, from the Money Confidence engine):

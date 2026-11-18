@@ -106,7 +106,7 @@ print(json.dumps({"out": out, "made": made, "line": rsc.line(out), "brief": rsc.
     expect(pat.fldR7apBzSp3oxFxz).toBe('TENANCY RECORD KEY: a0000000000000a1');
     const blank = r.made.find(f => /Kim Blank/.test(f.fldRGhBQViKZKtkQ6));
     expect(blank.fldRGhBQViKZKtkQ6).toMatch(/Could not read the rent or the start date/);
-    expect(r.brief).toBe('Signed agreements with no tenancy record: 3. The Cash Flow Voids agent has the task.');
+    expect(r.brief).toBe('Signed agreements with no tenancy record: 3. The Accounts Receivable agent has the task.');
   });
 
   it('once recorded there is nothing to raise; an open task is never raised twice but still said', () => {

@@ -434,7 +434,7 @@
     // ─── A ROBOT FORM CARD IS NOBODY'S DRAFT (3 Oct 2026) ────────────
     //
     // The daily rent check raises the direct rent payment form card under the
-    // Cash Flow Voids agent's id, but no agent writes a word of it: it is rules,
+    // Accounts Receivable agent's id, but no agent writes a word of it: it is rules,
     // and Kevin's verdict on it is a business call on a government form. So it
     // never counts in an agent's score, on any surface. Either mark is enough.
     // Kept identical to FORM_CARDS in scripts/agent_email_format.py

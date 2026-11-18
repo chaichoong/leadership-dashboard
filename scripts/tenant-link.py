@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""A tenant's details-form link, made by a robot (Cash Flow Voids lane C, 5 Oct 2026).
+"""A tenant's details-form link, made by a robot (Accounts Receivable lane C, 5 Oct 2026).
 
-The Cash Flow Voids agent drafts the RENT CAP email asking a capped tenant to fill in the details form. This
+The Accounts Receivable agent drafts the RENT CAP email asking a capped tenant to fill in the details form. This
 makes the link for it, through the property-manager Worker's robot-only route (POST /tenant-form/robot-link),
 with the robots' own key. That key opens that one route and nothing else on the Worker.
 
 Rules, so the agent can always call it and use what it prints:
-  * While the Cash Flow Voids agent is on its trial run, no link is made: its drafts are never sent, so a live
+  * While the Accounts Receivable agent is on its trial run, no link is made: its drafts are never sent, so a live
     link would only sit unused for 14 days. It prints {"ok": false, "trial": "..."} and exits 0.
   * A tenant who already has a live link keeps it: the Worker answers 409 and this prints
     {"ok": false, "live": true, "expires": "YYYY-MM-DD"} (a new link would end the one the tenant may be using).
@@ -28,7 +28,7 @@ import agent_email_format as aef  # noqa: E402
 
 WORKER = "https://pm.operationsdirector.co.uk/tenant-form/robot-link"
 KEY_PATH = os.path.expanduser("~/.config/od/pm_robot_key")
-AGENT = "rec7aHLK1Q8fMLRXH"         # the Cash Flow Voids agent: its trial decides whether links are made
+AGENT = "rec7aHLK1Q8fMLRXH"         # the Accounts Receivable agent: its trial decides whether links are made
 # Cloudflare refuses Python's own User-Agent with a 403 before the Worker sees the call (4 Oct 2026).
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) od-robot/1.0"
 

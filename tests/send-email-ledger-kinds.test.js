@@ -416,7 +416,7 @@ describe('a notify that dies is recorded, as a send is', () => {
   });
 });
 
-// The Task Board Manager's clock (7 Oct 2026) nudges Roy once a week on a physical task he has held
+// The Operations Manager's clock (7 Oct 2026) nudges Roy once a week on a physical task he has held
 // seven days with no movement. notify sent once per task for ever, so the handover's own notify
 // refused every reminder; --again-after-days lets one through once the last went N days ago, and
 // never over a send that was cut off. Back-tested: dropping the age check sends inside the week.

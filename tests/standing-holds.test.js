@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 // Standing holds (Kevin, 24 Sep 2026). A ruling that stays true only until an
 // event ("nothing on that council's tax until the officer replies") is written
-// once for the whole team. On 23 Sep 2026 the Task Board Manager raised eight
+// once for the whole team. On 23 Sep 2026 the Operations Manager raised eight
 // cards Kevin had already put on hold, because the ruling lived only in the two
 // inbox agents' files. These tests drive the REAL scripts: the holds module's
 // own selftest (park, lift, expire, orphan, broken hold) and the REAL

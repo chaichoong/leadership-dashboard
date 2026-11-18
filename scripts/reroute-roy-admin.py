@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""reroute-roy-admin.py: move Roy Lavin's ADMIN tasks to the agents (Property Administration first).
+"""reroute-roy-admin.py: move Roy Lavin's ADMIN tasks to the agents (Compliance first).
 
 WHY (Kevin, 5 Oct 2026): "Roy only gets escalations for things that we can't
 physically do. Anything administrative, the AI agent can do." On 7 Oct 2026 Roy
@@ -38,9 +38,9 @@ Repair-lane names (MAINTENANCE: with no ticket tick) that do move are listed in
 their own group, so a person can check them before --apply.
 
 WHICH AGENT: the one whose lane the task is in, so no agent has to send it back:
-an invoice, bill, utility, council tax or premium to the Supplier and Creditor
-Manager; rent and Universal Credit chasing to Cash Flow Voids; everything else
-to Property Administration (the ids are read from agent-dispatch.py). The dry
+an invoice, bill, utility, council tax or premium to Accounts
+Payable; rent and Universal Credit chasing to Accounts Receivable; everything else
+to Compliance (the ids are read from agent-dispatch.py). The dry
 run prints the agent beside each task.
 
 HOW IT MOVES: Team Member loses Roy and gains that agent (any other link is kept),
@@ -89,18 +89,18 @@ def const(path, name):
 ROY_REC = "reclbdjfVev3bqNHS"                              # Team Members: Roy Lavin (Active, human)
 ROY_EMAIL = const("agent-dispatch.py", "ROY_EMAIL")       # his Member collaborator's email
 # The agent each moved task goes to: the lane it belongs in, so no agent has to
-# send it back. Rent and Universal Credit chasing is the Cash Flow Voids agent's;
-# an invoice, a bill or a payment set-up is the Supplier and Creditor Manager's
-# (the Property Administration file sends money owed back to it); the rest is
-# Property Administration's.
-AGENT_REC = const("agent-dispatch.py", "PROPERTY_REC_ID")      # AI Property Administration
-RENT_AGENT_REC = const("agent-dispatch.py", "RENT_REC_ID")     # AI Cash Flow Voids
-MONEY_AGENT_REC = const("agent-dispatch.py", "CREDITOR_REC_ID")  # AI Supplier and Creditor Manager
-AGENT_NAMES = {AGENT_REC: "Property Administration", RENT_AGENT_REC: "Cash Flow Voids",
-               MONEY_AGENT_REC: "Supplier and Creditor Manager"}
+# send it back. Rent and Universal Credit chasing is the Accounts Receivable agent's;
+# an invoice, a bill or a payment set-up is the Accounts Payable agent's
+# (the Compliance file sends money owed back to it); the rest is
+# Compliance's.
+AGENT_REC = const("agent-dispatch.py", "PROPERTY_REC_ID")      # AI Compliance
+RENT_AGENT_REC = const("agent-dispatch.py", "RENT_REC_ID")     # AI Accounts Receivable
+MONEY_AGENT_REC = const("agent-dispatch.py", "CREDITOR_REC_ID")  # AI Accounts Payable
+AGENT_NAMES = {AGENT_REC: "Compliance", RENT_AGENT_REC: "Accounts Receivable",
+               MONEY_AGENT_REC: "Accounts Payable"}
 # Money owed or a payment set up comes first: "council tax arrears" and "water
 # bill arrears" are the creditor agent's, not rent. A licence fee is not here: a
-# licence is Property Administration's whole lane, fee and all.
+# licence is Compliance's whole lane, fee and all.
 MONEY_LANE_RE = re.compile(r"\binvoice\w*|\bauto ?pay\b|direct debit|\bbills?\b|council tax|\bwater\b|"
                            r"\butilit(?:y|ies)\b|\bpremium\b|premium credit|\bfinance agreement\b|"
                            r"\benergy\b(?! performance)|\belectricity\b|gas supply|\bsuppl(?:y|ier)\b", re.I)

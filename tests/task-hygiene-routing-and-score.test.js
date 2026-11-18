@@ -47,7 +47,7 @@ def make_fetch(members, register, businesses=None, projects=None):
 MEMBERS = [
     {"id":"recLive","fields":{"Name":"Task Manager","Is AI Agent":True}},
     {"id":"recPlanned","fields":{"Name":"Sales Progressor","Is AI Agent":True}},
-    {"id":"recBuilding","fields":{"Name":"Cash Flow Voids","Is AI Agent":True}},
+    {"id":"recBuilding","fields":{"Name":"Accounts Receivable","Is AI Agent":True}},
     {"id":"recUnreg","fields":{"Name":"Ghost Agent","Is AI Agent":True}},
     {"id":"recGone","fields":{"Name":"Karlo","Status":"Offboarded"}},
     {"id":"recPerson","fields":{"Name":"Mica","Status":"Active"}},
@@ -55,7 +55,7 @@ MEMBERS = [
 REGISTER = [
     {"id":"recR1","fields":{"Name":"Task Manager","Status":"Live","Team Member":[{"id":"recLive"}]}},
     {"id":"recR2","fields":{"Name":"Sales Progressor","Status":"Planned","Team Member":[{"id":"recPlanned"}]}},
-    {"id":"recR3","fields":{"Name":"Cash Flow Voids","Status":"Building","Team Member":[{"id":"recBuilding"}]}},
+    {"id":"recR3","fields":{"Name":"Accounts Receivable","Status":"Building","Team Member":[{"id":"recBuilding"}]}},
 ]
 `;
 

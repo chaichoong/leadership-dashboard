@@ -40,7 +40,7 @@ const TRIAGE = resolve(SCRIPTS, 'inbound-triage.py');
 const DISPATCH = resolve(SCRIPTS, 'agent-dispatch.py');
 const RUNNER = resolve(SCRIPTS, 'inbound-triage-run.sh');
 
-const RESPONSE = 'recJ8J8idWE8d97tH';   // Inbox Response, Team Members row
+const RESPONSE = 'recJ8J8idWE8d97tH';   // Customer Service, Team Members row
 const READ_LABEL = '19: for Kevin to read';
 // The real label's id is "Label_12": nothing may read that as lane 12.
 const LABELS = [
@@ -709,7 +709,7 @@ def files():
     writeFileSync(join(box.home, '.claude/agents/inbound-comms-response.md'), RESPONSE_FILE);
   }
 
-  it('the dispatcher alone files it with Inbox Response; inbox-lessons puts it in triage, inside its lessons', () => {
+  it('the dispatcher alone files it with Customer Service; inbox-lessons puts it in triage, inside its lessons', () => {
     const box = sandbox();
     agentFiles(box);
     const r = runPy(box, CARD + `
@@ -955,7 +955,7 @@ out({"err": err, "calls": len(CALLS)})
 });
 
 describe('the people and pages around the card', () => {
-  it('Inbox Response is told what an INBOX card verdict means: approve = seen, a named number = one task', () => {
+  it('Customer Service is told what an INBOX card verdict means: approve = seen, a named number = one task', () => {
     // Its definition file is its prompt; this guards the instruction a redo needs.
     const f = readFileSync(join(process.env.HOME, '.claude/agents/inbound-comms-response.md'), 'utf8');
     const block = f.slice(f.indexOf('## INBOX cards'), f.indexOf('## Step 0')).replace(/\s+/g, ' ');

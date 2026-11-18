@@ -130,8 +130,8 @@ Claude runs these. Kevin approves at the gates: every email and every form submi
 4. Put the rent and `Due Day of Month` on the tenancy so the cash flow reports and the
    forecast carry them. Payment Status starts as CFV (cash flow void).
 5. Do NOT raise Roy's Universal Credit tasks by hand (changed 2 Oct 2026). Once the tenancy
-   exists as a CFV and the tenant's Rent Payment Type is Universal Credit (and the Cash Flow
-   Voids agent is switched on), the daily rent check raises them and emails Roy: the journal upload first,
+   exists as a CFV and the tenant's Rent Payment Type is Universal Credit (and the Accounts
+   Receivable agent is switched on), the daily rent check raises them and emails Roy: the journal upload first,
    then the housing costs check 7 days after he replies (`scripts/rent_new_tenant.py`). If a
    Roy task for this tenant was already raised by hand, link the tenancy and add one line to
    its Notes so the rent check adopts it instead of raising a twin:

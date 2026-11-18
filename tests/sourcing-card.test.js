@@ -452,7 +452,7 @@ function submit(output, agent = RESPONSE) {
   return py(DISPATCH, `
 import tempfile, os, types
 m.require_role_agent_live = lambda *a, **k: None
-# An Inbox Response submit looks for a twin card waiting on Kevin (16 Nov 2026): none is waiting here.
+# A Customer Service submit looks for a twin card waiting on Kevin (16 Nov 2026): none is waiting here.
 m.query_records = lambda table, formula=None, fields=None, max_records=None: []
 class Reached(Exception): pass
 reads = []
@@ -492,7 +492,7 @@ describe('cmd_submit runs the sourcing gate', () => {
   it('a sourcing card is judged whichever agent submits it', () => {
     expect(submit(drop(FENCE, 'SEARCHED:'), '').error).toMatch(/SEARCHED line is missing/);
   });
-  it('the listing backstop applies to the Inbox Response agent only', () => {
+  it('the listing backstop applies to the Customer Service agent only', () => {
     const r = submit(NOV2);
     expect(r.result).toBe('refused');
     expect(r.error).toMatch(/must use the SOURCING card shape/);

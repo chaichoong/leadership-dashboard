@@ -209,7 +209,7 @@ FILE_LABEL_ALLOW = {"6", "10", "11", "17", "18"}
 #                  payment, a deadline or a date is a rule-1 task); labelled
 #                  READ_LABEL_NUM, archived, and listed on Kevin's ONE open
 #                  INBOX card (new emails are added to it until he decides
-#                  it), owned by Inbox Response so a "reply to 2 saying yes"
+#                  it), owned by Customer Service so a "reply to 2 saying yes"
 #                  note is worked by an agent that can;
 #   * answered  -> archived, but only when a later send on the thread went TO
 #                  the sender (a forward to Roy is not an answer);
@@ -1381,7 +1381,7 @@ CARD_FOOTER = [
     "- Approve once you have read them: approving means you have seen them. The card closes and "
     "nothing is sent.",
     "- To have any of them acted on, name its number in Request changes, for example \"act on 3 "
-    "and 7\" or \"reply to 2 saying yes\". The Inbox Response agent turns each number you name "
+    "and 7\" or \"reply to 2 saying yes\". The Customer Service agent turns each number you name "
     "into its own task and brings any reply back to you first.",
     "- To say one should not have come to you, Reject (or tick Remember this reason) and say "
     "why, for example \"never show me this sender's newsletters\". The triage robot reads "
@@ -1498,7 +1498,7 @@ def inbox_card_fields(name, text, ids, dispatch, today_iso, deferred_until=None)
     """The task fields for a new card, keyed by the pipeline's own field map
     (agent-dispatch.py AF), so the card is the shape every surface reads: Status
     Approval with Sent For Approval By set (the queue hides a card without it).
-    Owned by Inbox Response: approving hands it back to close, a note such as
+    Owned by Customer Service: approving hands it back to close, a note such as
     "reply to 2" is worked by the agent that answers mail."""
     AF = dispatch.AF
     resp = dispatch.RESPONSE_REC_ID
@@ -1761,7 +1761,7 @@ def cmd_inbox_card(slot=None, dry_run=False, dispatch=None):
 # ─── KEVIN'S NOTES ON INBOX CARDS TEACH THE TRIAGE (14 Oct 2026) ─────────
 #
 # `agent-dispatch.py lessons` writes a remembered note to the agent that SENT
-# the card (Inbox Response), and reroutes to triage only for a relevance reason
+# the card (Customer Service), and reroutes to triage only for a relevance reason
 # on an INBOUND task. An INBOX card is neither, yet every note on one is about
 # what triage chose to show him: "never show me these" must reach the agent
 # that decides, before its next run. Two sources, both read, both Kevin's
@@ -1876,7 +1876,7 @@ def cmd_inbox_lessons(dry_run=False, dispatch=None):
 #   * everything else in the inbox -> counted, never touched (mail with no
 #     decision is the ongoing triage's `stale_to_triage`).
 # Approving the card means seen; a number named in Request changes becomes a
-# task, made by Inbox Response.
+# task, made by Customer Service.
 
 def queue_holder_path():
     root = os.environ.get("JOB_QUEUE_DIR") or str(Path.home() / "knowledge-os/logs/queue")
@@ -2903,7 +2903,7 @@ def act_block_reason(ctx, action, override):
 
 # Certificates are never filed without a task (Kevin, 2 Oct 2026). On 24 Aug an
 # electrical report was filed under label 10 and archived with no task, by a rule
-# written while "its own agent is being built". The Property Administration agent
+# written while "its own agent is being built". The Compliance agent
 # went live on 2 Sep and the rule was never changed, so the report sat in a label
 # and the compliance book got a placeholder. Label 10 is still where the mail
 # lives; it now needs the id of the task that will file the document.
@@ -2918,7 +2918,7 @@ def file_block_reason(label_num, task_id):
     if task_id and TASK_ID_RE.match(str(task_id).strip()):
         return None
     return ("file --label-num 10 refused: certificate and compliance mail is never filed "
-            "without a task (Kevin, 2 Oct 2026). Create the Property Administration task "
+            "without a task (Kevin, 2 Oct 2026). Create the Compliance task "
             "first (Step 4c), then repeat with --task <the task's rec id>. A certificate "
             "that sits in a label is one the compliance book never hears about, and the "
             "visit gets bought twice.")
@@ -4606,7 +4606,7 @@ def cmd_health():
 
 
 def cmd_search(q, limit, account=None):
-    """Read-only Gmail search for the role agents (Property Administration
+    """Read-only Gmail search for the role agents (Compliance
     build, 2 Sep 2026): the search-first rule needs a route into the mailbox
     that is NOT a hand-rolled curl carrying the triage key. Same worker, same
     read-and-label credential, one page, never a modify."""

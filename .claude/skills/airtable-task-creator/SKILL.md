@@ -22,9 +22,9 @@ Work down this list and stop at the first route that fits.
    names a specific agent, in which case use that agent's Team Members row from `AGENTS` or
    `ROLE_AGENTS` in `scripts/agent-dispatch.py` (read it there, never from a list in a
    prompt). On its next run the dispatch engine applies the fixed lanes: repairs to Roy;
-   certificates, licences, landlord insurance and inspections to Property Administration;
-   creditor and payment chasing to the Supplier and Creditor Manager; inbound replies to
-   Inbox Response. The CEO routes everything else to the agent whose goal matches.
+   certificates, licences, landlord insurance and inspections to Compliance;
+   creditor and payment chasing to Accounts Payable; inbound replies to
+   Customer Service. The CEO routes everything else to the agent whose goal matches.
 2. **Roy Lavin, head of the property business.** Roy is a TEAM MEMBER, not a contractor
    (since 25 Aug 2026). Hand a task straight to him when it is a **repair** (Kevin's standing
    approval: every maintenance task passes to Roy with no per-task yes) or when **Kevin asks

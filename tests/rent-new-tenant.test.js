@@ -1,4 +1,4 @@
-// Lane B of the Cash Flow Voids chain (Kevin, 2 Oct 2026): scripts/rent_new_tenant.py, the rules
+// Lane B of the Accounts Receivable chain (Kevin, 2 Oct 2026): scripts/rent_new_tenant.py, the rules
 // that walk a new Universal Credit tenant into payment, and the "do not chase" list in
 // scripts/rent-check.py.
 //
@@ -24,10 +24,10 @@ def load_mod(name, file):
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 rc = load_mod("rc", "rent-check.py")
 lb = rc.lane_b_rules
-# The Cash Flow Voids trial ended on 5 Oct 2026; these cases were written for the trial, so each run puts the
+# The Accounts Receivable trial ended on 5 Oct 2026; these cases were written for the trial, so each run puts the
 # agent back on trial in its own process (tests/cash-flow-voids-agent.test.js block 10 reads the real lists).
 import agent_email_format as _aef_trial
-_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Accounts Receivable agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
 _aef_trial.TRIAL_ENDED.pop("rec7aHLK1Q8fMLRXH", None)
 SCRATCH = tempfile.mkdtemp()
 rc.HISTORY = os.path.join(SCRATCH, "history.jsonl")
@@ -1536,8 +1536,8 @@ print(json.dumps({"dry": dry, "off": off, "posts": posts, "mailed": mailed, "not
     // Nothing was raised, and the row does not claim Roy was asked.
     expect(r.note).toBe('new, the journal upload is next');
     expect(r.lines[0]).toBe('New-tenant tasks a real run would make: Roy, journal check 1: Unit 9 – 1 Example Road.');
-    expect(r.lines[1]).toBe('New-tenant tasks: none raised, the Cash Flow Voids agent is switched off.');
-    expect(r.lines[2]).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
+    expect(r.lines[1]).toBe('New-tenant tasks: none raised, the Accounts Receivable agent is switched off.');
+    expect(r.lines[2]).toBe("New-tenant tasks: none raised, the Accounts Receivable agent's switch could not be read.");
   });
 
   it('paused or unread, Kevin\'s own sends are still recorded and his sent-back card still leaves his queue; nothing new is raised', () => {

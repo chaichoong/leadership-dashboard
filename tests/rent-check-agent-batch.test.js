@@ -1,6 +1,6 @@
 // AGENT RENT LATE, one task per letting agent per due date (Kevin, 13 Nov 2026, on "AGENT RENT LATE: Unit 1 – 22 Newton
 // Street, rent due 10 Nov": "StayCay late rent should be one email covering every unpaid StayCay property, not one email
-// per property"). Lesson line 402 of the Cash Flow Voids agent file, made a code check on 16 Nov 2026.
+// per property"). Lesson line 402 of the Accounts Receivable agent file, made a code check on 16 Nov 2026.
 //
 // These drive the REAL scripts/rent-check.py: assess() judges fixture tenancies shaped as Airtable returns them, then
 // agent_late_plan() and agent_late() plan and "write" through a fake api, and the real read_agent_late() reads those

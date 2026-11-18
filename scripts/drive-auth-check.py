@@ -380,7 +380,7 @@ def check_fresh():
             f'{len(missing)} of the {len(paths)} newest files on Google are missing from '
             f"this Mac's Drive folder (first: {missing[0]}). The mount reads but is stale: "
             f'new uploads are not arriving, so new episodes cannot be opened and the '
-            f'Content Engine cannot see new raw clips. Fix: disconnect and reconnect '
+            f'Social Media Manager cannot see new raw clips. Fix: disconnect and reconnect '
             f"kevin@runpreneur.org.uk in Google Drive's settings.")
     return HEALTHY, f"the {len(paths)} newest files on Google are all in this Mac's Drive folder"
 

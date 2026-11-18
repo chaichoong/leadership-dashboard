@@ -225,7 +225,7 @@ describe('the rules are enforced where they cannot be skipped', () => {
   // "ALLOWED_SENDERS = (PERSONAL_SENDER, BUSINESS_SENDER, RUNPRENEUR_SENDER)",
   // which pinned the COUNT rather than the property. Two things followed.
   // It broke on 3 Sep when PROPERTY_SENDER (info@agilelets.co.uk) was added
-  // for the Property Administration agent — the code was right and the test
+  // for the Compliance agent — the code was right and the test
   // was wrong, which is the worst way round. And because it only ever read
   // ONE line of ONE file, it never noticed that scripts/send-email.py had
   // carried its own byte-identical BUSINESS_SENDER and BUSINESS_BRAND since

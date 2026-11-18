@@ -12,7 +12,7 @@ function verdictRow({ minutesOld = 5, line } = {}) {
   const computedAt = new Date(Date.now() - minutesOld * 60000).toISOString();
   const hb = line || {
     key: 'handback', colour: 'red', number: 56, answer: '4 of 9 cards came back to you',
-    byAgent: [{ id: AGENT_A, name: 'Creditor Management', cards: 8, back: 3, score: 62, colour: 'red',
+    byAgent: [{ id: AGENT_A, name: 'Accounts Payable', cards: 8, back: 3, score: 62, colour: 'red',
       reasons: { 'you did a sign-in or settings step': 2, 'you could not do the step it gave you': 1 } }],
   };
   return { id: 'recEsVerdict', createdTime: computedAt, fields: {
@@ -27,7 +27,7 @@ test.describe('AI Agents scorecards: Came back to you', () => {
   test('each agent shows the cards that came back, in its colour, with the reasons on hover', async ({ page }) => {
     await mockAgentsPage(page, { estate: [verdictRow()] });
     await loadAgentsPage(page);
-    const creditor = card(page, 'Creditor Management');
+    const creditor = card(page, 'Accounts Payable');
     await expect(creditor).toContainText('Came back to you');
     const val = creditor.locator('.sc-val.bad', { hasText: '3 of 8 (score 62)' });
     await expect(val).toHaveCount(1);
@@ -40,15 +40,15 @@ test.describe('AI Agents scorecards: Came back to you', () => {
   test('a row over 2 hours old, or a grey line, reads "can\'t tell", never the old number', async ({ page }) => {
     await mockAgentsPage(page, { estate: [verdictRow({ minutesOld: 180 })] });
     await loadAgentsPage(page);
-    const v = card(page, 'Creditor Management').locator('.sc-val.warn', { hasText: "can't tell" });
+    const v = card(page, 'Accounts Payable').locator('.sc-val.warn', { hasText: "can't tell" });
     await expect(v).toHaveCount(1);
     await expect(v).toHaveAttribute('title', /over 2 hours ago/);
-    await expect(card(page, 'Creditor Management')).not.toContainText('score 62');
+    await expect(card(page, 'Accounts Payable')).not.toContainText('score 62');
 
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await mockAgentsPage(page, { estate: [verdictRow({ line: { key: 'handback', colour: 'grey', why: 'the 14-day read missed 1 the task board shows' } })] });
     await loadAgentsPage(page);
-    await expect(card(page, 'Creditor Management').locator('.sc-val.warn', { hasText: "can't tell" }))
+    await expect(card(page, 'Accounts Payable').locator('.sc-val.warn', { hasText: "can't tell" }))
       .toHaveAttribute('title', /the 14-day read missed 1/);
   });
 
@@ -57,7 +57,7 @@ test.describe('AI Agents scorecards: Came back to you', () => {
     await page.route('**/api.airtable.com/**/tblZVrdzivyBueZVf**', (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"SERVER_ERROR"}' }));
     await loadAgentsPage(page);
-    await expect(card(page, 'Creditor Management').locator('.sc-val.warn', { hasText: 'unavailable' })).toHaveCount(1);
-    await expect(card(page, 'Creditor Management')).not.toContainText('score 62');
+    await expect(card(page, 'Accounts Payable').locator('.sc-val.warn', { hasText: 'unavailable' })).toHaveCount(1);
+    await expect(card(page, 'Accounts Payable')).not.toContainText('score 62');
   });
 });

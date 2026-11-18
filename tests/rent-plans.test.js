@@ -1,4 +1,4 @@
-// Payment plans (Cash Flow Voids step 3b; Kevin approved "Build as-is" on 4 Oct 2026). The PLAN lines on a
+// Payment plans (Accounts Receivable step 3b; Kevin approved "Build as-is" on 4 Oct 2026). The PLAN lines on a
 // card, and scripts/rent_plans.py, which keeps every promise once the plan's email has gone. These drive the
 // REAL code with Airtable stubbed: every id, name and amount is invented.
 import { describe, it, expect } from 'vitest';
@@ -13,11 +13,11 @@ const HARNESS = `
 import importlib.util, json, sys, os, io, contextlib
 from datetime import date, timedelta
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
-# The Cash Flow Voids trial ended on 5 Oct 2026; these cases were written for the trial and prove its doors, so
+# The Accounts Receivable trial ended on 5 Oct 2026; these cases were written for the trial and prove its doors, so
 # each run puts the agent back on trial in its own process (tests/cash-flow-voids-agent.test.js block 10 reads
 # the real lists).
 import agent_email_format as _aef_trial
-_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Accounts Receivable agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
 _aef_trial.TRIAL_ENDED.pop("rec7aHLK1Q8fMLRXH", None)
 sys.argv = ["test"]
 import agent_email_format as aef

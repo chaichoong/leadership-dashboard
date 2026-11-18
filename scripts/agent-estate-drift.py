@@ -229,13 +229,13 @@ RETIRED = [
     (r"Fifteen at 24 Aug 2026", "2026-09-07",
      "never state a register count in a prompt; the register is read live"),
     (r"Wickman's Integrator running Gary Keller", "2026-07-29",
-     "the CEO is Dan Martell (org chart v3); Wickman heads Operations"),
+     "the CEO leads, with Dan Martell's method (org chart v3); the Head of Operations works Wickman's method"),
     (r"Michalowicz cash, Jenyns systems, Martell AI-leverage", "2026-07-29",
      "the v2 seat list; the live board is the dept-* files in ~/.claude/agents/"),
     (r"Never an agent for a tier 1 or tier 2 matter", "2026-08-25",
      "tier 1 is PREPARED by an agent and lands with Kevin labelled; tier 2 no longer exists"),
     (r"Mica handles ALL creditor and debt correspondence", "2026-08-25",
-     "the Supplier and Creditor Manager agent prepares every creditor matter; Kevin approves"),
+     "the Accounts Payable agent prepares every creditor matter; Kevin approves"),
     # Case-insensitive on purpose: the retired name appears as both "the
     # teardown call" and "The Teardown call" (dept-sales.md, 21 Sep 2026).
     (r"(?i)teardown call", "2026-07-31",
@@ -266,7 +266,7 @@ RETIRED = [
     # Operations (with systemisation), Finance (with wealth), Legal and Compliance. HR,
     # Productivity and Mindset retired; Marketing, Sales and the Writer parked to January.
     (r"(?i)\beleven(-seat)? (department )?(heads|seats|board)\b", "2026-10-09",
-     "the board is four heads (Strategy, Operations, Finance, Legal and Compliance) and four workers"),
+     "the board is four heads (Head of Strategy, Head of Operations, Head of Finance, Head of Legal) and four workers"),
     (r"(?i)\ball eleven\b", "2026-10-09",
      "the board is four heads; convene the ones with live work"),
     (r"(?i)\bfive workers\b", "2026-10-09",
@@ -553,7 +553,7 @@ def selftest():
     # both exempt even though both contain retired wording. 4, 5, 6 fire. Line
     # 7 fires too: its history word comes AFTER the stale rule.
     assert lines == [4, 5, 6, 7], "selftest: expected hits on 4,5,6,7 got %s" % lines
-    assert not scan_text("Route to the Supplier and Creditor Manager agent.", "x")
+    assert not scan_text("Route to the Accounts Payable agent.", "x")
     assert scan_text("Use for the teardown call.", "x")
     assert scan_text("The Teardown Call runs first.", "x")
     # Texts to tenants (5 Oct 2026): the GoHighLevel route fires; GoHighLevel itself, for OD sales, does not.

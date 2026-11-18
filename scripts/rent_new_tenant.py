@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lane B of the Cash Flow Voids chain (Kevin, 2 Oct 2026): a new tenant into payment, by rules.
+"""Lane B of the Accounts Receivable chain (Kevin, 2 Oct 2026): a new tenant into payment, by rules.
 
 WHY THIS IS RULES AND NOT THE AGENT
 Every link here is an if/then with a date on it: has Roy answered, have seven days passed, has a
@@ -61,7 +61,7 @@ THE CLOCK
             that could be this rent and is not matched yet. It waits, and the row says so.
 
 WHAT IT NEVER DOES
-It sends nothing to a tenant: the tenant drafts are the Cash Flow Voids agent's, which is a TRIAL
+It sends nothing to a tenant: the tenant drafts are the Accounts Receivable agent's, which is a TRIAL
 agent (scripts/agent_email_format.py). It drafts nothing to the DWP and sends nothing to it: the
 form is sent by Kevin's own hand, and contacting the DWP is Roy's alone (Kevin, 2 Oct 2026). It
 writes to a tenancy only after Kevin confirms he sent the form: one comment, and CFV to CFV
@@ -1368,7 +1368,7 @@ def drop_plan(ad, task_id):
 
 def raise_form(rc, item, day):
     """Raise the form card: build the answers and the robot's plan from the records, create the
-    card under the Cash Flow Voids agent, put the plan where the Your turn button finds it, and
+    card under the Accounts Receivable agent, put the plan where the Your turn button finds it, and
     submit the card to Kevin's queue with its KEVIN ONLY step. A blank record raises nothing, and
     neither does a card Kevin asked to change whose answers have not changed (until
     CHANGES_WAIT_DAYS have passed). A refused submit withdraws the card, so the next run raises
@@ -1627,7 +1627,7 @@ def finish_one(rc, item, day):
 def lane_b(rc, res, data, day, writes, on, now=None):
     """Plan and (on a real run) make today's lane B moves, and put each stage on its row. Never
     stops the rent check: a failure is said on the row and in the exit code, and one failed write
-    does not stop the others. `on` is the Cash Flow Voids register switch the rent check already
+    does not stop the others. `on` is the Accounts Receivable register switch the rent check already
     read: False raises nothing, None means it could not be read. The switch stops what is NEW (a
     raise, an email to Roy, a close or an end line): what Kevin has already done is recorded either
     way (his sent form is finished, a card he sent back or let lapse leaves his queue, a closed card's
@@ -1774,9 +1774,9 @@ def lane_b_line(setup):
         return f"New-tenant tasks FAILED: {setup['failed']}{check}"
     kept = (f" Form cards recorded or tidied: {'; '.join(setup['closed'])}." if setup.get("closed") else "")
     if setup["on"] is None:
-        return f"New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.{kept}{check}"
+        return f"New-tenant tasks: none raised, the Accounts Receivable agent's switch could not be read.{kept}{check}"
     if not setup["on"]:
-        return f"New-tenant tasks: none raised, the Cash Flow Voids agent is switched off.{kept}{check}"
+        return f"New-tenant tasks: none raised, the Accounts Receivable agent is switched off.{kept}{check}"
     done = ["raised: " + "; ".join(setup["raised"])] if setup["raised"] else []
     done += ["closed or ended: " + "; ".join(setup["closed"])] if setup["closed"] else []
     if done:

@@ -217,8 +217,8 @@ test.describe('blocked robots are cards, never panel rows', () => {
 // handover plan ready (the sweep marks the wall turn:true). The worked examples: Chedburgh has a
 // plan, the PIB replacement and Athertons do not.
 const TURNS = [
-  { task: 'recPYIC5nn7v2bh8e', name: 'INSURANCE: Landlord buildings insurance via TopCashback - 6 Chedburgh Place', agent: 'Property Administration', kind: 'KEVIN', subject: 'purchase', fix: 'Kevin clicks Your turn', days: 0, turn: true },
-  { task: 'recbBdOmWJASeTYLs', name: 'INSURANCE: Replacement cover - 30 Burnbank Gardens', agent: 'Property Administration', kind: 'KEVIN', subject: 'identity', fix: 'Kevin gives his date of birth', days: 1 },
+  { task: 'recPYIC5nn7v2bh8e', name: 'INSURANCE: Landlord buildings insurance via TopCashback - 6 Chedburgh Place', agent: 'Compliance', kind: 'KEVIN', subject: 'purchase', fix: 'Kevin clicks Your turn', days: 0, turn: true },
+  { task: 'recbBdOmWJASeTYLs', name: 'INSURANCE: Replacement cover - 30 Burnbank Gardens', agent: 'Compliance', kind: 'KEVIN', subject: 'identity', fix: 'Kevin gives his date of birth', days: 1 },
   { task: 'recLRHyQ8AG0NUHt0', name: 'Athertons Exterior Cleaning invoice', agent: 'Finance', kind: 'KEVIN', subject: 'payment', fix: 'Kevin pays', days: 1 },
 ];
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The direct rent payment form for a new tenant (Cash Flow Voids lane B, 3 Oct 2026).
+"""The direct rent payment form for a new tenant (Accounts Receivable lane B, 3 Oct 2026).
 
 Kevin's ruling, 3 Oct 2026: "Robot fills, you pick reason." Once Roy says a new Universal Credit
 tenant's housing costs are verified, a card comes to Kevin. Approving it gives him the Your turn

@@ -193,8 +193,8 @@ def today_str():
 
 
 def norm_agent(agent):
-    """An agent's name as the cap keys it: 'Property Administration',
-    'property-administration' and 'AI Property Administration' are one filer."""
+    """An agent's name as the cap keys it: 'Compliance' and 'AI Compliance' are one filer, and
+    known_agents maps that key to the agent file ('property-administration')."""
     n = re.sub(r"[^a-z0-9]", "", (agent or "").lower())
     return n[2:] if n.startswith("ai") and len(n) > 2 else n
 
@@ -289,7 +289,7 @@ def known_agents(now=None):
     """(normalised name -> the agent's one name, problem). The Team Members list comes from a
     cache refreshed at most once a day; a failed refresh keeps the last good list, says so, and
     is not tried again for AGENTS_RETRY_MINUTES. ONE AGENT, ONE CAP: every spelling of an agent
-    that agent-dispatch.py maps to an agent file ('AI Task Board Manager', 'Task Board Manager',
+    that agent-dispatch.py maps to an agent file ('AI Operations Manager', 'Operations Manager',
     'task-manager') resolves to that file name, so it cannot hold two caps."""
     now = now or datetime.utcnow()
     out, problem, cached = {}, "", None
@@ -472,7 +472,7 @@ def duplicate_root(state, fid, limit=50):
 def survivor_status(state, fid):
     """(id, status) a wall citing FID is judged by: FID itself, or for a merged repeat the
     survivor it points at, whatever that survivor's state. ('', '') for an unknown id.
-    THE one place this is decided (review of PR #784): the Task Board Manager's clock reads
+    THE one place this is decided (review of PR #784): the Operations Manager's clock reads
     it, and agent-dispatch.py's finding_states should read it too once PR #780 lands."""
     r = state.get(fid)
     if not r:
@@ -1546,7 +1546,7 @@ def cmd_escalate(a):
     """Raise an open finding's severity so the fixer takes it first.
 
     WHY (Kevin, 7 Oct 2026): 19 robots sat on TOOL walls for up to 12 days while
-    their fixes were medium findings nobody claimed. The Task Board Manager's
+    their fixes were medium findings nobody claimed. The Operations Manager's
     clock calls this when a TOOL wall passes 3 days with its finding still
     unclaimed. Append-only like every other op; severity only ratchets up, so a
     second call on a finding already at that level writes nothing. A closed

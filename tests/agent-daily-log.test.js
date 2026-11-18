@@ -55,8 +55,8 @@ describe('the four silent runtimes are actually wired', () => {
     expect(gateAt, 'change gate present (control)').toBeGreaterThan(-1);
     expect(publishAt).toBeLessThan(gateAt);
     // Both scored role agents get a display name for the Log Day key.
-    expect(dispatch).toMatch(/"response": "Inbox Response"/);
-    expect(dispatch).toMatch(/"creditor": "Supplier and Creditor Manager"/);
+    expect(dispatch).toMatch(/"response": "Customer Service"/);
+    expect(dispatch).toMatch(/"creditor": "Accounts Payable"/);
   });
 
   const SKILL_PINS = [

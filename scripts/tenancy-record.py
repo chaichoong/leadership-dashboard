@@ -2,14 +2,14 @@
 """tenancy-record.py: the ONE door through which an agent changes a tenancy record.
 
 WHY THIS EXISTS (9 Oct 2026, Kevin's /fix "the cash flow voids details are not updating")
-The Cash Flow Voids agent's file said "Never: ... writing to a tenancy or tenant record", and no
+The Accounts Receivable agent's file said "Never: ... writing to a tenancy or tenant record", and no
 other agent owned the job. So every ruling Kevin gave at the approval gate that needed a record
 changed went nowhere: 30 Burnbank Gardens stayed a cash flow void after "not a cash flow void, that
 needs updating" (6 Oct), Duckworth Apartments 8 and 9 kept the 4th after he approved the 9th
 (7 Oct), and a tenant's death (8 Oct) was on no record. Each time the agent filed a code fix, the
 findings queue was over its cap, and the fix went to an overflow log nothing works.
 
-Kevin ruled on 9 Oct 2026: the Cash Flow Voids agent OWNS tenancy-record upkeep, through one gated
+Kevin ruled on 9 Oct 2026: the Accounts Receivable agent OWNS tenancy-record upkeep, through one gated
 door, never a card per change (memory project_cfv_owns_tenancy_records_2026-10-09). This is it.
 
 WHAT EVERY WRITE NEEDS
@@ -251,7 +251,7 @@ def write_field(tenancy_id, field, value, label, task, why, dry_run):
     if rc.sel(after) != str(value):
         ledger({"kind": "unlanded", "tenancy": tenancy_id, "field": label, "to": str(value), "task": task["id"]})
         raise RuntimeError(f"{label} on {tenancy_id} reads {rc.sel(after)!r} after writing {value!r}: the write did not land")
-    text = (f"{stamp()}: {label} changed from {shown_before} to {value} by the Cash Flow Voids agent, on the "
+    text = (f"{stamp()}: {label} changed from {shown_before} to {value} by the Accounts Receivable agent, on the "
             f"RECORD CHANGE line of the card Kevin approved, task {task['id']} ({task_label(task)}). Why: {why}")
     out = {"tenancy": tenancy_id, "field": label, "from": shown_before, "to": str(value), "task": task["id"]}
     ledger(dict(out, kind="write", why=why))
@@ -351,7 +351,7 @@ def cmd_set_off(a):
     ledger(dict(out, kind="write", why=a.why))
     authority = f"the RECORD CHANGE line of the card Kevin approved, task {task['id']}"
     text = (f"{stamp()}: rent paid by set-off from {start.strftime('%-d %b %Y')} to {until.strftime('%-d %b %Y')} "
-            f"(was {before[0]} to {before[1]}), counted as paid, by the Cash Flow Voids agent on {authority} "
+            f"(was {before[0]} to {before[1]}), counted as paid, by the Accounts Receivable agent on {authority} "
             f"({task_label(task)}). Why: {a.why}")
     try:
         post_comment(a.tenancy, text)
@@ -627,7 +627,7 @@ def cmd_onboard(a):
                TY_IN["initialDue"]: due.isoformat(), TY_IN["nextDue"]: nxt.isoformat(), TY_IN["payStatus"]: "CFV",
                TY_IN["deposit"]: 0, TY_IN["agreementUrl"]: f"https://mail.google.com/mail/u/0/#all/{mail}",
                TY_IN["docLinks"]: f"AST signed {ag.get('signed')} (Adobe '{ag.get('subject')}'): £{ag['rent']:.2f} a month "
-                                  f"from {start.strftime('%-d %B %Y')}. Onboarded by the Cash Flow Voids agent from task {task['id']}."},
+                                  f"from {start.strftime('%-d %B %Y')}. Onboarded by the Accounts Receivable agent from task {task['id']}."},
               **copy_unit_links(a.unit), **year)
     tenancy_id = create(rc.T_TENANCIES, yf)
     out["tenancy"] = tenancy_id
@@ -647,7 +647,7 @@ def cmd_onboard(a):
     ledger(dict(out, kind="onboard"))
     comment_or_say(out, tenancy_id, f"{stamp()}: onboarded from the signed agreement ({ag.get('signed')}): £{ag['rent']:.2f} a "
                                     f"month from {start.strftime('%-d %b %Y')}, due on the {a.due_day}, starts as a cash flow "
-                                    f"void. By the Cash Flow Voids agent on the card Kevin approved, task {task['id']}. "
+                                    f"void. By the Accounts Receivable agent on the card Kevin approved, task {task['id']}. "
                                     f"Why: {a.why}")
     return out
 
@@ -755,7 +755,7 @@ def cmd_rent_change(a):
     ledger(dict(out, kind="rent-change"))
     comment_or_say(out, a.tenancy, f"{stamp()}: ended {plan['oldEnds']}: the tenant signed a new agreement at £{ag['rent']:.2f} "
                                    f"from {start.strftime('%-d %b %Y')}; new tenancy {new_id}. Tenant and unit unchanged. "
-                                   f"By the Cash Flow Voids agent on the card Kevin approved, task {task['id']}.")
+                                   f"By the Accounts Receivable agent on the card Kevin approved, task {task['id']}.")
     comment_or_say(out, new_id, f"{stamp()}: created from the signed agreement ({ag.get('signed')}): £{ag['rent']:.2f} a month from "
                                 f"{start.strftime('%-d %b %Y')}, Payment Status {status} as before. Replaces {a.tenancy}. Moved "
                                 f"{len(out['movedPayments'])} payment(s) and {len(out['movedTasks'])} open task(s). Why: {a.why}")

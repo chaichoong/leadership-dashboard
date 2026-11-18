@@ -5,7 +5,7 @@ A new tenant's pack goes into Adobe as the tenancy agreement, the authority to a
 tenant signs the first two, so Adobe emails them those signed copies itself. Only we sign the proof of residency
 (info@agilelets.co.uk, typed "Roy Lavin"), so Adobe sends its signed copy to info@ alone, and the tenant needs it for
 their Universal Credit journal. Kevin, 28 Sep 2026: forward it from info@, a standing instruction with no approval
-card. Kevin, 8 Oct 2026: send it to Roy's own inbox as well, and have the Cash Flow Voids lane do it. Until then every
+card. Kevin, 8 Oct 2026: send it to Roy's own inbox as well, and have the Accounts Receivable lane do it. Until then every
 forward was by hand from a Claude session or by Kevin, and one September proof of residency was never forwarded.
 
 WHAT IT DOES, each rent check
@@ -43,7 +43,7 @@ KNOWN LIMITS: a proof of residency named some other way is not a proof of reside
 email that names a residency document and does not parse is said on the row and on Home. A pack cancelled after its
 proof of residency was signed is still sent: cancel nothing after info@ signs, or forward nothing and close the task.
 
-Never sends while the Cash Flow Voids agent is switched off or unread, and never on a dry run.
+Never sends while the Accounts Receivable agent is switched off or unread, and never on a dry run.
 """
 
 import base64
@@ -443,7 +443,7 @@ def _lock(ledger):
 
 def run(rc, now, writes, on, day=None, list_mail=None, fetch=None, send=None, ledger=None, start=START):
     """The proof of residency step, once per rent check. Never raises: a failure is said on the row and in the exit
-    code. Sends and writes only on a real run with the Cash Flow Voids agent switched on."""
+    code. Sends and writes only on a real run with the Accounts Receivable agent switched on."""
     out = {"on": bool(on), "checked": 0, "sent": [], "waiting": [], "held": [], "raised": [], "closed": [],
            "uncertain": [], "unreadable": [], "planned": [], "busy": False, "failed": ""}
     if not on:
@@ -533,7 +533,7 @@ def brief(out):
 def line(out):
     """The rent check row's line: the whole story."""
     if not out.get("on"):
-        return "Proof of residency: nothing sent, the Cash Flow Voids agent is switched off or unread."
+        return "Proof of residency: nothing sent, the Accounts Receivable agent is switched off or unread."
     bits = []
     if out.get("sent"):
         bits.append("sent from info@: " + "; ".join(out["sent"]))

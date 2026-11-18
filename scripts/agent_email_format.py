@@ -44,7 +44,7 @@ and refuses a repeated address rather than guessing which copy was meant.
     ---
     The body, identical for every recipient.
 
-ATTACH names ONE local file (added 25 Aug 2026 for the Creditor Management
+ATTACH names ONE local file (added 25 Aug 2026 for the Accounts Payable
 agent's restraint-order pages). The parser checks shape only; the send path
 enforces the real guards — the file must live under the attachments
 directory, carry an allowed extension, exist, and fit the size cap — because
@@ -73,13 +73,13 @@ from datetime import datetime, timezone
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
 ALLOWED_HEADERS = {"TO", "TO-EACH", "CC", "SUBJECT", "FROM", "ATTACH"}
-# A TEXT TO SEND WITH THE EMAIL (Cash Flow Voids cut-over build, 3 Oct 2026). Two lines above the email's
+# A TEXT TO SEND WITH THE EMAIL (Accounts Receivable cut-over build, 3 Oct 2026). Two lines above the email's
 # headers, so Kevin approves the text's exact words on the same card. They are the TEXT's, never the
 # email's: parse_output skips them, and scripts/send-text.py is the only reader (parse_text). One line of
 # message, at most TEXT_MAX characters.
 TEXT_HEADERS = {"TEXT TO", "TEXT"}
 TEXT_MAX = 300
-# A PAYMENT PLAN (Cash Flow Voids step 3b, Kevin approved "Build as-is" on 4 Oct 2026). One line per promise
+# A PAYMENT PLAN (Accounts Receivable step 3b, Kevin approved "Build as-is" on 4 Oct 2026). One line per promise
 # above the headers, beside the TEXT lines: "PLAN: 2026-10-10 £100.00", and one line naming the tenancy the
 # agent read: "PLAN FOR: rec…" (a tenant's reply arrives as its own task, with no tenancy link). Kevin approves
 # the dates and amounts on the card; once the email has gone, scripts/rent_plans.py checks each promise against
@@ -718,7 +718,7 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
 # handing it to a carry-out run. Ending a trial is MOVING the entry to TRIAL_ENDED
 # below, in a PR Kevin approves: the cut-over is a decision, never a side effect.
 TRIAL_AGENTS = {
-    # Empty: no agent is on trial. The Cash Flow Voids agent's trial ended on 5 Oct 2026 (TRIAL_ENDED below).
+    # Empty: no agent is on trial. The Accounts Receivable agent's trial ended on 5 Oct 2026 (TRIAL_ENDED below).
 }
 TRIAL_STAMP = "TRIAL CHECKED"
 # THE TASK IS ON TRIAL TOO, WHOEVER HOLDS IT (independent review, 2 Oct 2026). A trial lane's task
@@ -736,7 +736,7 @@ TRIAL_TASK_MARKS = {
     # that prefix is the robot's direct rent payment form card (ROBOT FORM CARD below), which opens its window.
     "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "), "note": "RENT CHECK KEY: "},
 }
-# A ROBOT FORM CARD (Cash Flow Voids lane B, 3 Oct 2026; Kevin's ruling "Robot fills, you pick
+# A ROBOT FORM CARD (Accounts Receivable lane B, 3 Oct 2026; Kevin's ruling "Robot fills, you pick
 # reason"). The rent check raises the direct rent payment form card. Approving it opens ONE door:
 # the robot's window (agent-browser.js `handover`, through agent-dispatch.py `outcome`), where the
 # robot fills the form and Kevin checks every answer and sends it himself. Every other door stays
@@ -752,7 +752,7 @@ FORM_CARDS = {
 }
 
 
-# A CARD KEVIN WORKS HIMSELF (Cash Flow Voids lane C, 5 Oct 2026; Kevin's ruling on 4 Oct 2026 "Yes, runs
+# A CARD KEVIN WORKS HIMSELF (Accounts Receivable lane C, 5 Oct 2026; Kevin's ruling on 4 Oct 2026 "Yes, runs
 # for real"). The rent check raises the council housing payment claim card (RENT CLAIM) and the card asking
 # for the council's answer (RENT CLAIM DECISION). Kevin fills in the council's form himself and records its
 # answer. Every door is shut for them exactly as for a robot form card: never an agent's work, never sent,
@@ -807,7 +807,7 @@ def strip_trial_marks(text):
 # The diary and the post pass no approval time on purpose: a trial card can never carry those shapes
 # (TRIAL_ACTING_SHAPE_RE refuses them at submit), and a Level A diary entry has no approval to date.
 TRIAL_ENDED = {
-    # Cash Flow Voids (register row reclaAzGLA4utssxx). Kevin, 5 Oct 2026: "Let's take it off trial ... As long as
+    # Accounts Receivable (register row reclaAzGLA4utssxx). Kevin, 5 Oct 2026: "Let's take it off trial ... As long as
     # the guardrails are in place with the approval cards, I can check things as we go." Every card still waits for
     # his approval; a card he approved before this moment was a check and is never sent.
     "rec7aHLK1Q8fMLRXH": "2026-10-05T11:44:00Z",
@@ -1165,7 +1165,7 @@ def mailout_recipients_problem(task_name, parsed):
 # ─── KEVIN'S SIX RULINGS, THE SENDER AND QUOTE PARTS (16 Nov 2026, decision card recinoFWz6fQ6JVVB) ───
 #
 # Ruling 1: every email to a letting agent goes FROM info@agilelets.co.uk signed "Roy Lavin" then
-# "Agile Lets", Cash Flow Voids' AGENT RENT LATE email and its answer to the agent's reply included. The
+# "Agile Lets", Accounts Receivable's AGENT RENT LATE email and its answer to the agent's reply included. The
 # 5 Oct 2026 rule (from Kevin's Gmail, signed Kevin) is retired. GUARDRAILS has said since 17 Sep 2026
 # that all property mail from info@ is signed Roy Lavin, Agile Lets; the stored cards show the robots
 # still signed it "Kevin Brittain, on behalf of Agile Lets", "Kevin" or "Agile Lets Team".

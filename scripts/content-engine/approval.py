@@ -44,7 +44,7 @@ DISPATCH = os.path.join(REPO, "scripts", "agent-dispatch.py")
 TASKS_API = "https://api.airtable.com/v0/%s/tblqB8b22hKBL4PF1" % watch.BASE
 STATE = os.path.join(os.path.dirname(watch.LEDGER), "approvals.json")
 
-AGENT_TM = "recRcy1Edas6rGaaF"          # Team Members row "AI Content Engine" (register row recNaC0N5KiTGBPNy)
+AGENT_TM = "recRcy1Edas6rGaaF"          # Team Members row "AI Social Media Manager" (register row recNaC0N5KiTGBPNy)
 BUSINESS_PERSONAL = "reclAPC2vMx2Umuzb"  # every Runpreneur task on the board sits under Personal (read 3 Sep 2026)
 TF = {"name": "fldgFjGBw6bTKJFCD", "desc": "fldRGhBQViKZKtkQ6", "status": "fldx4qCw17UfrKpaN", "team": "flduCtmQGpOA4eWaj",
       "priority": "fldS21RwmwOqt71LI", "due": "fld7XP8w8kbxfETV4", "business": "fldLu1Y4GzyWcDoxr", "notes": "fldR7apBzSp3oxFxz",

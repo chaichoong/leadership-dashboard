@@ -1,4 +1,4 @@
-// Benefit-cap claims (Cash Flow Voids lane C; Kevin approved "Build as-is" on 4 Oct 2026, and "Yes, runs for real"
+// Benefit-cap claims (Accounts Receivable lane C; Kevin approved "Build as-is" on 4 Oct 2026, and "Yes, runs for real"
 // for the claim card). scripts/rent_cap.py raises the agent's RENT CAP task, Kevin's RENT CLAIM and RENT CLAIM
 // DECISION cards, reads his verdicts and keeps each claim moving; the signed step ticks Authority Signed; the
 // robots' link script makes a tenant's form link. These drive the REAL code with Airtable stubbed: every id,
@@ -17,11 +17,11 @@ const HARNESS = `
 import importlib.util, json, sys, os, io, contextlib, argparse, re, tempfile
 from datetime import date, timedelta
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
-# The Cash Flow Voids trial ended on 5 Oct 2026; these cases were written for the trial and prove its doors, so
+# The Accounts Receivable trial ended on 5 Oct 2026; these cases were written for the trial and prove its doors, so
 # each run puts the agent back on trial in its own process (tests/cash-flow-voids-agent.test.js block 10 reads
 # the real lists).
 import agent_email_format as _aef_trial
-_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Accounts Receivable agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
 _aef_trial.TRIAL_ENDED.pop("rec7aHLK1Q8fMLRXH", None)
 sys.argv = ["test"]
 def load_mod(name, file):

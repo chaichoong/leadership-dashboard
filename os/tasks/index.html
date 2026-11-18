@@ -2895,7 +2895,7 @@ function taskAgentId(t){
 }
 function taskAgentName(t){ const id=taskAgentId(t); return id?(AGENT_MAP[id]||''):'' }
 // Short label for a grid cell: "AI Worker — Writer" → "Writer",
-// "AI Operations (Gino Wickman)" → "Operations".
+// "AI Head of Operations" → "Head of Operations".
 function shortAgentName(name){
   return String(name||'').replace(/^AI\s+/,'').replace(/^Worker\s*[—-]\s*/,'').replace(/\s*\(.*\)$/,'').trim();
 }

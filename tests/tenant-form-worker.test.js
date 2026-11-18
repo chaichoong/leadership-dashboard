@@ -112,7 +112,7 @@ describe('making a link (signed in only)', () => {
   });
 });
 
-// The robots' key (Cash Flow Voids lane C, 5 Oct 2026): it makes a tenant's link and opens nothing else.
+// The robots' key (Accounts Receivable lane C, 5 Oct 2026): it makes a tenant's link and opens nothing else.
 describe("the robots' key", () => {
   const ROBOT = 'robot-key-test-0123456789';
   const robot = (body, key = ROBOT, path = '/tenant-form/robot-link', method = 'POST', origin) =>

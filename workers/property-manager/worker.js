@@ -27,7 +27,7 @@
 // And, signed in (Kevin or Roy), the link itself:
 //   POST /tenant-form/link     { tenantId }    → { ok, url, expires, firstName }
 //   POST /tenant-form/link/off { tenantId }    → { ok }
-// And the robots' own key (Cash Flow Voids lane C, 5 Oct 2026), which opens this one route and nothing else:
+// And the robots' own key (Accounts Receivable lane C, 5 Oct 2026), which opens this one route and nothing else:
 //   POST /tenant-form/robot-link { tenantId }  Authorization: Robot <PM_ROBOT_KEY>
 //                      → { ok, url, expires, firstName }, or 409 { error, expires } while a live link stands
 //                      (a robot never cuts off a link a tenant may be using; a person's button still can)

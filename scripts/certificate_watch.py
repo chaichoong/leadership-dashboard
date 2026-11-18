@@ -10,8 +10,8 @@ but were missing from the compliance book:
     filed" in its own output, and closed the task. The filing gate only looked
     at engine-raised renewal tasks.
   * an electrical report arrived on 24 Aug and Inbox Triage filed the email
-    under a label with no task, by a rule written before the Property
-    Administration agent existed. The book later got a row with a 753-byte
+    under a label with no task, by a rule written before the Compliance
+    agent existed. The book later got a row with a 753-byte
     placeholder instead of the report, and a placeholder counted as a document.
 
 The book showed "missing" for 18 days after a paid visit and nothing in the code
@@ -978,7 +978,7 @@ def premium_rises(rows, keyed_tasks, today, limit=PREMIUM_RISE_LIMIT):
 #   * the Costs table pays two insurance costs for it at once.
 # The daily run raises ONE task for every such house with no open task, naming
 # each policy with its premium and each cost with its Expected Cost, and asks the
-# Property Administration agent to PROPOSE which to cancel (keep the cheapest).
+# Compliance agent to PROPOSE which to cancel (keep the cheapest).
 # Cancelling is Kevin's (Level C): nothing here cancels anything.
 #
 # What is NOT a second policy, each one a test:
@@ -1259,7 +1259,7 @@ TF = {"name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "due": "fld7XP
       "estimate": "fld10VzzbiNNgRmIi",
       # LMT: last modified time over ALL fields (read only, base schema 7 Oct 2026).
       "modified": "flddJA23cJRX5cs1K"}
-PROPERTY_ADMIN_REC = "recwWvBju2ycB63i4"   # Team Members: AI Property Administration
+PROPERTY_ADMIN_REC = "recwWvBju2ycB63i4"   # Team Members: AI Compliance
 ORDER_RULE = ("Order of work (Kevin, 7 Oct 2026): lapsed first, then the quarter plan's list "
               "order, then soonest expiry.")
 
@@ -1709,7 +1709,7 @@ def cmd_daily(apply):
         """One create through the gate. Paused: nothing is raised, and the row says so."""
         if paused:
             return {"what": what, "name": fields[TF["name"]], "ok": False,
-                    "gate": "not raised: the Property Administration agent is paused"}
+                    "gate": "not raised: the Compliance agent is paused"}
         ok, out = gate_create(fields, apply)
         row = {"what": what, "name": fields[TF["name"]], "ok": ok, "gate": out.get("action"),
                "taskId": out.get("taskId", ""), "dryRun": not apply}

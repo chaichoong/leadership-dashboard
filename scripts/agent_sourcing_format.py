@@ -108,9 +108,9 @@ SHAPE = (
 
 
 # A task raised to buy something is NAMED for it. The dispatcher reads this to keep the task with
-# the Inbox Response agent, whose rules hold the sourcing process (Kevin's ruling, 11 Nov 2026:
-# "sourcing requests stay in the Inbox Response lane"). On 12 Nov 2026 the first such task, for
-# mains smoke alarms, was about to move to Property Administration on the words "smoke alarm".
+# the Customer Service agent, whose rules hold the sourcing process (Kevin's ruling, 11 Nov 2026:
+# "sourcing requests stay in the Inbox Response lane", the agent now named Customer Service). On 12 Nov 2026 the first such task, for
+# mains smoke alarms, was about to move to Compliance on the words "smoke alarm".
 SOURCING_TASK_PREFIX = "SOURCING:"
 
 

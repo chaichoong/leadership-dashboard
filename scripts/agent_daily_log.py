@@ -2,14 +2,14 @@
 """agent_daily_log.py — THE one writer for the AI Agent Daily Log table.
 
 Found 26 Aug 2026: the Daily Log table held 3 rows ever, written by two
-agents, while four Built/Live agents (Creditor Management, Inbound Comms
+agents, while four Built/Live agents (Accounts Payable, Inbound Comms
 Response, Prospecting, Reconciliation) had never logged a day in their
 lives — their runtimes simply had no publish step, so the AI Agents page's
 "Daily logs" check could only report a permanent wiring gap. This module is
 that missing step, shared so no runtime grows its own drifting copy:
 
   * scripts/agent-dispatch.py imports it (write_register_reading publishes a
-    row every time a role agent's score is computed, so Creditor Management
+    row every time a role agent's score is computed, so Accounts Payable
     and Inbound Comms Response log on every slot run);
   * the prospect-daily-run routine (parked 27 Sep) and the retired daily-transaction-reconciler folder call
     the CLI at the end of a run:

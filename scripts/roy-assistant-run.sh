@@ -6,7 +6,7 @@
 # finds new systems slow to pick up, so his assistant lives in that inbox. He
 # forwards a tenant's message from info@ to info@ with one line saying what he
 # wants; scripts/roy-assistant.py turns it into a ROY: task and emails "Got it".
-# This run then has the Inbox Response agent work those tasks at once: new
+# This run then has the Customer Service agent work those tasks at once: new
 # work otherwise waits for the 07:00 run or the next triage slot, and a tenant
 # waiting half a day is exactly what Roy would stop using this for.
 #
@@ -142,7 +142,7 @@ export AGENT_RUN_QUEUE="$RUNDIR/queue.json"
 
 RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written moments ago. Do NOT re-run the queue subcommand.
 
-WORK ONLY THESE TASK IDS: $IDS. Ignore every other item in the worklist, and do NO routing or escalation. Each is a ROY: task owned by Inbox Response; dispatch it to that local agent, whose file has a section 'Roy's requests' saying exactly how to work one: a question is answered to Roy with ROY ANSWER:, work logged for him is ROY DONE: naming every record id, and every email to a tenant, contractor or letting agent is Correspondence FROM info@agilelets.co.uk signed Roy Lavin, Agile Lets, which goes to Kevin's queue like any other card. Roy approves nothing. Do NOT send anything to Roy yourself: roy-assistant.py emails him the outcome after this run.
+WORK ONLY THESE TASK IDS: $IDS. Ignore every other item in the worklist, and do NO routing or escalation. Each is a ROY: task owned by Customer Service; dispatch it to that local agent, whose file has a section 'Roy's requests' saying exactly how to work one: a question is answered to Roy with ROY ANSWER:, work logged for him is ROY DONE: naming every record id, and every email to a tenant, contractor or letting agent is Correspondence FROM info@agilelets.co.uk signed Roy Lavin, Agile Lets, which goes to Kevin's queue like any other card. Roy approves nothing. Do NOT send anything to Roy yourself: roy-assistant.py emails him the outcome after this run.
 
 Everything else in the skill applies in full: the gate sits BEFORE the action; tier-1 labelling and --tier1 on tier-1 work; the carry-out closing line; step 4b's CEO review pass on non-tier-1 drafts; step 5's report.json in $RUNDIR; step 7 (verify) is mandatory. Do not take the queue lock — this run is lock-exempt and must never queue for it; Roy's new requests are listed in the worklist of THIS queue read only, so no other run drafts them. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working files go under $RUNDIR/TASKID/ only. End with at most ten lines of counts: no message content, no names, no record ids." \
   --add-dir "$RUNDIR" \

@@ -362,14 +362,14 @@ NEW_WORK_FLOOR = 10
 # task still linked to one is worked or routed by the CEO and never dispatched
 # to an agent file that no longer exists.
 AGENTS = {
-    "reciHUAEcEkbctnZ6": {"name": "AI CEO (Dan Martell)",                    "agent": "od-ceo",                "role": "ceo"},
+    "reciHUAEcEkbctnZ6": {"name": "AI CEO",                    "agent": "od-ceo",                "role": "ceo"},
     "rec27NaJB7JNLaBB0": {"name": "AI HR & People (Patrick Lencioni)",       "agent": "od-ceo",                "role": "ceo"},     # retired 9 Oct 2026
     "recCzAdg2rO8bha9A": {"name": "AI Wealth (Robert Kiyosaki)",             "agent": "dept-finance",          "role": "head"},    # folded into Finance 9 Oct 2026
-    "recFZ1ofn0OuoZNEr": {"name": "AI Strategy (Gary Keller)",               "agent": "dept-strategy",         "role": "head"},
-    "recGvMnprGf1hr9Z1": {"name": "AI Finance (Greg Crabtree)",              "agent": "dept-finance",          "role": "head"},
+    "recFZ1ofn0OuoZNEr": {"name": "AI Head of Strategy",               "agent": "dept-strategy",         "role": "head"},
+    "recGvMnprGf1hr9Z1": {"name": "AI Head of Finance",              "agent": "dept-finance",          "role": "head"},
     "recMKExCwu0ulMBMG": {"name": "AI Productivity (Chris Bailey)",          "agent": "od-ceo",                "role": "ceo"},     # retired 9 Oct 2026
-    "recRStFWWEyHgOD6t": {"name": "AI Operations (Gino Wickman)",            "agent": "dept-operations",       "role": "head"},
-    "recSvV7a47ze9i5X9": {"name": "AI Legal & Compliance (Keith Cunningham)","agent": "dept-legal-compliance", "role": "head"},
+    "recRStFWWEyHgOD6t": {"name": "AI Head of Operations",            "agent": "dept-operations",       "role": "head"},
+    "recSvV7a47ze9i5X9": {"name": "AI Head of Legal","agent": "dept-legal-compliance", "role": "head"},
     "recYD7avVxouIkH5b": {"name": "AI Systemisation (Dave Jenyns)",          "agent": "dept-operations",       "role": "head"},    # folded into Operations 9 Oct 2026
     "recZlgKJZn7xsBfoz": {"name": "AI Mindset (John F. DeMartini)",          "agent": "od-ceo",                "role": "ceo"},     # retired 9 Oct 2026
     "reciAJnPnFEbj5FhX": {"name": "AI Marketing (Alex Hormozi)",             "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
@@ -391,7 +391,7 @@ OFF_BOARD = {
     "recZlgKJZn7xsBfoz": "Retired. The AI CEO covers overwhelm and protected assets.",
     "reciAJnPnFEbj5FhX": "Parked until the January Operations Director decision.",
     "recpCz18pCLCUf3oJ": "Parked until the January Operations Director decision.",
-    "recFMVmHmqAOVPAeJ": "Parked until January. Drafted replies go to Inbox Response.",
+    "recFMVmHmqAOVPAeJ": "Parked until January. Drafted replies go to Customer Service.",
 }
 REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 
@@ -414,20 +414,20 @@ REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 # *_REGISTER_ROW names below are derived aliases, kept so the many existing
 # readers (and their tests) stay true — never redefine them by hand.
 ROLE_AGENTS = {
-    "recJ8J8idWE8d97tH": {"name": "AI Inbox Response",
+    "recJ8J8idWE8d97tH": {"name": "AI Customer Service",
                           "agent": "inbound-comms-response", "role": "worker",
                           "registerRow": "recHfhVDb6BfQYco5"},
-    "recjh6mmaF8KJW8t3": {"name": "AI Supplier and Creditor Manager",
+    "recjh6mmaF8KJW8t3": {"name": "AI Accounts Payable",
                           "agent": "creditor-management", "role": "worker",
                           "registerRow": "recDvxwDGcC3pFbPa"},
-    "rec1hYELb4zS8pjjO": {"name": "AI Task Board Manager",
+    "rec1hYELb4zS8pjjO": {"name": "AI Operations Manager",
                           "agent": "task-manager", "role": "worker",
                           "registerRow": "reczg8BygPFnJMQnh"},
-    # Property Administration (build session 2 Sep 2026; was Property
+    # Compliance (build session 2 Sep 2026; was Property
     # Compliance, with Property Maintenance merged in at the agent gate).
     # Owns certificates, licences, landlord insurance and inspections across
     # the portfolio; repairs stay Roy's same-hour lane (Kevin's ruling).
-    "recwWvBju2ycB63i4": {"name": "AI Property Administration",
+    "recwWvBju2ycB63i4": {"name": "AI Compliance",
                           "agent": "property-administration", "role": "worker",
                           "registerRow": "recZBW9tjcx9WJw4q"},
     # LESSONS ONLY — never dispatched. Added 27 Aug 2026.
@@ -458,16 +458,16 @@ ROLE_AGENTS = {
     # in this dict; `dispatch: False` because the CEO pass must never hand it
     # work — its work arrives as raw clips, not tasks. Lessons land in
     # ~/.claude/agents/content-engine.md and both of its Claude calls read them.
-    "recRcy1Edas6rGaaF": {"name": "AI Content Producer",
+    "recRcy1Edas6rGaaF": {"name": "AI Social Media Manager",
                           "agent": "content-engine", "role": "worker",
                           "registerRow": "recNaC0N5KiTGBPNy",
                           "dispatch": False},
-    # Cash Flow Voids, lane A (build 2 Oct 2026; chain map approved by Kevin the
+    # Accounts Receivable, lane A (build 2 Oct 2026; chain map approved by Kevin the
     # same day, on the register row). scripts/rent-check.py raises one RENT LATE
     # task per late tenancy per stage and this agent drafts the email to the
     # tenant. It is a TRIAL agent (TRIAL_AGENTS in agent_email_format.py): its
     # cards reach Kevin's queue like any other and nothing it raises is sent.
-    "rec7aHLK1Q8fMLRXH": {"name": "AI Cash Flow Voids",
+    "rec7aHLK1Q8fMLRXH": {"name": "AI Accounts Receivable",
                           "agent": "cash-flow-voids", "role": "worker",
                           "registerRow": "reclaAzGLA4utssxx"},
 }
@@ -478,7 +478,7 @@ RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
 CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
 TASKMGR_REC_ID = "rec1hYELb4zS8pjjO"           # Team Members row
 PROPERTY_REC_ID = "recwWvBju2ycB63i4"          # Team Members row
-RENT_REC_ID = "rec7aHLK1Q8fMLRXH"              # Team Members row (Cash Flow Voids)
+RENT_REC_ID = "rec7aHLK1Q8fMLRXH"              # Team Members row (Accounts Receivable)
 RESPONSE_REGISTER_ROW = ROLE_AGENTS[RESPONSE_REC_ID]["registerRow"]
 CREDITOR_REGISTER_ROW = ROLE_AGENTS[CREDITOR_REC_ID]["registerRow"]
 TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]
@@ -557,7 +557,7 @@ def fetch_ai_agents():
 # ─── Deterministic routing lanes (ordered, first match wins) ─────────
 #
 # Kevin's rulings: inbound reply tasks go to the Response agent (24 Aug 2026)
-# and creditor/payment-chasing inbound goes to the Creditor Management agent
+# and creditor/payment-chasing inbound goes to the Accounts Payable agent
 # (25 Aug 2026) — no CEO judgement per routine item. Creditor sits FIRST
 # because a creditor email is an inbound task too, and the specialist owns it.
 #
@@ -576,8 +576,8 @@ def fetch_ai_agents():
 # creditor correspondence (t["tier2Correspondence"]) only.
 #
 # The property lane (2 Sep 2026) sits between them: a compliance matter —
-# certificate, licence, landlord insurance, inspection — goes to the Property
-# Administration agent whether or not it arrived by email, because its
+# certificate, licence, landlord insurance, inspection — goes to the Compliance
+# agent whether or not it arrived by email, because its
 # engine-raised renewal tasks are not inbound and must still land there. It
 # is NOT inbound-only like the creditor lane because property_match is
 # name-only with a legal veto, the same discipline that makes the Roy lane
@@ -587,9 +587,9 @@ def fetch_ai_agents():
 AUTO_ROUTES = (
     # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"; widened 5 Oct 2026): an inbound message
     # from anyone a rent card wrote to (open, or SENT in the last REPLY_WINDOW_DAYS; RENT LATE, PLAN, CAP, DETAILS,
-    # and the letting agent of an AGENT RENT LATE card) goes to the Cash Flow Voids agent, which drafts the answer
+    # and the letting agent of an AGENT RENT LATE card) goes to the Accounts Receivable agent, which drafts the answer
     # and any payment plan. OFF until the agent's trial has ended: rent_reply_senders() reads nothing while
-    # it is on trial, so no tenant's message waits on a draft that cannot be sent; Inbox Response answers
+    # it is on trial, so no tenant's message waits on a draft that cannot be sent; Customer Service answers
     # him meanwhile. First, because the sender is a known tenant mid-chase; Roy's repair lane diverts
     # before AUTO_ROUTES, so a repair from the same tenant still goes to Roy.
     {"rec": RENT_REC_ID,
@@ -642,7 +642,7 @@ TENANT_EMAIL, TENANT_PHONE = "fldybEduFY3DWWTfT", "fldraHUkWfqo4olLF"
 def rent_reply_senders(today=None):
     """The emails and mobiles a reply to the rent lane could come from, as sender_key spells them: the tenants on an
     open rent card or one SENT in the last REPLY_WINDOW_DAYS, and, for a letting agent's card (AGENT RENT LATE), the
-    address it went to, never the tenant, who was not written to. Empty, reading nothing, while the Cash Flow Voids
+    address it went to, never the tenant, who was not written to. Empty, reading nothing, while the Accounts Receivable
     agent is on trial or its trial has not ended."""
     if RENT_REC_ID in TRIAL_AGENTS or RENT_REC_ID not in TRIAL_ENDED:
         return set()
@@ -1002,7 +1002,7 @@ def lane_match(patterns, exclude_re, name, description="", notes=""):
 #
 # Same discipline as the Roy lane: MATCH ON THE NAME, VETO ON EVERYTHING. The
 # veto here is the law and the live legal matter plus creditor vocabulary
-# (money owed is the Creditor Management agent's, contractor invoices
+# (money owed is the Accounts Payable agent's, contractor invoices
 # included). Money words that ARE this lane — a licence fee, an insurance
 # premium — are deliberately not vetoed: the approval gate sits before every
 # payment regardless, and Kevin pays; the agent only prepares.
@@ -1035,7 +1035,7 @@ PROPERTY_EXCLUDE_RE = re.compile(
     r"solicitor|\bcourt\b|enforcement|bailiff|liability\s+order|"
     r"restraint\s+order|statutory\s+demand|\blegal\b|\bhmrc\b|"
     r"companies\s+house|council\s+tax|mortgage|\bsell\b|refinanc|"
-    # Creditor vocabulary — money OWED is the Creditor Management lane
+    # Creditor vocabulary — money OWED is the Accounts Payable lane
     r"\binvoice|chas(?:e|ing)\s+(?:a\s|the\s)?payment|payment\s+chas|"
     r"\bdebt\b|\barrears|final\s+(?:notice|demand)|letter\s+(?:before|of)\s+"
     r"(?:action|claim)|default\s+notice|premium\s+finance",
@@ -1044,7 +1044,7 @@ PROPERTY_EXCLUDE_RE = re.compile(
 
 
 def property_match(name, description="", notes=""):
-    """Why this is the Property Administration agent's, or ""."""
+    """Why this is the Compliance agent's, or ""."""
     return lane_match(PROPERTY_PATTERNS, PROPERTY_EXCLUDE_RE, name, description, notes)
 
 
@@ -1133,7 +1133,7 @@ def system_alert_match(sender, *texts):
 
 
 # Creditor lane: money Kevin or his businesses OWE. The routing floor for the
-# Creditor Management agent (build session 25 Aug 2026; Kevin approved routing
+# Accounts Payable agent (build session 25 Aug 2026; Kevin approved routing
 # creditor and payment-chasing work to the specialist, including the formerly
 # tier-2-parked correspondence). Same floor-not-ceiling contract as
 # TIER1_PATTERNS: the dispatcher's judgement pass routes what these miss.
@@ -2474,7 +2474,7 @@ PASS_TO_ROY_RE = re.compile(r"^\s*PASS TO ROY:", re.I)
 # ─── ROY'S ASSISTANT (Kevin, 24 Sep 2026) ───────────────────────────────
 # Roy forwards a message from info@agilelets.co.uk to itself with one line
 # saying what he wants. scripts/roy-assistant.py reads it out of info@'s Sent
-# folder, makes one "ROY:" task for Inbox Response and stamps ROY_REQUEST_MARK
+# folder, makes one "ROY:" task for Customer Service and stamps ROY_REQUEST_MARK
 # on its Notes. BOTH are required: the prefix alone is a name anyone can type,
 # the stamp is written only after the message was read from the Sent folder.
 # A Roy request is work FOR Roy, so it never goes back to him through the Roy
@@ -4359,7 +4359,7 @@ def load_standing_holds():
 
 # ─── ONE TASK, ONE ANSWER (Kevin, 15 Oct 2026) ───────────────────────
 #
-# The dispatcher and the Task Board Manager (scripts/task-manager.py) both
+# The dispatcher and the Operations Manager (scripts/task-manager.py) both
 # classify the open board, and until 15 Oct 2026 they did it with partly
 # separate rules. Read off the live board that day, three kinds of task got two
 # answers: a task parked here as a SYSTEM ALERT read as ordinary stuck work on
@@ -4490,7 +4490,7 @@ def task_lane(t, ctx):
     is in `ctx` (lane_context)."""
     # A STANDING HOLD WINS FIRST (Kevin, 24 Sep 2026). He ruled that nothing
     # on the matter moves until an event (a named person's reply); on
-    # 23 Sep the Task Board Manager raised eight cards he had already ruled
+    # 23 Sep the Operations Manager raised eight cards he had already ruled
     # on, because the ruling lived in two other agents' files. A hold is
     # read here for every agent, and an approval he gave AFTER the hold
     # began is his newer word, so hold_for never holds it. Listed, never
@@ -4533,7 +4533,7 @@ def task_lane(t, ctx):
     hit2, out2 = _mark_task(t, ctx)
     if hit2 and out2 and not ctx["creditor_ok"]:
         # The old Mica lane survives ONLY as the fallback: while the
-        # Creditor Management agent's register row is not Built/Live
+        # Accounts Payable agent's register row is not Built/Live
         # (Kevin's pause lever), creditor correspondence parks exactly as
         # it did before 25 Aug 2026 rather than flowing to a generalist.
         return "skippedTier2", {"matchedPattern": hit2, "outboundPattern": out2}
@@ -4572,7 +4572,7 @@ def task_lane(t, ctx):
     # defence. An APPROVED task is never diverted — Kevin has already said
     # yes to that exact work and it must be carried out, not handed on.
     # THE PROPERTY LANE (2 Sep 2026). Compliance matters go to the
-    # Property Administration agent through AUTO_ROUTES below, so they
+    # Compliance agent through AUTO_ROUTES below, so they
     # are marked here and NOT diverted to Roy. While the agent's register
     # row is not Built/Live (Kevin's pause lever) the mark is dropped and
     # the task falls through to the Roy lane exactly as before this
@@ -4583,12 +4583,12 @@ def task_lane(t, ctx):
     # him; the property steal would move it to an agent that has no
     # answer-to-Roy shapes. Tier 1 and the creditor lane still win.
     roy_request = is_roy_request(t["name"], t["notes"])
-    # A DIARY TASK stays with Inbox Response (Kevin, 18 Oct 2026). "CALENDAR: Boiler service,
+    # A DIARY TASK stays with Customer Service (Kevin, 18 Oct 2026). "CALENDAR: Boiler service,
     # British Gas" carries a repair word and "CALENDAR: Gas safety check" a compliance word, but
     # each is a date for Kevin's diary, never a job for Roy or the compliance book.
     diary = _gate().calendar_task(t["name"])
-    # A BUYING TASK stays with Inbox Response (Kevin, 11 Nov 2026: sourcing is that agent's). On
-    # 12 Nov 2026 "SOURCING: mains smoke alarms ..." was about to move to Property Administration
+    # A BUYING TASK stays with Customer Service (Kevin, 11 Nov 2026: sourcing is that agent's). On
+    # 12 Nov 2026 "SOURCING: mains smoke alarms ..." was about to move to Compliance
     # on the words "smoke alarm", an agent with no buying rules; "SOURCING: a replacement boiler"
     # would have gone to Roy as a repair. The item's name says what is bought, never whose job
     # the buying is. Tier 1 and the creditor lane still win, as they do for a diary task.
@@ -4665,7 +4665,7 @@ def task_lane(t, ctx):
             # specialist — the deliberately narrow steal predicates in
             # AUTO_ROUTES decide, so the CEO's explicit routing choices
             # are not silently overridden.
-            # A diary task stays with Inbox Response (Kevin, 18 Oct 2026): "CALENDAR: Call with
+            # A diary task stays with Customer Service (Kevin, 18 Oct 2026): "CALENDAR: Call with
             # Barclaycard - Wed 28 Oct" names a creditor, but it is a date for Kevin's diary.
             target = (None if _gate().calendar_task(t["name"])
                       else auto_route_steal(t, tm, ctx["role_roster"]))
@@ -4796,7 +4796,7 @@ def build_queue(args=None):
     roy_run = os.environ.get("ROY_ASSISTANT_RUN") == "1"
     creditor_count = 0
     # Tenants mid-chase, for the rent reply lane. A failed read leaves the lane empty and says so: the
-    # message then goes to Inbox Response as before, never nowhere.
+    # message then goes to Customer Service as before, never nowhere.
     rent_senders, rent_senders_error = set(), ""
     try:
         rent_senders = rent_reply_senders()
@@ -5265,7 +5265,7 @@ def cmd_reassign(args):
         if not feedback_archived(hist, prior):
             fields[AF["feedbackHistory"]] = (hist.rstrip() + "\n\n" + block).strip()
     patch_task(args.task, fields)
-    print(json.dumps({"reassigned": args.task, "to": "AI CEO (Dan Martell)",
+    print(json.dumps({"reassigned": args.task, "to": "AI CEO",
                       "reason": args.reason, "priorBounces": bounces}))
 
 
@@ -5625,7 +5625,7 @@ def cmd_escalate(args):
         AF["approvalFeedback"]: None,
         AF["status"]: "Approval",
         # The Task Manager's Team Members row — read live from Team Members
-        # tblco0p2OnlLQVAX7 on 15 Sep 2026 ("AI Task Board Manager"), and the
+        # tblco0p2OnlLQVAX7 on 15 Sep 2026 ("AI Operations Manager"), and the
         # same id ROLE_AGENTS carries. The gate needs a sender or it hides the
         # row (APV_QUEUE_FORMULA requires Sent For Approval By).
         AF["sentForApprovalBy"]: [TASKMGR_REC_ID],
@@ -6320,7 +6320,7 @@ def paid_check_problem(task_rec, output, task_type):
 
 
 # 2. NEVER RENEW, BUY FRESH THROUGH TOPCASHBACK (inbound-comms-response 30 Sep 2026, property-
-# administration 25 Sep 2026; broken three times on Property Administration cards). On a task in the
+# administration 25 Sep 2026; broken three times on Compliance cards). On a task in the
 # insurance lane (insurance, premium finance or credit in its name), a closing line or approve line that
 # renews the policy, accepts or signs the renewal, or signs its finance agreement is refused unless the
 # card carries the TopCashback comparison (`TOPCASHBACK QUOTE: <insurer> £<net>` lines) or the reason
@@ -6857,8 +6857,8 @@ def managed_compliance_problem(name, output, mail_subject, task_fields=None):
 #
 # The same shape as the eight above: each reads only the shape it is about, says what it found, and
 # names its way through. Every one was back-tested read-only on the stored Agent Outputs of the 30 days
-# to 16 Nov 2026 (547 tasks with a submit in that window, 202 Inbox Response submit rounds, 112
-# Property Administration rounds) and narrowed until it refused fewer than 1 in 10.
+# to 16 Nov 2026 (547 tasks with a submit in that window, 202 Customer Service submit rounds, 112
+# Compliance rounds) and narrowed until it refused fewer than 1 in 10.
 #
 # A line that names the agent's check never goes in an email body, where it would be sent. On an email
 # card there is no other line for it: everything above the `---` is read as a header (an unknown header
@@ -6924,13 +6924,13 @@ CLOSE_OR_STATUS_RE = re.compile(r"\s*(?:CLOSE PROPOSAL|STATUS ONLY)\s*:", re.I)
 
 # 9. ONE MATTER, ONE CARD (inbound-comms-response lesson of 27 Aug 2026: "Before any submit, search open
 # and pending tasks for the same matter. Fold or close a duplicate. Never send Kevin the same thing
-# twice"). An Inbox Response card is refused while another card the creation gate would fold it into
+# twice"). A Customer Service card is refused while another card the creation gate would fold it into
 # (its own decide(): same lane, no other house, tenant or linked record, same counterparty, then the
 # subject key or the word pass with every guard) is already waiting on Kevin, unless the card names that
 # card and says why it is another matter. Narrowed to cards WAITING on him because that is where "twice"
 # happens: PR 950's back-test of the open-task version refused 171 of 1,246 submits (content episodes,
 # football fixtures), and an open task with no card yet is caught when its own card is submitted. Back-
-# test, 30 days to 16 Nov 2026: 4 of 202 Inbox Response submit rounds refused, three a second or third
+# test, 30 days to 16 Nov 2026: 4 of 202 Customer Service submit rounds refused, three a second or third
 # card on one subscription cancellation while the cost card on it waited, one a second card on one
 # letting agent's October move. A fifth, two bills from one letting agent for two flats, is why
 # names_differ_on_detail exists: it passes.
@@ -6939,7 +6939,7 @@ DUPLICATE_CHECK_LINE_RE = re.compile(r"\bDUPLICATE CHECK[ \t*_]*:[ \t*_]*not the
 
 
 def twin_card_problem(task_rec, output, fetch=None, said=""):
-    """Why an Inbox Response card must not reach Kevin while its twin is already waiting on him, or ''.
+    """Why a Customer Service card must not reach Kevin while its twin is already waiting on him, or ''.
     `said` is the submit's --duplicate-check text."""
     if CLOSE_OR_STATUS_RE.match(output or ""):
         return ""
@@ -7089,11 +7089,11 @@ def bill_promise_problem(task_id, output, plain_approve, fetch=None, said=""):
 
 # 11. ONE JOB PER HOUSE AND CERTIFICATE (property-administration lesson of 15 Sep 2026: "Before raising or
 # submitting anything, look for another open task or waiting card on the same house and certificate. If
-# one exists, fold into it"). A Property Administration card on a task about one certificate at one house
+# one exists, fold into it"). A Compliance card on a task about one certificate at one house
 # is refused while another card on the same house and certificate is waiting on Kevin, unless the card
 # names it and says why it is another job. Narrowed to waiting cards: PR 950 measured the open-task version
 # at 24 of 90 refused, 16 of them approved as-is (a quote reply and its booking are two open tasks in one
-# chain). Back-test, 30 days to 16 Nov 2026: 1 of 112 Property Administration submit rounds, a contractor
+# chain). Back-test, 30 days to 16 Nov 2026: 1 of 112 Compliance submit rounds, a contractor
 # booking for a gas safety check while a card asking the letting agent for the same house's certificate
 # waited (the double purchase the lesson is about).
 SAME_HOUSE_LINE_RE = re.compile(r"\bSAME HOUSE CHECK[ \t*_]*:[ \t*_]*(rec[A-Za-z0-9]{14})[ \t*_]*is a different job"
@@ -7101,7 +7101,7 @@ SAME_HOUSE_LINE_RE = re.compile(r"\bSAME HOUSE CHECK[ \t*_]*:[ \t*_]*(rec[A-Za-z
 
 
 def same_house_card_problem(task_rec, output, fetch=None, said=""):
-    """Why a Property Administration card must not reach Kevin beside another on the same house and
+    """Why a Compliance card must not reach Kevin beside another on the same house and
     certificate, or ''. `said` is the submit's --same-house-check text."""
     if CLOSE_OR_STATUS_RE.match(output or ""):
         return ""
@@ -7994,7 +7994,7 @@ def cmd_submit(args):
     # THE SOURCING CARD (Kevin, 11 Nov 2026). On 2 Nov a fridge freezer card reached him with ten
     # listing links and a wall of text, and he vetted every link himself. A sourcing card offers one
     # pick per unit needed and two reserves, facts on fixed lines (scripts/agent_sourcing_format.py).
-    # An Inbox Response card that offers a listing to buy without the shape is refused too.
+    # A Customer Service card that offers a listing to buy without the shape is refused too.
     src_problem = sourcing_problem(output)
     if not src_problem and getattr(args, "agent", "") == RESPONSE_REC_ID:
         src_problem = listing_without_shape_problem(output)
@@ -9263,7 +9263,7 @@ def signed_handoff_note(stamp, agreement, pdf, then):
 
 
 AUTHORITY_SIGNED = "fldHPe9YQ6GmlrKBt"     # Tenants: Authority Signed (checkbox; workers/property-manager/fields.mjs)
-# A tenant's letter of authority is named this way in Adobe (the Cash Flow Voids agent file says so). A
+# A tenant's letter of authority is named this way in Adobe (the Accounts Receivable agent file says so). A
 # document that only mentions an authority ("Local Authority ...") never ticks anything.
 AUTHORITY_RE = re.compile(r"^\s*letters? of (?:authority|authori[sz]ation)\b", re.I)
 SIGNERS_LINE_RE = re.compile(r"^\s*SIGNERS:\s*(.+)$", re.I | re.M)
@@ -9327,7 +9327,7 @@ def cmd_signed(args):
     rec = get_task(args.task)
     tf = rec.get("fields", {}) or {}
     notes = str(tf.get(AF["notes"]) or "")
-    # A LETTER OF AUTHORITY ticks Authority Signed on the tenants who signed it (Cash Flow Voids lane C, 5 Oct
+    # A LETTER OF AUTHORITY ticks Authority Signed on the tenants who signed it (Accounts Receivable lane C, 5 Oct
     # 2026): the benefit-cap claim card waits on that tick. It never holds up the hand-off: a failed tick is said
     # and exits 1, so signature-watch offers the row again and the next poll ticks it ("already handed off").
     tick = {"authorityTicked": [], "authorityNote": "", "authorityError": ""}
@@ -11209,7 +11209,7 @@ def trial_approved_tasks():
     out = []
     for rec in rows:
         t = task_view(rec)
-        # The queue's own order (review, 4 Oct 2026): Kevin's answer to a DECIDE: card goes to the Task
+        # The queue's own order (review, 4 Oct 2026): Kevin's answer to a DECIDE: card goes to the Operations
         # Manager, and an agent on its own go signal carries out its own cards, before any trial check.
         if is_decide_card(t["agentOutput"]) or own_go_signal(t["agentId"]):
             continue
@@ -14025,7 +14025,7 @@ def cmd_verify(args):
                 and not str(live["name"]).startswith(REVIEW_TASK_PREFIX)):
             creditor_submits.append((a["task"], str(live["name"])[:60]))
         # Collected for the compliance-book gate below: a renewal the
-        # Property Administration agent carried out and CLOSED must have
+        # Compliance agent carried out and CLOSED must have
         # filed its certificate, or been handed to a person.
         if (kind == "carry_out" and not a.get("keepOpen")
                 and PROPERTY_REC_ID in (live["teamMemberIds"]
@@ -14342,9 +14342,9 @@ def raise_engine_task(name, team_rec_id, estimate, desc, due=None,
 # the AI Agents page's "Daily logs" check reads: without it an agent's runs
 # are invisible and the page can only report a wiring gap (found 26 Aug 2026
 # — four Built/Live agents had never logged once).
-SCORE_AGENT_NAMES = {"response": "Inbox Response",
-                     "creditor": "Supplier and Creditor Manager",
-                     "property": "Property Administration"}
+SCORE_AGENT_NAMES = {"response": "Customer Service",
+                     "creditor": "Accounts Payable",
+                     "property": "Compliance"}
 
 
 def write_register_reading(label, register_row, state_path, reading, stats,
@@ -14556,7 +14556,7 @@ KEVIN_APPROVER_USR = "usrKkopUJSGsBhWMD"
 
 
 def ensure_weekly_review():
-    """The Creditor Management agent's weekly fixed-cost review task, raised
+    """The Accounts Payable agent's weekly fixed-cost review task, raised
     by the engine every Monday (Kevin's ruling, 25 Aug 2026).
 
     Raised HERE, in code, London time — never via the Airtable Recurring
@@ -14589,7 +14589,7 @@ def ensure_weekly_review():
             desc=(
                 "Weekly fixed-cost review (raised automatically each Monday "
                 "by agent-dispatch). Follow the ordered review steps in the "
-                "Creditor Management agent's register row: read active "
+                "Accounts Payable agent's register row: read active "
                 "costs, flag rises above 10% or £10/mo, duplicates, and "
                 "costs with no matching transaction in 90 days; every "
                 "saving of £5/mo or more becomes its own recommendation "
@@ -15122,7 +15122,7 @@ def creditor_ledger_selftest():
     print("selftest-creditor-ledger: all checks passed")
 
 
-# ─── THE COMPLIANCE BOOK (Property Administration, Kevin-approved chain,
+# ─── THE COMPLIANCE BOOK (Compliance, Kevin-approved chain,
 #     2 Sep 2026; rebuilt the same day after the independent review) ────
 #
 # One page per property: who manages it, what it must hold, what it holds and
@@ -15747,8 +15747,8 @@ def cmd_certificate_gaps(args):
         sys.exit(3)
 
 
-# ONE WEEKLY CHASE FOR ROY'S STALE REPAIRS (Kevin, 17 Sep 2026). The Property
-# Administration file has promised since 2 Sep to follow up any repair task of
+# ONE WEEKLY CHASE FOR ROY'S STALE REPAIRS (Kevin, 17 Sep 2026). The Compliance
+# agent's file has promised since 2 Sep to follow up any repair task of
 # Roy's with no movement in 7 days, but nothing ever raised that follow-up: it
 # happened only if a run happened to look (found by the 17 Sep handoff map).
 # One task a week, listing every stale repair, so Roy gets one chase and Kevin's
@@ -16371,9 +16371,9 @@ def main():
     sub.add_parser("queue")
 
     sc = sub.add_parser("score",
-                        help="compute the Inbound Comms Response 24h metric, "
-                             "the Creditor Management ledger reading and the "
-                             "Property Administration outstanding-issues "
+                        help="compute the Customer Service 24h metric, "
+                             "the Accounts Payable ledger reading and the "
+                             "Compliance outstanding-issues "
                              "reading, write each to its register Metric "
                              "Score, and raise the engine's own tasks")
     sc.add_argument("--selftest", action="store_true",
@@ -16464,10 +16464,10 @@ def main():
                         "certificate we may already hold (the compliance book, the task history, each inbox) and "
                         "what you found. Stamped on the task's Notes, never put in the email.")
     s.add_argument("--duplicate-check", default="", metavar="TEXT",
-                   help="when an Inbox Response card is refused because a card on the same matter already waits on "
+                   help="when a Customer Service card is refused because a card on the same matter already waits on "
                         "Kevin and it is another matter: 'not the same matter as <rec id>: <why>'. Stamped on Notes.")
     s.add_argument("--same-house-check", action="append", default=None, metavar="TEXT",
-                   help="when a Property Administration card is refused because another card on the same house and "
+                   help="when a Compliance card is refused because another card on the same house and "
                         "certificate waits on Kevin and it is another job: '<rec id> is a different job: <why>'. "
                         "Once per waiting card.")
     s.add_argument("--on-payment-list", default="", metavar="RECID",

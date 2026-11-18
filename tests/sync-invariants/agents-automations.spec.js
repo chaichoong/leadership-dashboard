@@ -20,7 +20,7 @@ test.describe('AI Agents page — descriptions and automations', () => {
         await mockAgentsPage(page, fx);
         await loadAgentsPage(page);
 
-        const card = page.locator('.sc-card', { hasText: 'Creditor Management' }).first();
+        const card = page.locator('.sc-card', { hasText: 'Accounts Payable' }).first();
         const what = card.locator('.sc-what');
         await expect(what).toHaveText(LONG);
 

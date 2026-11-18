@@ -124,7 +124,7 @@ const BUILTIN_SITES = {
   'find-and-update.company-information.service.gov.uk':
                                 { label: 'Companies House',    login: false },
   'gov.uk':                     { label: 'GOV.UK',             login: false, shortSession: true },
-  // The DWP's "Apply for direct rent payments" form (Cash Flow Voids lane B, 3 Oct 2026). Its
+  // The DWP's "Apply for direct rent payments" form (Accounts Receivable lane B, 3 Oct 2026). Its
   // first question's answers carry the word "payment", which the final-action guard refuses.
   // This one exact radio label, on this host only, is an answer and never the final click: the
   // robot still never presses "Accept and send", and the reason Kevin states is his. The robot
@@ -268,7 +268,7 @@ const BUILTIN_SITES = {
   // link. The show page lists them all, but only once a browser has run its script. Read-only, no login:
   // the content engine reads it with `read --links /episode/`.
   'open.spotify.com':           { label: 'Spotify (public show pages)', login: false },
-  // Product and materials sourcing (11 Nov 2026). The Inbox Response agent reads listings and prices
+  // Product and materials sourcing (11 Nov 2026). The Customer Service agent reads listings and prices
   // here for a SOURCING card (scripts/agent_sourcing_format.py). Read-only on purpose: no loginUrl, so
   // none of them reaches the Robot sign-in app or the keep-alive, and `login` refuses to record one.
   // On 2 Nov eBay was "NOT CHECKED" because the robot refused it; these entries end that wall.

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 // ONE TASK, ONE ANSWER (Kevin, 15 Oct 2026).
 //
-// The dispatcher (scripts/agent-dispatch.py build_queue) and the Task Board Manager
+// The dispatcher (scripts/agent-dispatch.py build_queue) and the Operations Manager
 // (scripts/task-manager.py cmd_board) classify the same open board. After PR #792 three kinds of
 // task still got two answers, read off the live board on 15 Oct 2026:
 //   (a) a task the dispatcher parks as a SYSTEM ALERT read as ordinary stuck work on the board, so
@@ -30,7 +30,7 @@ const CEO = 'reciHUAEcEkbctnZ6';
 const ANALYST = 'recqmKBmq8ZGkxVH9';
 const BUILDER = 'recQkO6BA4w5zqwZ4';
 const BOOKKEEPER = 'recAdy3T0lcr4I9eZ';   // AI agent row no robot works (not in ALL_AGENTS)
-const RENT = 'rec7aHLK1Q8fMLRXH';         // Cash Flow Voids: PAUSED in this register
+const RENT = 'rec7aHLK1Q8fMLRXH';         // Accounts Receivable: PAUSED in this register
 const TRIAGE = 'recCUfsTXzmVZynEI';       // own schedule: never handed work
 const PRODUCER = 'recRcy1Edas6rGaaF';     // own schedule: works its own answered cards
 const RESPONSE = 'recJ8J8idWE8d97tH';
@@ -39,18 +39,18 @@ const PROPERTY = 'recwWvBju2ycB63i4';
 const KEVIN = 'recHEt2VPYothaqTd';        // a person
 
 const AI = {
-  [CEO]: 'AI CEO (Dan Martell)', [ANALYST]: 'AI Worker — Analyst', [BUILDER]: 'AI Worker — Builder',
-  [BOOKKEEPER]: 'AI Bookkeeper', [RENT]: 'AI Cash Flow Voids', [TRIAGE]: 'AI Inbox Triage',
-  [PRODUCER]: 'AI Content Producer', [RESPONSE]: 'AI Inbox Response', [CREDITOR]: 'AI Supplier and Creditor Manager',
-  [PROPERTY]: 'AI Property Administration',
+  [CEO]: 'AI CEO', [ANALYST]: 'AI Worker — Analyst', [BUILDER]: 'AI Worker — Builder',
+  [BOOKKEEPER]: 'AI Bookkeeper', [RENT]: 'AI Accounts Receivable', [TRIAGE]: 'AI Inbox Triage',
+  [PRODUCER]: 'AI Social Media Manager', [RESPONSE]: 'AI Customer Service', [CREDITOR]: 'AI Accounts Payable',
+  [PROPERTY]: 'AI Compliance',
 };
 const ROSTER = {
-  [RENT]: { name: 'Cash Flow Voids', status: 'Paused', dispatchable: false },
+  [RENT]: { name: 'Accounts Receivable', status: 'Paused', dispatchable: false },
   [TRIAGE]: { name: 'Inbox Triage', status: 'Live', dispatchable: false },
-  [PRODUCER]: { name: 'Content Producer', status: 'Built', dispatchable: false },
-  [RESPONSE]: { name: 'Inbox Response', status: 'Live', dispatchable: true },
-  [CREDITOR]: { name: 'Creditor Management', status: 'Paused', dispatchable: false },
-  [PROPERTY]: { name: 'Property Administration', status: 'Live', dispatchable: true },
+  [PRODUCER]: { name: 'Social Media Manager', status: 'Built', dispatchable: false },
+  [RESPONSE]: { name: 'Customer Service', status: 'Live', dispatchable: true },
+  [CREDITOR]: { name: 'Accounts Payable', status: 'Paused', dispatchable: false },
+  [PROPERTY]: { name: 'Compliance', status: 'Live', dispatchable: true },
 };
 
 const ROY_STAMP = '[15 Oct 2026 — roy-assistant]';
@@ -523,7 +523,7 @@ m.cmd_route(types.SimpleNamespace(task="recPausedCarryAaa", to="${ANALYST}"))
 f = TASK["fields"]
 t = m.task_view(TASK)
 roster = json.loads(${JSON.stringify(JSON.stringify(ROSTER))})
-ctx = m.lane_context([], roster, "", [], {"${RENT}": "AI Cash Flow Voids", "${ANALYST}": "AI Worker — Analyst"})
+ctx = m.lane_context([], roster, "", [], {"${RENT}": "AI Accounts Receivable", "${ANALYST}": "AI Worker — Analyst"})
 print(json.dumps({"team": f[AF["teamMember"]], "sender": f.get(AF["sentForApprovalBy"]), "outcome": f.get(AF["approvalOutcome"]),
                   "approvedAt": f.get(AF["approvedAt"]), "lane": m.task_lane(t, ctx)[0], "agentId": t["agentId"]}))
 `], { encoding: 'utf8' });

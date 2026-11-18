@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Send an approved text to a tenant from the Agile Lets number: the gate, as send-email.py is for email.
 
-WHY THIS EXISTS (Cash Flow Voids cut-over build, 3 Oct 2026; Kevin approved the plan "Build as-is")
+WHY THIS EXISTS (Accounts Receivable cut-over build, 3 Oct 2026; Kevin approved the plan "Build as-is")
 A late-rent card carries the email AND the text Kevin approves, as two lines above the email's headers:
 
     TEXT TO: 07700 900123

@@ -825,7 +825,7 @@ def room_blockers(data, opens):
 
 
 def rooms_task(pid, r, day):
-    """One task per house for AI Property Administration (its standing lane: certificates, licences,
+    """One task per house for AI Compliance (its standing lane: certificates, licences,
     landlord insurance): everything that stops a new tenant moving in, found in the compliance book."""
     desc = (f"{r['property']} has rooms we are finding tenants for (the tenant-finding chain). Kevin's way: "
             "tenants secure a room with their documents done, the works are done, and they move in a few days "
@@ -1970,7 +1970,7 @@ def monitor(data, day, opens, run_notes):
     elif blocked:
         ai = [r["property"] for r in blocked if r["property"] not in elsewhere]
         if ai:
-            note += f". AI Property Administration holds a task for {', '.join(ai)}"
+            note += f". AI Compliance holds a task for {', '.join(ai)}"
         if elsewhere:
             note += ". Not the AI's: " + "; ".join(f"{h} (Kevin: {why})" for h, why in elsewhere.items())
     if stuck:
@@ -2065,7 +2065,7 @@ _MODS = {}
 
 
 def module(key):
-    """agent-dispatch.py (submit, handover, Roy's address, the Property Administration id), loaded
+    """agent-dispatch.py (submit, handover, Roy's address, the Compliance id), loaded
     once and called IN PROCESS, so there is no command line to get wrong."""
     files = {"ad": "agent-dispatch.py"}
     if key not in _MODS:
@@ -2183,7 +2183,7 @@ class Writer:
                 siblings=None, coverage=None, receipt=None, attach=None))
         except RuntimeError as exc:
             # A refused card must not sit at Today under an agent: it would block the next
-            # mail-out (due_again) and be handed to Property Administration as work.
+            # mail-out (due_again) and be handed to Compliance as work.
             api("PATCH", T_TASKS, {"records": [{"id": tid, "fields": {TK["status"]: "Cancelled", TK["notes"]:
                 f"TENANT CHAIN IDS: \n\n{REFUSED_MARK}: the submit gate refused this card: {str(exc)[:500]}"}}]})
             raise
@@ -2611,7 +2611,7 @@ def run(data, day, w, only=None, replies=None):
 
     def do_docs_in():
         """Each second-form submission: linked to its person, their record stamped, and the check handed to
-        AI Property Administration (read the UC statement, take up the reference: an email is a card for
+        AI Compliance (read the UC statement, take up the reference: an email is a card for
         Kevin). A submission whose id matches nobody is marked No match and shown on the monitor."""
         leads = {l["id"]: l for l in data["leads"]}
         done, doc_rows, lead_rows = [], [], []
@@ -2647,8 +2647,8 @@ def run(data, day, w, only=None, replies=None):
         return ", ".join(done)
 
     def do_rooms():
-        """Each house with an opening that is not legal to move into gets ONE task for AI Property
-        Administration; a fresh one only after the last closed 14 days ago and the house is still not legal."""
+        """Each house with an opening that is not legal to move into gets ONE task for AI
+        Compliance; a fresh one only after the last closed 14 days ago and the house is still not legal."""
         made = []
         for pid, r in room_blockers(data, opens).items():
             if not r["blockers"]:

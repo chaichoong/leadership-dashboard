@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url';
 // ROY'S ASSISTANT (Kevin, 24 Sep 2026).
 //
 // Roy forwards a message from info@agilelets.co.uk to itself with one line
-// saying what he wants. scripts/roy-assistant.py makes a ROY: task for Inbox
-// Response from info@'s SENT folder, the agent answers Roy or drafts a reply,
+// saying what he wants. scripts/roy-assistant.py makes a ROY: task for Customer
+// Service from info@'s SENT folder, the agent answers Roy or drafts a reply,
 // every email to the outside world is a card in Kevin's one queue, and Roy is
 // told what became of every request.
 //
@@ -160,7 +160,7 @@ describe('reading the request', () => {
 });
 
 describe('the task it makes', () => {
-  it("is a ROY: task for Inbox Response that agent-dispatch.py recognises as Roy's", () => {
+  it("is a ROY: task for Customer Service that agent-dispatch.py recognises as Roy's", () => {
     const r = py(`
 from datetime import datetime, timezone
 f = ra.task_fields(ra.parse_request(msg("m1", FWD)), msg("m1", FWD), AF, datetime(2026, 9, 24, 9, 30, tzinfo=timezone.utc), ad.RESPONSE_REC_ID)

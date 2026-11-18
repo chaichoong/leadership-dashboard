@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url';
 // calendar or not." Inbox Triage raises a CALENDAR: task beside the email's own task, and the
 // independent review found four places that would quietly lose it before it became a card:
 // the create gate folding it into the reply task, two diary dates from one sender folding into
-// one, the Task Board Manager and an agent's duplicate close treating it as the reply task's
-// twin, and repair or compliance words routing it to Roy or Property Administration.
+// one, the Operations Manager and an agent's duplicate close treating it as the reply task's
+// twin, and repair or compliance words routing it to Roy or Compliance.
 // Every case drives the real Python. Names and dates are invented.
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -101,7 +101,7 @@ print(json.dumps({"level": d["level"], "why": d.get("why") or d.get("evidence")}
   });
 });
 
-describe('the Task Board Manager never lists a diary task as closable', () => {
+describe('the Operations Manager never lists a diary task as closable', () => {
   const groups = (names) => py(TM, `
 names = json.loads(${JSON.stringify(JSON.stringify(names))})
 views = [{"id": "recView%010d" % i, "name": n, "status": "Today", "createdTime": "2026-10-18T0%d:00:00.000Z" % (i + 1),
@@ -126,11 +126,11 @@ print(json.dumps([{"lane": g["lane"], "closable": g["closable"]} for g in m.dupl
   });
 });
 
-describe('a diary task stays with Inbox Response whatever words it carries', () => {
+describe('a diary task stays with Customer Service whatever words it carries', () => {
   const lane = (name, inbound) => py(DISPATCH, `
 AF = m.AF
-roster = {"${RESPONSE}": {"name": "Inbox Response", "status": "Live", "dispatchable": True},
-          "${PROPERTY}": {"name": "Property Administration", "status": "Live", "dispatchable": True}}
+roster = {"${RESPONSE}": {"name": "Customer Service", "status": "Live", "dispatchable": True},
+          "${PROPERTY}": {"name": "Compliance", "status": "Live", "dispatchable": True}}
 ctx = m.lane_context([], roster, "", [], {})
 T = {"id": "recDiaryLaneAaaa", "createdTime": "2026-10-18T10:00:00.000Z",
      "fields": {AF["name"]: ${JSON.stringify(name)}, AF["status"]: "Today", AF["teamMember"]: ["${RESPONSE}"],
@@ -144,7 +144,7 @@ print(json.dumps({"lane": l, "property": t.get("property") or ""}))`);
     expect(lane('CALENDAR: Boiler service, British Gas - Tue 27 Oct', false).lane).toBe('newWork');
   });
 
-  it('a compliance word does not hand it to Property Administration', () => {
+  it('a compliance word does not hand it to Compliance', () => {
     expect(lane('INBOUND: Gas safety check due - 5 Example Street', true).property).not.toBe('');  // CONTROL
     const r = lane('CALENDAR: Gas safety check, Example Gas - Tue 27 Oct', false);
     expect(r.property).toBe('');
@@ -242,8 +242,8 @@ print(json.dumps({"level": d["level"], "why": d.get("why") or d.get("evidence")}
     const lane = (name) => py(DISPATCH, `
 AF = m.AF
 CRED = "recjh6mmaF8KJW8t3"
-roster = {"${RESPONSE}": {"name": "Inbox Response", "status": "Live", "dispatchable": True},
-          CRED: {"name": "Creditor Management", "status": "Live", "dispatchable": True}}
+roster = {"${RESPONSE}": {"name": "Customer Service", "status": "Live", "dispatchable": True},
+          CRED: {"name": "Accounts Payable", "status": "Live", "dispatchable": True}}
 ctx = m.lane_context([], roster, "", [], {})
 T = {"id": "recDiaryCredAaaaa", "createdTime": "2026-10-18T10:00:00.000Z",
      "fields": {AF["name"]: ${JSON.stringify(name)}, AF["status"]: "Today", AF["teamMember"]: ["${RESPONSE}"],

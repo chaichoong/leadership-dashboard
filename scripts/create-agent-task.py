@@ -1838,10 +1838,10 @@ def fold_lane(name, team=None, maintenance_ticket=False):
     """
     if maintenance_ticket or ROY_TEAM_MEMBER in (team or []):
         return "maintenance"
-    # A BUYING TASK IS ITS OWN LANE (13 Nov 2026). The dispatcher keeps a task with Inbox
-    # Response, the agent with the buying rules, by its SOURCING: name. Folded into an open
+    # A BUYING TASK IS ITS OWN LANE (13 Nov 2026). The dispatcher keeps a task with Customer
+    # Service, the agent with the buying rules, by its SOURCING: name. Folded into an open
     # "INBOUND: ... smoke alarms ..." reply task, a request to buy would keep THAT name and go
-    # to Property Administration or to Roy; and a reply folded into a buying task would never
+    # to Compliance or to Roy; and a reply folded into a buying task would never
     # get its answer. Fold-only and Python-only, like fold_on_a_number_only: the page's
     # Duplicates lane still shows the pair to Kevin, because grouping shows and folding destroys.
     if sourcing_task(name):
@@ -2561,7 +2561,7 @@ def _field_names(ids):
 # tasks daily-ops raised from failed data invariants on 30 Sep, 3, 5, 11 and 15 Oct, and each
 # waited up to seven days for the board. This places it right at creation instead. The test is
 # agent-dispatch.py's own `no_lane_holders` over its own two reads (`fetch_ai_agents`,
-# `fetch_role_roster`), imported, never copied, so the gate, the dispatcher and the Task Board
+# `fetch_role_roster`), imported, never copied, so the gate, the dispatcher and the Operations
 # Manager give one answer to "does any robot work this holder?".
 #
 # NOTHING CAN BE LOST (review of PR #793). An owner problem never refuses: exit 3 means "an
@@ -2750,7 +2750,7 @@ def settle_owner(fields, owner=None, stamp=""):
     if d is None:
         if owner and not team:
             why += ("; --owner %s could not be resolved, so the task has no Team Member and the "
-                    "Task Board Manager's ownerless step places it" % owner)
+                    "Operations Manager's ownerless step places it" % owner)
         return fields, None, [why]
     try:
         notes, rerouted = [], None
@@ -2806,7 +2806,7 @@ def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
         print("REROUTED: %s; Team Member set to %s (%s)."
               % (rerouted["why"], rerouted["to"]["name"], rerouted["to"]["id"]), file=sys.stderr)
     if holder_note:
-        print("HOLDER " + holder_note + ". The Task Board Manager's ownerless step is the "
+        print("HOLDER " + holder_note + ". The Operations Manager's ownerless step is the "
               "backstop.", file=sys.stderr)
 
     cache = load_scan_cache()
