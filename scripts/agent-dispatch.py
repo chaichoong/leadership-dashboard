@@ -122,6 +122,16 @@ from agent_email_format import (  # noqa: E402
     strip_trial_marks,
     form_card,
     trial_problem,
+    # Kevin's six rulings (16 Nov 2026, decision card recinoFWz6fQ6JVVB): who sends property mail.
+    PROPERTY_SENDER,
+    TEXT_CARD_MARKS,
+    AGENT_RENT_LATE_PREFIX,
+    SIX_RULINGS,
+    FREE_MAIL_DOMAINS,
+    address_domain,
+    company_key,
+    every_recipient,
+    outside_recipients,
 )
 # The CALENDAR contract lives in one place too, shared with
 # scripts/calendar-write.py — same one-parser rule, same reason.
@@ -7195,6 +7205,283 @@ def certificate_search_problem(name, output, mail_subject, description, search):
     return ""
 
 
+# ─── KEVIN'S SIX RULINGS, THE PARTS THAT NEED THE TASK (16 Nov 2026, decision card recinoFWz6fQ6JVVB) ───
+#
+# Ruling 3, Haverhill: certificates go to the designated engineer first; three quotes only when they
+# cannot do it or the job is new. Kevin, 28 Sep 2026, on a Haverhill EICR: "We have a preferred contractor
+# for this". Kevin, 31 Oct 2026, sending back three gas price requests: "We already have a designated Gas
+# Safe engineer for Haverhill, so we need to email them instead." Broken twice on 31 Oct. Who is
+# designated where lives in a PRIVATE file, never in this public
+# repo: ~/knowledge-os/handover/preferred-contractors.json, each entry with the towns or postcode districts
+# it covers, the certificate (gas or eicr), the contractor, their emails and the record it was read from.
+#
+# A quote request or a booking on a COMPLIANCE task for a gas safety certificate or an EICR at a house the
+# file covers is refused unless the designated contractor is a recipient (or, on a PASS TO ROY booking,
+# named), or the submit says why not with --preferred-declined "<they cannot do it, or the job is new>",
+# stamped on the task's Notes with the card. A missing or unreadable file never refuses a card: it is said
+# on stderr, stamped NOT CHECKED BY CODE on the Notes and listed in the submit's own output.
+PREFERRED_CONTRACTORS_FILE = "preferred-contractors.json"
+PREFERRED_TYPES = {"GSC": "gas", "EICR": "eicr"}
+PREFERRED_DECLINED_MIN = 15
+
+
+def preferred_contractors_path():
+    return os.path.join(HANDOVER_DIR, PREFERRED_CONTRACTORS_FILE)
+
+
+def _text_list(value):
+    """A list of non-blank strings from a JSON value: a list keeps its string items, a string is one item, and
+    anything else is nothing (review of this PR: "towns": "Haverhill" was read letter by letter)."""
+    items = value if isinstance(value, list) else [value] if isinstance(value, str) else []
+    return [x.strip() for x in items if isinstance(x, str) and x.strip()]
+
+
+def load_preferred_contractors(path=None):
+    """(entries, problem): the usable entries of the private file, and why any of it could not be used ("" when
+    all of it could). An entry with no certificate type, name, email, place or source is left out and named.
+    Never raises: a file that cannot be used is a problem to say, never a refusal of every card."""
+    path = path or preferred_contractors_path()
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return [], f"the preferred-contractors file {path} is missing"
+    except (OSError, ValueError) as exc:
+        return [], f"the preferred-contractors file {path} could not be read ({type(exc).__name__}: {str(exc)[:80]})"
+    rows = data.get("contractors") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return [], f"the preferred-contractors file {path} has no \"contractors\" list"
+    entries, bad = [], []
+    for i, row in enumerate(rows):
+        row = row if isinstance(row, dict) else {}
+        cert = str(row.get("certificate") or "").strip().lower()
+        emails = [e.lower() for e in _text_list(row.get("emails")) if "@" in e]
+        domains = [d.lower() for d in _text_list(row.get("domains")) if d.lower() not in FREE_MAIL_DOMAINS]
+        districts = [d.upper() for d in _text_list(row.get("districts"))]
+        towns = [t.lower() for t in _text_list(row.get("towns"))]
+        name = row.get("name").strip() if isinstance(row.get("name"), str) else ""
+        if cert not in PREFERRED_TYPES.values() or not name or not emails or not (districts or towns) \
+                or not _text_list(row.get("sources")):
+            bad.append(f"entry {i + 1} ({name or 'no name'})")
+            continue
+        aliases = [a for a in _text_list(row.get("aliases")) if len(a) >= 3] + [name]
+        entries.append({"certificate": cert, "name": name, "emails": emails, "domains": domains,
+                        "districts": districts, "towns": towns, "aliases": aliases})
+    problem = (f"the preferred-contractors file {path} has entries it cannot use: {', '.join(bad)} (each needs a "
+               "certificate of gas or eicr, a name, an email, towns or districts, and a source)") if bad else ""
+    return entries, problem
+
+
+def preferred_for(entries, house, cert):
+    """The entries designated for this certificate type at this house: by its postcode district when it has one
+    (a town word in the address is not the town: "3 Haverhill Road, Cambridge CB1" is not Haverhill, review of
+    this PR), by the town only for an entry with no districts or a house with no readable postcode."""
+    district = postcode_district(house.get("postcode") or house.get("name"))
+    where = f"{house.get('name') or ''} {house.get('short') or ''}".lower()
+
+    def by_town(e):
+        return any(re.search(r"\b" + re.escape(t) + r"\b", where) for t in e["towns"])
+    return [e for e in entries if e["certificate"] == cert
+            and ((district in e["districts"]) if (district and e["districts"]) else by_town(e))]
+
+
+def preferred_reached(entry, recipients, roy_text):
+    """True when the email reaches the designated contractor, or a PASS TO ROY booking names them."""
+    for a in recipients:
+        if a in entry["emails"] or address_domain(a) in entry["domains"]:
+            return True
+    hay = str(roy_text or "")
+    return bool(hay) and any(re.search(r"(?<![A-Za-z])" + re.escape(x) + r"(?![A-Za-z])", hay, re.I)
+                             for x in entry["aliases"] + entry["emails"])
+
+
+def preferred_contractor_problem(task_rec, output, mail_subject, declined=None, contractors=None, tenants=None):
+    """Why a gas or EICR quote or booking at a house with a designated contractor leaves them out, or asks
+    other firms at the same time, or ''. `tenants` is the set of tenant emails, read only when needed."""
+    tf = (task_rec or {}).get("fields") or {}
+    name = str(tf.get(AF["name"]) or "")
+    cert = PREFERRED_TYPES.get(certificate_type(name))
+    if not cert:
+        # "GSC and EICR renewals" names two types, so certificate_type reads none: said, never silent (review).
+        both = [label for label, rx in CERT_TYPE_PATTERNS if label in PREFERRED_TYPES and rx.search(name)]
+        # certificate_step reads the task name only to know it is one certificate; ask it about the output alone.
+        if name.startswith(COMPLIANCE_TASK_PREFIX) and len(both) > 1 and \
+                certificate_step(f"{COMPLIANCE_TASK_PREFIX} EICR", output, mail_subject) in ("quote", "booking"):
+            note_not_checked("designated-contractor check: the task names both a gas and an electrical certificate, so "
+                             "code could not tell which designated contractor this goes to first")
+        return ""
+    step = certificate_step(name, output, mail_subject)
+    if step not in ("quote", "booking"):
+        return ""
+    entries, problem = contractors if contractors is not None else load_preferred_contractors()
+    if problem:
+        note_not_checked(f"designated-contractor check: {problem}, so code did not check whether this {cert} {step} "
+                         "goes to the designated contractor first")
+    if not entries:
+        return ""
+    props = fetch_properties()
+    pid, how = place_task_house(name, props, tf)
+    house = next((p for p in props if p["id"] == pid), None)
+    if not house:
+        note_not_checked(f"designated-contractor check: the card is a {cert} {step} and {how}, so code could not tell "
+                         "whether the house has a designated contractor")
+        return ""
+    designated = preferred_for(entries, house, cert)
+    if not designated:
+        return ""
+    own = agent_own_text(output)
+    try:
+        mail = parse_email_output(own)
+    except EmailFormatError:
+        mail = None
+    roy = "\n".join(m_.group(0) for m_ in PASS_TO_ROY_BLOCK_RE.finditer(own))
+    said = " ".join(str(declined or "").split())
+    if len(said) >= PREFERRED_DECLINED_MIN:
+        return ""
+    who = "; ".join(f"{e['name']} ({', '.join(e['emails'])})" for e in designated)
+    short = (f" Your --preferred-declined (\"{said}\") is too short to say why: name what they said or why the "
+             "job is new.") if said else ""
+    way = ("Send it to them alone, or, if they cannot do it or the job is new, say so with --preferred-declined "
+           "\"<what they said and when, or why the job is new>\" (stamped on the task's Notes, never in the email)."
+           + short)
+    if mail is None:
+        # A PASS TO ROY booking: Roy books it, so the card must name who.
+        if not roy or any(preferred_reached(e, [], roy) for e in designated):
+            return ""
+        return (f"it is a {cert} booking for {house['short']} through Roy, and {house['short']} has a designated "
+                f"contractor for that certificate: {who}. Kevin's ruling ({SIX_RULINGS}): a Haverhill certificate goes "
+                "to the designated engineer first; three quotes only when they cannot do it or the job is new. Name "
+                "them in the PASS TO ROY line, or " + way[0].lower() + way[1:])
+    reached = [a for a in outside_recipients(mail, texts=False) if any(preferred_reached(e, [a], "") for e in designated)]
+    others = [a for a in outside_recipients(mail, texts=False) if a not in reached]
+    if others:
+        # A notice to the tenants (the visit is booked) is not asking another firm (review of this PR).
+        if tenants is None:
+            try:
+                tenants = recipients_on_record(contractors=False)
+            except (Exception, SystemExit) as exc:          # noqa: BLE001 — said, and the card is refused
+                tenants = {"tenants": set(), "unread": [f"the Tenants table ({type(exc).__name__})"]}
+            unread = [u for u in tenants["unread"] if u.startswith("the Tenants table")]
+            tenants = tenants["tenants"] if not unread else None
+            if tenants is None:
+                return (f"it is a {cert} {step} for {house['short']} and code could not read the Tenants table to "
+                        "tell whether its recipients are the house's tenants or other firms: NOT CHECKED. Try again; "
+                        "if it fails again, record a TOOL wall")
+        others = [a for a in others if a not in tenants]
+    if not others:
+        return ""
+    if reached:
+        return (f"it is a {cert} {step} for {house['short']} to the designated contractor ({who}) and to another firm "
+                f"at the same time ({', '.join(others)}). Kevin's ruling ({SIX_RULINGS}): the designated engineer comes "
+                "FIRST; other firms are asked only when they cannot do it or the job is new. " + way)
+    return (f"it is a {cert} {step} for {house['short']}, and {house['short']} has a designated contractor for that "
+            f"certificate: {who}. Kevin's ruling ({SIX_RULINGS}): a Haverhill certificate goes to the designated "
+            "engineer first; three quotes only when they cannot do it or the job is new. " + way)
+
+
+# Ruling 1 and the 17 Sep 2026 sender table: property mail goes FROM info@agilelets.co.uk, signed Roy Lavin,
+# Agile Lets. Kevin's Gmail is for his own matters: creditors, HMRC, solicitors, banks, personal, and creditor
+# and tier-1 mail about a property. The stored cards of the 90 days to 18 Nov 2026 showed approved emails from
+# his Gmail to insurers, brokers, a lender and councils on COMPLIANCE tasks: those are his to send from Gmail
+# (an insurer is not on the info@ list), so the lane test below reads only the lanes whose mail is property
+# mail by its nature: the rent lane to tenants and letting agents, MAINTENANCE (repairs), and certificate
+# work (a gas, EICR, EPC, emergency lighting or fire certificate). Anything else is refused only when a
+# recipient IS a tenant, a letting agent or a designated contractor on record.
+RENT_LANE_PREFIXES = tuple(TEXT_CARD_MARKS["prefix"]) + (AGENT_RENT_LATE_PREFIX,)
+MAINTENANCE_PREFIX = "MAINTENANCE:"
+# The named exceptions, explicit and small: each sends from Kevin's Gmail by design.
+GMAIL_PROPERTY_EXCEPTIONS = (
+    # The Level A redirect reply (Kevin, 17 Sep 2026): a fixed text, built in code, from the Gmail the
+    # property mail wrongly reached, telling the sender to use info@. It is never an agent-written email.
+    ("the redirect reply to info@", REDIRECT_RE),
+)
+
+
+def recipients_on_record(contractors=True):
+    """{"tenants": addresses, "agents": addresses and firm keys, "contractors": (addresses, domains)} with every
+    read that failed named in "unread". A read of zero tenants or zero letting-agent cards is unread, never
+    "none on record": both have existed since October 2026. With contractors=False, only the tenants are read."""
+    seen = {"tenants": set(), "agents": set(), "contractors": (set(), set()), "unread": []}
+    try:
+        rows = query_records(TENANTS_TABLE, None, [TENANT_EMAIL])
+        seen["tenants"] = {str((r.get("fields") or {}).get(TENANT_EMAIL) or "").strip().lower() for r in rows} - {""}
+        if not seen["tenants"]:
+            seen["unread"].append("the Tenants table (no email read back)")
+    except (Exception, SystemExit) as exc:               # noqa: BLE001 — said, never a pass
+        seen["unread"].append(f"the Tenants table ({type(exc).__name__})")
+    if not contractors:
+        return seen
+    try:
+        agents, cards = set(), 0
+        for r in query_records(TASKS, f"FIND('{AGENT_RENT_LATE_PREFIX}', {{Task Name}}&'')=1",
+                               [AF["name"], AF["agentOutput"]]):
+            cards += 1
+            head = (str((r.get("fields") or {}).get(AF["agentOutput"]) or "").split("\n---", 1) + [""])[0]
+            for line in re.findall(r"^[ \t]*(?:TO|CC)[ \t]*:[ \t]*(.+)$", head, re.M | re.I):
+                # The firm a letting agent's accounts contact works at, but a council or other public body by its
+                # exact address only, so its other departments are never read as a letting agent (review).
+                agents |= {a.lower() if address_domain(a).endswith(".gov.uk") else company_key(a)
+                           for a in re.split(r"[,;\s]+", line) if "@" in a}
+        if not cards:
+            seen["unread"].append("the letting agents' AGENT RENT LATE cards (none read back)")
+        # A property's own agent email is matched by its exact address: a manager there may be a council or a
+        # housing body whose other mail is Kevin's (review of this PR).
+        for p in fetch_properties():
+            agents |= {a.lower() for a in re.split(r"[,;\s]+", str(p.get("managerEmail") or "")) if "@" in a}
+        seen["agents"] = agents - {company_key(a) for a in RULE_OWN_ADDRESSES} - set(RULE_OWN_ADDRESSES)
+    except (Exception, SystemExit) as exc:               # noqa: BLE001
+        seen["unread"].append(f"the letting agents' addresses ({type(exc).__name__})")
+    entries, problem = load_preferred_contractors()
+    if problem:
+        seen["unread"].append(problem)
+    seen["contractors"] = ({a for e in entries for a in e["emails"]}, {d for e in entries for d in e["domains"]})
+    return seen
+
+
+def gmail_property_problem(parsed, name, description="", notes="", tier1=False, creditor=False, output="",
+                           record=None):
+    """Why an email from Kevin's Gmail is property mail that goes from info@, or ''. `record` is
+    recipients_on_record(), read only when the lanes alone do not decide."""
+    if (parsed.get("from") or "").strip().lower() != PERSONAL_SENDER:
+        return ""
+    outside = outside_recipients(parsed)
+    if not outside or tier1 or creditor:
+        return ""
+    own = agent_own_text(output)
+    if any(rx.match(own) for _label, rx in GMAIL_PROPERTY_EXCEPTIONS):
+        return ""
+    name = str(name or "")
+    why = ""
+    if name.startswith(RENT_LANE_PREFIXES):
+        why = "it is a rent-lane email to a tenant or a letting agent"
+    elif name.upper().startswith(MAINTENANCE_PREFIX):
+        why = "it is a MAINTENANCE email (a repair)"
+    elif certificate_type(name) in CERT_SEARCH_TYPES and (name.startswith(COMPLIANCE_TASK_PREFIX)
+                                                          or property_match(name, description, notes)):
+        why = f"it is certificate work ({certificate_type(name)})"
+    else:
+        record = record if record is not None else recipients_on_record()
+        for a in outside:
+            if a in record["tenants"]:
+                why = f"{a} is a tenant on record"
+            elif a in record["agents"] or company_key(a) in record["agents"]:
+                why = f"{a} is a letting agent on record"
+            elif a in record["contractors"][0] or address_domain(a) in record["contractors"][1]:
+                why = f"{a} is a designated contractor on record"
+            if why:
+                break
+        if not why:
+            for gap in record["unread"]:
+                note_not_checked(f"Gmail sender check: could not read {gap}, so code did not check this Gmail email's "
+                                 "recipients against it")
+            return ""
+    return (f"it goes from {PERSONAL_SENDER}, but {why}. Property mail, every email to a tenant, a contractor or a "
+            f"letting agent included, and every email on a rent, repair or certificate task, goes FROM {PROPERTY_SENDER}, "
+            f"signed `Roy Lavin` then `Agile Lets` ({SIX_RULINGS}; GUARDRAILS since 17 Sep 2026). Change the FROM line "
+            "and the sign-off. Kevin's Gmail stays for creditor and tier-1 mail (mark a tier-1 matter with --tier1) and "
+            "for his own matters away from those tasks: HMRC, solicitors, banks, his insurers and lenders")
+
+
 def cmd_submit_group(args):
     """`submit`, with --siblings: a property group submitted once on its lead."""
     siblings = [i.strip() for i in (getattr(args, "siblings", None) or "").split(",") if i.strip()]
@@ -7516,8 +7803,8 @@ def cmd_submit(args):
                        "CHECKED. Try again; if it fails again, record a TOOL wall")
         if problem:
             sys.exit(f"ERROR: refusing to submit {args.task}: {problem}.")
-    # What a check let through without looking, stamped with the card below (finding 11 of PR 950's review).
-    unchecked = list(_SUBMIT_NOT_CHECKED)
+    # What a check let through without looking is stamped with the card below (finding 11 of PR 950's review),
+    # read once every check has run.
 
     # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
     # the card, from this round, or the submit is refused.
@@ -7554,6 +7841,16 @@ def cmd_submit(args):
     cov = coverage_problem(coverage_text, output, tf_early.get(AF["name"], "") or "", args.type)
     if cov:
         sys.exit(f"ERROR: refusing to submit {args.task} — {cov}.")
+    # THE DESIGNATED CONTRACTOR (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB, ruling 3): a gas or EICR
+    # quote or booking at a house with a designated contractor goes to them first. Only when this card acts.
+    if _acts:
+        try:
+            pref = preferred_contractor_problem(rec_early, own, _subject, getattr(args, "preferred_declined", None))
+        except (Exception, SystemExit) as exc:               # noqa: BLE001 — said, and the card is refused
+            pref = (f"the designated-contractor check could not run ({type(exc).__name__}: {str(exc)[:160]}), so it is "
+                    "NOT CHECKED. Try again; if it fails again, record a TOOL wall")
+        if pref:
+            sys.exit(f"ERROR: refusing to submit {args.task}: {pref}.")
 
     # Does the closing line promise a send this Task Type cannot deliver?
     # Refused here, not discovered at carry-out after Kevin has approved it.
@@ -7635,6 +7932,23 @@ def cmd_submit(args):
                 "       than a refused draft: the refusal arrives after the\n"
                 "       decision."
             )
+        # WHO SENDS PROPERTY MAIL (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB, ruling 1): an email from
+        # his Gmail on a property lane, or to a tenant, letting agent or contractor on record, is refused unless
+        # the matter is tier 1 or a creditor's. Read with the task, so it sits here and not in the email module.
+        try:
+            _mail = parse_email_output(output) if detect_kind(output) == "email" else None
+        except EmailFormatError:
+            _mail = None
+        if _mail:
+            _tier1 = bool(args.tier1) or TIER1_BANNER in output or bool(tier_match(TIER1_PATTERNS, _pn, _pd, _pnotes))
+            _creditor = creditor or creditor_match(_pn, _pd, _pnotes)
+            try:
+                gmail = gmail_property_problem(_mail, _pn, _pd, _pnotes, tier1=_tier1, creditor=_creditor, output=output)
+            except (Exception, SystemExit) as exc:           # noqa: BLE001 — said, and the card is refused
+                gmail = (f"the Gmail sender check could not run ({type(exc).__name__}: {str(exc)[:160]}), so it is NOT "
+                         "CHECKED. Try again; if it fails again, record a TOOL wall")
+            if gmail:
+                sys.exit(f"ERROR: refusing to submit {args.task} as Correspondence: {gmail}.")
 
     # A CALENDAR output is the same promise about calendar-write.py. Validated
     # with the SAME parser that script uses, for the same reason as above —
@@ -7844,12 +8158,14 @@ def cmd_submit(args):
     # What the agent said it checked, on the flags that keep it out of an email (16 Nov 2026).
     for flag, label in (("certificate_search", "CERTIFICATE SEARCH"), ("duplicate_check", "DUPLICATE CHECK"),
                         ("same_house_check", "SAME HOUSE CHECK"), ("on_payment_list", "ON PAYMENT LIST"),
-                        ("rent_received", "RENT RECEIVED")):
+                        ("rent_received", "RENT RECEIVED"), ("preferred_declined", "PREFERRED DECLINED")):
         given = getattr(args, flag, "") or ""
         for said_flag in (given if isinstance(given, (list, tuple)) else [given]):
             said_flag = " ".join(str(said_flag or "").split())
             if said_flag:
                 stamps.append(note_line("agent-dispatch", f"{label} (round {round_no}): {said_flag[:600]}"))
+    # Read again here: the designated-contractor and Gmail sender checks run after the first copy was taken.
+    unchecked = list(_SUBMIT_NOT_CHECKED)
     for text in unchecked:
         stamps.append(note_line("agent-dispatch", f"{NOT_CHECKED_MARK} (round {round_no}): {text}"))
     # The close gate reads this mark, so a later output that drops the SOURCING line cannot slip past it.
@@ -7908,7 +8224,8 @@ def cmd_submit(args):
         patch_task(args.task, filed)
         print(json.dumps({"submitted": args.task, "filed": True, "status": "Completed",
                           "type": args.type, "attached": len(to_attach),
-                          "why": "informational output: nothing to approve"}))
+                          "why": "informational output: nothing to approve",
+                          **({"notChecked": unchecked} if unchecked else {})}))
         return 0
 
     # ─── LEVEL A: the agent acts (Kevin's ruling, 7 Sep 2026) ────────────
@@ -8038,7 +8355,9 @@ def cmd_submit(args):
                       "chars": len(output),
                       # Proof, not assertion: what the record HOLDS, read back
                       # after the write.
-                      "verified": {"storedChars": len(stored), "status": status}}))
+                      "verified": {"storedChars": len(stored), "status": status},
+                      # What a check let through without looking (also stamped on the Notes).
+                      **({"notChecked": unchecked} if unchecked else {})}))
 
 
 def cmd_annotate(args):
@@ -16144,6 +16463,10 @@ def main():
                    help="on an AGENT RENT LATE card rewritten after the send found some units paid: "
                         "'<tenancy id>: <payment id>' for each paid unit the email no longer chases, once per unit. "
                         "Stamped on Notes; the send then checks only the units still chased.")
+    s.add_argument("--preferred-declined", default="", metavar="REASON",
+                   help="on a gas or EICR quote or booking at a house with a designated contractor that this email "
+                        "leaves out: why (they cannot do it, with what they said and when, or the job is new). "
+                        "Stamped on Notes, never in the email (Kevin, 16 Nov 2026).")
     s.add_argument("--coverage", metavar="PATH",
                    help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
                         "covers ... (source: url) lines; refused without it (7 Sep 2026)")

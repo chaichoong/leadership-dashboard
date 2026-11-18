@@ -605,6 +605,43 @@ RULE_NO_COMMIT_RE = re.compile(
     r"deposit|bank details|pay (?:you|the invoice))\b", re.I)
 RULE_ADDR_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
+# ─── ONE COMPANY, ONE EMAIL (Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB, ruling 6) ───
+#
+# "Two separate emails, one per company, otherwise it can be unprofessional" (his note of 29 Oct 2026).
+# A company is known by its email domain. A free-mail address (a sole trader on gmail.com) is its own
+# company, because two plumbers on gmail.com are two firms; a text gateway address is one phone.
+FREE_MAIL_DOMAINS = frozenset((
+    "gmail.com", "googlemail.com", "hotmail.com", "hotmail.co.uk", "outlook.com", "outlook.co.uk", "live.com",
+    "live.co.uk", "msn.com", "yahoo.com", "yahoo.co.uk", "ymail.com", "icloud.com", "me.com", "mac.com",
+    "aol.com", "aol.co.uk", "btinternet.com", "btopenworld.com", "sky.com", "virginmedia.com", "ntlworld.com",
+    "blueyonder.co.uk", "talktalk.net", "tiscali.co.uk", "protonmail.com", "proton.me", "mail.com", "gmx.com",
+    "gmx.co.uk", "zoho.com", "btconnect.com", "virgin.net", "talk21.com", "lineone.net", "freeserve.co.uk",
+    "o2.co.uk", "plus.net", "plusnet.com", "orange.net", "fsmail.net", "rocketmail.com", "hotmail.fr", "live.ie"))
+# ClickSend email-to-text (Kevin, 5 Oct 2026): an address here is a text to one phone, never an email.
+TEXT_GATEWAY_DOMAINS = frozenset(("sms.clicksend.com",))
+# A second-level label that is part of the suffix: office@mail.fixture.co.uk and jobs@fixture.co.uk are one firm.
+SUFFIX_LABELS = frozenset(("co", "org", "gov", "ac", "ltd", "plc", "me", "net", "nhs", "police", "sch", "com"))
+
+
+def address_domain(addr):
+    return str(addr or "").strip().lower().rpartition("@")[2]
+
+
+def organisation_domain(dom):
+    """The domain a firm registered, with any subdomain taken off (mail.fixture.co.uk -> fixture.co.uk)."""
+    labels = [x for x in str(dom or "").lower().split(".") if x]
+    if len(labels) >= 3 and labels[-2] in SUFFIX_LABELS and len(labels[-1]) == 2:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+def company_key(addr):
+    """Which company an address belongs to: its organisation's domain, or the whole address on a free-mail domain
+    or a text gateway, where one domain is many people."""
+    a = str(addr or "").strip().lower()
+    dom = address_domain(a)
+    return a if (dom in FREE_MAIL_DOMAINS or dom in TEXT_GATEWAY_DOMAINS) else organisation_domain(dom)
+
 
 def rule_send_problem(rule, mail, task, require_stamp=True):
     """Why this email may NOT go out under `rule` with no card, or "" when it may.
@@ -649,9 +686,13 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
         if "quote" not in (mail.get("subject") or "").lower():
             return "the subject does not say quote"
         if not 1 <= len(to) <= 3:
-            return "a quote request goes to one to three tradespeople"
+            return "a quote request goes to one company, at most three of its addresses"
         if any(a in RULE_OWN_ADDRESSES for a in to):
             return "one of our own addresses is a recipient"
+        # Kevin, 16 Nov 2026 (decision card recinoFWz6fQ6JVVB, ruling 6): one company per email, never two
+        # firms on one. Several companies are several separate emails.
+        if len({company_key(a) for a in to}) > 1:
+            return "a quote request goes to one company per email, never two firms on one (Kevin, 16 Nov 2026)"
         if RULE_COVERAGE_MARK not in notes:
             return "the coverage check has not passed on this task"
         if re.search(r"^\s*SPEND:", body, re.M):
@@ -1118,6 +1159,125 @@ def mailout_recipients_problem(task_name, parsed):
     return ""
 
 
+# ─── KEVIN'S SIX RULINGS, THE SENDER AND QUOTE PARTS (16 Nov 2026, decision card recinoFWz6fQ6JVVB) ───
+#
+# Ruling 1: every email to a letting agent goes FROM info@agilelets.co.uk signed "Roy Lavin" then
+# "Agile Lets", Cash Flow Voids' AGENT RENT LATE email and its answer to the agent's reply included. The
+# 5 Oct 2026 rule (from Kevin's Gmail, signed Kevin) is retired. GUARDRAILS has said since 17 Sep 2026
+# that all property mail from info@ is signed Roy Lavin, Agile Lets; the stored cards show the robots
+# still signed it "Kevin Brittain, on behalf of Agile Lets", "Kevin" or "Agile Lets Team".
+# Ruling 6: a quote request is one email per company, never two firms on one email.
+# Submit only, like the rest of validate_submission: an email Kevin already approved still goes out.
+AGENT_RENT_LATE_PREFIX = "AGENT RENT LATE: "     # kept identical to AGENT_LATE_PREFIX in scripts/rent-check.py
+ROY_NAME_LINE_RE = re.compile(r"^Roy Lavin\b")
+AGILE_LETS_LINE_RE = re.compile(r"^Agile Lets\b")
+# A signer other than Roy on info@: Kevin by name, or the other company's name, on a line of its own. "On
+# behalf of the owner" under Roy's name is not a signer, and neither is "on behalf of Agile Estates".
+WRONG_PROPERTY_SIGNOFF_RE = re.compile(
+    r"^(?:Kevin(?:\s+Brittain)?|Agile Estates(?:\s+Ltd|\s+Limited)?)[.,!]?$", re.I)
+SIX_RULINGS = "Kevin, 16 Nov 2026, decision card recinoFWz6fQ6JVVB"
+
+
+def every_recipient(parsed):
+    return [a.strip().lower() for a in (parsed.get("to") or []) + (parsed.get("cc") or []) + (parsed.get("toEach") or [])
+            if a and a.strip()]
+
+
+def outside_recipients(parsed, texts=True):
+    """The recipients who are not us: never one of our own addresses, and, with texts=False, never a text
+    gateway address (a text to a phone carries no email sign-off)."""
+    return [a for a in every_recipient(parsed) if a not in RULE_OWN_ADDRESSES
+            and (texts or address_domain(a) not in TEXT_GATEWAY_DOMAINS)]
+
+
+def property_signoff_problem(parsed):
+    """Why an email FROM info@ to someone outside is not signed Roy Lavin then Agile Lets, or ""."""
+    if (parsed.get("from") or "").strip().lower() != PROPERTY_SENDER:
+        return ""
+    # A note to Roy or to Kevin, a reply to a tenant's text through the bridge (TO info@ itself) and a text
+    # by ClickSend are not property mail to someone outside, and none carries the email sign-off.
+    if not outside_recipients(parsed, texts=False):
+        return ""
+    body = parsed.get("body") or ""
+    # The sender's own words above any quoted message, where a top-posted reply signs; and the body with the
+    # quoted lines (">") and their "On ... wrote:" line taken out, where an inline reply signs below the quote
+    # (review of this PR, finding 1). A wrong signer is read in the sender's own words only: a quoted thread
+    # below a top-posted reply carries other people's sign-offs, and Kevin's own earlier ones.
+    tail = closing_block(own_words(body))
+    dequoted = "\n".join(ln for ln in body.splitlines()
+                         if not ln.lstrip().startswith(">") and not re.match(r"^[ \t]*On .{3,200}wrote:[ \t]*$", ln))
+    tails = (tail, closing_block(dequoted))
+    wrong = next((ln for ln in tail if WRONG_PROPERTY_SIGNOFF_RE.match(ln)), None)
+    signed_roy = any(ROY_NAME_LINE_RE.match(line) and i + 1 < len(t) and AGILE_LETS_LINE_RE.match(t[i + 1])
+                     for t in tails for i, line in enumerate(t))
+    if signed_roy and wrong is None:
+        return ""
+    if wrong is not None:
+        return ("this email goes from info@agilelets.co.uk but is signed %r. Mail from info@ is Roy's: sign it "
+                "`Roy Lavin` with `Agile Lets` on the next line (%s; GUARDRAILS since 17 Sep 2026). If it is Kevin's "
+                "own matter (a creditor, HMRC, a solicitor, a bank, a tier-1 matter), send it from %s instead"
+                % (wrong, SIX_RULINGS, PERSONAL_SENDER))
+    return ("this email goes from info@agilelets.co.uk, so it ends with the sign-off `Roy Lavin` and `Agile Lets` on "
+            "the next line (%s; GUARDRAILS since 17 Sep 2026). Its last lines read %r. Write it as Roy, in the first "
+            "person, and sign it that way" % (SIX_RULINGS, " / ".join(tail[-3:]) or "(nothing)"))
+
+
+def agent_rent_late_sender_problem(task_name, parsed):
+    """Why an AGENT RENT LATE email is not going from info@, or "". Its sign-off is property_signoff_problem's."""
+    if not str(task_name or "").startswith(AGENT_RENT_LATE_PREFIX):
+        return ""
+    # A note to Roy or Kevin on the task is not the email to the letting agent (review of this PR).
+    if (parsed.get("from") or "").strip().lower() == PROPERTY_SENDER or not outside_recipients(parsed):
+        return ""
+    return ("an AGENT RENT LATE email goes to the letting agent FROM %s, signed `Roy Lavin` then `Agile Lets` (%s, "
+            "replacing the 5 Oct 2026 rule that sent it from Kevin's Gmail). Use `FROM: %s`: it is a new email from "
+            "info@, because the old threads sit in Kevin's Gmail, so quote their subject in it"
+            % (PROPERTY_SENDER, SIX_RULINGS, PROPERTY_SENDER))
+
+
+# A quote REFERENCE is a label, not a request ("Quote Ref: 931520229" on an insurer's renewal). Kept the
+# same shape as QUOTE_REF_RE in scripts/agent-dispatch.py.
+QUOTE_LABEL_RE = re.compile(r"\bquot(?:e|ation)\s*(?:ref(?:erence)?|no|number|#)\.?\s*[:#]?\s*[\w/-]+", re.I)
+QUOTE_ASK_SUBJECT_RE = re.compile(r"\b(?:quote|quotes|quotation|quotations)\b|\bprice for\b", re.I)
+# Asking for a PRICE, never "quote" as in cite: "please quote the clause in our management agreement" went to a
+# managing agent and its sister branch on 13 Nov 2026 and is not a quote request (back-test, 18 Nov 2026).
+QUOTE_ASK_BODY_RE = re.compile(
+    r"\b(?:please|could you|can you|would you|kindly|grateful if you could)\b[^.\n?]{0,40}?"
+    r"\b(?:provide|send|give|let (?:us|me) have|supply|forward|prepare|share)\b(?:\s+(?:us|me))?(?:\s+with)?"
+    r"\s+(?:(?:a|an|your)\s+)?(?:(?:written|fixed|free|best|competitive|firm)\s+)?(?:price|quote|quotation|estimate)\b"
+    r"|\bquote\s+(?:us|me)\b|\b(?:price|quote|quotation|estimate)\s+for\s+(?:the|a|an|this|these|our|carrying|doing)\b"
+    r"|\bquote request\b|\bhow much (?:would|will|do|does|is|are) (?:it|you|this|that|the job)\b", re.I)
+
+
+def quote_asked(parsed):
+    """The words that make this email ask for a quote, or "": a subject that is not a reply, and the sender's
+    own words. A reply keeps the other side's subject ("Re: Quote for boiler repair"), so it is read by its
+    own words only (review of this PR: accepting a quote, copying the tenant, is not a request to two firms)."""
+    subject = "" if REPLY_SUBJECT_RE.match(parsed.get("subject") or "") else (parsed.get("subject") or "")
+    hit = QUOTE_ASK_SUBJECT_RE.search(QUOTE_LABEL_RE.sub(" ", subject))
+    if hit:
+        return "the subject says %r" % hit.group(0)
+    hit = QUOTE_ASK_BODY_RE.search(QUOTE_LABEL_RE.sub(" ", own_words(parsed.get("body") or "")))
+    return ("the email asks %r" % " ".join(hit.group(0).split())) if hit else ""
+
+
+def multi_company_quote_problem(parsed):
+    """Why a quote request would put two or more companies on one email, or "". TO-EACH is the way through."""
+    shown = [a for a in (parsed.get("to") or []) + (parsed.get("cc") or [])
+             if a.strip().lower() not in RULE_OWN_ADDRESSES]
+    companies = sorted({company_key(a) for a in shown})
+    if len(companies) < 2:
+        return ""
+    asked = quote_asked(parsed)
+    if not asked:
+        return ""
+    return ("this email asks for a quote (%s) and its TO and CC lines reach %d companies (%s). Kevin's ruling (%s): "
+            "one email per company, always, never two firms on one email. Use `TO-EACH:` in place of TO and CC (the "
+            "same words go to each address as a separate email, so write words that fit every firm, with no one "
+            "firm's name in the greeting), or submit one card per company"
+            % (asked, len(companies), ", ".join(companies), SIX_RULINGS))
+
+
 # Where `inbound-triage.py attachments` saves what other people sent (GUARDRAILS "Email attachments"). A
 # document there is someone else's words as received: an insurer's "[approx.]", a solicitor's "[sic]". The
 # agent cannot edit it, so it is not read, as the quoted reply under an email is not read (review of PR 951,
@@ -1239,6 +1399,10 @@ def validate_submission(output, task_name=None):
             % (RUNPRENEUR_SENDER, PERSONAL_SENDER))
     bad = signoff_problem(parsed["body"])
     if bad:
+        if sender.lower() == PROPERTY_SENDER:
+            raise EmailFormatError(
+                "%s Mail from info@ is signed `Roy Lavin` with `Agile Lets` on the next line, and nothing "
+                "under it: no address, no phone number, no contact block." % bad)
         raise EmailFormatError(
             "%s Sign off as `Kevin Brittain`, or `Kevin Brittain` on its own "
             "line above `on behalf of <company>` when writing for an entity. "
@@ -1254,7 +1418,12 @@ def validate_submission(output, task_name=None):
     bad = (placeholder_problem(words) or em_dash_problem(words)
            or placeholder_problem(own_subject, "the subject") or em_dash_problem(own_subject, "the subject")
            or roy_third_person_problem(parsed["body"])
-           or mailout_recipients_problem(task_name, parsed))
+           or mailout_recipients_problem(task_name, parsed)
+           # Kevin's six rulings (16 Nov 2026): the AGENT RENT LATE sender, Roy's sign-off on info@, and one
+           # company per quote request.
+           or agent_rent_late_sender_problem(task_name, parsed)
+           or property_signoff_problem(parsed)
+           or multi_company_quote_problem(parsed))
     if bad:
         raise EmailFormatError(bad)
     # A mail-out redrafted as one long TO line shows every contact to every other

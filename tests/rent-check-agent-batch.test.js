@@ -133,10 +133,13 @@ print(json.dumps({"n": len(plan), "bayTasks": len(bay), "tenancies": tcys(bay[0]
     expect(r.desc).toContain('- Unit 1 – 9 Model Street: £700.00 owed');
     expect(r.desc).toContain('Total owed: £1,950.00.');
     expect(r.desc).toContain('Draft ONE email to the letting agent covering every unit above');
-    // Who it is sent from waits on Kevin's decision card: this sentence is word for word what it was.
-    expect(r.desc).toContain('It goes from kevinbrittain@gmail.com, signed Kevin Brittain (Kevin, 5 Oct 2026: the letting agent '
-      + 'knows him as the landlord), to their accounts contact, in the thread of the last emails about this place where there '
-      + 'is one (agent-dispatch.py history). Nothing goes to the tenant.');
+    // Kevin's decision card recinoFWz6fQ6JVVB (16 Nov 2026): letting-agent mail goes from info@ signed Roy, never his Gmail.
+    expect(r.desc).toContain('It goes from info@agilelets.co.uk, signed Roy Lavin, then Agile Lets on the next line (Kevin, '
+      + '16 Nov 2026), to their accounts contact. Read the last emails about this place first (agent-dispatch.py history) '
+      + "and quote their subject: it is a new email from info@, because the old threads sit in Kevin's Gmail. Nothing goes "
+      + 'to the tenant.');
+    expect(r.desc).not.toContain('kevinbrittain@gmail.com');
+    expect(r.desc).not.toContain('signed Kevin');
     expect(r.desc).toContain('RENT AGENT KEY: recBay1:2026-11-10\nRENT AGENT KEY: recBay2:2026-11-10\nRENT AGENT KEY: recBay3:2026-11-10');
     // The paid unit and the Universal Credit tenant are in no letting-agent task.
     expect(r.everywhere).toEqual(['recBay1', 'recBay2', 'recBay3', 'recOak1']);
@@ -279,9 +282,11 @@ print(json.dumps({"second": [[p["step"], p["name"], tcys(p), keys(p)] for p in s
     expect(r.second).toEqual([['2', 'AGENT RENT LATE: Baywater Lets, rent due 10 Nov (2 units, second email)',
       ['recBay1', 'recBay3'], ['recBay1:2026-11-10:2', 'recBay3:2026-11-10:2']]]);
     expect(r.secondDesc).toContain('The email to the letting agent went on 13 Nov and the rent has still not arrived.');
-    // Who it is sent from waits on Kevin's decision card: this sentence is word for word what it was.
-    expect(r.secondDesc).toContain('Draft a second, firmer email in the same thread, from kevinbrittain@gmail.com, signed Kevin '
-      + 'Brittain, asking for the payment date in writing. Nothing goes to the tenant.');
+    // Kevin's decision card recinoFWz6fQ6JVVB (16 Nov 2026): the second email goes from info@ signed Roy too.
+    expect(r.secondDesc).toContain('Draft a second, firmer email, from info@agilelets.co.uk, signed Roy Lavin, then Agile Lets '
+      + 'on the next line, in the thread of the first email where it went from info@, asking for the payment date in writing. '
+      + 'Nothing goes to the tenant.');
+    expect(r.secondDesc).not.toContain('kevinbrittain@gmail.com');
     expect(r.roy).toEqual([['roy', 'AGENT RENT LATE: Baywater Lets, rent due 10 Nov (3 units): phone the letting agent',
       ['recBay1', 'recBay2', 'recBay3']]]);
     expect(r.royDesc).toContain('Two emails to the letting agent (8 Nov and 12 Nov)');

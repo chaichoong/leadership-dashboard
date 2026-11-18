@@ -1108,8 +1108,8 @@ print(json.dumps({"off": [off["raised"], rc.agent_late_line(off)], "dry": [dry["
     expect(r.assignee).toBeNull();
     expect(r.key).toBe('RENT AGENT KEY: recAgent:2026-09-30');
     expect(r.tenancies).toEqual(['recAgent']);
-    // The sender wording is unchanged (it waits on Kevin's decision card).
-    expect(r.desc).toContain('It goes from kevinbrittain@gmail.com, signed Kevin Brittain');
+    // Kevin's decision card recinoFWz6fQ6JVVB (16 Nov 2026): from info@, signed Roy Lavin, Agile Lets.
+    expect(r.desc).toContain('It goes from info@agilelets.co.uk, signed Roy Lavin, then Agile Lets on the next line');
     // Only the open ROY step is offered to his email again (its ledger never sends a second copy); the agent's card never.
     expect(r.mailed).toEqual([['recOPENROY000001', 'roy@example.test']]);
     expect(r.line).toMatch(/^Agent-managed late rent raised: AGENT RENT LATE: Example Lettings/);
