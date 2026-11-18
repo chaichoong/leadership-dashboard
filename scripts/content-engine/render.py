@@ -836,13 +836,27 @@ def teaser_day_from_lead(key, role, spoken, day, reason, ledger):
     return ep, "no spoken day; it follows %s, episode %d's long recording, so it is that episode's teaser" % (lead[0], ep)
 
 
+def max_length(key, ledger):
+    """A clip's length in seconds: its recorded duration, or, before it has rendered, the most it can be, which is the
+    time until the next clip starts (one camera records one clip at a time). None when neither is known. So the answer
+    does not depend on which of a day's short clips renders first (re-review of PR 979)."""
+    v = ledger.get(key) or {}
+    if isinstance(v.get("duration"), (int, float)): return v["duration"]
+    t0 = clip_start(v)
+    if t0 is None: return None
+    later = [s for k2, v2 in ledger.items() if k2 != key for s in [clip_start(v2)] if s is not None and s > t0]
+    return min(later) - t0 if later else None
+
+
 def other_summary(key, day, ledger):
     """True when episode `day` has another short clip that is, or may still become, its summary: rendered or waiting,
-    known to be short, and not itself paired to a set-aside recording. A clip of unknown length does not count."""
+    known to be short (by its role, its duration or the gap to the next clip), and not itself paired to a set-aside
+    recording. A clip whose length cannot be bounded does not count."""
     for k2, v in ledger.items():
         if k2 == key or v.get("status") in (watch.SET_ASIDE, "broll", "failed"): continue
         if (v.get("episode") or v.get("day")) != day or is_long_recording(v): continue
-        short = v.get("role") == "teaser" or (isinstance(v.get("duration"), (int, float)) and v["duration"] <= TEASER_MAX_SECONDS)
+        most = max_length(k2, ledger)
+        short = v.get("role") == "teaser" or (most is not None and most <= TEASER_MAX_SECONDS)
         if short and follows_episode(k2, day, ledger) is not False: return True
     return False
 
@@ -858,13 +872,14 @@ def second_long_recording(e, day, first, spoken):
     as an episode, so it is set aside and the card is not held. One that names no day may be a part 2 the continuation
     check missed (review of PR 979), so it fails as before: "it needs a person", listed in the morning report, and
     resubmit_due holds the card for a ruling."""
-    if spoken is not None:
-        set_aside(e, "%s %d (%s is already its episode) and not a part of it: it names day %d of its own, so it is set "
-                     "aside and cannot replace that episode" % (SECOND_LONG, day, first, spoken))
+    if spoken is not None and spoken != day:
+        set_aside(e, "%s %d (%s is already its episode) and not a part of it: it names day %d, not %d, so it is set "
+                     "aside and cannot replace that episode" % (SECOND_LONG, day, first, spoken, day))
         return
     e["status"] = "failed"; e["requeued"] = "not requeued: it needs a person"   # the page names it; a retry would do the same
     e["error"] = ("%s %d (%s is already its episode) and not a part of it: not rendered, so it cannot replace that "
-                  "episode; it names no day, so it may be a part the engine did not recognise" % (SECOND_LONG, day, first))
+                  "episode; it names %s, so it may be a part the engine did not recognise"
+                  % (SECOND_LONG, day, first, "no day" if spoken is None else "this episode's own day"))
     e["render_failed"] = dt.datetime.now().isoformat(timespec="seconds")   # steps the day aside in the redo queue (982)
 
 
@@ -891,6 +906,12 @@ def summary_rival(key, day, reason, ledger):
     if not done:
         return "", ""
     mine, theirs = follows_episode(key, day, ledger), {k2: follows_episode(k2, day, ledger) for k2 in done}
+    if mine is False and any(t is True for t in theirs.values()):
+        # It follows the set-aside recording and SAYS the right day (else it was set aside above): it never replaces a
+        # summary that follows the episode's own recording, whatever their spoken days (re-review of PR 979).
+        return "refuse", ("a short recording that follows %s, a second long recording of episode %d that was set aside; "
+                          "%s follows the episode's own recording and stays its summary"
+                          % (lead[0], day, ", ".join(k2 for k2, t in theirs.items() if t is True)))
     if mine is True and all(t is False for t in theirs.values()):
         return "replace", ("episode %d's summary came from %s, which follows a long recording that was set aside; this one "
                            "follows the episode's own recording (%s), so it is the day's summary"
@@ -2864,7 +2885,13 @@ def _selftest_teaser_pairing():
     a2, a3 = {}, {}
     second_long_recording(a2, 2106, "c001.insv", None); second_long_recording(a3, 2106, "c001.insv", 2102)
     assert a2["status"] == "failed" and a2["requeued"].endswith("needs a person") and a2.get("render_failed"), a2
-    assert a3["status"] == watch.SET_ASIDE and "names day 2102 of its own" in a3["set_aside"], a3
+    assert a3["status"] == watch.SET_ASIDE and "names day 2102, not 2106" in a3["set_aside"], a3
+    a4 = {}; second_long_recording(a4, 2106, "c001.insv", 2106)
+    assert a4["status"] == "failed" and "this episode's own day" in a4["error"], "a missed part 2 opening 'day 2106' is held"
+    says = dict(first, **{"c004.insv": dict(led["c004.insv"], duration=None)})
+    assert summary_rival("c004.insv", 2106, "spoken day matches the date", says)[0] == "refuse", "004 saying 2106 never replaces 002"
+    early = dict(led, **{"c002.insv": {"date": D, "hms": "142528", "status": "pulled", "day": 2106}})
+    assert max_length("c002.insv", early) == 66 and summary_rival("c004.insv", 2106, NO_DAY, early)[0] == "set-aside", "004 before 002"
     # across midnight: absolute time pairs it, and a teaser naming no day takes the episode of the recording it follows
     night = {"l": {"date": D, "hms": "235200", "duration": 400.0, "role": "episode", "episode": 2106, "status": "rendered"},
              "t": {"date": "2026-03-08", "hms": "000110", "duration": 40.0, "status": "new", "day": 2107}}
@@ -3151,7 +3178,7 @@ def selftest():
     assert 'e.pop("intro_at_override", None)' in rd, "a jingle point with no figure must drop a stored one"
     assert "intro_at_override" not in RESET_STALE, "his figure must survive a failed-clip reset"
     _selftest_note_times()
-    print(json.dumps({"checks": 150, "failed": []}))
+    print(json.dumps({"checks": 155, "failed": []}))
 
 
 def _selftest_note_times():

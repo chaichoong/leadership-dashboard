@@ -361,3 +361,46 @@ res = [lead_b and lead_b[0], day_b[0], day_t, render.summary_rival("t", day_t, w
     expect(r).toEqual(['a', 2107, 2106, 'set-aside', 2107]);
   });
 });
+
+// Re-review of PR 979 (18 Nov 2026): a clip that follows the set-aside recording and SAYS the right day still replaced
+// the summary that follows the episode (the 18 Oct fault by another route); a second long recording naming the
+// episode's own day was set aside, though a missed part 2 opens that way; and when 004 rendered before 002, 002 had no
+// recorded length, so 004 became the summary. The decision now reads every clip of the day, whatever the order.
+describe('finding 20261020-agent-dispatch-1016 re-review: the right summary whatever 004 says and whichever renders first', () => {
+  const py = (body) => JSON.parse(execFileSync('python3', ['-c', `
+import sys, os, json, io, contextlib, datetime as dt
+sys.path.insert(0, ${JSON.stringify(DIR)})
+import render, watch
+FLAG = "spoken day 2101 disagrees with the date (2106); date used, flagged"
+D = "2026-03-07"
+led = {"c001": {"date": D, "hms": "141815", "duration": 428.2, "role": "episode", "episode": 2106, "status": "rendered", "day": 2106},
+       "c002": {"date": D, "hms": "142528", "duration": 47.5, "role": "teaser", "episode": 2106, "status": "rendered",
+                "episode_reason": FLAG, "day": 2106},
+       "c003": {"date": D, "hms": "142634", "duration": 384.5, "role": "episode", "episode": 2106, "status": watch.SET_ASIDE, "day": 2106},
+       "c004": {"date": D, "hms": "143312", "status": "pulled", "day": 2106}}
+res = None
+with contextlib.redirect_stdout(io.StringIO()):
+${body.split('\n').map((l) => '    ' + l).join('\n')}
+print(json.dumps(res))
+`], { encoding: 'utf8', cwd: DIR }));
+
+  it('004 saying "day 2106" after the set-aside 003 never replaces 002, which follows the episode', () => {
+    expect(py(`res = render.summary_rival("c004", 2106, "spoken day matches the date", led)[0]`)).toBe('refuse');
+  });
+
+  it("a second long recording naming the episode's own day is held for a person; one naming another day is set aside", () => {
+    const r = py(`
+same, other = {}, {}
+render.second_long_recording(same, 2106, "c001", 2106)
+render.second_long_recording(other, 2106, "c001", 2102)
+res = [same["status"], same.get("requeued"), other["status"]]`);
+    expect(r).toEqual(['failed', 'not requeued: it needs a person', 'set-aside']);
+  });
+
+  it('004 rendering before 002 (no length or role recorded for 002 yet) is still set aside', () => {
+    const r = py(`
+led["c002"] = {"date": D, "hms": "142528", "status": "pulled", "day": 2106}
+res = render.summary_rival("c004", 2106, "no spoken day, date used", led)[0]`);
+    expect(r).toBe('set-aside');
+  });
+});
