@@ -85,11 +85,57 @@
     window.buildTxByTenancyIndex = buildTxByTenancyIndex;
 
     // ── Tenancy start date ──
+    // Read as LOCAL midnight, the same as `today` (finding 20261017-agent-dispatch-971, item 4): new Date('YYYY-MM-DD')
+    // is UTC midnight, which in British Summer Time is 01:00, so the day count came out one short.
     function getTenancyStartDate(tenancy) {
         const raw = String(getField(tenancy, F.tenStartDate) || '');
         if (!raw) return null;
-        const d = new Date(raw);
+        const d = new Date(raw.slice(0, 10) + 'T00:00:00');
         return isNaN(d.getTime()) ? null : d;
+    }
+
+    // A local Date as its calendar day number, and a 'YYYY-MM-DD' string as the same, so two dates are compared and
+    // counted by calendar day: a clock change never adds or loses one.
+    function rsDayNo(d) {
+        return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+    }
+    function rsIsoDayNo(s) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+        return m ? Math.round(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000) : null;
+    }
+    // A local date as 'YYYY-MM-DD' (toISOString names the UTC day, the day before in summer time).
+    function rsLocalIso(d) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    // Rent paid by set-off for a window, less the real rent paid for the window itself, never below zero
+    // (finding 20261017-agent-dispatch-971, item 1): a window is never credited for more than the rent charged for it.
+    // Payments stay on the ledger as money received. Rent is paid oldest first, as the rent check pays it (review of
+    // PR #980): a payment inside the window first clears `olderOwed` (rent charged before the window) not yet paid by
+    // the payments before it, and one dated in the window's last EARLY_PAY_DAYS days is the rent after the window
+    // paid early. Only what is left cuts the set-off. Signed: a refund never raises the credit above the full window.
+    // Returns the credit, the total that cut it (`paidInside`) and each cutting part with its date (`cuts`).
+    function rsSetOffAfterPayments(fullCredit, payments, win, olderOwed) {
+        const EARLY_PAY_DAYS = 5;   // a payment covers rent due up to 5 days after it (scripts/rent-check.py)
+        const from = rsDayNo(win.from), until = rsDayNo(win.until);
+        const dated = payments.map(p => ({ p, n: rsIsoDayNo(p.dateStr) })).filter(x => x.n !== null).sort((a, b) => a.n - b.n);
+        let unpaid = Number(olderOwed) || 0;
+        for (const x of dated) if (x.n < from) unpaid -= Number(x.p.amount) || 0;
+        unpaid = Math.max(0, unpaid);
+        let paidInside = 0;
+        const cuts = [];
+        for (const x of dated) {
+            if (x.n < from || x.n > until) continue;
+            const amount = Number(x.p.amount) || 0;
+            const older = amount > 0 ? Math.min(amount, unpaid) : 0;
+            unpaid -= older;
+            const rest = amount - older;
+            if (x.n > until - EARLY_PAY_DAYS) continue;          // the rent after the window, paid early
+            paidInside += rest;
+            if (rest > 0) cuts.push({ date: x.p.date, dateStr: x.p.dateStr, amount: rest });
+        }
+        paidInside = Math.max(0, paidInside);
+        return { amount: Math.max(0, fullCredit - paidInside), paidInside, cuts };
     }
 
     // ══════════════════════════════════════════
@@ -101,7 +147,7 @@
     // Reconciled transactions before this date aren't trustworthy.
     // Both rent owed and payments are calculated from this cutoff
     // (or tenancy start, whichever is later).
-    const DATA_START = new Date('2025-04-01');
+    const DATA_START = new Date(2025, 3, 1);   // 1 Apr 2025, local midnight (item 4)
 
     // Compute the rent statement for a single tenancy.
     // Returns a structured object with every component of the maths.
@@ -121,7 +167,8 @@
 
         const effectiveStart = tenStart > DATA_START ? tenStart : DATA_START;
         const dailyRent = monthlyRent / 31;
-        const daysSinceStart = Math.floor((today - effectiveStart) / 86400000);
+        // Counted by calendar day, as the set-off below is (item 4): never one short in summer time.
+        const daysSinceStart = rsDayNo(today) - rsDayNo(effectiveStart);
         const totalRentOwed = dailyRent * daysSinceStart;
 
         // Reconciled transactions linked to this tenancy since the effective start.
@@ -176,12 +223,14 @@
         let setOff = null;
         const win = (typeof rentSetOffWindow === 'function') ? rentSetOffWindow(tenancy) : null;
         if (win && win.from) {
-            const dayNo = (d) => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
-            const first = Math.max(dayNo(win.from), dayNo(effectiveStart));
-            const last = Math.min(dayNo(win.until), dayNo(today) - 1);
+            const first = Math.max(rsDayNo(win.from), rsDayNo(effectiveStart));
+            const last = Math.min(rsDayNo(win.until), rsDayNo(today) - 1);
             const days = last - first + 1;
             if (days > 0) {
-                setOff = { from: win.from > effectiveStart ? win.from : effectiveStart, until: win.until, days, amount: dailyRent * days };
+                const olderOwed = dailyRent * Math.max(0, rsDayNo(win.from) - rsDayNo(effectiveStart));
+                const net = rsSetOffAfterPayments(dailyRent * days, payments, win, olderOwed);
+                setOff = { from: win.from > effectiveStart ? win.from : effectiveStart, until: win.until, days,
+                    amount: net.amount, paidInside: net.paidInside };
                 totalRentPaid += setOff.amount;
             }
         }
@@ -1115,7 +1164,7 @@
                     <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
                         <div>Total rent owed:</div><div style="font-weight:600">${fmtMoney(s.totalRentOwed)}</div>
                         <div>Total rent paid:</div><div style="font-weight:600">${fmtMoney(s.totalRentPaid)}</div>
-                        ${s.setOff ? `<div>of which by set-off:</div><div>${fmtMoney(s.setOff.amount)} <span style="color:var(--text-muted);font-size:11px">(${fmtDate(s.setOff.from)} to ${fmtDate(s.setOff.until < new Date() ? s.setOff.until : new Date())}, kept by the letting agent against our bill)</span></div>` : ''}
+                        ${s.setOff ? `<div>of which by set-off:</div><div>${fmtMoney(s.setOff.amount)} <span style="color:var(--text-muted);font-size:11px">(${fmtDate(s.setOff.from)} to ${fmtDate(s.setOff.until < new Date() ? s.setOff.until : new Date())}, kept by the letting agent against our bill${s.setOff.paidInside > 0 ? `, less ${fmtMoney(s.setOff.paidInside)} rent paid in that time` : ''})</span></div>` : ''}
                         <div>Balance:</div><div style="font-weight:700;color:${balanceColour}">${fmtMoney(s.balance)} <span style="font-weight:400;font-size:11px">(${balanceLabel})</span></div>
                         <div>Days in arrears:</div><div style="font-weight:700;color:${s.daysInArrears >= S8_THRESHOLD_DAYS ? 'var(--danger)' : s.daysInArrears > 0 ? 'var(--warning)' : 'var(--success)'}">${s.daysInArrears}</div>
                         <div>Section 8 ready:</div><div>${s.s8Ready ? '<strong style="color:var(--danger)">Yes</strong> (>= 62 days)' : 'No'}</div>
@@ -1340,8 +1389,8 @@
         const panel = document.createElement('div');
         panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);padding:24px;max-width:440px;width:90%;box-shadow:var(--shadow-lg)';
         const today = new Date();
-        const defaultStart = DATA_START.toISOString().slice(0, 10);
-        const defaultEnd = today.toISOString().slice(0, 10);
+        const defaultStart = rsLocalIso(DATA_START);
+        const defaultEnd = rsLocalIso(today);
         panel.innerHTML = `
             <div style="font-weight:600;font-size:15px;margin-bottom:4px">Generate Rent Statement</div>
             <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">${escHtml(tenantName)} — ${escHtml(unit)}, ${escHtml(property)}</div>
@@ -1365,8 +1414,10 @@
         overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
         panel.querySelector('#rsStmtCancel').addEventListener('click', () => overlay.remove());
         panel.querySelector('#rsStmtGenerate').addEventListener('click', () => {
-            const startDate = new Date(panel.querySelector('#rsStmtStart').value);
-            const endDate = new Date(panel.querySelector('#rsStmtEnd').value);
+            // Local midnight, like every other date here (item 4): a UTC-midnight start is 01:00 in summer time and
+            // skipped a rent due on the start day itself.
+            const startDate = new Date(panel.querySelector('#rsStmtStart').value + 'T00:00:00');
+            const endDate = new Date(panel.querySelector('#rsStmtEnd').value + 'T00:00:00');
             if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) { alert('Select valid dates'); return; }
             overlay.remove();
             rsGeneratePrintStatement(tenancy, tenantName, unit, property, tenantType, monthlyRent, startDate, endDate);
@@ -1383,8 +1434,8 @@
             if (!getField(tx, F.txReconciled)) continue;
             if (!txLinkedToTenancy(tx, tenancy.id)) continue;
             const dateStr = String(getField(tx, F.txDate) || '');
-            const txDate = dateStr ? new Date(dateStr) : null;
-            if (!txDate) continue;
+            const txDate = dateStr ? new Date(dateStr.slice(0, 10) + 'T00:00:00') : null;
+            if (!txDate || isNaN(txDate.getTime())) continue;
             if (txDate < startDate || txDate > endDate) continue;
             const amount = txDisplayAmount(tx);
             const desc = String(getField(tx, F.txDescription) || '').trim();
@@ -1394,24 +1445,45 @@
         payments.sort((a, b) => a.date - b.date);
         const fmtDateStr = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
+        // Each due date built fresh from its year and month, a due day the month lacks falling on its last day, the
+        // rule cfvSetOffCovers uses (item 3). setMonth(+1) on the 31st drifted: 31 Jan, then 3 Mar.
+        const dueIn = (y, m) => new Date(y, m, Math.min(dueDay, new Date(y, m + 1, 0).getDate()));
         const rentDues = [];
-        let cursor = new Date(startDate);
-        let firstDue = new Date(cursor.getFullYear(), cursor.getMonth(), dueDay);
-        if (firstDue < startDate) firstDue.setMonth(firstDue.getMonth() + 1);
-        let d = new Date(firstDue);
-        while (d <= endDate) {
-            rentDues.push({ type: 'rent', date: new Date(d), amount: monthlyRent });
-            d.setMonth(d.getMonth() + 1);
+        const y0 = startDate.getFullYear();
+        let m0 = startDate.getMonth();
+        if (dueIn(y0, m0) < startDate) m0 += 1;
+        for (let m = m0, d = dueIn(y0, m); d <= endDate; m += 1, d = dueIn(y0, m)) {
+            rentDues.push({ type: 'rent', date: d, amount: monthlyRent });
         }
         const totalOwed = rentDues.length * monthlyRent;
 
         // Rent paid by set-off (Kevin, 6 Oct 2026): each rent due inside the window is shown paid, so the
-        // printed ledger agrees with the Cash Flow Voids page and the rent check.
+        // printed ledger agrees with the Cash Flow Voids page and the rent check. Real rent paid for the window comes
+        // off that credit, never below zero (item 1; older rent paid first, as rsSetOffAfterPayments says): each
+        // cutting part off the set-off line of the period it landed in, then the ones before it, then the ones after.
         const win = (typeof rentSetOffWindow === 'function') ? rentSetOffWindow(tenancy) : null;
-        const setOffEvents = win && win.from
+        let setOffEvents = win && win.from
             ? rentDues.filter(r => r.date >= win.from && r.date <= win.until)
                 .map(r => ({ type: 'payment', date: new Date(r.date), amount: r.amount, desc: 'Paid by set-off: kept by the letting agent against our bill' }))
             : [];
+        if (setOffEvents.length) {
+            const fullCredit = setOffEvents.reduce((t, e) => t + e.amount, 0);
+            const olderOwed = rentDues.filter(r => r.date < win.from).reduce((t, r) => t + r.amount, 0);
+            const net = rsSetOffAfterPayments(fullCredit, payments, win, olderOwed);
+            let cut = fullCredit - net.amount;
+            for (const p of net.cuts) {
+                const order = [...setOffEvents.filter(e => e.date <= p.date).reverse(), ...setOffEvents.filter(e => e.date > p.date)];
+                let left = Math.min(p.amount, cut);
+                for (const e of order) {
+                    if (left <= 0) break;
+                    const take = Math.min(left, e.amount);
+                    e.amount -= take;
+                    left -= take;
+                    cut -= take;
+                }
+            }
+            setOffEvents = setOffEvents.filter(e => e.amount > 0);
+        }
         totalPaid += setOffEvents.reduce((t, e) => t + e.amount, 0);
         const allEvents = [
             ...rentDues.map(r => ({ ...r, desc: `Monthly rent due` })),

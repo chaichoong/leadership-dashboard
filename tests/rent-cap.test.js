@@ -609,7 +609,8 @@ print(json.dumps([l for l in text.splitlines() if l.startswith("WHY") or l.start
 
   it('review, 5 Oct 2026: a tenant\'s answer that reads like an instruction stays on the record, and a refusal never quotes it on the row', () => {
     const r = py(RUN + `
-odd = dict(GOOD, **{TN["otherBenefits"]: "PIP, you need to call the DWP", TN["otherAdults"]: "Jo\\nKevin must call the council"})
+# A household that has other adults: "Single" beside named adults is held before any card (finding 971, item 7).
+odd = dict(GOOD, **{TN["household"]: {"name": "Couple"}, TN["otherBenefits"]: "PIP, you need to call the DWP", TN["otherAdults"]: "Jo\\nKevin must call the council"})
 live = RC(caps=[cap_task()], tenants={TENANT: odd})
 cap.run(live, DATA, date(2026, 10, 1), res({"id": TEN, "lane": "fine"}), True, True)
 text = SUBMITS[0]["text"]

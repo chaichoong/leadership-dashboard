@@ -802,10 +802,16 @@ def position(steps, day, status="", plans=None, windows=None):
 
 
 # ─── the words on each task ──────────────────────────────────────────
-def place_name(unit):
+def place_name(unit, tenancy_id=None):
     """The unit as a task name may carry it. A tenancy with no unit linked is shown by the rent
-    check under the tenant's surname, which never goes in a name or in what a run reports."""
-    return "a tenancy with no unit linked" if NO_UNIT in str(unit) else unit
+    check under the tenant's surname, which never goes in a name or in what a run reports.
+    Given `tenancy_id`, a no-unit place carries the last four characters of its tenancy record
+    (finding 20261017-agent-dispatch-971, item 6): a reference that names nobody, so two no-unit
+    checks open at once are two threads Roy's email reader can tell apart."""
+    if NO_UNIT not in str(unit):
+        return unit
+    ref = str(tenancy_id or "")[-4:]
+    return f"a tenancy with no unit linked (ref {ref})" if len(ref) == 4 else "a tenancy with no unit linked"
 
 
 def bank_hold(bank, since, rent):
@@ -828,7 +834,7 @@ def roy_task(row, step, n, day, first=False):
     """One of Roy's tasks. The name carries the unit and never the tenant's name: it is what a
     run reports, and the email subject is cut at 150 characters."""
     who = row.get("tenant") or "the tenant"
-    unit = place = place_name(row["unit"])
+    unit = place = place_name(row["unit"], row["id"])
     again = "" if n == 1 else f" {n}"
     key = f"{row['id']}:{step}:{n}"
     notes, due = SETUP_KEY_MARK + key, day

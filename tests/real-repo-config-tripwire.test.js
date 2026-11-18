@@ -7,7 +7,7 @@
 // run must FAIL for the incident's settings and PASS for ordinary config traffic (a branch section).
 import { describe, it, expect } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, symlinkSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,8 +52,12 @@ function innerRun(probe, { git = true } = {}) {
   }
 }
 
-describe('the real-repo git config tripwire', () => {
-  if (process.env.TRIPWIRE_PROBE) return;   // never inside an inner run
+// A copy with no .git of its own (a `git archive` export) has no settings to guard, and asking git for them throws at
+// load: skipped, the same check the global setup makes (finding 20261017-agent-dispatch-971, item 8).
+const OWN_GIT = existsSync(resolve(ROOT, '.git'));
+
+describe.skipIf(!OWN_GIT)('the real-repo git config tripwire', () => {
+  if (process.env.TRIPWIRE_PROBE || !OWN_GIT) return;   // never inside an inner run, never with no .git
   const realBefore = readWatched(sharedConfigPath());
 
   it('is wired into this repository\'s vitest config as a global setup', () => {

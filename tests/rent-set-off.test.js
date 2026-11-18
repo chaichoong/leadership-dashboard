@@ -167,10 +167,12 @@ describe('rent statement: set-off days are paid at the daily rate, over the days
     const getField = (o, k) => o[k];
     // eslint-disable-next-line no-new-func
     const compute = new Function('F', 'getField', 'getTenancyStartDate', 'DATA_START', 'allTransactions', 'txLinkedToTenancy',
-      'txDisplayAmount', 'S8_THRESHOLD_DAYS', 'rentSetOffWindow', `${extract(AR, 'computeRentStatement')}; return computeRentStatement;`)(
+      'txDisplayAmount', 'S8_THRESHOLD_DAYS', 'rentSetOffWindow',
+      `${extract(AR, 'rsDayNo')}\n${extract(AR, 'rsIsoDayNo')}\n${extract(AR, 'rsSetOffAfterPayments')}\n`
+      + `${extract(AR, 'computeRentStatement')}; return computeRentStatement;`)(
       { tenRent: 'rent', txDate: 'date' }, getField,
-      (t) => new Date(t.start),                                    // the real reader: new Date('YYYY-MM-DD'), UTC midnight
-      new Date('2025-04-01'), [], () => false, (tx) => tx.amount, 62,
+      (t) => new Date(t.start + 'T00:00:00'),                      // the real reader: local midnight (finding 971, item 4)
+      new Date(2025, 3, 1), [], () => false, (tx) => tx.amount, 62,
       (t) => rentSetOffWindow({ from: t.from, until: t.until }));
     return compute(ten, 'Agent-Managed', new Date(todayIso + 'T00:00:00'), new Map([['recT', payments]]));
   }
