@@ -86,10 +86,21 @@ describe('browser lane: the value guard reads what a value IS, not a word inside
   it.each(['5482505', 'The secret: consistency.', 'The secret: 10,000 steps', 'Top secret: 2026', 'My secret: 5am.',
     'Day 2,187: 16,777.69km run, 23,297.31km left', 'https://www.facebook.com/reel/1908741580501895',
     'Episode 2187 - Screen Addiction, Gaming and ADHD', '#TheUltimateUltraMarathon2026Challenge', 'youtu.be/7CvvQa_9Lm2',
-    'Watch the series: www.youtube.com/playlist?list=PLaB3dE5gH7jK9mN1pQ3rS5tU7vW9xY0zA', 'Raised £76,975 so far', ''])
+    'Watch the series: www.youtube.com/playlist?list=PLaB3dE5gH7jK9mN1pQ3rS5tU7vW9xY0zA', 'Raised £76,975 so far', '',
+    // second review (18 Nov 2026): sentences and references that only look like a label or a card
+    'Turn on 2FA: always.', 'Every token: earned', 'Your card number: never share it', 'The secret = showing up',
+    'Order 203-1234566-7654321 arrived', 'Meter 2012345670007 read today', 'TheUltimateUltraMarathon2026Challenge',
+    'See https://example.org/item/1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D for the form'])
     ('allows ordinary text: %s', (v) => {
       expect(browser.secretValueReason(v)).toBe('');
     });
+
+  it('reads a very long value in linear time (no backtracking blow-up)', () => {
+    const long = ('a-b.c-d '.repeat(12500)) + 'end';          // 100 KB of hyphens and dots, the slow shape for \b
+    const t0 = Date.now();
+    expect(browser.secretValueReason(long)).toBe('');
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
 
   it('never puts the value in the refusal message', async () => {
     const key = KEYS['an Anthropic key'];

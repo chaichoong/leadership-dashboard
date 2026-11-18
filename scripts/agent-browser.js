@@ -707,22 +707,42 @@ const SECRET_SHAPES = [
   ['a cloud key', /\b(?:AKIA[0-9A-Z]{16}\b|AIza[0-9A-Za-z_-]{35})/],
   ['a Google sign-in token', /\b(?:ya29\.[A-Za-z0-9_-]{20,}|1\/\/0[A-Za-z0-9_-]{20,})/],
   ['a GoHighLevel token', /\bpit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
-  ['an API key', /\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b/],    // capital-letter UUID (ClickSend's key)
   ['a signed token', /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
   ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-  // a credential word labelling a value: "api_key=abc", "Password: correcthorse", "OTP: 123456"
-  ['a labelled secret', new RegExp('(?:pass(?:word|code)|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(?:code|answer)|' +
-    'auth(?:entication)?.?code|token|api.?key)\\s*(?:=\\s*\\S|:\\s*\\S{4,})', 'i')],
-  // "secret" is an everyday word ("The secret: 10,000 steps"), so after a colon only a key-like run counts
-  ['a labelled secret', /secret\s*(?:=\s*\S|:\s*(?=[\w-]*[A-Za-z])(?=[\w-]*\d)[\w-]{8,}(?!\S))/i],
 ];
 
 // Links and hashtags are copy, never a secret by their shape: a YouTube id, a playlist id, #UltraMarathon2026Challenge.
-const COPY_NOT_SECRET_RE = /(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*|#\w+/gi;
+// (?<![\w.-]) rather than \b: \b fires at every hyphen and made this quadratic on a long value (review, 18 Nov 2026).
+const COPY_NOT_SECRET_RE = /(?:https?:\/\/|www\.)\S+|(?<![\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*|#\w+/gi;
+
+// A credential word labelling a value. "=" is code ("api_key=abc", "token = x"); after a colon it counts when the label
+// opens a line ("Password: correcthorse") or the word after it is key-like ("my password: hunter2"), never in a
+// sentence ("Turn on 2FA: always.", "Every token: earned"). "secret" alone is an everyday word: only a key-like run.
+const CRED_LABEL_RE = /(pass(?:word|code)|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(?:code|answer)|auth(?:entication)?.?code|token|api.?key|secret)(\s*)([:=])(\s*)(\S+)/gi;
+const keyLike = (w) => /\d/.test(w) || /[^A-Za-z0-9.,;:!?'"()[\]-]/.test(w) || /[a-z][A-Z]/.test(w);
+
+function labelledSecret(v) {
+  for (const m of v.matchAll(CRED_LABEL_RE)) {
+    const [, label, gap1, sep, gap2, raw] = m;
+    const word = raw.replace(/[.,;:!?)\]"']+$/, '');
+    const glued = !gap1 && !gap2;                                           // client_secret=abc, token:abc
+    if (/^secret$/i.test(label)) {
+      if (glued && sep === '=') return true;
+      if (word.length >= 8 && /[A-Za-z]/.test(word) && /\d/.test(word)) return true;
+      continue;
+    }
+    if (sep === '=') return true;
+    const opensLine = /(^|\n)[ \t]*$/.test(v.slice(0, m.index));
+    if (word.length >= 4 && (opensLine || glued || keyLike(word))) return true;
+  }
+  return false;
+}
 
 function luhnCard(text) {
-  // 13 to 19 digits, single spaces or dashes allowed, first digit 2 to 6 (a 16-digit Facebook reel id starts with 1)
-  for (const m of text.matchAll(/(?<!\d)[2-6](?:[ -]?\d){12,18}(?!\d)/g)) {
+  // real card shapes only (Visa 4, Mastercard 51-55 and 22-27, Discover 6011/65/644-649 as 4-4-4-4; Amex 34/37 as 4-6-5),
+  // one separator throughout: an Amazon order number (203-1234566-7654321) or a meter number is not one
+  const re = /(?<![\d-])(?:(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|6(?:011|5\d{2}|4[4-9]\d))([ -]?)\d{4}\1\d{4}\1\d{4}|3[47]\d{2}([ -]?)\d{6}\2\d{5})(?![\d-])/g;
+  for (const m of text.matchAll(re)) {
     const d = m[0].replace(/\D/g, '');
     let sum = 0;
     for (let i = 0; i < d.length; i++) { let n = +d[d.length - 1 - i]; if (i % 2) { n *= 2; if (n > 9) n -= 9; } sum += n; }
@@ -731,19 +751,28 @@ function luhnCard(text) {
   return false;
 }
 
+// A random key changes between lower case, capitals and digits at most characters; a long word does not
+// ("TheUltimateUltraMarathon2026Challenge" changes 7 times in 37).
+function looksRandom(run) {
+  if (!(/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run))) return false;
+  const cls = (c) => (/[a-z]/.test(c) ? 1 : /[A-Z]/.test(c) ? 2 : /\d/.test(c) ? 3 : 4);
+  let changes = 0;
+  for (let i = 1; i < run.length; i++) if (cls(run[i]) !== cls(run[i - 1])) changes++;
+  return changes >= run.length / 3;
+}
+
 function secretValueReason(value) {
   const v = String(value === undefined || value === null ? '' : value).trim();
   if (!v) return '';
   for (const [why, re] of SECRET_SHAPES) if (re.test(v)) return why;
-  // one word that names a secret ("MyPassword123"), as the check always refused; a link is not a word
+  if (labelledSecret(v)) return 'a labelled secret';
   const copy = v.replace(COPY_NOT_SECRET_RE, ' ');
+  // one word that names a secret ("MyPassword123"), as the check always refused; a link is not a word
   if (!/\s/.test(v) && v.length <= 64 && copy === v && SECRET_NAME_RE.test(v)) return 'a secret-named word';
   if (luhnCard(copy)) return 'a card number';
+  if (/\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b/.test(copy)) return 'an API key';   // ClickSend's shape
   if (/\b[0-9a-f]{40,}\b/i.test(copy)) return 'a long hex secret';
-  // a long random run: mixed case and digits, 32 characters or more, no word breaks
-  for (const run of copy.match(/[A-Za-z0-9+/=]{32,}/g) || []) {
-    if (/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run)) return 'a long random string';
-  }
+  for (const run of copy.match(/[A-Za-z0-9+/=]{32,}/g) || []) if (looksRandom(run)) return 'a long random string';
   return '';
 }
 
