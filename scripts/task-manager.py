@@ -17,7 +17,10 @@ Movement is measured ONLY from stamps nothing re-writes on a schedule:
   - Created Time (the floor — a task younger than the window is never stuck)
 NEVER Due Date (the rescheduler re-stamps it daily) and NEVER Last Modified
 Time (any automation touching any field re-stamps it). Both have burned this
-platform before — see loop-health and its tests.
+platform before — see loop-health and its tests. Due Date answers one other
+question only: a task stored at Upcoming with its date still ahead is not due
+yet (`scheduled`, 18 Nov 2026), because the rescheduler moves a date to today,
+never ahead.
 
 Commands:
   board [--dispatch-queue PATH]  read the board, print the JSON worklist
@@ -351,7 +354,7 @@ def newest_note_stamp(notes, *marks):
 
 def classify(f, activity_ids, now=None, lane=None):
     """One task's bucket: parked | waitingOnKevin | escalated | withRoy |
-    ownLane | held | decided | stuck | moving. Returns (bucket, source, moved_dt) so the caller
+    ownLane | held | decided | scheduled | stuck | moving. Returns (bucket, source, moved_dt) so the caller
     never recomputes.
 
     `lane` is agent-dispatch.py's task_lane for this task, read by queue_lanes (one task, one
@@ -444,6 +447,16 @@ def classify(f, activity_ids, now=None, lane=None):
     if (f.get("Status") == "Upcoming" and str(f.get("Due Date") or "")[:10] > now.date().isoformat()
             and newest_note_stamp(f.get("Notes"), PARKED_NOTE_MARK)):
         return "parked", "decidedUntil", moved
+    # SCHEDULED, NOT STUCK (18 Nov 2026). Stored at Upcoming with its date still ahead, the task is not
+    # due: the dispatcher takes it only on that date (DUE_UPCOMING_CLAUSE), loop-health and the AI team
+    # panel call it scheduled, and the clock in this file never touches it (parked_on_purpose). Only this
+    # board called it stuck: on 18 Nov 2026, 44 of 101 "stuck" were month-end stepping stones, standing
+    # holds and the Operations Director work parked to January, and the foreman wrote `leave` on each one
+    # three times a day. The date decides "not due yet" only and is never a movement stamp (the overdue
+    # rescheduler moves a date to today, never ahead). A task dispatch works in a lane is its work, not
+    # scheduled. Listed on `scheduled` with its date; on that date it is ordinary board work again.
+    if not lane and scheduled_ahead(f, now):
+        return "scheduled", "dueAhead", moved
     if moved is None:
         # No stamp at all should be impossible (Created Time is automatic);
         # treat as stuck so it surfaces rather than hides.
@@ -771,7 +784,9 @@ def task_view(rec, activity_ids, dispatch_ids, now, lanes=None):
         view["heldWhy"] = held_why(lane, detail)
         if detail.get("groupLead"):
             view["groupLead"] = detail["groupLead"]
-    if bucket in ("stuck", "moving", "held") and team:
+    # `scheduled` too (18 Nov 2026): it is on the ownerless scan, and without its lane a hand-over to
+    # Roy would never count as placing it (review of the scheduled bucket).
+    if bucket in ("stuck", "moving", "held", "scheduled") and team:
         # Read here, where the Notes are in hand, for the ownerless check's `royAllowed`.
         view["royLane"] = roy_lane(f)
     wall = open_wall(f.get("Notes"))
@@ -1040,7 +1055,9 @@ def ownerless_views(buckets, ai_agents=None, dispatch=None, roster=None):
     (None: the register was unread, judged by the list alone). Each such view carries
     `noLaneHolder`, the agents' names."""
     out = []
-    for b in ("stuck", "moving"):
+    # `scheduled` too (18 Nov 2026): a task with its date ahead was `stuck` or `moving` before it had a
+    # bucket of its own, and the 23 Sep case was exactly one, an ownerless legal task due in October.
+    for b in ("stuck", "moving", "scheduled"):
         for v in buckets.get(b, []):
             if v.get("hasAssignee") or v.get("assigneeEmail"):
                 continue
@@ -1329,7 +1346,8 @@ def cmd_board(dispatch_queue_path=None):
               % lanes_error, file=sys.stderr)
 
     buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [], "inFlight": [],
-               "withRoy": [], "escalated": [], "decided": [], "ownLane": [], "held": [], "resting": []}
+               "withRoy": [], "escalated": [], "decided": [], "ownLane": [], "held": [], "resting": [],
+               "scheduled": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         status = r["fields"].get("Status", "?")
@@ -1354,6 +1372,9 @@ def cmd_board(dispatch_queue_path=None):
     # Approval twin can surface as untouchable.
     # Held twins are duplicate-checked too (review of PR #794): a held task is not the foreman's to
     # move, but a second task on its thread is still a second card for one matter.
+    # NOT scheduled twins (18 Nov 2026), for the parked twins' reason: the keeper is the OLDEST task,
+    # so a twin due now would fold into one not due until January and leave every list that is worked.
+    # A scheduled twin joins the check on its date. The stated cost: until then the pair is two tasks.
     dupes = duplicate_groups(
         buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"] + buckets["held"])
     # A door can stay shut (a lead kept open for weeks): a held task past the stuck clock needs a
@@ -1384,6 +1405,8 @@ def cmd_board(dispatch_queue_path=None):
             "heldPastStuckDays": sum(1 for v in buckets["held"] if v["pastClock"]),
             # Resting in dispatch until a date (a keep-open's next look, a status update's NEXT CHECK).
             "resting": len(buckets["resting"]),
+            # Stored at Upcoming with the date still ahead: not due, never stuck, never a move.
+            "scheduled": len(buckets["scheduled"]),
             # Of the worked tasks, those whose rest has ended: dispatch owes each a look.
             "restDue": sum(1 for b in ("stuck", "moving", "inFlight") for v in buckets[b] if v.get("restDue")),
             "duplicateGroups": len(dupes),
@@ -1412,6 +1435,10 @@ def cmd_board(dispatch_queue_path=None):
         # Tasks resting in dispatch, each with the date its rest ends: never stuck, never a move.
         "resting": [{"id": v["id"], "name": v["name"], "restUntil": v.get("restUntil"), "why": v.get("restWhy", "")}
                     for v in buckets["resting"]],
+        # Tasks not due yet, soonest first, each with its date and how long since it last moved: never
+        # stuck and never a move, listed so a wait is seen, never hidden. Due today, it is board work.
+        "scheduled": [{"id": v["id"], "name": v["name"], "dueDate": v["dueDate"], "daysStill": v["daysStill"]}
+                      for v in sorted(buckets["scheduled"], key=lambda v: str(v["dueDate"] or ""))],
         "stuck": buckets["stuck"],
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
@@ -1756,12 +1783,18 @@ def wall_decision(row, f, now, d, findings_error="", resolve=None):
     return out
 
 
+def scheduled_ahead(f, now):
+    """Stored at Upcoming with a Due Date after today (London): not due yet. One rule for the clock
+    (parked_on_purpose) and the board (classify's `scheduled`), so the two never disagree again."""
+    return (_sel(f.get("Status")) == "Upcoming"
+            and str(f.get("Due Date") or "")[:10] > london_today(now).isoformat())
+
+
 def parked_on_purpose(f, now):
     """Some Day, or Upcoming with a date still ahead: a standing hold (standing_holds.py parks to the
     review date), Kevin's own `decided --until`, or a date someone moved forward by hand. The clock
     never ticks, moves or chases such a task: a tick's due date would unpark it."""
-    return bool(f.get("Some Day")) or (_sel(f.get("Status")) == "Upcoming"
-                                       and str(f.get("Due Date") or "")[:10] > london_today(now).isoformat())
+    return bool(f.get("Some Day")) or scheduled_ahead(f, now)
 
 
 def roy_note_stamp(notes):
@@ -2536,6 +2569,14 @@ def cmd_selftest():
     assert classify(dict(held, **{"Due Date": now.date().isoformat()}), set(), now)[0] == "stuck"   # the date has come
     assert classify(dict(held, Status="Today"), set(), now)[0] == "stuck"                            # flip-due moved it
     assert classify(dict(held, Notes=late["Notes"]), set(), now)[0] != "parked"                      # future-dated, but not on his answer
+    # ...it is scheduled instead (18 Nov 2026): not due, so never stuck, unless dispatch works it in a lane
+    plain = {"_id": "recE8", "Created Time": old, "Status": "Upcoming", "Due Date": "2026-12-01"}
+    assert classify(plain, set(), now)[:2] == ("scheduled", "dueAhead"), classify(plain, set(), now)
+    assert classify(plain, set(), now, lane="")[0] == "scheduled"
+    assert classify(dict(plain, **{"Due Date": "2026-08-25"}), set(), now)[0] == "stuck"   # due today
+    assert classify(dict(plain, **{"Due Date": None}), set(), now)[0] == "stuck"           # no date at all
+    assert classify(dict(plain, Status="Today"), set(), now)[0] == "stuck"                 # stored Today
+    assert classify(plain, set(), now, lane="newWork")[0] == "stuck"                     # dispatch's work
     # ...but an old escalation nobody answered is stuck again, and a carried-out one is ordinary work
     assert classify(dict(late, **{"Approval Outcome": None}), set(), now)[0] == "stuck"
     carried_late = dict(late, **{"Approval Outcome": None, "Agent Output": "DECIDED (Kevin, 02 Aug 2026): Approved as-is\n\nDECIDE: sell or keep?"},
