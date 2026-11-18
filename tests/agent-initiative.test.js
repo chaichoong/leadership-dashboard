@@ -453,8 +453,7 @@ describe('finding 20261013-agent-dispatch-857: the machine-state reads stay narr
 
   it('the reads a robot needs to prove a file reached iCloud are reachable', () => {
     const out = tools();
-    for (const t of ['Bash(brctl status:*)', 'Bash(xattr -l:*)', 'Bash(xattr -p:*)',
-      'Bash(stat:*)', 'Bash(osadecompile:*)']) {
+    for (const t of ['Bash(brctl status:*)', 'Bash(xattr -p:*)', 'Bash(stat:*)', 'Bash(osadecompile:*)']) {
       expect(out, `${t} must be reachable by a headless agent`).toContain(t);
     }
   });
@@ -472,6 +471,31 @@ describe('finding 20261013-agent-dispatch-857: the machine-state reads stay narr
     ];
     const bad = out.filter((t) => forbidden.some((re) => re.test(t)));
     expect(bad, `these widen the robots' power beyond the fix: ${bad.join(', ')}`).toEqual([]);
+  });
+
+  // Review of PR 977: an entry is judged by every COMMAND it lets through, not by its own text.
+  // `Bash(xattr -l:*)` read as a list, yet `xattr -l -c <file>` starts with it and wipes every
+  // attribute. This walks real command lines through the prefix rule Claude Code applies to a
+  // `Bash(<prefix>:*)` entry: the command is the prefix, or the prefix and a space and more.
+  it('every command the entries let through is a read: `xattr -l -c x` is not allowed', () => {
+    const entries = tools();
+    const allows = (cmd) => entries.some((t) => {
+      const m = t.match(/^Bash\((.*):\*\)$/);
+      if (m) return cmd === m[1] || cmd.startsWith(`${m[1]} `);
+      return t === `Bash(${cmd})`;
+    });
+    const reads = [
+      'brctl status /Users/x/Library/Mobile Documents/com~apple~CloudDocs/Desktop/App.app',
+      'xattr -p com.apple.metadata:kMDItemWhereFroms /tmp/x',
+      'stat -f %z /tmp/x',
+      'osadecompile /tmp/App.app/Contents/Resources/Scripts/main.scpt',
+    ];
+    const writes = [
+      'xattr -l -c x', 'xattr -c x', 'xattr -cr x', 'xattr -w k v x', 'xattr -d k x', 'xattr -l -d k x',
+      'brctl evict x', 'brctl download x', 'brctl log', 'launchctl unload x', 'launchctl bootout gui/501/x',
+    ];
+    expect(reads.filter((c) => !allows(c)), 'a read the fix exists for is refused').toEqual([]);
+    expect(writes.filter(allows), 'these commands change state and must not be allowed').toEqual([]);
   });
 
   it('the robot deny list does not take the reads straight back', () => {

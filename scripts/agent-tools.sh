@@ -108,11 +108,12 @@ AGENT_ALLOWED_TOOLS=(
   # re-cut from closed PR #930 on 18 Nov 2026). A robot asked to prove a file had
   # uploaded to iCloud had no route to the answer: brctl, xattr, stat and
   # osadecompile were all refused for the agent AND the dispatcher, so a task that
-  # needed one read sat for weeks. All five are READS. The exact subcommand is
+  # needed one read sat for weeks. All four are READS. The exact subcommand is
   # named where the binary also writes: `brctl` on its own can evict and download,
-  # and `xattr` on its own can set (-w) and delete (-d) attributes.
+  # and `xattr` on its own can set (-w), delete (-d) and clear (-c) attributes.
+  # `xattr -p` only: xattr refuses -p with -c, -d or -w. `xattr -l` was dropped in
+  # review (PR 977) because `xattr -l -c <file>` matches it and wipes every attribute.
   "Bash(brctl status:*)"
-  "Bash(xattr -l:*)"
   "Bash(xattr -p:*)"
   "Bash(stat:*)"
   "Bash(osadecompile:*)"

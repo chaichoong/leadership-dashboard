@@ -17,7 +17,7 @@ var MCP_TOOLS = {
   "generatedAt": "2026-10-06T05:10:08Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "",
-  "agentAllowlistSize": 16,
+  "agentAllowlistSize": 15,
   "counts": {
     "total": 41,
     "verified": 28,
