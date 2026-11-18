@@ -11203,6 +11203,19 @@ DUE_MOVED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(D
 PLAN_REPAIR_CARD_RE = re.compile(r"\bThe Your turn plan for (rec[A-Za-z0-9]{14})\b")
 
 
+def standing_park(notes, status, today_iso):
+    """The date of Kevin's park when it still STANDS, else '': his newest stamped park line is ahead, the task is
+    Upcoming, and no newer step is on record after it (a card submitted, an escalation, a decision carried out,
+    a due date moved on his words). An overridden park never holds a task (re-review of PR #978)."""
+    parks = list(KEVIN_PARK_RE.finditer(str(notes or "")))
+    if not parks or status != "Upcoming" or parks[-1].group(1) <= today_iso:
+        return ""
+    later = str(notes or "")[parks[-1].end():]
+    if any(rx.search(later) for rx in (SUBMITTED_LINE_RE, ESCALATED_LINE_RE, DECIDED_ANY_LINE_RE, DUE_MOVED_LINE_RE)):
+        return ""
+    return parks[-1].group(1)
+
+
 def decided_card_verdict(t):
     """Kevin's approval on a decision card the dispatcher ITSELF closed with `decided`, or ''.
 
@@ -11254,7 +11267,7 @@ def cmd_complete(args):
         evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
         # Only a task with NO live verdict and nothing waiting (review of PR #978): a card back at Approval, a
         # verdict of Changes requested or Rejected, or a park he gave that still stands keeps the door shut.
-        parked_until = [d for d in KEVIN_PARK_RE.findall(str(t["notes"] or "")) if d > today_london()]
+        parked_until = standing_park(t["notes"], t["status"], today_london())
         door = ""
         if not t["outcome"] and t["status"] not in ("Approval", "Completed", "Cancelled") and not parked_until:
             door = decided_card_verdict(t) or plan_repair_closable(t)

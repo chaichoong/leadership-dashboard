@@ -2358,7 +2358,7 @@ def build_update(existing_fields, incoming_fields, today_iso):
         # Said, never silent: what folded in is read on the park's date.
         patch[F["notes"]] = (str(existing_fields.get(F["notes"]) or "").rstrip() + "\n\n[%s — create-agent-task] "
                              "Folded in while Kevin's park stands until %s: read on that date (see the Description)."
-                             % (today_iso, parked[-1])).strip()
+                             % (today_iso, parked[-1])).strip()[-90000:]
     if existing_status != "Approval" and not park_stands:
         # Same allowed set as a create: the fold path PATCHes with typecast
         # on, so an unvalidated value here would mint the phantom option the

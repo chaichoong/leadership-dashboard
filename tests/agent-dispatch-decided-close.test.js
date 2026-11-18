@@ -138,6 +138,16 @@ print(json.dumps({k: [complete(k), status(k)] for k in ("recBACKATAPPRxxx1", "re
     for (const [why] of Object.values(r)) expect(why).not.toBe(null);
   });
 
+  it('an overridden park never holds it: a park followed by an escalation and his "do it now" closes (re-review)', () => {
+    const r = py(`
+FUTURE = "2099-01-17"
+rec("recOVERRIDDENxxx1", agentOutput=DECIDED_OUT, status={"name": "Today"},
+    notes="[19 Oct 2026 — agent-dispatch] Parked until " + FUTURE + " on Kevin's answer\\n\\n"
+          "[05 Nov 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder recX)\\n\\n" + MARK)
+print(json.dumps([complete("recOVERRIDDENxxx1"), status("recOVERRIDDENxxx1")]))`);
+    expect(r).toEqual([null, 'Completed']);
+  });
+
   it('a hand-over reason is one line, so it cannot plant a stamped mark', () => {
     const src = readFileSync(DISPATCH, 'utf8');
     expect(src).toMatch(/reason = " "\.join\(str\(args\.reason or ""\)\.split\(\)\) or "approved reassignment"/);
