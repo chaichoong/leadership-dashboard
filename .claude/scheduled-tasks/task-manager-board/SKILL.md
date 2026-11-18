@@ -433,8 +433,9 @@ out of your list — the board subtracted dispatch's tasks in code):
    one deliberate route that may propose on a lane item, under its own
    limits); a group whose closable list is empty is report-only this slot.
    The board already keeps the other edges safe in code: Roy maintenance
-   tasks never group with reply tasks, and parked or dispatch-in-flight tasks
-   are never grouped.
+   tasks never group with reply tasks, and parked, scheduled or
+   dispatch-in-flight tasks are never grouped (a scheduled twin is left as a
+   second task on purpose until its date, so due work is never folded into it).
 8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type
