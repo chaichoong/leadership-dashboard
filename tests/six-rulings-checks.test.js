@@ -41,6 +41,8 @@ def refused(output, task_name=None):
     except ef.EmailFormatError as e:
         return str(e)
 ROY = "Kind regards\\nRoy Lavin\\nAgile Lets"
+# Roy's own address, read from the code's list of our addresses rather than typed into a public test.
+ROY_ADDR = sorted(a for a in ef.RULE_OWN_ADDRESSES if a.startswith("roy"))[0]
 `;
 
 describe('ruling 1: mail from info@ is signed Roy Lavin, then Agile Lets', () => {
@@ -56,7 +58,7 @@ out = {
   "royOwner": refused(mail("Please send your earliest date.\\n\\n" + ROY + "\\nOn behalf of the owner")),
   "royLtd": refused(mail("Please send your earliest date.\\n\\nKind regards\\nRoy Lavin\\nAgile Lets Ltd")),
   # A note to Roy, a reply to a tenant's text through the bridge, and a ClickSend text carry no email sign-off.
-  "toRoy": refused(mail("Please chase the plumber.\\n\\nThanks,\\nKevin", to="roy.lavin1978@gmail.com")),
+  "toRoy": refused(mail("Please chase the plumber.\\n\\nThanks,\\nKevin", to=ROY_ADDR)),
   "text": refused(mail("Hi Sam, the engineer comes Friday morning.", to="447700900318@sms.clicksend.com")),
   # Kevin's own mail from his Gmail keeps his own sign-off.
   "gmail": refused(mail("Thank you.\\n\\nKind regards\\nKevin Brittain", frm="kevinbrittain@gmail.com", to="help@fixture-bank.test")),
@@ -67,6 +69,11 @@ out = {
   # A quoted thread below a top-posted reply carries other people's sign-offs, Kevin's own earlier ones included.
   "topPosted": refused(mail("Thanks, noted.\\n\\n" + ROY + "\\n\\nFrom: Kevin Brittain <kb@fixture-old.test>\\nSent: 1 Nov 2026\\n\\nHello\\n\\nKind regards\\nKevin Brittain")),
   "inlineKevin": refused(mail("On Tue, 10 Nov 2026, Sam wrote:\\n> Can you do Friday?\\n\\nYes, Friday works.\\n\\nKind regards\\nKevin Brittain")),
+  # Second review: a quoted earlier "Roy Lavin / Agile Lets" under a top-posted reply or a forward is not this email's.
+  "outlookQuotedRoy": refused(mail("Noted, thanks.\\n\\nKind regards\\nAgile Lets Team\\n\\nFrom: Roy Lavin <ops@fixture-old.test>\\n"
+                                    "Sent: 1 Nov 2026\\nSubject: Visit\\n\\nHello\\n\\n" + ROY)),
+  "forwardRoy": refused(mail("Please see below.\\n\\n---------- Forwarded message ---------\\nFrom: Sam <sam@fixture-trade.test>\\n"
+                              "Subject: Visit\\n\\nHello\\n\\n" + ROY)),
 }
 print(json.dumps(out))`);
     expect(r.kevinOnBehalf).toMatch(/goes from info@agilelets.co.uk but is signed 'Kevin Brittain'/);
@@ -76,10 +83,15 @@ print(json.dumps(out))`);
     expect(r.teamOnly).toMatch(/ends with the sign-off `Roy Lavin` and `Agile Lets`/);
     expect(r.agileEstates).toMatch(/is signed 'Agile Estates'/);
     expect(r.noSignoff).toMatch(/ends with the sign-off `Roy Lavin`/);
-    for (const k of ['roy', 'royOwner', 'royLtd', 'toRoy', 'text', 'gmail', 'quotedBelow', 'inline', 'headerBlock', 'topPosted']) {
+    for (const k of ['roy', 'royOwner', 'royLtd', 'toRoy', 'text', 'gmail', 'quotedBelow', 'inline', 'topPosted']) {
       expect(r[k], k).toBeNull();
     }
     expect(r.inlineKevin).toMatch(/ends with the sign-off `Roy Lavin`/);
+    expect(r.outlookQuotedRoy).toMatch(/ends with the sign-off `Roy Lavin`/);
+    // Signed below an Outlook header block with no ">" quoting: it cannot be told from a forwarded old sign-off, so it
+    // is refused (the safe side); sign above the quoted message instead.
+    expect(r.headerBlock).toMatch(/ends with the sign-off `Roy Lavin`/);
+    expect(r.forwardRoy).toMatch(/ends with the sign-off `Roy Lavin`/);
   });
 
   it('an AGENT RENT LATE email goes from info@, signed Roy, never from Kevin\'s Gmail (the 5 Oct rule is retired)', () => {
@@ -95,7 +107,7 @@ out = {
                             to="help@fixture-bank.test"), "INBOUND: the bank asks for a statement"),
   # A note to Roy on the task is not the email to the letting agent.
   "noteToRoy": refused(mail("Roy, the agent has not paid yet.\\n\\nThanks,\\nKevin", frm="kevinbrittain@gmail.com",
-                            to="roy.lavin1978@gmail.com"), name),
+                            to=ROY_ADDR), name),
 }
 print(json.dumps(out))`);
     expect(r.gmail).toMatch(/an AGENT RENT LATE email goes to the letting agent FROM info@agilelets.co.uk/);
@@ -116,7 +128,7 @@ out = {
   "ccFirm": refused(mail(ask, to="jobs@fixture-gas.test", cc="office@other-gas.test", subject="Gas safety check")),
   "twoSoleTraders": refused(mail(ask, to="gasman.one@gmail.com, gasman.two@gmail.com", subject="Gas safety check")),
   "oneFirmTwoPeople": refused(mail(ask, to="jobs@fixture-gas.test, lee@fixture-gas.test", subject="Quote request")),
-  "firmAndRoy": refused(mail(ask, to="jobs@fixture-gas.test", cc="roy.lavin1978@gmail.com", subject="Quote request")),
+  "firmAndRoy": refused(mail(ask, to="jobs@fixture-gas.test", cc=ROY_ADDR, subject="Quote request")),
   "toEach": refused(mail(ask, to="", subject="Quote request", head="").replace("TO: \\n", "TO-EACH: jobs@fixture-gas.test, office@other-gas.test\\n")),
   # Two companies with no quote asked: a reply that copies a managing agent's sister branch.
   "noQuote": refused(mail("Please release the October rent and quote the clause you rely on.\\n\\n" + ROY,
@@ -131,6 +143,11 @@ out = {
                           to="jobs@fixture-waste.test, office@other-waste.test", subject="Garden clearance")),
   "btconnect": refused(mail(ask, to="gas.one@btconnect.com, gas.two@btconnect.com", subject="Gas safety check")),
   "replyAsk": refused(mail(ask, to="jobs@fixture-gas.test", cc="office@other-gas.test", subject="Re: gas safety check")),
+  # Second review: only a mail-system label is folded; per-user and per-tenant provider domains are different firms.
+  "plusnet": refused(mail(ask, to="gas@smithgas.plus.test.co.uk, gas@jonesgas.plus.test.co.uk", subject="Gas safety check")),
+  "tenantsOnProvider": refused(mail(ask, to="jobs@smithgas.onmicrosoft.test, jobs@jonesgas.onmicrosoft.test", subject="Gas safety check")),
+  "howMuchOrder": refused(mail("Please tell us how much it would cost to clear the garden.\\n\\n" + ROY,
+                               to="jobs@fixture-waste.test, office@other-waste.test", subject="Garden clearance")),
 }
 print(json.dumps(out))`);
     expect(r.twoFirms).toMatch(/asks for a quote \(the subject says 'Quote'\) and its TO and CC lines reach 2 companies \(fixture-gas.test, other-gas.test\)/);
@@ -144,6 +161,9 @@ print(json.dumps(out))`);
     expect(r.howMuch).toMatch(/reach 2 companies/);
     expect(r.btconnect).toMatch(/reach 2 companies/);
     expect(r.replyAsk).toMatch(/the email asks/);         // a reply subject is not read, the request in its words is
+    expect(r.plusnet).toMatch(/reach 2 companies/);
+    expect(r.tenantsOnProvider).toMatch(/reach 2 companies/);
+    expect(r.howMuchOrder).toMatch(/reach 2 companies/);
   });
 
   it('the Level A quote request (no card) is one company too, in the copy send-email.py re-checks', () => {
@@ -264,6 +284,7 @@ def email(body, to, frm="kevinbrittain@gmail.com", subject="Your visit", sign="K
     return (f"TO: {to}\\nFROM: {frm}\\nSUBJECT: {subject}\\n---\\n{body}\\n\\n{sign}\\n\\n"
             "**Carrying this out will involve:** one email goes.")
 ROY = "Kind regards\\nRoy Lavin\\nAgile Lets"
+ROY_ADDR = sorted(a for a in m.RULE_OWN_ADDRESSES if a.startswith("roy"))[0]
 `;
 
 describe('ruling 1: Kevin\'s Gmail is refused on property mail at submit', () => {
@@ -301,7 +322,7 @@ def one(name, to, **kw):
 out["insurer"] = one("COMPLIANCE: Landlord Insurance missing - 7 Example Road", "renewals@fixture-insurer.test")
 out["licence"] = one("COMPLIANCE: Testville Council HMO licence fee overdue - 7 Example Road", "licensing@testville.gov.test")
 out["lender"] = one("INBOUND: the lender asks for a statement", "help@fixture-lender.test")
-out["roy"] = one("COMPLIANCE: EICR renewal due 2026-12-01 - 7 Example Road", "roy.lavin1978@gmail.com")
+out["roy"] = one("COMPLIANCE: EICR renewal due 2026-12-01 - 7 Example Road", ROY_ADDR)
 out["tier1"] = one("INBOUND: the letting agent asks about Apartment 7", "manager@fixture-lettings.test", tier1=True)
 out["creditor"] = one("INBOUND: the letting agent asks about Apartment 7", "manager@fixture-lettings.test", agent=CREDITOR)
 task("RENT LATE: Unit 1 – 7 Example Road, rent due 1 Nov")
@@ -419,9 +440,14 @@ def go(to, body="Fixture Gas Care is booked for Friday 4 December at 10am for th
             "\\n\\n**Carrying this out will involve:** one email goes.")
     return submit(out_, tenant_notice=NOTICE)["err"]
 out["tenant"] = go("sam.tenant@fixture-mail.test")
-out["roy"] = go("roy.lavin1978@gmail.com")
+out["roy"] = go(ROY_ADDR)
 out["designatedCcTenant"] = go("fixturegascare@gmail.com", cc="sam.tenant@fixture-mail.test")
-out["designatedCcFirm"] = go("fixturegascare@gmail.com", cc="office@other-gas.test")
+QUOTE = "Please could you send us a quote for a gas safety check at 12 Example Lane, Haverhill CB9 9ZZ?"
+out["designatedCcFirm"] = go("fixturegascare@gmail.com", body=QUOTE, cc="office@other-gas.test")
+out["bookingCcFirm"] = go("fixturegascare@gmail.com", cc="office@other-gas.test")
+out["councilCc"] = go("sam.tenant@fixture-mail.test", cc="housing@testville.gov.uk")
+out["agentCc"] = go("sam.tenant@fixture-mail.test", cc="accounts@fixture-lettings.test")
+out["newTenant"] = go("new.tenant@fixture-mail.test")
 task(N)
 each = ("TO-EACH: fixturegascare@gmail.com, office@other-gas.test, jobs@third-gas.test\\nFROM: info@agilelets.co.uk\\n"
         "SUBJECT: Quote request: gas safety check\\n---\\nHello,\\n\\nPlease could you send us a quote for a gas safety check at "
@@ -433,7 +459,11 @@ print(json.dumps(out))`);
     expect(r.tenant).toBeNull();
     expect(r.roy).toBeNull();
     expect(r.designatedCcTenant).toBeNull();
-    expect(r.designatedCcFirm).toMatch(/to the designated contractor \(Fixture Gas Care .*\) and to another firm at the same time \(office@other-gas.test\)/);
+    expect(r.designatedCcFirm).toMatch(/quote request for 12 Example Lane to the designated contractor \(Fixture Gas Care .*\) and to another firm at the same time \(office@other-gas.test\)/);
+    expect(r.bookingCcFirm).toBeNull();                      // a booking WITH them may copy whoever needs to know
+    expect(r.councilCc).toBeNull();
+    expect(r.agentCc).toBeNull();
+    expect(r.newTenant).toMatch(/must be on record \(the Tenants table/);
     expect(r.toEachFirst).toMatch(/and to another firm at the same time \(office@other-gas.test, jobs@third-gas.test\)/);
     expect(r.tenantUnread).toMatch(/could not read the Tenants table .*NOT CHECKED/);
   });
@@ -456,13 +486,16 @@ broken = {"contractors": [{"certificate": "gas", "towns": ["Haverhill"], "name":
 out["broken"] = q("COMPLIANCE: GSC renewal due 2026-12-01 - 12 Example Lane", broken)
 contractors(CONTRACTORS)
 out["twoTypes"] = q("COMPLIANCE: GSC and EICR renewals due 2026-12-01 - 12 Example Lane")
+out["mixed"] = q("COMPLIANCE: Gas safety certificate for HMO licence - 12 Example Lane")
 print(json.dumps(out))`);
     expect(r.road.err).toBeNull();
     expect(r.strings.err).toMatch(/designated contractor for that certificate: Fixture Gas Care/);   // a string is one item
     expect(r.broken.err).toBeNull();
     expect(r.broken.nc[0]).toMatch(/entries it cannot use: entry 1 \(no name\)/);
     expect(r.twoTypes.err).toBeNull();
-    expect(r.twoTypes.nc[0]).toMatch(/names both a gas and an electrical certificate/);
+    expect(r.twoTypes.nc[0]).toMatch(/names EICR and GSC beside another subject/);
+    expect(r.mixed.err).toBeNull();
+    expect(r.mixed.nc[0]).toMatch(/names GSC beside another subject/);
   });
 
   it('ruling 1: zero letting-agent cards read is NOT CHECKED, and a property\'s agent email is matched exactly', () => {

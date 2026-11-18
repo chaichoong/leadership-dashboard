@@ -7288,7 +7288,8 @@ def preferred_for(entries, house, cert):
 def preferred_reached(entry, recipients, roy_text):
     """True when the email reaches the designated contractor, or a PASS TO ROY booking names them."""
     for a in recipients:
-        if a in entry["emails"] or address_domain(a) in entry["domains"]:
+        dom = address_domain(a)
+        if a in entry["emails"] or any(dom == d or dom.endswith("." + d) for d in entry["domains"]):
             return True
     hay = str(roy_text or "")
     return bool(hay) and any(re.search(r"(?<![A-Za-z])" + re.escape(x) + r"(?![A-Za-z])", hay, re.I)
@@ -7302,13 +7303,15 @@ def preferred_contractor_problem(task_rec, output, mail_subject, declined=None, 
     name = str(tf.get(AF["name"]) or "")
     cert = PREFERRED_TYPES.get(certificate_type(name))
     if not cert:
-        # "GSC and EICR renewals" names two types, so certificate_type reads none: said, never silent (review).
-        both = [label for label, rx in CERT_TYPE_PATTERNS if label in PREFERRED_TYPES and rx.search(name)]
+        # "GSC and EICR renewals", or "Gas safety certificate for HMO licence", names a gas or electrical certificate
+        # beside another subject, so certificate_type reads none: said, never silent (both reviews of this PR).
+        hits = [label for label, rx in CERT_TYPE_PATTERNS if label in PREFERRED_TYPES and rx.search(name)]
         # certificate_step reads the task name only to know it is one certificate; ask it about the output alone.
-        if name.startswith(COMPLIANCE_TASK_PREFIX) and len(both) > 1 and \
+        if name.startswith(COMPLIANCE_TASK_PREFIX) and hits and certificate_type(name) == "" and \
                 certificate_step(f"{COMPLIANCE_TASK_PREFIX} EICR", output, mail_subject) in ("quote", "booking"):
-            note_not_checked("designated-contractor check: the task names both a gas and an electrical certificate, so "
-                             "code could not tell which designated contractor this goes to first")
+            note_not_checked(f"designated-contractor check: the task name names {' and '.join(hits)} beside another "
+                             "subject, so code could not tell which certificate, and so which designated contractor, "
+                             "this goes to first")
         return ""
     step = certificate_step(name, output, mail_subject)
     if step not in ("quote", "booking"):
@@ -7353,30 +7356,38 @@ def preferred_contractor_problem(task_rec, output, mail_subject, declined=None, 
                 "to the designated engineer first; three quotes only when they cannot do it or the job is new. Name "
                 "them in the PASS TO ROY line, or " + way[0].lower() + way[1:])
     reached = [a for a in outside_recipients(mail, texts=False) if any(preferred_reached(e, [a], "") for e in designated)]
-    others = [a for a in outside_recipients(mail, texts=False) if a not in reached]
+    # A booking WITH the designated firm may copy whoever needs to know (the tenants, the letting agent, Roy).
+    if reached and step == "booking":
+        return ""
+    # A council is not a firm that quotes for the certificate.
+    others = [a for a in outside_recipients(mail, texts=False) if a not in reached
+              and not address_domain(a).endswith(".gov.uk")]
     if others:
-        # A notice to the tenants (the visit is booked) is not asking another firm (review of this PR).
+        # A notice to the house's tenants or its letting agent (the visit is booked) asks no firm for anything
+        # (both reviews of this PR). Both are read from the records, and an unreadable record is NOT CHECKED.
         if tenants is None:
             try:
-                tenants = recipients_on_record(contractors=False)
+                rec = recipients_on_record()
             except (Exception, SystemExit) as exc:          # noqa: BLE001 — said, and the card is refused
-                tenants = {"tenants": set(), "unread": [f"the Tenants table ({type(exc).__name__})"]}
-            unread = [u for u in tenants["unread"] if u.startswith("the Tenants table")]
-            tenants = tenants["tenants"] if not unread else None
-            if tenants is None:
-                return (f"it is a {cert} {step} for {house['short']} and code could not read the Tenants table to "
-                        "tell whether its recipients are the house's tenants or other firms: NOT CHECKED. Try again; "
-                        "if it fails again, record a TOOL wall")
-        others = [a for a in others if a not in tenants]
+                rec = {"tenants": set(), "agents": set(), "unread": [f"the Tenants table ({type(exc).__name__})"]}
+            unread = [u for u in rec["unread"] if u.startswith("the Tenants table") or u.startswith("the letting agents")]
+            if unread:
+                return (f"it is a {cert} {step} for {house['short']} and code could not read {unread[0]} to tell whether "
+                        "its recipients are the house's tenants, its letting agent or other firms: NOT CHECKED. Try "
+                        "again; if it fails again, record a TOOL wall")
+            tenants = set(rec["tenants"]) | set(rec.get("agents") or ())
+        others = [a for a in others if a not in tenants and company_key(a) not in tenants]
     if not others:
         return ""
     if reached:
-        return (f"it is a {cert} {step} for {house['short']} to the designated contractor ({who}) and to another firm "
-                f"at the same time ({', '.join(others)}). Kevin's ruling ({SIX_RULINGS}): the designated engineer comes "
-                "FIRST; other firms are asked only when they cannot do it or the job is new. " + way)
+        return (f"it is a {cert} quote request for {house['short']} to the designated contractor ({who}) and to another "
+                f"firm at the same time ({', '.join(others)}). Kevin's ruling ({SIX_RULINGS}): the designated engineer "
+                "comes FIRST; other firms are asked only when they cannot do it or the job is new. " + way)
     return (f"it is a {cert} {step} for {house['short']}, and {house['short']} has a designated contractor for that "
             f"certificate: {who}. Kevin's ruling ({SIX_RULINGS}): a Haverhill certificate goes to the designated "
-            "engineer first; three quotes only when they cannot do it or the job is new. " + way)
+            "engineer first; three quotes only when they cannot do it or the job is new. " + way + " A recipient who "
+            "is one of the house's tenants, or its letting agent, must be on record (the Tenants table, or a past "
+            "AGENT RENT LATE card) to be read as one")
 
 
 # Ruling 1 and the 17 Sep 2026 sender table: property mail goes FROM info@agilelets.co.uk, signed Roy Lavin,

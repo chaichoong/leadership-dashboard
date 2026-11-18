@@ -619,8 +619,10 @@ FREE_MAIL_DOMAINS = frozenset((
     "o2.co.uk", "plus.net", "plusnet.com", "orange.net", "fsmail.net", "rocketmail.com", "hotmail.fr", "live.ie"))
 # ClickSend email-to-text (Kevin, 5 Oct 2026): an address here is a text to one phone, never an email.
 TEXT_GATEWAY_DOMAINS = frozenset(("sms.clicksend.com",))
-# A second-level label that is part of the suffix: office@mail.fixture.co.uk and jobs@fixture.co.uk are one firm.
-SUFFIX_LABELS = frozenset(("co", "org", "gov", "ac", "ltd", "plc", "me", "net", "nhs", "police", "sch", "com"))
+# A mail-system label in front of a firm's domain: office@mail.fixture.co.uk and jobs@fixture.co.uk are one firm.
+# Only these are folded: smith.plus.com and jones.plus.com, or two *.onmicrosoft.com tenants, are different
+# firms on one provider's parent domain (second review of this PR).
+MAIL_HOST_LABELS = frozenset(("mail", "email", "e-mail", "mx", "smtp", "webmail"))
 
 
 def address_domain(addr):
@@ -628,11 +630,12 @@ def address_domain(addr):
 
 
 def organisation_domain(dom):
-    """The domain a firm registered, with any subdomain taken off (mail.fixture.co.uk -> fixture.co.uk)."""
+    """The firm's domain: the address's own domain, with a mail-system label in front taken off
+    (mail.fixture.co.uk -> fixture.co.uk), and nothing else folded."""
     labels = [x for x in str(dom or "").lower().split(".") if x]
-    if len(labels) >= 3 and labels[-2] in SUFFIX_LABELS and len(labels[-1]) == 2:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
+    if len(labels) >= 3 and labels[0] in MAIL_HOST_LABELS:
+        labels = labels[1:]
+    return ".".join(labels)
 
 
 def company_key(addr):
@@ -1204,9 +1207,14 @@ def property_signoff_problem(parsed):
     # (review of this PR, finding 1). A wrong signer is read in the sender's own words only: a quoted thread
     # below a top-posted reply carries other people's sign-offs, and Kevin's own earlier ones.
     tail = closing_block(own_words(body))
-    dequoted = "\n".join(ln for ln in body.splitlines()
-                         if not ln.lstrip().startswith(">") and not re.match(r"^[ \t]*On .{3,200}wrote:[ \t]*$", ln))
-    tails = (tail, closing_block(dequoted))
+    tails = [tail]
+    # Only a reply that quotes with ">" is read the second way, and only up to the first Outlook header block or
+    # forward marker: a quoted earlier "Roy Lavin / Agile Lets" under a top-posted reply or a forward is someone
+    # else's sign-off, never this email's (second review of this PR).
+    if any(ln.lstrip().startswith(">") for ln in body.splitlines()):
+        dequoted = "\n".join(ln for ln in body.splitlines()
+                             if not ln.lstrip().startswith(">") and not re.match(r"^[ \t]*On .{3,200}wrote:[ \t]*$", ln))
+        tails.append(closing_block(own_words(dequoted)))
     wrong = next((ln for ln in tail if WRONG_PROPERTY_SIGNOFF_RE.match(ln)), None)
     signed_roy = any(ROY_NAME_LINE_RE.match(line) and i + 1 < len(t) and AGILE_LETS_LINE_RE.match(t[i + 1])
                      for t in tails for i, line in enumerate(t))
@@ -1246,7 +1254,8 @@ QUOTE_ASK_BODY_RE = re.compile(
     r"\b(?:provide|send|give|let (?:us|me) have|supply|forward|prepare|share)\b(?:\s+(?:us|me))?(?:\s+with)?"
     r"\s+(?:(?:a|an|your)\s+)?(?:(?:written|fixed|free|best|competitive|firm)\s+)?(?:price|quote|quotation|estimate)\b"
     r"|\bquote\s+(?:us|me)\b|\b(?:price|quote|quotation|estimate)\s+for\s+(?:the|a|an|this|these|our|carrying|doing)\b"
-    r"|\bquote request\b|\bhow much (?:would|will|do|does|is|are) (?:it|you|this|that|the job)\b", re.I)
+    r"|\bquote request\b|\bhow much (?:would|will|do|does|is|are) (?:it|you|this|that|the job)\b"
+    r"|\bhow much (?:it|this|that|the job|the work) (?:would|will|might) cost\b", re.I)
 
 
 def quote_asked(parsed):
