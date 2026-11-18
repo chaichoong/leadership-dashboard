@@ -108,18 +108,34 @@
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
-    // Rent paid by set-off for a window, less the real rent payments dated inside it, never below zero
-    // (finding 20261017-agent-dispatch-971, item 1): a payment that lands inside the window is rent for it too, so the
-    // window is never credited for more than the rent charged for it. Payments stay on the ledger as money received.
-    // Signed: a refund inside the window never raises the credit above the full window.
-    function rsSetOffAfterPayments(fullCredit, payments, win) {
+    // Rent paid by set-off for a window, less the real rent paid for the window itself, never below zero
+    // (finding 20261017-agent-dispatch-971, item 1): a window is never credited for more than the rent charged for it.
+    // Payments stay on the ledger as money received. Rent is paid oldest first, as the rent check pays it (review of
+    // PR #980): a payment inside the window first clears `olderOwed` (rent charged before the window) not yet paid by
+    // the payments before it, and one dated in the window's last EARLY_PAY_DAYS days is the rent after the window
+    // paid early. Only what is left cuts the set-off. Signed: a refund never raises the credit above the full window.
+    // Returns the credit, the total that cut it (`paidInside`) and each cutting part with its date (`cuts`).
+    function rsSetOffAfterPayments(fullCredit, payments, win, olderOwed) {
+        const EARLY_PAY_DAYS = 5;   // a payment covers rent due up to 5 days after it (scripts/rent-check.py)
         const from = rsDayNo(win.from), until = rsDayNo(win.until);
+        const dated = payments.map(p => ({ p, n: rsIsoDayNo(p.dateStr) })).filter(x => x.n !== null).sort((a, b) => a.n - b.n);
+        let unpaid = Number(olderOwed) || 0;
+        for (const x of dated) if (x.n < from) unpaid -= Number(x.p.amount) || 0;
+        unpaid = Math.max(0, unpaid);
         let paidInside = 0;
-        for (const p of payments) {
-            const n = rsIsoDayNo(p.dateStr);
-            if (n !== null && n >= from && n <= until) paidInside += Number(p.amount) || 0;
+        const cuts = [];
+        for (const x of dated) {
+            if (x.n < from || x.n > until) continue;
+            const amount = Number(x.p.amount) || 0;
+            const older = amount > 0 ? Math.min(amount, unpaid) : 0;
+            unpaid -= older;
+            const rest = amount - older;
+            if (x.n > until - EARLY_PAY_DAYS) continue;          // the rent after the window, paid early
+            paidInside += rest;
+            if (rest > 0) cuts.push({ date: x.p.date, dateStr: x.p.dateStr, amount: rest });
         }
-        return { amount: Math.max(0, fullCredit - Math.max(0, paidInside)), paidInside };
+        paidInside = Math.max(0, paidInside);
+        return { amount: Math.max(0, fullCredit - paidInside), paidInside, cuts };
     }
 
     // ══════════════════════════════════════════
@@ -211,7 +227,8 @@
             const last = Math.min(rsDayNo(win.until), rsDayNo(today) - 1);
             const days = last - first + 1;
             if (days > 0) {
-                const net = rsSetOffAfterPayments(dailyRent * days, payments, win);
+                const olderOwed = dailyRent * Math.max(0, rsDayNo(win.from) - rsDayNo(effectiveStart));
+                const net = rsSetOffAfterPayments(dailyRent * days, payments, win, olderOwed);
                 setOff = { from: win.from > effectiveStart ? win.from : effectiveStart, until: win.until, days,
                     amount: net.amount, paidInside: net.paidInside };
                 totalRentPaid += setOff.amount;
@@ -1441,9 +1458,9 @@
         const totalOwed = rentDues.length * monthlyRent;
 
         // Rent paid by set-off (Kevin, 6 Oct 2026): each rent due inside the window is shown paid, so the
-        // printed ledger agrees with the Cash Flow Voids page and the rent check. Real rent paid inside the window
-        // comes off that credit, never below zero (item 1): each payment off the set-off line of the period it landed
-        // in, then the ones before it, then the ones after.
+        // printed ledger agrees with the Cash Flow Voids page and the rent check. Real rent paid for the window comes
+        // off that credit, never below zero (item 1; older rent paid first, as rsSetOffAfterPayments says): each
+        // cutting part off the set-off line of the period it landed in, then the ones before it, then the ones after.
         const win = (typeof rentSetOffWindow === 'function') ? rentSetOffWindow(tenancy) : null;
         let setOffEvents = win && win.from
             ? rentDues.filter(r => r.date >= win.from && r.date <= win.until)
@@ -1451,9 +1468,10 @@
             : [];
         if (setOffEvents.length) {
             const fullCredit = setOffEvents.reduce((t, e) => t + e.amount, 0);
-            let cut = fullCredit - rsSetOffAfterPayments(fullCredit, payments, win).amount;
-            const inside = payments.filter(p => p.amount > 0 && p.date >= win.from && p.date <= win.until);
-            for (const p of inside) {
+            const olderOwed = rentDues.filter(r => r.date < win.from).reduce((t, r) => t + r.amount, 0);
+            const net = rsSetOffAfterPayments(fullCredit, payments, win, olderOwed);
+            let cut = fullCredit - net.amount;
+            for (const p of net.cuts) {
                 const order = [...setOffEvents.filter(e => e.date <= p.date).reverse(), ...setOffEvents.filter(e => e.date > p.date)];
                 let left = Math.min(p.amount, cut);
                 for (const e of order) {

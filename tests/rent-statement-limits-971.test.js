@@ -108,6 +108,26 @@ describe('finding 971: the rent statement', () => {
     expect(p.rows.filter((r) => /set-off/.test(r.desc))).toEqual([]);
   });
 
+  it('item 1, review of PR #980: rent is paid oldest first, so a late payment for the month before the window, or an early one for the month after, never cuts the set-off', () => {
+    // £500 due on the 1st, the set-off covers October, September's rent arrives late on 5 Oct: nothing is owed.
+    const ten = { rent: 500, start: '2026-09-01', due: '1', from: '2026-10-01', until: '2026-10-31' };
+    const late = statement(ten, '2026-11-01', [{ date: '2026-10-05', amount: 500 }]);
+    expect(late.balance).toBeCloseTo(0, 6);                        // the head under review showed £483.87 owed
+    expect(late.daysInArrears).toBe(0);                            // and 30 days in arrears
+    expect(late.setOff.paidInside).toBeCloseTo(500 - (500 / 31) * 30, 6);   // only what was left after September
+    const latePrint = printStatement(ten, '2026-09-01', '2026-10-31', [{ date: '2026-10-05', amount: 500 }]);
+    expect([latePrint.owed, latePrint.paid, latePrint.balance]).toEqual(['£1000.00', '£1000.00', '£0.00']);
+    expect(latePrint.rows.filter((r) => /set-off/.test(r.desc)).map((r) => r.credit)).toEqual(['£500.00']);
+
+    // September paid on time, November's rent paid early on 28 Oct: the set-off still pays October in full.
+    const early = statement(ten, '2026-11-01', [{ date: '2026-09-01', amount: 500 }, { date: '2026-10-28', amount: 500 }]);
+    expect(early.setOff.amount).toBeCloseTo(500, 6);
+    expect(early.balance).toBeCloseTo((500 / 31) * 61 - 1500, 6);  // in credit by November's rent, paid in advance
+    const earlyPrint = printStatement(ten, '2026-09-01', '2026-11-30',
+      [{ date: '2026-09-01', amount: 500 }, { date: '2026-10-28', amount: 500 }]);
+    expect([earlyPrint.owed, earlyPrint.paid, earlyPrint.balance]).toEqual(['£1500.00', '£1500.00', '£0.00']);
+  });
+
   it('item 3: the printed statement keeps a due day of 31 on each month\'s last day when the month is short', () => {
     const p = printStatement({ rent: 600, start: '2026-06-01', due: '31' }, '2027-01-31', '2027-04-30');
     expect(p.rows.filter((r) => r.desc === 'Monthly rent due').map((r) => r.date))
@@ -151,7 +171,8 @@ def run(window, output):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         code = m.main(["due-day", TEN, "15", "--task", TASK, "--why", "the tenant's pay day moved to the 15th"])
-    return [code, json.loads(buf.getvalue()), W[rc.T_TENANCIES][TEN][rc.TY["dueDay"]]]
+    row = W[rc.T_TENANCIES][TEN]
+    return [code, json.loads(buf.getvalue()), row[rc.TY["dueDay"]], [row.get(m.SET_OFF_FROM), row.get(m.SET_OFF_UNTIL)]]
 WIN = {m.SET_OFF_FROM: "2026-10-01", m.SET_OFF_UNTIL: "2026-11-30"}
 DUE = "If you approve, the due day moves.\\nRECORD CHANGE: " + TEN + " Due Day = 15"
 print(json.dumps({
@@ -160,6 +181,11 @@ print(json.dumps({
     "reRecorded": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-10-15 to 2026-12-14"),
     "reRecordedWrong": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-10-01 to 2026-11-30"),
     "over": run({m.SET_OFF_FROM: "2026-08-01", m.SET_OFF_UNTIL: "2026-09-30"}, DUE),
+    # Review of PR #980: the card's set-off must pass the set-off command's own checks and carry on from the running one.
+    "pastWindow": run({m.SET_OFF_FROM: "2026-08-01", m.SET_OFF_UNTIL: "2026-11-30"},
+                      DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-08-15 to 2026-09-14"),
+    "overThreeYears": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2026-10-15 to 2030-10-14"),
+    "unrelated": run(WIN, DUE + "\\nRECORD CHANGE: " + TEN + " Set-off = 2027-06-15 to 2027-07-14"),
 }))
 `);
     expect(r.refused[0]).toBe(2);
@@ -167,9 +193,22 @@ print(json.dumps({
     expect(r.refused[2]).toBe('1');                                // nothing written
     expect(r.noWindow[0]).toBe(0);
     expect(r.noWindow[2]).toBe('15');
-    expect(r.reRecorded[0]).toBe(0);                               // the same card re-records the window, lined up
-    expect(r.reRecordedWrong[1].refused).toMatch(/re-record the set-off first/);
+    // The same card re-records the window, lined up with the new day, and this command writes both.
+    expect(r.reRecorded[0]).toBe(0);
+    expect(r.reRecorded[2]).toBe('15');
+    expect(r.reRecorded[3]).toEqual(['2026-10-15', '2026-12-14']);
+    expect(r.reRecorded[1].setOff.to).toBe('2026-10-15 to 2026-12-14');
+    expect(r.reRecordedWrong[1].refused).toMatch(/re-record the set-off first.*whole rent periods/);
     expect(r.over[0]).toBe(0);                                     // a window already over is left alone
+    // Each refused case writes nothing: the due day and the running window are as they were.
+    for (const [k, why] of [['pastWindow', /the card's set-off ended on 2026-09-14/],
+      ['overThreeYears', /longer than three years/], ['unrelated', /does not carry on from the running one/]]) {
+      expect(r[k][0], k).toBe(2);
+      expect(r[k][1].refused, k).toMatch(why);
+      expect(r[k][2], k).toBe('1');
+    }
+    expect(r.pastWindow[3]).toEqual(['2026-08-01', '2026-11-30']);
+    expect(r.overThreeYears[3]).toEqual(['2026-10-01', '2026-11-30']);
   });
 });
 

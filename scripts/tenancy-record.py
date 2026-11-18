@@ -322,19 +322,59 @@ def cmd_due_day(a):
         raise Refused(f"tenancy {a.tenancy} has ended; its due day is not changed")
     # A set-off still running must stay whole rent periods (finding 20261017-agent-dispatch-971, item 2): a new due
     # day that leaves it mid-period would read a whole month as paid in the rent check and a few days in the rent
-    # statement. The set-off is re-recorded with it, on the same card, lined up with the new day; a window already over
-    # has been read for the periods it ran and is left alone.
+    # statement. It goes through only when the same card re-records the set-off, lined up with the new day, and that
+    # set-off passes the set-off command's own checks, carries on from the running one and has not ended; this command
+    # then writes it too (review of PR #980), so the due day never lands without it. A window already over has been read
+    # for the periods it ran and is left alone.
     f = tenancy.get("fields") or {}
     so_from, so_until = rc.parse_day(f.get(SET_OFF_FROM)), rc.parse_day(f.get(SET_OFF_UNTIL))
+    again = None
     if (so_from and so_until and so_from <= so_until and so_until >= rc.today_london()
             and not whole_periods(so_from, so_until, a.day)):
         again = card_set_off(task, a.tenancy)
-        if not (again and again[0] and again[1] and again[0] <= again[1] and whole_periods(again[0], again[1], a.day)):
+        if not again:
+            why = "the card has no Set-off line for this tenancy"
+        else:
+            why = set_off_problem(tenancy, again[0], again[1], a.day)
+            if not why and not (again[0] <= so_until and again[1] >= so_from):
+                why = f"the card's set-off ({again[0]} to {again[1]}) does not carry on from the running one"
+            if not why and again[1] < rc.today_london():
+                why = f"the card's set-off ended on {again[1]}"
+        if why:
             raise Refused(f"tenancy {a.tenancy} has rent paid by set-off from {so_from} to {so_until}, which would no "
                           f"longer be whole rent periods with due day {a.day}: re-record the set-off first. Put a "
                           f"'RECORD CHANGE: {a.tenancy} Set-off = <a due date> to <the day before one>' line lined up "
-                          f"with the {a.day}th on the same card as the Due Day line, then run due-day, then set-off")
-    return write_field(a.tenancy, DUE_DAY, str(a.day), "Due Day of Month", task, a.why, a.dry_run)
+                          f"with the {a.day}th on the same card as the Due Day line; this command writes both ({why})")
+    out = write_field(a.tenancy, DUE_DAY, str(a.day), "Due Day of Month", task, a.why, a.dry_run)
+    if again:
+        if a.dry_run:
+            out["setOff"] = {"field": "Rent Set-off", "to": f"{again[0]} to {again[1]}", "dryRun": True}
+        else:
+            # The set-off command itself, so every one of its checks runs again against the new due day.
+            done = cmd_set_off(argparse.Namespace(tenancy=a.tenancy, start=again[0].isoformat(),
+                                                  until=again[1].isoformat(), task=a.task, why=a.why, dry_run=False))
+            out["setOff"] = done
+            if done.get("commentProblem"):
+                out["commentProblems"] = [done["commentProblem"]]
+    return out
+
+
+def set_off_problem(tenancy, start, until, due_day):
+    """'' when a set-off from `start` to `until` passes the set-off command's checks for this due day, else why not."""
+    if not start or not until:
+        return "--from and --until are dates, YYYY-MM-DD"
+    if until < start:
+        return f"the set-off ends ({until}) before it starts ({start})"
+    if (until - start).days > 3 * 366:
+        return "a set-off longer than three years is not a set-off; ask Kevin"
+    if ended(tenancy):
+        return f"tenancy {tenancy['id']} has ended; no set-off is written"
+    # Whole rent periods only (independent review, 9 Oct 2026): a window ending mid-period would read a whole month as
+    # paid in the rent check and a few days in the rent statement. From is a due date; Until is the day before one.
+    if not whole_periods(start, until, due_day):
+        return (f"a set-off covers whole rent periods: --from must be a due date (the {due_day}th) and --until "
+                "the day before one")
+    return ""
 
 
 def cmd_set_off(a):
@@ -342,24 +382,14 @@ def cmd_set_off(a):
     letting agent keeping the rent against a bill we owe them means the rent is paid, "so it's not a cash flow
     void". The rent check, the Cash Flow Voids page and the rent statement count those days as paid."""
     start, until = rc.parse_day(a.start), rc.parse_day(a.until)
-    if not start or not until:
-        raise Refused("--from and --until are dates, YYYY-MM-DD")
-    if until < start:
-        raise Refused(f"the set-off ends ({until}) before it starts ({start})")
-    if (until - start).days > 3 * 366:
-        raise Refused("a set-off longer than three years is not a set-off; ask Kevin")
     tenancy = load_tenancy(a.tenancy)
-    if ended(tenancy):
-        raise Refused(f"tenancy {a.tenancy} has ended; no set-off is written")
-    # Whole rent periods only (independent review, 9 Oct 2026): a window ending mid-period would read a whole month as
-    # paid in the rent check and a few days in the rent statement. From is a due date; Until is the day before one.
     try:
         due_day = int(rc.sel((tenancy.get("fields") or {}).get(DUE_DAY)))
     except ValueError:
         raise Refused(f"tenancy {a.tenancy} has no due day, so a set-off cannot be lined up with its rent")
-    if not whole_periods(start, until, due_day):
-        raise Refused(f"a set-off covers whole rent periods: --from must be a due date (the {due_day}th) and --until "
-                      "the day before one")
+    why = set_off_problem(tenancy, start, until, due_day)
+    if why:
+        raise Refused(why)
     tenancy, task = gate(a.tenancy, a.task, ("Set-off", f"{start.isoformat()} to {until.isoformat()}"))
     f = tenancy.get("fields") or {}
     before = (f.get(SET_OFF_FROM) or "blank", f.get(SET_OFF_UNTIL) or "blank")
