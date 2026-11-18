@@ -247,6 +247,17 @@ KEVIN_ONLY_STEP_RE = re.compile(r"^[ \t>*_#]*\**KEVIN ONLY:", re.M)
 SPEND_STEP_RE = re.compile(r"^[ \t>*_#]*\**SPEND[ \t]*:", re.M | re.I)
 
 
+def strip_trailing_spend(body):
+    """The body without a SPEND line that is its LAST line (finding 20261117-agent-dispatch-1337). That line is
+    the money rule's declaration for the approval card, like the closing carry-out line, and the gate reads it
+    from the whole card, not from the email: a gas safety booking ending 'Roy Lavin / Agile Lets' then
+    'SPEND: £59' was refused as a SPEND line inside the email. A SPEND line anywhere else still refuses."""
+    lines = (body or "").rstrip().split("\n")
+    if lines and SPEND_STEP_RE.match(lines[-1]):
+        return "\n".join(lines[:-1]).rstrip()
+    return body
+
+
 def clean_email_body(body):
     """The email body with what is Kevin's taken out, or EmailFormatError when that cannot be done
     without guessing.
@@ -278,7 +289,10 @@ def clean_email_body(body):
 # Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
 # their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
 # RENT CAP (lane C, 5 Oct 2026): the benefit-cap email to a tenant is the lane's own tenant card too.
-TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "), "note": "RENT CHECK KEY: "}
+# RENT ARREARS (18 Nov 2026, finding 20261118-agent-dispatch-1355): the rent lane's arrears card to a tenant; an
+# approved card's email went out and its approved text was refused as "not a rent lane's tenant card".
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: ", "RENT ARREARS: "),
+                   "note": "RENT CHECK KEY: "}
 
 
 def parse_plan(output):
@@ -494,7 +508,7 @@ def parse_output(output):
     # banner: both are addressed to Kevin, neither is addressed to the
     # recipient. Stripped before the empty-body check, so an output that is
     # nothing BUT the marker is refused rather than sent as a blank email.
-    body = strip_carry_out_line(body)
+    body = strip_trailing_spend(strip_carry_out_line(body))
     # WHAT IS LEFT MUST BE ONE EMAIL (7 Oct 2026, finding 20261007-agent-dispatch-780). Notes for Kevin
     # under a second separator, a notes heading or a tier-1 banner went out in sent emails. Which side
     # is the email cannot be known, so it is refused, never guessed: anything for Kevin goes ABOVE the
