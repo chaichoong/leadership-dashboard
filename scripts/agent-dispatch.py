@@ -305,8 +305,16 @@ def in_dispatch_window(status, due_date, today=None, some_day=False):
 
 def is_decide_card(agent_output):
     """A decision card (cmd_escalate): Agent Output opens with DECIDE:. Kevin's
-    answer to one is for the Task Manager's board, never a carry-out."""
-    return str(agent_output or "").lstrip().upper().startswith("DECIDE:")
+    answer to one is for the Task Manager's board, never a carry-out.
+
+    THE BANNER IS NOT THE SHAPE (finding 20261015-agent-dispatch-907): a tier-1 card opens with
+    TIER1_BANNER and its DECIDE: line sits under it, so the card Kevin approved on 24 Oct 2026
+    (hold seven council tax tasks to a date) was never read as a decision card and `decided`
+    refused it. Read under the banner, as checked_problem and decision_level do."""
+    out = str(agent_output or "").strip()
+    if out.startswith(TIER1_BANNER):
+        out = out[len(TIER1_BANNER):].strip()
+    return out.upper().startswith("DECIDE:")
 
 # How many pieces of work one run may take on.
 #
@@ -5700,6 +5708,96 @@ def cmd_escalate(args):
                       "trackRecord": record.splitlines()[0][:200]}))
 
 
+# A day and a month written out ("31 Mar 2027", "14 December", "1st June 2027"), the shape a card's own
+# table uses. The year, when written, must match too.
+CARD_DAY_MONTH_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?(?:\s+(\d{4}))?\b")
+
+
+def card_line_names_date(line, d):
+    """True when one line of a card names this exact date: ISO, '31 Mar 2027' or '31/03/2027'. A month alone
+    is not enough here (quote_names_date's bar is for Kevin's own words; a card's row names the day)."""
+    line = str(line or "")
+    if d.isoformat() in line:
+        return True
+    for day, word, year in CARD_DAY_MONTH_RE.findall(line):
+        if (_MONTH_NUM.get(word.lower()) == d.month and int(day) == d.day
+                and (not year or int(year) == d.year)):
+            return True
+    for day, month, year in re.findall(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2}|\d{4}))?\b", line):
+        if (int(day), int(month)) == (d.day, d.month) and (not year or int(year) % 100 == d.year % 100):
+            return True
+    return False
+
+
+def on_card_problem(task_id, tf, lead_rec, until):
+    """'' when Kevin's answer on decision card `lead_rec` parks `task_id` to `until`, else why not.
+
+    ONE CARD, SEVERAL TASKS (finding 20261015-agent-dispatch-907). On 24 Oct 2026 Kevin approved one card
+    covering seven council tax tasks ("hold all seven to 31 March 2027; 5 Woodcock back 14 December"). Only
+    the card itself is a decision card, so `decided` refused the six siblings, and `due` needs his dated
+    words on each task, which a card covering seven never gives: the siblings sat at Today with a wall for
+    25 days. The card's own table is his answer for each row, so it may park a sibling when, and only when:
+    the card is a decision card carrying a REAL approval as it stands (approved, Approved At after the card
+    was created, Sent For Approval By set), he wrote no words with it (his words decide, through the normal
+    route), and one line of the card names this task's id AND this exact date. Park the siblings before the
+    card itself is closed with `decided`: closing it archives the approval this check reads."""
+    lf = (lead_rec or {}).get("fields", {}) or {}
+    lead_id = (lead_rec or {}).get("id") or "the card"
+    status = sel(tf.get(AF["status"]))
+    if status in ("Completed", "Cancelled"):
+        return f"{task_id} is {status}; parking it would reopen it"
+    if status == "Approval":
+        return f"{task_id} is waiting at Approval as its own card; Kevin answers that card, not {lead_id}"
+    if not is_decide_card(lf.get(AF["agentOutput"])):
+        return f"{lead_id} is not a decision card (its Agent Output does not open with DECIDE:)"
+    outcome = sel(lf.get(AF["approvalOutcome"]))
+    if outcome not in APPROVED:
+        return (f"Kevin has not approved {lead_id} (its outcome is {outcome or 'empty'}); if it was already "
+                "closed with `decided`, its approval was archived: siblings are parked BEFORE the card itself")
+    evidence = approval_evidence_problem(lf, (lead_rec or {}).get("createdTime") or "")
+    if evidence:
+        return f"{lead_id} carries no real approval: {evidence}"
+    if str(lf.get(AF["approvalFeedback"]) or "").strip():
+        return (f"Kevin wrote words with his answer on {lead_id}; his words decide, so carry them out through "
+                "the normal route (due --quote, or a fresh card), never by the card's table")
+    if not until:
+        return "--on-card needs --until: the date the card names for this task"
+    try:
+        d = datetime.strptime(until, "%Y-%m-%d").date()
+    except ValueError:
+        return f"--until {until} is not a date (YYYY-MM-DD)"
+    if d.isoformat() <= today_london():
+        return f"--until {until} is not in the future"
+    body = str(lf.get(AF["agentOutput"]) or "")
+    rows = [ln for ln in body.splitlines() if task_id in ln]
+    if not rows:
+        return f"{lead_id} never names {task_id}, so Kevin's answer on it says nothing about this task"
+    if not any(card_line_names_date(ln, d) for ln in rows):
+        return (f"no line of {lead_id} that names {task_id} also names {d.isoformat()}; park it to the date "
+                "its own line gives")
+    return ""
+
+
+def decided_on_card(task_id, tf, lead_id, until, stamp):
+    """Park a sibling task to the date Kevin's approved decision card gives it (on_card_problem)."""
+    lead_rec = get_task(lead_id)
+    problem = on_card_problem(task_id, tf, lead_rec, until)
+    if problem:
+        sys.exit(f"REFUSED: {problem}.")
+    lf = lead_rec.get("fields", {}) or {}
+    row = next(ln for ln in str(lf.get(AF["agentOutput"]) or "").splitlines()
+               if task_id in ln and card_line_names_date(ln, datetime.strptime(until, "%Y-%m-%d").date()))
+    row = " ".join(row.replace("|", " ").split())[:200]
+    approved = str(lf.get(AF["approvedAt"]) or "")[:10]
+    existing = str(tf.get(AF["notes"]) or "").rstrip()
+    # The same stamped "Parked until" line `decided --until` writes, so task-manager.py files it as parked.
+    note = (f"[{stamp} — agent-dispatch] Parked until {until} on Kevin's answer on card {lead_id} "
+            f"({sel(lf.get(AF['approvalOutcome']))}, {approved}): {row}")
+    patch_task(task_id, {AF["status"]: "Upcoming", AF["dueDate"]: until,
+                         AF["notes"]: (existing + "\n\n" + note).strip()[-90000:]})
+    print(json.dumps({"parkedOnCard": task_id, "card": lead_id, "until": until}))
+
+
 def cmd_decided(args):
     """Close an ANSWERED decision card whose answer is to wait.
 
@@ -5715,10 +5813,14 @@ def cmd_decided(args):
     properly, never for "nothing needs doing", which is a `complete`."""
     tf = (get_task(args.task).get("fields", {}) or {})
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    lead = (getattr(args, "on_card", None) or "").strip()
+    if lead and lead != args.task:
+        return decided_on_card(args.task, tf, lead, (getattr(args, "until", None) or "").strip(), stamp)
     fields = decision_carry_out_fields(tf, stamp)
     if not fields:
         sys.exit(f"REFUSED: {args.task} is not an answered decision card (a DECIDE: card with Kevin's verdict "
-                 "on it), so there is no answer to record.")
+                 "on it), so there is no answer to record. If ONE card he answered covers this task and names "
+                 "its date, use --on-card <that card's id> --until <the date>.")
     if sel(tf.get(AF["status"])) == "Completed":
         sys.exit(f"REFUSED: {args.task} is Completed (a rejected card closes its task). Parking it would "
                  "reopen work Kevin closed.")
@@ -16481,6 +16583,9 @@ def main():
     dd.add_argument("task")
     dd.add_argument("--until", metavar="YYYY-MM-DD",
                     help="park the task until this date; it comes back on the board that day")
+    dd.add_argument("--on-card", dest="on_card", metavar="CARD_ID",
+                    help="the answered decision card that covers this task and names its date on the task's own "
+                         "line (finding 907); park the siblings before closing the card itself")
 
     h = sub.add_parser("handover",
                        help="hand an approved task to a named human team member")

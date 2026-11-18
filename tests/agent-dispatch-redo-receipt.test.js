@@ -201,7 +201,7 @@ describe('the report gate', () => {
   // CLOSE PROPOSAL at the start: a tier-1 close on an inbound Admin task was refused for the five
   // questions, and adding a CHECKED line got it refused as "not a report". No honest shape passed
   // and two approved closes sat for a month. Back-test: remove the banner strip and all four fail.
-  // 20261107-agent-dispatch-1242 is the same bug in decision_level, and has its own test in
+  // The same bug in decision_level is a separate finding with its own test in
   // tests/protocol-enforcement.test.js: one test proves one finding.
   it('an exempt shape under the tier-1 banner is still that shape (951)', () => {
     const r = j(`
