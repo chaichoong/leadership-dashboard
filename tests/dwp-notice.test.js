@@ -78,7 +78,7 @@ def api(method, path, payload=None, params=None):
             raise TimeoutError("The read operation timed out")
         return {"id": "comX%d" % len(calls["comments"])}
     raise AssertionError("unexpected call " + method + " " + path)
-REAL_GET_ALL = d._get_all
+REAL_GET_ALL, REAL_API = d._get_all, d._api
 def get_all(table, params):
     if table == rc.T_TASKS:
         calls["boardReads"] += 1
@@ -451,6 +451,7 @@ result = {"first": first, "second": second, "posts": len(calls["comments"]), "on
     const r = py(`
 os.environ["DWP_NOTICE_LEDGER"] = "/dev/null/ledger.jsonl"
 os.environ["DWP_NOTICE_RETRY"] = box + "/retry.json"
+os.environ["DWP_NOTICE_LOCKS"] = box + "/locks"
 c = ctx("${UC}", "${SUBJ}", "${DIRECT}")
 first = d.record("m42", c, TODAY)
 second = d.record("m42", c, TODAY)
@@ -513,25 +514,46 @@ t.write_scan_cache([msg("m1", "Universal Credit <${UC}>", "${SUBJ}", "${DIRECT}"
 cache = t.read_scan_cache()
 result = {"m1": cache["m1"].get("dwp"), "others": ["dwp" in cache["m2"], "dwp" in cache["m3"]],
           "kept": sorted(cache["m3"])}`);
-    expect(r.m1).toEqual({ tenant: 'Jo Alder', summary: DIRECT_SUMMARY, from: UC });
+    expect(r.m1).toEqual({ tenant: 'Jo Alder', summary: DIRECT_SUMMARY, from: UC, decided: true });
     expect(r.others).toEqual([false, false]);
     // No other cache change: a non-DWP entry carries exactly the keys it always did.
     expect(r.kept).toEqual(['ask', 'auto_reply', 'deadline', 'inbox', 'internalDate', 'reply_state', 'sender',
       'subject', 'threadId']);
   });
 
-  // Review minors 5 and 6: a display-name address and a scan-flagged automatic reply get no DWP reading.
-  it('a display-name address and an automatic reply get no DWP reading in the scan', () => {
+  // Review minors 5 and 6: a display-name address and a real automatic reply with nothing decided get no
+  // DWP reading.
+  it('a display-name address and an automatic reply with nothing decided get no DWP reading in the scan', () => {
     const r = py(`${TRIAGE}
+ack = "Thank you for your email. We aim to reply within 10 working days."
 t.write_scan_cache([msg("m5", "${UC} <evil@example.com", "${SUBJ}", "${DIRECT}"),
                     msg("m6", "Universal Credit ${UC} via evil@example.com", "${SUBJ}", "${DIRECT}"),
-                    msg("m7", "Universal Credit <${UC}>", "Automatic reply", "${DIRECT}", auto_reply="header auto-submitted: auto-replied")])
+                    msg("m7", "Universal Credit <${UC}>", "We have your email", ack, auto_reply="header auto-submitted: auto-replied"),
+                    msg("m8", "Universal Credit <${UC}>", "Automatic reply: Housing costs", ack, auto_reply="subject: Automatic reply: Housing costs")])
 cache = t.read_scan_cache()
-skip = d.plan("m7", dict(ctx("${UC}", "${SUBJ}", "${DIRECT}"), auto_reply="header auto-submitted: auto-replied"), TODAY)
-result = {"dwp": ["dwp" in cache[k] for k in ("m5", "m6", "m7")], "plan": skip}`);
-    expect(r.dwp).toEqual([false, false, false]);
+skip = d.plan("m7", dict(ctx("${UC}", "We have your email", ack), auto_reply="header auto-submitted: auto-replied"), TODAY)
+result = {"dwp": ["dwp" in cache[k] for k in ("m5", "m6", "m7", "m8")], "plan": skip}`);
+    expect(r.dwp).toEqual([false, false, false, false]);
     expect(r.plan).toMatchObject({ do: 'skip' });
-    expect(r.plan.why).toMatch(/automatic reply/);
+    expect(r.plan.why).toMatch(/automatic reply with nothing decided/);
+  });
+
+  // Review round 2, fix 1: the scan's receipt-phrase reading ("Thank you for contacting Universal Credit.") must
+  // never drop a decision, and a decision sentence keeps even a header-flagged reply.
+  it('a decision that opens with a receipt phrase is read, recorded on act, and planned by the back-fill', () => {
+    const r = py(`${TRIAGE}
+body = "Thank you for contacting Universal Credit. Regarding housing costs request for Sam Birch. This has been approved."
+t.write_scan_cache([msg("m9", "Universal Credit <${UC}>", "Housing costs", body, auto_reply="body: thank you for contacting"),
+                    msg("m10", "Universal Credit <${UC}>", "Housing costs", body, auto_reply="header auto-submitted: auto-replied")])
+cache = t.read_scan_cache()
+acted = run(lambda: t.main(["act", "--id", "m9", "--do", "archive", "--reason", "filed"]))
+planned = d.plan("m10", cache["m10"], TODAY)
+result = {"dwp": ["dwp" in cache[k] for k in ("m9", "m10")], "acted": acted, "comments": calls["comments"], "planned": planned["do"]}`);
+    expect(r.dwp).toEqual([true, true]);
+    expect(r.acted.code).toBe(0);
+    expect(JSON.parse(r.acted.stdout.trim()).dwp).toMatchObject({ done: 'commented', tenancy: 'recTYBIRCH0000001' });
+    expect(r.comments.map((c) => c.tenancy)).toEqual(['recTYBIRCH0000001']);
+    expect(r.planned).toBe('comment');
   });
 
   it('note --do answered on a cached DWP message still files it AND records it; act then note records once', () => {
@@ -670,6 +692,125 @@ result = {"out": out, "calls": calls, "ledger": ledger(), "retry": retry_ids()}`
     expect(r.calls.tasks).toEqual([]);
     expect(r.ledger).toEqual([]);
     expect(r.retry).toEqual([]);
+  });
+});
+
+// Review round 2 (934488c1): one regression (fix 1, in the triage hook block above) and four minors.
+describe('review round 2', () => {
+  // Fix 2: a POST answered 5xx may have landed; it is never sent again, the record is read back instead.
+  it('a comment POST answered 504 after it landed is read back, never posted twice; a GET 503 and a 429 retry once', () => {
+    const r = py(`
+import urllib.error, urllib.parse
+d._api = REAL_API
+rc._pat = lambda: "test-token"
+d.time.sleep = lambda s: None
+sent = []
+class Reply:
+    def __init__(self, body): self.body = body
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def read(self): return json.dumps(self.body).encode()
+def err(url, code):
+    return urllib.error.HTTPError(url, code, "x", {}, io.BytesIO(b'{"error": "x"}'))
+script = {"get503": 0, "post429": 0}
+def urlopen(req, timeout=None):
+    method, url = req.get_method(), req.full_url
+    sent.append(method + " " + urllib.parse.urlparse(url).path.split("/", 3)[-1])
+    path = urllib.parse.urlparse(url).path
+    if path.endswith("/comments") and method == "GET":
+        if script["get503"] == 1:
+            script["get503"] = 2
+            raise err(url, 503)
+        return Reply({"comments": [{"text": t} for t in COMMENTS.get(path.split("/")[-2], [])]})
+    if path.endswith("/comments") and method == "POST":
+        if script["post429"] == 1:
+            script["post429"] = 2
+            raise err(url, 429)
+        COMMENTS.setdefault(path.split("/")[-2], []).append(json.loads(req.data)["text"])
+        if script["post429"] == 0:
+            raise err(url, 504)
+        return Reply({"id": "comY"})
+    raise AssertionError(method + " " + url)
+d.urllib.request.urlopen = urlopen
+first = d.record("m60", ctx("${UC}", "${SUBJ}", "${DIRECT}"), TODAY)
+posts_after_504 = len([s for s in sent if s.startswith("POST")])
+script["get503"], script["post429"] = 1, 1
+forget_ledger()
+COMMENTS.clear()
+second = d.record("m61", ctx("${UC}", "${SUBJ}", "${DIRECT}"), TODAY)
+result = {"first": first, "posts504": posts_after_504, "onTenancy": COMMENTS, "sent": sent, "second": second["done"]}`);
+    expect(r.first.done).toBe('commented');
+    expect(r.first.note).toMatch(/reported an error but it landed/);
+    expect(r.posts504).toBe(1);
+    expect(r.second).toBe('commented');
+    expect(r.onTenancy).toEqual({ recTYALDER0000001: [expect.stringMatching(/Gmail m61\.$/)] });
+    // m60: read, POST (504), read back. m61: read (503), read again, POST (429), POST.
+    expect(r.sent.map((s) => s.split(' ')[0])).toEqual(['GET', 'POST', 'GET', 'GET', 'GET', 'POST', 'POST']);
+  });
+
+  // Fix 3: a Re: or Dear line naming someone beside one of our own words is unkeepable, never skipped whole.
+  it('"Re: Roy Alder" beside a surname reference is unsure, so it is a task, not a comment on the one live Alder', () => {
+    const r = py(`
+reading = d.read_names("${SUBJ}", "Payment reference: ALDER\\nRe: Roy Alder\\nYour application has been approved.")
+out = d.record("m62", ctx("${UC}", "${SUBJ}", "Payment reference: ALDER\\nRe: Roy Alder\\nYour application has been approved."), TODAY)
+still = d.read_names("${SUBJ}", "Dear Kevin Brittain\\nDear Roy\\nDear Agile Lets Team\\nPayment reference: Alder\\nIt was approved.")
+result = {"reading": reading, "out": out["done"], "comments": calls["comments"], "still": still["tenant"]}`);
+    expect(r.reading.tenant).toBe('');
+    expect(r.reading.unsure).toMatch(/"Roy Alder"/);
+    expect(r.out).toBe('task');
+    expect(r.comments).toEqual([]);
+    expect(r.still).toBe('Alder');
+  });
+
+  // Fix 4: gate exit 4 (created, a field did not stick) is a failure: exit 5 and a retry entry, never a quiet 0.
+  it('a task created with a field that did not stick fails loudly, is queued, and is never raised twice', () => {
+    const r = py(`
+spec = importlib.util.spec_from_file_location("triage_t", ${JSON.stringify(resolve(SCRIPTS, 'inbound-triage.py'))})
+t = importlib.util.module_from_spec(spec); sys.modules["triage_t"] = t; spec.loader.exec_module(t)
+t.worker_post = lambda path, body: (calls["gmail"].append([path, body]) or {"modified": 1})
+def incomplete(fields):
+    tid = "recTASKDWP%07d" % (len(BOARD) + 1)
+    BOARD.append({"id": tid, "fields": {rc.TK["notes"]: fields["fldR7apBzSp3oxFxz"]}})
+    calls["tasks"].append(fields)
+    return 4, {"action": "created", "taskId": tid, "fieldsNotWritten": ["Team Member"]}
+d.create_task = incomplete
+import time
+t.write_scan_cache([{"id": "m63", "threadId": "th63", "internalDate": str(int(time.time() * 1000)), "labelIds": ["INBOX"],
+                     "headers": {"from": "Universal Credit <${UC}>", "subject": "${SUBJ}"},
+                     "body": "Payment reference: CEDAR\\nYour application has been approved.", "auto_reply": None, "reply_state": ""}])
+out, err = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+    code = t.main(["note", "--id", "m63", "--do", "answered", "--reason", "x"])
+again = d.record("m63", t.read_scan_cache()["m63"], TODAY)
+result = {"code": code, "json": json.loads(out.getvalue().strip()), "stderr": err.getvalue(), "retry": retry_ids(),
+          "ledger": ledger(), "tasks": len(calls["tasks"]), "again": again["done"]}`);
+    expect(r.code).toBe(5);
+    expect(r.json.dwpProblem).toMatch(/recTASKDWP0000001 was raised but some fields did not stick \(Team Member\)/);
+    expect(r.stderr).toMatch(/DWP NOTICE NOT RECORDED for m63/);
+    expect(r.retry).toEqual(['m63']);
+    expect(r.ledger.map((x) => [x.task, x.fieldsNotWritten])).toEqual([['recTASKDWP0000001', 'Team Member']]);
+    expect(r.tasks).toBe(1);
+    expect(r.again).toBe('already');
+  });
+
+  // Fix 5: one run per message at a time, so triage and a scheduled retry never both write.
+  it('a second run on a message another run holds writes nothing, and goes ahead once the lock is free', () => {
+    const r = py(`
+import fcntl
+d.LOCK_WAIT = 1
+os.makedirs(d.locks_dir(), exist_ok=True)
+held = open(os.path.join(d.locks_dir(), "m64.lock"), "a")
+fcntl.flock(held, fcntl.LOCK_EX)
+c = ctx("${UC}", "${SUBJ}", "${DIRECT}")
+_, err = attempt(lambda: d.record("m64", c, TODAY))
+posts_while_held = len(calls["comments"])
+fcntl.flock(held, fcntl.LOCK_UN); held.close()
+out = d.record("m64", c, TODAY)
+result = {"err": err, "postsWhileHeld": posts_while_held, "out": out["done"], "posts": len(calls["comments"])}`);
+    expect(r.err).toMatch(/another run is recording message m64 right now/);
+    expect(r.postsWhileHeld).toBe(0);
+    expect(r.out).toBe('commented');
+    expect(r.posts).toBe(1);
   });
 });
 

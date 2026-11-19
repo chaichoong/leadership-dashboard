@@ -34,8 +34,8 @@ USAGE
     existed, whose cache entry has no "dwp" part. Without it such a message is listed, not guessed.
 
 Ledger: ~/knowledge-os/logs/dwp-notice/ledger.jsonl (DWP_NOTICE_LEDGER overrides it); retry file
-retry.json beside it (DWP_NOTICE_RETRY overrides it). Private, never the repo: they name tenancies,
-tenants and Gmail messages.
+retry.json beside it (DWP_NOTICE_RETRY overrides it); one lock file per message under locks/ beside it
+(DWP_NOTICE_LOCKS overrides it). Private, never the repo: they name tenancies, tenants and Gmail messages.
 """
 import contextlib
 import fcntl
@@ -72,6 +72,7 @@ DONE_KINDS = ("comment", "task")
 TRIAGE_BUDGET = 45
 AIRTABLE_TIMEOUT = 20
 TRACK_RECORD_TIMEOUT = 20
+LOCK_WAIT = 15
 MSG_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
@@ -124,7 +125,8 @@ MONTHS_DAYS = {"january", "february", "march", "april", "may", "june", "july", "
 # A "Dear" or "Re:" line to us, not about a tenant.
 ADDRESSEE = {"kevin", "brittain", "agile", "lets", "estates", "roy", "lavin", "sir", "madam", "landlord",
              "customer", "colleague", "colleagues", "all", "info", "owner", "manager", "agent", "partner",
-             "provider", "housing", "whom"}
+             "provider", "housing", "whom", "officer", "letting", "lettings", "director", "company", "ltd",
+             "limited"}
 # Words that never make a run of capitals look like a person: "The Property", "Housing Costs", "December".
 NOT_A_PERSON = NOT_NAME | NAME_STOP | MONTHS_DAYS | TITLES
 NAME_WORD_RE = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
@@ -252,7 +254,11 @@ def read_names(subject, body):
             raw = m.group("name")
             run = name_run(raw)
             if may_be_us and any(_fold(w) in ADDRESSEE for w in run):
-                continue                           # "Dear Kevin Brittain", "Dear Sir/Madam"
+                people = [w for w in run if _fold(w) not in NOT_A_PERSON and w not in JOINS]
+                if all(_fold(w) in ADDRESSEE for w in people):
+                    continue                       # "Dear Kevin Brittain", "Dear Roy", "Dear Agile Lets Team"
+                dropped.append(" ".join(run))      # "Re: Roy Alder": a name beside one of ours, unkeepable
+                continue
             name = clean_name(raw, capitalised=capitalised)
             seen = name_tokens(" ".join(run))
             if _person_like(run) and (not name or seen != name_tokens(name)):
@@ -285,15 +291,27 @@ def _squash(s):
     return " ".join(str(s or "").split())
 
 
-def summary(subject, body):
-    """The subject, then the first sentence that says what was decided, at most SUMMARY_MAX characters."""
-    subj = _squash(subject)
-    sentence = ""
+def decision_sentence(body):
+    """The first sentence of the body that says what was decided, or ''."""
     for part in SENTENCE_SPLIT_RE.split(str(body or "")):
         part = _squash(part)
         if part and DECISION_RE.search(part):
-            sentence = part
-            break
+            return part
+    return ""
+
+
+def auto_reply_skips(reason, decided):
+    """True only for a real machine reply with nothing decided in it: the scan's reason is the
+    Auto-Submitted header or an auto-reply subject (never its receipt-phrase reading of the body, which
+    fires on "Thank you for contacting Universal Credit." above a decision), and no decision sentence."""
+    r = str(reason or "").lower()
+    return (r.startswith("header ") or r.startswith("subject:")) and not decided
+
+
+def summary(subject, body):
+    """The subject, then the first sentence that says what was decided, at most SUMMARY_MAX characters."""
+    subj = _squash(subject)
+    sentence = decision_sentence(body)
     out = subj
     if sentence and _fold(sentence) not in _fold(subj):
         out = "%s: %s" % (subj, sentence) if subj else sentence
@@ -306,7 +324,7 @@ def cache_entry(subject, body, sender=""):
     """The "dwp" part of a scan cache entry: what record() needs, read while the full body exists.
     `sender` is the raw From header; its address (bare_email) is kept as "from"."""
     reading = read_names(subject, body)
-    entry = {"tenant": reading["tenant"], "summary": summary(subject, body)}
+    entry = {"tenant": reading["tenant"], "summary": summary(subject, body), "decided": bool(decision_sentence(body))}
     if sender:
         entry["from"] = bare_email(sender)
     if reading["unsure"]:
@@ -335,8 +353,10 @@ def _rc():
 
 
 def _api(method, path, payload=None, params=None):
-    """One Airtable call, the way rent-check.py's api makes it, with a short timeout because triage waits:
-    a timeout is never retried, a 429 or 5xx once."""
+    """One Airtable call, the way rent-check.py's api makes it, with a short timeout because triage waits.
+    A timeout is never retried. A 429 is retried once (Airtable refused it, nothing was written). A 5xx
+    is retried once only for a GET: a POST answered 5xx may have landed, so it is never sent again here;
+    the caller reads the record back instead (review round 2, 19 Nov 2026)."""
     rc = _rc()
     url = "https://api.airtable.com/v0/%s/%s" % (rc.BASE, path)
     if params:
@@ -349,7 +369,7 @@ def _api(method, path, payload=None, params=None):
             with urllib.request.urlopen(req, timeout=AIRTABLE_TIMEOUT) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
-            if (e.code == 429 or e.code >= 500) and attempt == 1:
+            if attempt == 1 and (e.code == 429 or (e.code >= 500 and method == "GET")):
                 time.sleep(2)
                 continue
             # Never echo headers: they carry the token.
@@ -459,7 +479,8 @@ def retry_path():
 
 def ledger_done(msg_id):
     """The ledger row that already put this message on the record, or None. A ledger that exists and
-    cannot be read raises: the record itself is then the only answer, and it is read instead."""
+    cannot be read raises RecordError (NOT CHECKED) and nothing is written: the attempt fails and waits
+    in the retry file until the ledger can be read again."""
     p = ledger_path()
     if not os.path.exists(p):
         return None
@@ -688,8 +709,8 @@ def plan(msg_id, ctx, today=None, now=None):
     dwp = ctx.get("dwp")
     if not is_dwp_notice(_sender(ctx)) or not is_dwp_notice(ctx.get("sender")):
         return {"do": "skip", "why": "not from a DWP or Universal Credit address"}
-    if ctx.get("auto_reply"):
-        return {"do": "skip", "why": "the scan flagged it as an automatic reply (%s)" % ctx.get("auto_reply")}
+    if auto_reply_skips(ctx.get("auto_reply"), (dwp or {}).get("decided") if isinstance(dwp, dict) else False):
+        return {"do": "skip", "why": "an automatic reply with nothing decided in it (%s)" % ctx.get("auto_reply")}
     if not isinstance(dwp, dict):
         return {"do": "skip", "why": "no DWP reading in the scan cache for this message"}
     done = ledger_done(msg_id)
@@ -724,11 +745,51 @@ def _found_after(check, what):
         return None, "; reading the %s again to see whether it landed also failed (%s)" % (what, str(exc)[:160])
 
 
+def locks_dir():
+    return os.environ.get("DWP_NOTICE_LOCKS") or os.path.join(os.path.dirname(ledger_path()), "locks")
+
+
+@contextlib.contextmanager
+def message_lock(msg_id):
+    """One run at a time per message (review round 2): triage and a scheduled `retry` may meet on the same
+    message, and both could read "not on the record" before either wrote. Waits up to LOCK_WAIT seconds,
+    then fails: the other run is making the record, and this one stays queued for retry."""
+    if not MSG_ID_RE.fullmatch(msg_id or ""):
+        raise RecordError("%r is not a Gmail message id" % msg_id)
+    try:
+        os.makedirs(locks_dir(), exist_ok=True)
+        fh = open(os.path.join(locks_dir(), msg_id + ".lock"), "a")
+    except OSError as exc:
+        raise RecordError("NOT CHECKED: the lock for message %s could not be taken (%s), so nothing was written"
+                          % (msg_id, exc))
+    with fh:
+        waited = 0.0
+        while True:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if waited >= LOCK_WAIT:
+                    raise RecordError("another run is recording message %s right now (waited %ds), so this one "
+                                      "wrote nothing" % (msg_id, LOCK_WAIT))
+                time.sleep(0.5)
+                waited += 0.5
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def record(msg_id, ctx, today=None, now=None, budget=None):
     """Put one DWP notice on the record: ONE comment on the one matching live tenancy, else ONE task.
-    Returns what was done; raises RecordError when it could not be done. Never twice: the record
-    itself is read before each write and again after a write that failed."""
+    Returns what was done; raises RecordError when it could not be done. Never twice: one run per message
+    at a time (message_lock), and the record itself is read before each write and after one that failed."""
     deadline = time.monotonic() + budget if budget else None
+    with message_lock(msg_id):
+        return _record(msg_id, ctx, today, now, deadline)
+
+
+def _record(msg_id, ctx, today, now, deadline):
     p = plan(msg_id, ctx, today, now)
     if p["do"] in ("skip", "already"):
         return {"done": p["do"], "why": p.get("why", ""),
@@ -772,10 +833,16 @@ def record(msg_id, ctx, today=None, now=None, budget=None):
                                     "note": "the gate reported an error but the task landed"})
         raise RecordError("the task gate did not raise the RENT CHECK task (%s)%s"
                           % (problem or "exit %s: %s" % (code, _squash(json.dumps(out))[:200]), extra))
-    result = _ledger_quietly({"id": msg_id, "kind": "task", "task": task_id, "why": p["why"]},
-                             {"done": "task", "task": task_id, "why": p["why"]})
+    missing = ", ".join((out or {}).get("fieldsNotWritten") or []) or "the gate did not say which"
+    row = {"id": msg_id, "kind": "task", "task": task_id, "why": p["why"]}
     if code == 4:
-        result["fieldsProblem"] = "some fields did not stick: %s" % ", ".join((out or {}).get("fieldsNotWritten") or [])
+        row["fieldsNotWritten"] = missing
+    result = _ledger_quietly(row, {"done": "task", "task": task_id, "why": p["why"]})
+    if code == 4:
+        # Created, but incomplete (exit 4): a failure, said and queued like any other (review round 2). The
+        # ledger line is written first, so no replay ever raises a second task; it lists the missing fields.
+        raise RecordError("task %s was raised but some fields did not stick (%s): fix them on the task"
+                          % (task_id, missing))
     return result
 
 

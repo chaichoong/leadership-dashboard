@@ -538,19 +538,23 @@ def write_scan_cache(messages):
         # A DWP or Universal Credit notice: the tenant it names and what was decided, read off the
         # full body like `deadline`. Every act and note on the message reads it back and puts the
         # fact on the tenancy record (finding 20261118-agent-dispatch-1353). The sender is read off the
-        # RAW From header by dwp_notice's own reader, so an address in the display name never counts,
-        # and a message the scan flagged as an automatic reply is left alone (review, 19 Nov 2026).
+        # RAW From header by dwp_notice's own reader, so an address in the display name never counts. A
+        # real automatic reply is left alone, judged by dwp_notice.auto_reply_skips: the Auto-Submitted
+        # header or an auto-reply subject, and never when a decision sentence is in the body (review
+        # round 2, 19 Nov 2026: the receipt-phrase reading fires on "Thank you for contacting Universal
+        # Credit." above a decision).
         raw_from = (m.get("headers") or {}).get("from", "")
-        if dwp_notice.is_dwp_notice(raw_from) and dwp_notice.is_dwp_notice(cache[m["id"]]["sender"]) \
-                and not m.get("auto_reply"):
+        if dwp_notice.is_dwp_notice(raw_from) and dwp_notice.is_dwp_notice(cache[m["id"]]["sender"]):
             subject = (m.get("headers") or {}).get("subject", "")
             try:
-                cache[m["id"]]["dwp"] = dwp_notice.cache_entry(subject, unquote(m.get("body", "")), raw_from)
+                entry = dwp_notice.cache_entry(subject, unquote(m.get("body", "")), raw_from)
             except Exception as exc:  # noqa: BLE001 — the scan never dies on it; the notice becomes a task
                 progress("DWP NOTICE NOT READ for %s (%s): it will be raised as a RENT CHECK task with no name"
                          % (m["id"], str(exc)[:160]))
-                cache[m["id"]]["dwp"] = {"tenant": "", "summary": " ".join(str(subject).split())[:300],
-                                         "from": dwp_notice.bare_email(raw_from)}
+                entry = {"tenant": "", "summary": " ".join(str(subject).split())[:300],
+                         "from": dwp_notice.bare_email(raw_from), "decided": False}
+            if not dwp_notice.auto_reply_skips(m.get("auto_reply"), entry.get("decided")):
+                cache[m["id"]]["dwp"] = entry
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
     (d / "scan-cache.json").write_text(json.dumps(cache))
