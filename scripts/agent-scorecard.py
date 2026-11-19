@@ -674,9 +674,17 @@ def turn_start(e):
     if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
         return None
     text = _words(content)
-    if not text:
-        return None
     origin = e.get("origin") if isinstance(e.get("origin"), dict) else {}
+    if not text:   # a screenshot or a file with no words is still his question (second review)
+        kinds = {b.get("type") for b in content if isinstance(b, dict)} if isinstance(content, list) else set()
+        if "image" in kinds:
+            text = "(a screenshot)"
+        elif "document" in kinds:
+            text = "(a file)"
+        elif origin.get("kind") == "human":
+            return ""
+        else:
+            return None   # a reminder on its own, inside the turn
     if origin.get("kind") not in (None, "human") or not _kevin(text):
         return ""
     return text
@@ -699,9 +707,11 @@ def answer_line(text, limit=ASK_LIMIT):
 def exchanges(lines):
     """Kevin's typed messages in one conversation, oldest first, each with the first line of the
     answer he got: [{"at", "ask", "answer"}]. The answer is the agent's last text before the next
-    turn, so a "checking that now" line before a lookup is replaced by the reply itself. An API
-    error the app writes in the agent's place is never an answer."""
-    out, cur = [], None
+    turn, so a "checking that now" line before a lookup is replaced by the reply itself. A message
+    Kevin types while the agent is still working joins the turn: the questions stay open together
+    and share the final reply, which answers both (second review). An API error the app writes in
+    the agent's place is never an answer."""
+    out, open_ = [], []
     for raw in lines:
         try:
             e = json.loads(raw)
@@ -711,24 +721,28 @@ def exchanges(lines):
             continue
         text = turn_start(e)
         if text == "":
-            cur = None
+            open_ = []
             continue
         if text:
             stamp = e.get("timestamp") or (e.get("attachment") or {}).get("timestamp")
             t = _parse_time(stamp)
-            cur = {"at": t, "ask": first_line(" ".join(text.split()), ASK_LIMIT), "answer": ""} if t else None
-            if cur:
-                out.append(cur)
+            if not t:
+                open_ = []
+                continue
+            ex = {"at": t, "ask": first_line(" ".join(text.split()), ASK_LIMIT), "answer": ""}
+            out.append(ex)
+            open_ = open_ + [ex] if e.get("type") == "attachment" else [ex]
             continue
         msg = e.get("message") or {}
-        if (cur and e.get("type") == "assistant" and not e.get("isSidechain")
+        if (open_ and e.get("type") == "assistant" and not e.get("isSidechain")
                 and not e.get("isApiErrorMessage") and msg.get("model") != "<synthetic>"):
             content = msg.get("content")
             said = ("\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
                     if isinstance(content, list) else str(content or ""))
             line = answer_line(said)
             if line:
-                cur["answer"] = line
+                for ex in open_:
+                    ex["answer"] = line
     return out
 
 
@@ -1214,7 +1228,7 @@ def selftest():
                 "type": "queued_command", "commandMode": mode, "origin": {"kind": kind}, "prompt": text}})
         busy = [
             entry("user", "2026-11-18T19:00:00Z", "Who is late?"),
-            entry("assistant", "2026-11-18T19:00:05Z", [{"type": "text", "text": "Two are late."}]),
+            entry("assistant", "2026-11-18T19:00:05Z", [{"type": "text", "text": "Checking the rent row."}]),
             entry("assistant", "2026-11-18T19:00:06Z", [{"type": "tool_use", "name": "Bash", "input": {}}]),
             queued("2026-11-18T19:00:07Z", "Also chase flat 5"),
             entry("user", "2026-11-18T19:00:08Z", [{"type": "tool_result", "content": "x"}]),
@@ -1232,14 +1246,26 @@ def selftest():
                   origin={"kind": "task-notification"}),
         ]
         bx = exchanges(busy)
-        check("review 1: a message typed while the agent works is its own question, with its own answer",
+        check("review 1: a message typed while the agent works is its own question; both share the final reply",
               [(x["ask"], x["answer"]) for x in bx][:2]
-              == [("Who is late?", "Two are late."), ("Also chase flat 5", "Raised a chase for flat 5.")])
+              == [("Who is late?", "Raised a chase for flat 5."), ("Also chase flat 5", "Raised a chase for flat 5.")])
         check("review 1: a background notice's reply is never filed as Kevin's answer",
               all("background job" not in x["answer"] for x in bx))
         check("review 5: pasted text is his question; interruptions, briefs and notices are not",
               [x["ask"] for x in bx] == ["Who is late?", "Also chase flat 5", "Rent list for Elm Row"])
         check("review 6: an API error is never the answer", bx[2]["answer"] == "")
+        shot = [
+            entry("user", "2026-11-18T19:00:00Z", "Who is late?", origin={"kind": "human"}),
+            entry("assistant", "2026-11-18T19:00:20Z", [{"type": "text", "text": "Flat 2 is late."}]),
+            entry("user", "2026-11-18T19:01:00Z", [{"type": "image", "source": {}}], origin={"kind": "human"}),
+            entry("assistant", "2026-11-18T19:01:20Z", [{"type": "text", "text": "That screenshot shows a bank transfer."}]),
+            entry("user", "2026-11-18T19:02:00Z", "<system-reminder>only a note</system-reminder>"),
+            entry("assistant", "2026-11-18T19:02:20Z", [{"type": "text", "text": "Noted the transfer."}]),
+        ]
+        sx = exchanges(shot)
+        check("second review: a screenshot with no words is a new question, never a new answer to the last one",
+              [(x["ask"], x["answer"]) for x in sx]
+              == [("Who is late?", "Flat 2 is late."), ("(a screenshot)", "Noted the transfer.")])
         check("review 1: usage counts the queued message too", kevin_messages(busy, now - timedelta(days=14))[0] == 3)
         dup = [{"at": datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc), "ask": "a", "answer": "b"},
                {"at": datetime(2026, 11, 15, 9, 0, tzinfo=timezone.utc), "ask": "c", "answer": "d"}]
