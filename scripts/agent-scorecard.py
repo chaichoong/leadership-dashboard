@@ -136,7 +136,13 @@ ROOMS = {
     "ceo-room": dict(name="CEO room", team="whole-team",
                      members=list(CHATS), also=list(SCHEDULED), whole=True),
 }
-TEAMS = {"property": "Property team", "inbox": "Inbox team", "money": "Money team",
+# A personal chat (Kevin's note, 19 Nov 2026: "who does my personal work like wardrobe management?").
+# The agent gate scored it 12/20 and found no repeat work to score an agent on, so it is a chat with no
+# agent file, no register row and no scorecard; it still gets LAST TIME WE SPOKE and the Q&A log.
+PERSONAL = {
+    "personal-assistant": dict(name="Personal Assistant", team="personal"),
+}
+TEAMS = {"property": "Property team", "inbox": "Inbox team", "money": "Money team", "personal": "Personal",
          "runpreneur": "Runpreneur team", "whole-team": "Whole team"}
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
@@ -147,11 +153,15 @@ DATE_RE = re.compile(r"\b(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(
 
 
 def all_keys():
-    return list(CHATS) + list(ROOMS)
+    return list(CHATS) + list(ROOMS) + list(PERSONAL)
+
+
+def spec_for(key):
+    return CHATS.get(key) or ROOMS.get(key) or PERSONAL.get(key)
 
 
 def folder_for(key):
-    spec = CHATS.get(key) or ROOMS.get(key)
+    spec = spec_for(key)
     return os.path.join(AGENTS_ROOT, spec["team"], key) if spec else None
 
 
@@ -160,7 +170,7 @@ def chat_key(env=None, cwd=None):
     when it sits where a chat folder should."""
     env = os.environ if env is None else env
     key = (env.get("OD_AGENT_CHAT") or "").strip()
-    if key in CHATS or key in ROOMS:
+    if spec_for(key):
         return key
     cwd = os.path.realpath(cwd or os.getcwd())
     for k in all_keys():
@@ -395,7 +405,10 @@ def render(key, facts, now):
     stamp = "%s %s" % (short_day(london(now)), london(now).strftime("%H:%M"))
     head = ("AGENT CHAT SCORECARD for %s, read %s London. Show this at the top of your reply, "
             "numbers exactly as given; never round, guess or fill in a line marked unavailable."
-            % ((CHATS.get(key) or ROOMS[key])["name"], stamp))
+            % (spec_for(key)["name"], stamp))
+    if key in PERSONAL:
+        return ("AGENT CHAT SCORECARD for %s, read %s London: none. This is a personal chat, not an agent, "
+                "so it has no score; show no scorecard block." % (spec_for(key)["name"], stamp))
     if key in CHATS:
         return "\n".join([head] + agent_block(key, CHATS[key], facts, now))
     room = ROOMS[key]
@@ -491,6 +504,8 @@ def read_rows(table, formula=None, fields=None, by_field_id=False):
 
 def gather(key, now):
     """Every fact the chat's scorecard needs, each read failing on its own line."""
+    if key in PERSONAL:
+        return {}   # no register row, nothing to read
     keys = [key] if key in CHATS else ROOMS[key]["members"] + ROOMS[key].get("also", [])
     specs = [CHATS.get(k) or SCHEDULED.get(k) for k in keys]
     facts = {}
@@ -795,7 +810,7 @@ def chat_transcripts(key, extra=None):
 
 
 def chat_log_path(key, day):
-    name = (CHATS.get(key) or ROOMS[key])["name"]
+    name = spec_for(key)["name"]
     return os.path.join(CHAT_LOGS, "%s %s chat.md" % (day.isoformat(), name))
 
 
@@ -803,7 +818,7 @@ def written_down(key, limit=RECALL_NOTES):
     """The last lines written down in the brain from this chat, oldest of them first: [(day, line)].
     Reads the newest files first and stops once it has enough. The hook's own Q&A lines are left
     out (they are already in the questions above)."""
-    name = (CHATS.get(key) or ROOMS[key])["name"]
+    name = spec_for(key)["name"]
     suffix = " %s chat.md" % name
     names = sorted(x for x in os.listdir(CHAT_LOGS) if x.endswith(suffix) and re.match(r"\d{4}-\d{2}-\d{2} ", x))
     notes = []
@@ -823,13 +838,13 @@ def written_down(key, limit=RECALL_NOTES):
 
 
 def recall_text(key, asks, notes, now, after_summary=False, notes_error=None):
-    name = (CHATS.get(key) or ROOMS[key])["name"]
+    name = spec_for(key)["name"]
     head = ("LAST TIME WE SPOKE (%s chat, read %s London)%s. Read it before you answer and never ask "
             "Kevin to repeat what is here. If he refers to something not listed, search this chat's "
             "logs in the brain (CEO Conversations, \"%s chat\") before saying you do not know."
             % (name, london(now).strftime("%d %b %H:%M"),
                ", after Claude Code summarised this chat: do not show it, just use it" if after_summary
-               else ". Under the scorecard, one line to Kevin: \"Last time we spoke (<day>): <his last "
+               else ". At the top of your reply (under the scorecard when there is one), one line to Kevin: \"Last time we spoke (<day>): <his last "
                     "question, in a few words>.\" Leave the line out when there is nothing earlier",
                name))
     out = [head, "Kevin's last questions here, oldest first:"]
@@ -873,7 +888,7 @@ def _append_log_line(key, day, line):
     """One line into the chat's brain log for that day, above its Links footer, once: a line
     already there is left alone, so a retry after a failed or cut-off write never doubles it."""
     path = chat_log_path(key, day)
-    name = (CHATS.get(key) or ROOMS[key])["name"]
+    name = spec_for(key)["name"]
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             body = fh.read()
@@ -956,7 +971,7 @@ def cmd_usage(days=14, now=None):
                 continue
             n += c
             used.update(ds)
-        spec = CHATS.get(key) or ROOMS[key]
+        spec = spec_for(key)
         out[key] = {"name": spec["name"], "section": TEAMS[spec["team"]], "messages": n,
                     "days": len(used), "transcripts": len(names)}
     return {"windowDays": days, "since": since.isoformat(), "chats": out}
@@ -1326,8 +1341,22 @@ def selftest():
     check("usage counts London days", days == ["2026-11-17", "2026-11-18"])
     check("transcript folder encoding", project_dir("/Users/x/Projects/kevin-hq/agents/property/compliance")
           == os.path.join(PROJECTS_DIR, "-Users-x-Projects-kevin-hq-agents-property-compliance"))
-    check("every chat has a section", all((CHATS.get(k) or ROOMS[k])["team"] in TEAMS for k in all_keys()))
-    check("11 chats", len(all_keys()) == 11)
+    check("every chat has a section", all(spec_for(k)["team"] in TEAMS for k in all_keys()))
+    check("12 chats: 7 agents, 4 rooms, the Personal Assistant", len(all_keys()) == 12)
+    check("the Personal Assistant has its own folder and section",
+          folder_for("personal-assistant").endswith(os.path.join("agents", "personal", "personal-assistant"))
+          and chat_key({"OD_AGENT_CHAT": "personal-assistant"}, "/tmp") == "personal-assistant")
+    pa = render("personal-assistant", gather("personal-assistant", now), now)
+    check("the Personal Assistant has no scorecard and reads nothing", "none" in pa and "show no scorecard block" in pa)
+    keep_l, CHAT_LOGS = CHAT_LOGS, tempfile.mkdtemp()   # never the real brain
+    keep_p, PROJECTS_DIR = PROJECTS_DIR, tempfile.mkdtemp()   # never the real saved chats
+    try:
+        pa_recall = recall_block("personal-assistant", now)
+    finally:
+        CHAT_LOGS, PROJECTS_DIR = keep_l, keep_p
+    check("the Personal Assistant gets LAST TIME WE SPOKE with its own log name",
+          pa_recall.startswith("LAST TIME WE SPOKE (Personal Assistant chat")
+          and chat_log_path("personal-assistant", date(2026, 11, 19)).endswith("2026-11-19 Personal Assistant chat.md"))
     return {"checks": checks, "failed": failed}
 
 
@@ -1350,7 +1379,7 @@ def main(argv):
         return 0
     if cmd == "show":
         key = argv[1] if len(argv) > 1 else None
-        if key not in CHATS and key not in ROOMS:
+        if not spec_for(key):
             print("unknown chat %r; one of: %s" % (key, ", ".join(all_keys())), file=sys.stderr)
             return 2
         now = datetime.now(timezone.utc)
@@ -1358,7 +1387,7 @@ def main(argv):
         return 0
     if cmd == "recall":
         key = argv[1] if len(argv) > 1 else None
-        if key not in CHATS and key not in ROOMS:
+        if not spec_for(key):
             print("unknown chat %r; one of: %s" % (key, ", ".join(all_keys())), file=sys.stderr)
             return 2
         print(recall_block(key, datetime.now(timezone.utc)))
