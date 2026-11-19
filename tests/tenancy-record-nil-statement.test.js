@@ -101,7 +101,7 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
   it('a real payout beside a 0.00 fee is refused, a plain comment cannot write the marker, and --withdraw takes a date back', () => {
     const fee = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: payout £450.00, fees 0.00'));
     expect([fee.code, fee.posted]).toEqual([2, []]);
-    expect(fee.out.refused).toMatch(/--evidence quotes the statement itself/);
+    expect(fee.out.refused).toMatch(/shows a payout above zero \("payout £450\.00"\)/);
     // Review round 2: another item's nil between the payout words and the payout figure.
     const advice = door(ARGS('2026-10-10', 'Example Lettings statement, emailed 8 Oct 2026. Remittance advice: nil deductions this month. Payout £450.00'));
     expect([advice.code, advice.posted]).toEqual([2, []]);
@@ -133,5 +133,23 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
     // "Rent to be collected £0.00" alone is not a payout line.
     const owed = door(ARGS('2026-10-10', 'Example Lettings statement, emailed 8 Oct 2026: Rent to be collected £0.00'));
     expect([owed.code, owed.posted]).toEqual([2, []]);
+  });
+
+  // The review of the wording fix (19 Nov 2026): a nil beside a real payout, a row of columns, and another item's nil.
+  it('refuses evidence where any payout line shows money paid, a nil sits in a row of figures, or the nil is another item\'s', () => {
+    const lines = {
+      outstanding: 'Example Lettings statement, emailed 8 Oct 2026: Total payments to landlord £454.40, Outstanding payments to landlord £0.00',
+      advance: 'Example Lettings statement, emailed 8 Oct 2026: Advance payments to landlord £0.00, Total payments to landlord £454.40',
+      payout: 'Example Lettings statement, emailed 8 Oct 2026: Payout £454.40, Outstanding payout £0.00',
+      columns: 'Example Lettings statement, emailed 8 Oct 2026: Total payments to landlord 0.00 454.40',
+      nilWord: 'Example Lettings statement, emailed 8 Oct 2026: Payments to landlord: nil deductions, £454.40 paid',
+    };
+    for (const [name, quote] of Object.entries(lines)) {
+      const r = door(ARGS('2026-10-10', quote));
+      expect([name, r.code, r.posted]).toEqual([name, 2, []]);
+    }
+    expect(door(ARGS('2026-10-10', lines.outstanding)).out.refused).toMatch(/shows a payout above zero/);
+    const nilEnd = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: net payment nil.'));
+    expect([nilEnd.code, nilEnd.readBack]).toEqual([0, ['2026-10-10']]);
   });
 });
