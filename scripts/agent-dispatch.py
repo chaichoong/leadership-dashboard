@@ -9266,8 +9266,8 @@ def cmd_hard_deadline_off(args):
     elsewhere = str(getattr(args, "approved_on", "") or "").strip()
     if not elsewhere:
         sys.exit(f"ERROR: refusing to untick the Hard Deadline on {args.task}: there is no route that unticks it "
-                 "on this task's own say-so. Name the task Kevin approved it on (--approved-on) and quote his "
-                 "words (--quote).")
+                 "on this task's own say-so. Name the ruling task his approval sits on (--approved-on) and "
+                 "quote his words (--quote).")
     blocked = approved_elsewhere_problem(elsewhere, args.quote, args.task, fields)
     if blocked:
         print(json.dumps({"refused": args.task, "why": blocked}))
