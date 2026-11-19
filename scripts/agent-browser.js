@@ -1109,6 +1109,10 @@ const SIGN_OUT_URL_RE = /(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)
 // the cost of a false "signed in" is a cleared wall and a task that cannot
 // move. A bare "Sign in" link in a nav bar, and a "Sign out" link, are NOT
 // doors and must stay signed in; that is the control test.
+// How much of the page the passwordless-door words are looked for in. ONE number: the session read takes this much
+// text, and scripts/utilita-balance.py SIGNIN_TEXT_WINDOW must equal it (tests/agent-browser-door-landing.test.js
+// reads both; review round 2 of finding 1340: the JS sliced 4000 while the Python mirror sliced 2000).
+const SIGNIN_TEXT_WINDOW = 4000;
 const SIGNIN_TEXT_RE = new RegExp([
   "(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code",
   "(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code",
@@ -1141,7 +1145,7 @@ function sessionVerdict(url, passwordFields, text = '', title = '', site) {
   // so it rides on atDoor and onSigninPage reads it as the sign-in page — a
   // signed-out verdict the Robot sign-in app will act on, which is the point:
   // the old answer was "signed in", and nothing acted on that at all.
-  if (!door && SIGNIN_TEXT_RE.test(String(text || '').slice(0, 4000))) {
+  if (!door && SIGNIN_TEXT_RE.test(String(text || '').slice(0, SIGNIN_TEXT_WINDOW))) {
     door = 'a sign-in form that emails a login code (no password box)';
   }
   const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url) || !!door;
@@ -4643,10 +4647,10 @@ async function main() {
       await settleBotCheck(page);
       const url = page.url();
       const passwordFields = await passwordFieldCount(page);
-      // 2000, not 600 (finding 20261117-agent-dispatch-1340): the words that
-      // give a passwordless door away sit under the site's own header and
-      // cookie notice, and isBotCheck already reads up to 2000.
-      const text = await domText(page, 2000);
+      // SIGNIN_TEXT_WINDOW, not 600 (finding 20261117-agent-dispatch-1340): the
+      // words that give a passwordless door away sit under the site's own header
+      // and cookie notice. isBotCheck reads its own first 2000 of this.
+      const text = await domText(page, SIGNIN_TEXT_WINDOW);
       const title = await page.title();
       const doors = { entry, start };
       const verdict = sessionVerdict(url, passwordFields, text, title, doors);

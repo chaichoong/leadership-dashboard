@@ -309,6 +309,8 @@ AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|au
 # message said "the balance was not on the page", and the Robot sign-in line
 # that exists for exactly this case was withheld. Same wording as
 # SIGNIN_TEXT_RE in agent-browser.js, kept in step by the test below.
+# agent-browser.js SIGNIN_TEXT_WINDOW: the page text read, and searched for door words (review round 2 of 1340).
+SIGNIN_TEXT_WINDOW = 4000
 SIGNIN_TEXT = re.compile(
     r"(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code"
     r"|(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code"
@@ -326,11 +328,11 @@ def signed_in(url, password_fields, bot_check=False, text=""):
     # bot_check: agent-browser.js's own isBotCheck on the page (25 Sep 2026);
     # a "verify you are human" page is never a signed-in dashboard.
     # text: the page's own words, read the same way agent-browser.js reads them
-    # (finding 20261117-agent-dispatch-1340). Only the first 2000 characters, as
-    # there, so the two cannot drift on the amount they read.
+    # (finding 20261117-agent-dispatch-1340). Only the first SIGNIN_TEXT_WINDOW
+    # characters, the same window as there (a drift test reads both).
     if bot_check or password_fields is None or int(password_fields) != 0:
         return False
-    if SIGNIN_TEXT.search(str(text or "")[:2000]):
+    if SIGNIN_TEXT.search(str(text or "")[:SIGNIN_TEXT_WINDOW]):
         return False
     return not AT_DOOR.search(url or "")
 
@@ -384,7 +386,7 @@ def read_account(acct, node=None):
         proc = subprocess.Popen(
             [node, os.path.join(REPO, "scripts", "agent-browser.js"), "read",
              "--url", ENERGY_URL, "--profile", acct["profile"],
-             "--wait", "6000", "--max-text", "4000"],
+             "--wait", "6000", "--max-text", str(SIGNIN_TEXT_WINDOW)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True)
         out, err = proc.communicate(timeout=READ_TIMEOUT_S)
