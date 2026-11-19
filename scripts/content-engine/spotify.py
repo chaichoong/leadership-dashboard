@@ -16,7 +16,7 @@ The wizard (creators.spotify.com/pod/show/<show>/episode/wizard) has three steps
 (file input #uploadAreaInput), Details (title, description), Review (Publish). Field
 selectors for Details are confirmed on the first real episode and pinned here.
 """
-import argparse, json, os, re, sys, time
+import argparse, json, os, re, sys, time, urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 
 PODCAST_FORMAT = "video"          # Kevin, 5 Sep 2026: the same full episode YouTube gets, jingle and all; Spotify plays it as video or audio
@@ -174,36 +174,76 @@ def lane():
     return os.path.join(os.path.dirname(HERE), "agent-browser.js")   # scripts/agent-browser.js, not the repo root
 
 
-def verify_published(title, tries=3, wait=20, sleep=time.sleep):
-    """The real proof, read from the episodes list: 'published' when the title's row says Published,
-    'processing' while it still says Draft (Spotify shows a freshly published video as Draft for a few
-    minutes), 'missing' otherwise. The list lags the upload, so it is read more than once (10 Sep 2026:
-    2055 was live and the first read still said missing)."""
+def verify_published(title, tries=3, wait=20, sleep=time.sleep, run=None):
+    """The real proof, read from Spotify's own title search: 'published' when the title's row says Published,
+    'processing' while the title is there in any other state (Spotify shows a freshly published video as Draft for a
+    few minutes), 'missing' otherwise, and a 'missing' that is not proof of absence says 'not readable'. The list lags
+    the upload, so it is read more than once (10 Sep 2026: 2055 was live and the first read still said missing).
+
+    18 Nov 2026, episode 2138 went out TWICE. The look before the retry read the plain list once: ten rows, nine of them
+    Untitled drafts sorted on top. 2138 had been live since 10:12 but could not be read on that page, and "not on this
+    page" was taken as "not on Spotify", so a second copy went up at 11:37 (the same day a tenth draft hid 2188-2190
+    from the list outright). The search shows every copy wherever it sits, and only Spotify's own word proves absence."""
     import subprocess
-    last = ("missing", "the episodes list was not readable")
+    run = run or subprocess.run
+    if not (title or "").strip(): return "missing", "no title to search for, so the episodes list was not readable for it"
+    url = search_url(title)
+    def read():
+        r = run(["node", lane(), "read", "--url", url, "--profile", PROFILE, "--wait", "9000"],
+                capture_output=True, text=True, timeout=240)
+        out = r.stdout or ""
+        try: return json.loads(out[out.index("{"):]).get("text") or ""
+        except Exception: return ""
+    last, absent = ("missing", "the episodes list was not readable"), 0
     for n in range(max(1, tries)):
-        r = subprocess.run(["node", lane(), "read", "--url", EPISODES, "--profile", PROFILE, "--wait", "9000"],
-                           capture_output=True, text=True, timeout=240)
-        out = r.stdout
-        try: text = json.loads(out[out.index("{"):]).get("text") or ""
-        except Exception: text = ""
+        text = read()
         if text:
-            last = list_status(text, title)
+            last = search_status(text, title)
             if last[0] == "published": return last
-            if last[0] == "missing" and list_incomplete(text):
-                last = ("missing", "the episodes list was not readable in full: more episodes than the page shows")
+        absent = absent + 1 if text and last[1] == ABSENT else 0
         if n < tries - 1: sleep(wait)
+    if last[1] == ABSENT and absent < 2:
+        # an empty table drawn while the search is still answering reads exactly like absence (review, 19 Nov 2026),
+        # so absence is read twice in a row before anything is uploaded on the strength of it
+        sleep(wait); text = read()
+        last = search_status(text, title) if text else ("missing", "the episodes list was not readable on the second look")
     return last
 
 
-LIST_PAGE_ROWS = 20
+def search_url(title):
+    """The episodes list filtered by Spotify's title search on 'Episode N' (read 19 Nov 2026: '?search=Episode+2138'
+    listed both copies, '?search=Episode+9999' read 'No results' and '0-0 of 0'). The number, not the whole title,
+    so punctuation in a title never changes what the search box is given."""
+    m = re.match(r"\s*(Episode \d+)\b", title or "")
+    return EPISODES + "?search=" + urllib.parse.quote_plus(m.group(1) if m else (title or "")[:60])
 
 
-def list_incomplete(text):
-    """The episodes page may not show every episode: a 'load more' control, or a page's worth of rows, means a title
-    that is not in the text may still exist. A retry that trusts an incomplete list uploads a second copy
-    (review, 15 Sep 2026), so verify_published reports the list as not readable in full instead of 'missing'."""
-    return bool(re.search(r"\b(load|show) more( episodes)?\b", text, re.I))   # a row count was a stall in waiting (review, 15 Sep 2026)
+ABSENT = "the title search shows no episode with this title"
+PAGER_RE = re.compile(r"Rows per page:\s*\d+\s+(\d+)-(\d+) of ([\d,]+)")
+
+
+def search_status(text, title):
+    """What one read of the title search proves. A row carrying the title, or any row for the same episode number (the
+    Podcast Copy can be rewritten between attempts, so a retry's title may differ from the copy already up), is a copy
+    on Spotify in any state, even when its status word is not one this check knows, so it is never 'missing'. Absence
+    (ABSENT) is proved only by Spotify's 'No results', or by a pager from row 0 or 1 showing every result with none of
+    them this episode. Anything else (rows not drawn yet, results over one page) is 'not readable', which holds a retry
+    rather than uploading a second copy."""
+    st = list_status(text, title)
+    if st[0] != "missing": return st
+    key = (title or "")[:60]
+    if key and key in text:
+        i = text.index(key)
+        return "processing", "on Spotify, status word not read: " + " ".join(text[i:i + 160].split())
+    num = re.match(r"\s*Episode (\d+)\b", title or "")
+    row = num and re.search(r"(?im)^[ \t]*Episode %s(?!\d)[^\n]*" % num.group(1), text)
+    if row:
+        st = list_status(text, row.group(0).strip()[:60])
+        return (st[0] if st[0] != "missing" else "processing"), "this episode number is on Spotify under another title: " + " ".join(text[row.start():row.start() + 160].split())
+    pager = PAGER_RE.search(text)
+    if re.search(r"\bNo results\b", text) or (pager and pager.group(1) in ("0", "1") and pager.group(2) == pager.group(3).replace(",", "")):
+        return "missing", ABSENT
+    return "missing", "the episodes list was not readable: the title search showed neither the title nor 'No results'"
 
 
 def list_status(text, title):
@@ -303,8 +343,42 @@ def selftest():
     assert not any(x.get("for") == THUMB_SELECTED for x in build_plan("/x.mp4", "T", "d", "", False)["steps"]), "no thumbnail, no thumbnail wait"
     plan_c = build_plan("/x.mp4", "T", "Now live: I published my plan", "", False)
     assert plan_c["confirm"]["selector"] == PUBLISHED_PROOF and not PUBLISHED_PROOF.startswith("text="), "the Publish proof is never a word the copy can hold"
-    rows = " ".join("Episode %d - Title %d Published 9/1/26 Video 04:00" % (2000 + i, i) for i in range(25))
-    assert not list_incomplete(rows) and list_incomplete("Episode 2054 x Load more") and not list_incomplete("see more of this description"), "only a load-more control means the list goes on"
+    # 18 Nov 2026: episode 2138 went out twice. Nine Untitled drafts sat above every published episode on the plain list's
+    # ten rows, and the look before the retry read that list. The lane is faked by URL, in the shape of the 18-19 Nov pages
+    # (invented titles): the plain list never holds the episode, the title search does.
+    hdr = ("Episodes\nNew episode\nSearch\nAll\nDraft\nPublished\nScheduled\nSince published\nTitle\n\tStatus\t\nDate\n\t\n"
+           "Format\n\t\nLength\n\t\nPlays & downloads\n\t\nAudience\n")
+    row = lambda t, st, d="11/18/26", f="Video\t11:15\t0\t0": "\n%s\n\t\n%s\n\t\n%s\n\t%s\n" % (t, st, d, f)
+    t9 = "Episode 9001 - A Made Up Title About Patience"
+    plain = hdr + "".join(row("Untitled", "Draft", "", "Audio\t00:00\t0\t0") for _ in range(9)) \
+        + row("Episode 9000 - Another Made Up Title", "Published") + "Rows per page:\n10\n1-10 of 1207"
+    found = hdr + row(t9, "Published") + "Rows per page:\n10\n1-1 of 1"
+    urls = []
+    def lane_by_url(cmd, **kw):
+        url = cmd[cmd.index("--url") + 1]; urls.append(url)
+        return type("R", (), {"stdout": "lane\n" + json.dumps({"text": found if "?search=" in url else plain})})()
+    nap = lambda s: None
+    assert verify_published(t9, tries=1, run=lane_by_url, sleep=nap)[0] == "published", "the look finds the episode behind nine drafts (2138)"
+    assert urls == [EPISODES + "?search=Episode+9001"], urls
+    pages = lambda *texts: (lambda it: (lambda cmd, **kw: type("R", (), {"stdout": "lane\n" + json.dumps({"text": next(it)})})()))(iter(texts))
+    fake = lambda text: pages(*([text] * 6))
+    st = verify_published(t9, tries=1, run=fake(hdr + row(t9, "Publishing") + "Rows per page:\n10\n1-1 of 1"), sleep=nap)
+    assert st[0] == "processing", "a row with the title is a copy on Spotify whatever its status word says: %s" % (st,)
+    st = verify_published(t9, tries=1, run=fake(hdr + row("Episode 9001 - Its Title Before The Copy Was Rewritten", "Published") + "Rows per page:\n10\n1-1 of 1"), sleep=nap)
+    assert st[0] == "published" and "another title" in st[1], "the same episode number under an older title is still a copy on Spotify: %s" % (st,)
+    none = hdr + "No results\nRows per page:\n10\n0-0 of 0"
+    assert verify_published(t9, tries=1, run=fake(none), sleep=nap) == ("missing", ABSENT), "Spotify's own No results, read twice"
+    assert verify_published(t9, tries=1, run=fake(hdr + row("Episode 7 - Mentions Episode 9001", "Published") + "Rows per page:\n10\n1-1 of 1"), sleep=nap) == ("missing", ABSENT)
+    assert verify_published(t9, tries=1, run=pages(none, found), sleep=nap)[0] == "published", "an empty table drawn while the search loads is not absence"
+    assert "not readable" in verify_published(t9, tries=1, run=pages(none, ""), sleep=nap)[1], "absence must be read twice in a row"
+    for t in (hdr, hdr + row("Episode 9000 - Another Made Up Title", "Published") + "Rows per page:\n10\n1-10 of 12", "",
+              hdr + row("Episode 9000 - Another Made Up Title", "Published") + "Rows per page:\n10\n11-11 of 11", hdr + row("Episode 9000 - Results 1-2 of 2", "Published")):
+        why = verify_published(t9, tries=1, run=fake(t), sleep=nap)
+        assert why[0] == "missing" and "not readable" in why[1], "no rows drawn, a second page or no pager is not absence: %s" % (why,)
+    assert "not readable" in verify_published("", tries=1, run=fake(found), sleep=nap)[1], "no title, no verdict"
+    assert search_url("Episode 2138 - Dealing: With & More?") == EPISODES + "?search=Episode+2138"
+    pub_src = open(os.path.join(HERE, "publish.py")).read()
+    assert pub_src.count('"not readable" in str(why)') == 1, "publish.py holds a retry on exactly this phrase; keep the two in step"
     assert list_status("Episode 2054 - T Published", "Episode 2054 - T")[0] == "published" and list_status("nothing", "Episode 2054")[0] == "missing"
     t, d = podcast_parts("Title: Day 2195 running off-road\nDescription: Six years in.\n\nMore.\nHashtags: #a #b", 2195)
     assert t == "Day 2195 running off-road" and d.startswith("Six years in.") and "#a #b" in d and "Title:" not in d, (t, d)
@@ -366,7 +440,7 @@ def selftest():
     bad = lambda cmd, **kw: type("R", (), {"stdout": "no json here"})()
     import io, contextlib
     with contextlib.redirect_stderr(io.StringIO()): assert show_links(run=bad) == {} and _show_links is None, "an unreadable page is said, never cached"
-    print(json.dumps({"checks": 23, "failed": []}))
+    print(json.dumps({"checks": 35, "failed": []}))
 
 
 if __name__ == "__main__":
