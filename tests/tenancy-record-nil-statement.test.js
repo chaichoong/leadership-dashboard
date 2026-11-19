@@ -30,6 +30,9 @@ m.LEDGER = cfg["dir"] + "/ledger.jsonl"
 rc = m.rc
 rc.today_london = lambda: date(2026, 11, 18)
 posted = []
+def ALL():
+    return ([{"text": t, "createdTime": "2026-11-18T10:00:00.000Z"} for t in cfg["comments"]]
+            + [{"text": t, "createdTime": "2026-11-19T09:00:00.000Z"} for t in posted])
 def fetch_all(table, params=None):
     formula = (params or {}).get("filterByFormula") or ""
     if table == rc.T_TENANCIES and cfg["TEN"] in formula:
@@ -43,7 +46,7 @@ def fetch_all(table, params=None):
     return []
 def api(method, path, payload=None, params=None):
     if method == "GET" and path.endswith("/comments"):
-        return {"comments": [{"text": t} for t in cfg["comments"]] + [{"text": t} for t in posted]}
+        return {"comments": ALL()}
     if method == "POST" and path.endswith("/comments"):
         posted.append(payload["text"]); return {"id": "comNIL0001"}
     raise AssertionError("unexpected call " + method + " " + path)
@@ -52,7 +55,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     code = m.main(cfg["argv"])
 out = buf.getvalue().strip()
-read_back = sorted(d.isoformat() for d in rc.nil_statement_dates([{"text": t} for t in posted]))
+read_back = sorted(d.isoformat() for d in rc.nil_statement_dates(ALL()))
 print(json.dumps({"code": code, "out": json.loads(out), "posted": posted, "readBack": read_back}))`;
   return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }).trim().split('\n').pop());
 }
@@ -92,5 +95,24 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
     expect(cases.noFigure.out.refused).toMatch(/--evidence quotes the statement itself/);
     expect(cases.noPayoutWord.out.refused).toMatch(/--evidence quotes the statement itself/);
     expect(cases.notNamed.out.refused).toMatch(/does not name tenancy/);
+  });
+
+  // The independent review of the first draft (19 Nov 2026).
+  it('a real payout beside a 0.00 fee is refused, a plain comment cannot write the marker, and --withdraw takes a date back', () => {
+    const fee = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: payout £450.00, fees 0.00'));
+    expect([fee.code, fee.posted]).toEqual([2, []]);
+    expect(fee.out.refused).toMatch(/--evidence quotes the statement itself/);
+    const real = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: Balance paid to landlord: £0.00'));
+    expect([real.code, real.readBack]).toEqual([0, ['2026-10-10']]);
+    const hand = door(['comment', TEN, '--task', TASK, '--text', 'per Example Lettings NIL STATEMENT 2026-10-10: payout 0.00']);
+    expect([hand.code, hand.posted]).toEqual([2, []]);
+    expect(hand.out.refused).toMatch(/written by `tenancy-record.py nil-statement`/);
+    const own = real.posted[0];
+    const back = door([...ARGS('2026-10-10', 'the statement was for another unit at the house'), '--withdraw'], { comments: [own] });
+    expect([back.code, back.out.withdrawn, back.readBack]).toEqual([0, '2026-10-10', []]);
+    expect(back.posted[0]).toMatch(/: NIL STATEMENT WITHDRAWN 2026-10-10: the nil statement recorded for that rent is withdrawn/);
+    const none = door([...ARGS('2026-10-10', 'the statement was for another unit at the house'), '--withdraw']);
+    expect([none.code, none.posted]).toEqual([0, []]);
+    expect(none.out.unchanged).toMatch(/no nil statement for 2026-10-10 is recorded/);
   });
 });

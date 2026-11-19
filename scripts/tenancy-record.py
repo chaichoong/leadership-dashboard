@@ -282,6 +282,9 @@ def cmd_comment(a):
     text = " ".join(str(a.text or "").split())
     if len(text) < 15:
         raise Refused("a comment needs the fact itself (at least a sentence), not a placeholder")
+    if rc.NIL_MARK_RE.search(text):
+        # Only nil-statement writes that marker, after its checks (finding 1354).
+        raise Refused("a NIL STATEMENT line is written by `tenancy-record.py nil-statement`, never as a comment")
     _, task = gate(a.tenancy, a.task)
     body = f"{stamp()}: {text} (task {task['id']}: {task_label(task)})"
     if a.dry_run:
@@ -429,9 +432,14 @@ def cmd_set_off(a):
     return out
 
 
-# A nil payout, as the letting agent's statement writes it: "0.00", "£0", "nil", beside a payout word.
-NIL_FIGURE_RE = re.compile(r"(?i)(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.])0\.00(?![\d])|\bnil\b)")
-PAYOUT_WORD_RE = re.compile(r"(?i)\b(?:pay\s?-?out|paid out|net (?:payment|payable|to (?:the )?landlord|to you))\b")
+# A nil payout, as the letting agent's statement writes it: a payout phrase with 0.00, £0 or nil right after it
+# ("payout 0.00", "Balance paid to landlord: £0.00", "Total remitted 0.00", "net payment nil"). The figure must follow
+# the phrase within a few characters with no other figure between (review of the first draft: "payout £450.00, fees
+# 0.00" passed when the two were searched apart).
+PAYOUT_PHRASE = (r"(?:pay\s?-?outs?|paid\s+out|paid\s+to\s+(?:the\s+)?landlord|due\s+to\s+(?:the\s+)?landlord|remitted|"
+                 r"remittance|net\s+(?:payment|payable|amount|to\s+(?:the\s+)?landlord|to\s+you))")
+NIL_FIGURE = r"(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.£])0\.00(?!\d)|\bnil\b)"
+NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b[^0-9£\n]{{0,25}}{NIL_FIGURE}")
 
 
 def nil_statement_problem(tenancy, tenants, due, evidence, today):
@@ -447,7 +455,9 @@ def nil_statement_problem(tenancy, tenants, due, evidence, today):
     try:
         due_day = int(rc.sel(f.get(DUE_DAY)))
     except ValueError:
-        return f"tenancy {tenancy['id']} has no due day, so --due cannot be checked against its rent dates"
+        due_day = 0
+    if not 1 <= due_day <= 31:
+        return f"tenancy {tenancy['id']} has no usable due day, so --due cannot be checked against its rent dates"
     if rc.due_on(due.year, due.month, due_day) != due:
         return f"{due.isoformat()} is not one of this tenancy's due dates (its rent falls due on the {due_day}th)"
     start = rc.parse_day(f.get(rc.TY["start"]))
@@ -456,42 +466,56 @@ def nil_statement_problem(tenancy, tenants, due, evidence, today):
     if due > today:
         return f"{due.isoformat()} is in the future: a statement can only say a payout was nil for a rent already due"
     text = " ".join(str(evidence or "").split())
-    if len(text) < 20 or not NIL_FIGURE_RE.search(text) or not PAYOUT_WORD_RE.search(text):
-        return ("--evidence quotes the statement itself: who sent it, its date, and its payout line showing 0.00 or nil "
-                "(for example \"StayCay statement for September, emailed 8 Oct 2026: payout 0.00\")")
-    if rc.NIL_STATEMENT_MARK.strip() in text.upper():
+    if rc.NIL_MARK_RE.search(text):
         return "--evidence is the statement's own words, not a NIL STATEMENT line"
+    if len(text) < 20 or not NIL_PAYOUT_RE.search(text):
+        return ("--evidence quotes the statement itself: who sent it, its date, and its payout line showing 0.00 or nil "
+                "right after the payout words (for example \"StayCay statement for September, emailed 8 Oct 2026: "
+                "payout 0.00\")")
     return ""
 
 
 def cmd_nil_statement(a):
     """A letting agent's statement shows no payout for one rent due date (finding 1354, 19 Nov 2026). The rent check
-    then does not count that rent as owed (rent-check.py read_nil_statements). It needs no approval: like a comment,
-    it records the agent's own written figure, quoted in the comment, on a task that names the tenancy. It changes no
-    field, and a nil statement written in error is answered by a comment saying so (the rent check reads the dates)."""
+    and the AGENT RENT LATE send then do not count that rent as owed (agent_email_format.nil_statement_dates). It needs
+    no approval: like a comment, it records the agent's own written figure, quoted in the comment, on a task that names
+    the tenancy, and it changes no field. One recorded in error is taken back with --withdraw (a dated withdrawal
+    comment; the newest of the two wins), never by a hand comment, which cannot write the marker."""
     due = rc.parse_day(a.due)
     tenancy, task = gate(a.tenancy, a.task)
-    f = tenancy.get("fields") or {}
-    tenants = {}
-    for tid in f.get(rc.TY["tenants"]) or []:
-        row = _one(rc.T_TENANTS, tid, [rc.TN["payType"]])
-        if row:
-            tenants[tid] = row.get("fields") or {}
-    why = nil_statement_problem(tenancy, tenants, due, a.evidence, rc.today_london())
-    if why:
-        raise Refused(why)
-    if due in rc.nil_statement_dates(rc.read_comments(a.tenancy)):
-        return {"tenancy": a.tenancy, "unchanged": f"a nil statement for {due.isoformat()} is already recorded"}
-    evidence = " ".join(str(a.evidence).split())
-    body = (f"{stamp()}: {rc.NIL_STATEMENT_MARK}{due.isoformat()}: the letting agent's statement shows no payout for "
-            f"the rent due that day, so the rent check does not count it as owed. Evidence: {evidence} "
-            f"(task {task['id']}: {task_label(task)})")
+    held = rc.nil_statement_dates(rc.read_comments(a.tenancy))
+    reason = " ".join(str(a.evidence).split())
+    if a.withdraw:
+        if not due:
+            raise Refused("--due is a date, YYYY-MM-DD")
+        if due not in held:
+            return {"tenancy": a.tenancy, "unchanged": f"no nil statement for {due.isoformat()} is recorded"}
+        if len(reason) < 15 or rc.NIL_MARK_RE.search(reason):
+            raise Refused("--evidence says why the nil statement is withdrawn, in a sentence of your own words")
+        body = (f"{stamp()}: {rc.NIL_STATEMENT_MARK}WITHDRAWN {due.isoformat()}: {rc.NIL_WITHDRAWN_SENTENCE}, so the "
+                f"rent check counts that rent as owed again. Why: {reason} (task {task['id']}: {task_label(task)})")
+        kind = "nil-statement-withdrawn"
+    else:
+        f = tenancy.get("fields") or {}
+        tenants = {}
+        for tid in f.get(rc.TY["tenants"]) or []:
+            row = _one(rc.T_TENANTS, tid, [rc.TN["payType"]])
+            if row:
+                tenants[tid] = row.get("fields") or {}
+        why = nil_statement_problem(tenancy, tenants, due, a.evidence, rc.today_london())
+        if why:
+            raise Refused(why)
+        if due in held:
+            return {"tenancy": a.tenancy, "unchanged": f"a nil statement for {due.isoformat()} is already recorded"}
+        body = (f"{stamp()}: {rc.NIL_STATEMENT_MARK}{due.isoformat()}: {rc.NIL_STATEMENT_SENTENCE}, so the rent check "
+                f"does not count it as owed. Evidence: {reason} (task {task['id']}: {task_label(task)})")
+        kind = "nil-statement"
     if a.dry_run:
         return {"tenancy": a.tenancy, "comment": body, "dryRun": True}
     c = post_comment(a.tenancy, body)
-    ledger({"kind": "nil-statement", "tenancy": a.tenancy, "due": due.isoformat(), "task": task["id"],
-            "comment": c.get("id")})
-    return {"tenancy": a.tenancy, "nilStatement": due.isoformat(), "commented": c.get("id")}
+    ledger({"kind": kind, "tenancy": a.tenancy, "due": due.isoformat(), "task": task["id"], "comment": c.get("id")})
+    return {"tenancy": a.tenancy, ("withdrawn" if a.withdraw else "nilStatement"): due.isoformat(),
+            "commented": c.get("id")}
 
 
 # ─── move-in and rent change ─────────────────────────────────────────
@@ -929,6 +953,7 @@ def main(argv=None):
     ns.add_argument("--due", required=True)
     ns.add_argument("--task", required=True)
     ns.add_argument("--evidence", required=True)
+    ns.add_argument("--withdraw", action="store_true", help="take back a nil statement recorded in error")
     ns.add_argument("--dry-run", action="store_true")
     ob = sub.add_parser("onboard")
     ob.add_argument("--task", required=True)

@@ -119,6 +119,8 @@ import rent_proof_of_residency  # noqa: E402
 import rent_roy_email  # noqa: E402
 import rent_signed_check  # noqa: E402
 import text_check  # noqa: E402
+from agent_email_format import (NIL_STATEMENT_SENTENCE, NIL_WITHDRAWN_SENTENCE, NIL_MARK_RE,  # noqa: E402
+                                nil_statement_dates)
 
 LONDON = ZoneInfo("Europe/London")
 BASE = "appnqjDpqDniH3IRl"
@@ -249,19 +251,9 @@ def first_uncovered(newest, start, day, due_day):
 # real gap was 8: StayCay's September statement, emailed 8 Oct, showed a 0.00 payout). The fact is written once, as a
 # dated comment on the tenancy, by `tenancy-record.py nil-statement` (the agent's own written figure, quoted), and read
 # back here. Agent-managed tenancies only: anything else's comment is ignored.
+# The comment's shape, its reader (nil_statement_dates) and the withdrawal are shared with the AGENT RENT LATE send,
+# in agent_email_format.py (imported above), so the rent check and the send can never disagree on a nil month.
 NIL_STATEMENT_MARK = "NIL STATEMENT "
-NIL_STATEMENT_RE = re.compile(r"\bNIL STATEMENT (\d{4}-\d{2}-\d{2}):")
-
-
-def nil_statement_dates(comments):
-    """The due dates a tenancy's comments record a nil statement for (comment dicts as Airtable returns them)."""
-    out = set()
-    for c in comments or []:
-        for d in NIL_STATEMENT_RE.findall(str((c or {}).get("text") or "")):
-            day = parse_day(d)
-            if day:
-                out.add(day)
-    return out
 
 
 def read_comments(tenancy_id):
@@ -270,7 +262,7 @@ def read_comments(tenancy_id):
     while True:
         params = {"pageSize": 100, **({"offset": offset} if offset else {})}
         page = api("GET", f"{T_TENANCIES}/{tenancy_id}/comments", params=params)
-        if "comments" not in page:
+        if not isinstance(page, dict) or not isinstance(page.get("comments"), list):
             raise RuntimeError(f"the comments read for {tenancy_id} returned no comments list")
         out += page.get("comments") or []
         offset = page.get("offset")
@@ -598,17 +590,25 @@ def _judge(rec, tenants, payments, day, feed, pre_slate, late_before, nil, said)
     # Rent paid by set-off (Kevin, 6 Oct 2026): only when the oldest unpaid rent falls due INSIDE the window. Rent owed
     # before the window began is still owed, and the first rent after it is judged as usual.
     set_off = set_off_window(f)
-    covered = bool(set_off and set_off[0] <= owed <= set_off[1])
-    while covered and owed <= set_off[1]:
-        owed = next_due(owed, due_day)
-    # A letting agent's nil statement (finding 1354): nothing was due to us on that due date, so it is not owed.
-    if row["type"] == AGENT_MANAGED:
-        skipped = []
-        while owed in nil:
+    # A letting agent's nil statement (finding 1354): nothing was due to us on that due date, so it is not owed. One
+    # loop with the set-off, until neither moves owed (review of the first draft: a nil month just before a set-off
+    # window read as late, because the window was checked only once, before the nil skip).
+    agent = row["type"] == AGENT_MANAGED
+    covered, skipped = False, []
+    while True:
+        if set_off and set_off[0] <= owed <= set_off[1]:
+            covered = True
+            owed = next_due(owed, due_day)
+        elif agent and owed in nil:
             skipped.append(owed)
             owed = next_due(owed, due_day)
-        if skipped:
-            said.append("nil statement for " + ", ".join(d.strftime("%-d %b") for d in skipped))
+        else:
+            break
+    if skipped:
+        said.append("nil statement for " + ", ".join(d.strftime("%-d %b") for d in skipped))
+    if agent and nil:
+        # Read by agent_late_plan, so the letting agent's email never counts a nil month as owed.
+        row["nilDues"] = sorted(d.isoformat() for d in nil)
     as_at, bank_why = bank_view(feed, payments)
     # With a fresh feed, everything is judged as at the feed's day (never a day ahead of today).
     # With a stale or missing one the calendar decides whether rent is overdue, and an overdue
@@ -945,14 +945,15 @@ def letting_agent(f, tenants):
     return "+".join(ids), " and ".join(n for n in names if n)
 
 
-def owed_months(owed, due_day, day):
+def owed_months(owed, due_day, day, nil=()):
     """How many monthly rents have fallen due from `owed` up to `day`. Every one is unpaid: no payment covers any cycle
-    from the owed one on (first_uncovered). At least 1."""
+    from the owed one on (first_uncovered). A due date the letting agent's statement showed as nil is not counted
+    (finding 1354). At least 1."""
     if not 1 <= due_day <= 31:
         return 1
     n, due = 0, owed
     while due <= day:
-        n, due = n + 1, next_due(due, due_day)
+        n, due = n + (due not in nil), next_due(due, due_day)
     return max(n, 1)
 
 
@@ -1029,7 +1030,7 @@ def agent_late_plan(res, tenancies, existing, day, tenants=()):
                 due_day = int(sel(u["fields"].get(TY["dueDay"])) or 0)
             except ValueError:
                 due_day = 0
-            months = owed_months(owed, due_day, day)
+            months = owed_months(owed, due_day, day, {parse_day(d) for d in r.get("nilDues") or ()})
             amount = months * r["rent"]
             total += amount
             beyond = "daysLate" not in r

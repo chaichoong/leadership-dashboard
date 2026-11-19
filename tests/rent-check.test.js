@@ -1496,9 +1496,9 @@ def api(method, path, payload=None, params=None):
     calls.append([path, (params or {}).get("offset")])
     if "recAGMbroken" in path: raise RuntimeError("HTTP 503 (invented)")
     if "recAGMlive" in path and not (params or {}).get("offset"):
-        return {"comments": [{"text": "18 Nov 2026 10:00: NIL STATEMENT 2026-10-10: the letting agent's statement shows no payout"}], "offset": "p2"}
+        return {"comments": [{"text": "18 Nov 2026 10:00: NIL STATEMENT 2026-10-10: the letting agent's statement shows no payout for the rent due that day, so...", "createdTime": "2026-11-18T10:00:00.000Z"}], "offset": "p2"}
     if "recAGMlive" in path:
-        return {"comments": [{"text": "a plain note that names NIL STATEMENT with no date"}, {"text": "19 Nov 2026 09:00: NIL STATEMENT 2026-08-10: earlier"}]}
+        return {"comments": [{"text": "a plain note that names NIL STATEMENT with no date"}, {"text": "19 Nov 2026 09:00: NIL STATEMENT 2026-08-10: the letting agent's statement shows no payout for the rent due that day", "createdTime": "2026-11-19T09:00:00.000Z"}]}
     return {"comments": []}
 rc.api = api
 ts = [tenancy("recAGMlive", 10, 500, tenant="recT_agent"), tenancy("recUC1", 10, 500, tenant="recT_uc"),
@@ -1511,5 +1511,34 @@ print(json.dumps({"found": {k: sorted(d.isoformat() for d in v) for k, v in foun
     expect(r.unchecked).toEqual(['recAGMbroken']);
     expect(r.read).toEqual(['recAGMbroken', 'recAGMlive']);
     expect(r.pages).toEqual([null, 'p2']);
+  });
+
+  // The independent review of the first draft (19 Nov 2026), each a case that failed then.
+  it('a nil month just before a set-off window is paid by set-off, not late; the agent email counts no nil month', () => {
+    const r = py(NIL_DAY + `
+t = tenancy("recAGM", 10, 500, tenant="recT_agent", unit="Unit 1 – 2 Example Street",
+            **{TY["setOffFrom"]: "2026-11-10", TY["setOffUntil"]: "2026-12-09"})
+w = world([t], [paid("recAGM", "2026-09-10", 500)], day=NOV); w["nilDues"] = {"recAGM": NIL}
+res = rc.assess(w, NOV, datetime(2026, 11, 18, 12, 30, tzinfo=timezone.utc))
+lane = res["lanes"]["recAGM"]
+months = [rc.owed_months(date(2026, 10, 10), 10, NOV), rc.owed_months(date(2026, 10, 10), 10, NOV, {date(2026, 11, 10)})]
+print(json.dumps({"lane": lane, "light": res["lights"]["recAGM"], "months": months}))`);
+    expect([r.lane, r.light]).toEqual(['fine', 'green']);
+    expect(r.months).toEqual([2, 1]);
+  });
+
+  it('only the door\'s own comment counts, and a withdrawal written after it takes the date back out', () => {
+    const r = py(`
+import agent_email_format as aef
+own = "18 Nov 2026 10:00: NIL STATEMENT 2026-10-10: the letting agent's statement shows no payout for the rent due that day, so..."
+quoted = "18 Nov 2026 10:05: per StayCay NIL STATEMENT 2026-10-10: the letting agent's statement shows no payout for the rent due that day"
+gone = "19 Nov 2026 09:00: NIL STATEMENT WITHDRAWN 2026-10-10: the nil statement recorded for that rent is withdrawn, so..."
+def c(text, at): return {"text": text, "createdTime": at}
+print(json.dumps({
+  "own": sorted(d.isoformat() for d in aef.nil_statement_dates([c(own, "2026-11-18T10:00:00Z")])),
+  "quoted": sorted(d.isoformat() for d in aef.nil_statement_dates([c(quoted, "2026-11-18T10:05:00Z")])),
+  "withdrawn": sorted(d.isoformat() for d in aef.nil_statement_dates([c(gone, "2026-11-19T09:00:00Z"), c(own, "2026-11-18T10:00:00Z")])),
+  "again": sorted(d.isoformat() for d in aef.nil_statement_dates([c(gone, "2026-11-19T09:00:00Z"), c(own, "2026-11-20T10:00:00Z")]))}))`);
+    expect(r).toEqual({ own: ['2026-10-10'], quoted: [], withdrawn: [], again: ['2026-10-10'] });
   });
 });

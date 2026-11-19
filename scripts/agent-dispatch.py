@@ -6802,8 +6802,25 @@ RENT_RECEIVED_RE = re.compile(r"\bRENT RECEIVED(?: \(round \d+\))?:\s*(rec[A-Za-
 UNIT_REF_FIELD = "fldql2nyQlPfkPP4p"           # Tenancies: unit reference (rent-check.py TY["unitRef"])
 
 
-def agent_rent_landed_state(name, notes, description, records=None):
+def tenancy_comments(tenancy_id):
+    """Every comment on one tenancy, following offset. A reply with no comments list is an error, never "none"."""
+    out, offset = [], None
+    while True:
+        q = [("pageSize", "100")] + ([("offset", offset)] if offset else [])
+        page = _request("GET", f"/{TENANCIES_TABLE}/{tenancy_id}/comments?{urllib.parse.urlencode(q)}")
+        if not isinstance(page, dict) or not isinstance(page.get("comments"), list):
+            raise RuntimeError(f"the comments read for {tenancy_id} returned no comments list")
+        out += page["comments"]
+        offset = page.get("offset")
+        if not offset:
+            return out
+
+
+def agent_rent_landed_state(name, notes, description, records=None, comments=None):
     """Has the rent landed, since the card was made, for the units an AGENT RENT LATE card chases?
+    A unit whose chased due date the letting agent's statement showed as nil (a NIL STATEMENT comment on the
+    tenancy, finding 1354) counts as covered: nothing was due to us that day. `comments` is the caller's own
+    reader of one tenancy's comments (the send passes its own); a failed read is NOT CHECKED, never "no nil".
     {"state": "landed", "paid"} every unit paid | {"state": "partial", "paid", "unpaid"} some paid and not
     declared | {"state": "nokey"} | {"state": "notenancy", "tenancy"} | {"state": "norent", "tenancy"} |
     {"state": "unchecked", "detail"} | {"state": ""} nothing landed or not an agent card. Each unit is
@@ -6834,6 +6851,12 @@ def agent_rent_landed_state(name, notes, description, records=None):
         ref = ten.get(UNIT_REF_FIELD)
         ref = ref[0] if isinstance(ref, list) and ref else ref
         units.append({"tenancy": tenancy, "unit": str(ref or tenancy), "owed": owed, "dueDay": due_day})
+    from agent_email_format import nil_statement_dates
+    for u in units:
+        try:
+            u["nil"] = u["owed"] in nil_statement_dates((comments or tenancy_comments)(u["tenancy"]))
+        except (Exception, SystemExit) as exc:               # noqa: BLE001 — refused, never passed
+            return {"state": "unchecked", "detail": f"nil statements of {u['tenancy']}: {exc}"[:120]}
     since = (min(u["owed"] for u in units) - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat()
     try:
         bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
@@ -6841,6 +6864,10 @@ def agent_rent_landed_state(name, notes, description, records=None):
         return {"state": "unchecked", "detail": str(exc)[:120]}
     paid, unpaid = [], []
     for u in units:
+        if u.pop("nil"):
+            u["shown"] = f"the letting agent's statement showed no payout for the rent due {u['owed'].strftime('%d %b %Y')}"
+            paid.append(u)
+            continue
         cycle = owed_cycle_lines(bank, u["tenancy"], u["owed"], u["dueDay"])
         u["shown"] = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in cycle if b["amount"] > 0)
         (paid if sum(b["amount"] for b in cycle) > 0.005 else unpaid).append(u)

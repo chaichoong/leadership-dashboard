@@ -2000,3 +2000,42 @@ def validate_submission_any(output, task_name=None, task_id=None):
     if bad:
         raise EmailFormatError("%s %s." % (bad, AS_RECEIVED_WAY))
     return parsed
+
+
+# A LETTING AGENT'S NIL STATEMENT (finding 1354, 19 Nov 2026). The letting agent's statement for a month shows no
+# payout for an agent-managed rent, so nothing was due to us on that due date. `tenancy-record.py nil-statement` writes
+# it as a dated comment on the tenancy in exactly this shape, and the rent check (rent-check.py) and the AGENT RENT LATE
+# send (agent-dispatch.py agent_rent_landed_state) read it back through nil_statement_dates. Only a comment that BEGINS
+# with the door's own stamp and sentence counts (review of the first draft: a plain comment quoting the marker was read
+# as a nil month, skipping every check the door makes). A withdrawal, written by the same door, takes a date back out;
+# the newest of the two wins.
+NIL_STATEMENT_SENTENCE = "the letting agent's statement shows no payout for the rent due that day"
+NIL_WITHDRAWN_SENTENCE = "the nil statement recorded for that rent is withdrawn"
+_NIL_STAMP = r"\d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}: "
+NIL_STATEMENT_RE = re.compile(_NIL_STAMP + r"NIL STATEMENT (\d{4}-\d{2}-\d{2}): " + re.escape(NIL_STATEMENT_SENTENCE))
+NIL_WITHDRAWN_RE = re.compile(_NIL_STAMP + r"NIL STATEMENT WITHDRAWN (\d{4}-\d{2}-\d{2}): "
+                              + re.escape(NIL_WITHDRAWN_SENTENCE))
+# The marker itself, anywhere: refused in free text (a plain comment, the evidence) so only the door writes it.
+NIL_MARK_RE = re.compile(r"NIL STATEMENT (?:WITHDRAWN )?\d{4}-\d{2}-\d{2}", re.I)
+
+
+def nil_statement_dates(comments):
+    """The due dates (date objects) a tenancy's comments record as nil statements, withdrawals applied in the order the
+    comments were made. `comments` are Airtable comment dicts ({"text", "createdTime"})."""
+    events = []
+    for c in comments or []:
+        text = str((c or {}).get("text") or "")
+        made, taken = NIL_STATEMENT_RE.match(text), NIL_WITHDRAWN_RE.match(text)
+        if made or taken:
+            events.append((str((c or {}).get("createdTime") or ""), bool(made), (made or taken).group(1)))
+    out = set()
+    for _at, made, day in sorted(events):
+        try:
+            d = datetime.strptime(day, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if made:
+            out.add(d)
+        else:
+            out.discard(d)
+    return out
