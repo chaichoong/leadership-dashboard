@@ -26,7 +26,7 @@ describe('agent-scorecard.py', () => {
   it('passes its own selftest (worked examples, reading ages, unreadable sources, hook timing, usage count, last time we spoke)', () => {
     const out = JSON.parse(execFileSync('python3', [SCRIPT, 'selftest'], { encoding: 'utf8' }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(84);
+    expect(out.checks).toBeGreaterThanOrEqual(93);
   });
 
   it('the hook is silent outside an agent chat folder and never fails the prompt', () => {

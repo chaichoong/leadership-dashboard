@@ -571,13 +571,13 @@ def cmd_hook(stdin_text, env=None, now=None, gather_fn=gather):
     except (OSError, ValueError):
         state = {}
     prompt = str(data.get("prompt") or "")
-    lines = _read_lines(data.get("transcript_path"))
-    logged = state.get("logged")
+    logged, summarised = state.get("logged"), None
     try:   # the questions this conversation has already answered, one brain line each
-        logged = log_exchanges(key, exchanges(lines), logged) or logged
+        lines = _read_lines(data.get("transcript_path"))
+        summarised = compacted_at(lines)
+        logged = _within(DRIVE_BUDGET_S, log_exchanges, key, exchanges(lines), logged) or logged
     except Exception:
         pass   # the log is a record, never a reason to cost Kevin his message
-    summarised = compacted_at(lines)
     recalled = _parse_time(state.get("recalled"))
     if not due(state, now):
         new = dict(state, last=now.isoformat(), logged=logged)
@@ -607,39 +607,84 @@ def cmd_hook(stdin_text, env=None, now=None, gather_fn=gather):
 # ----------------------------------------------------------------------------- last time we spoke
 
 REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
+PASTE_RE = re.compile(r"</?pasted_content[^>]*>")
 FENCE_RE = re.compile(r"```.*?```", re.S)
 SUMMARY_START = "This session is being continued from a previous conversation"
+NOT_KEVIN = (SUMMARY_START, "[Request interrupted", "API Error")
+BRIEF_MARK = "Background (from the session that started this one)"
+DRIVE_BUDGET_S = 8          # brain folder reads and writes per message; the hook's own timeout is 60
 
 
-def typed_text(e):
-    """Kevin's own words in one transcript entry, else None. The app puts system reminders in front
-    of what he types, in the same block or a block of their own (seen 19 Nov 2026), so those are cut
-    out, not used to throw the message away. Tool results, meta entries, the summary Claude Code
-    writes when a chat fills up and the setup prompt that opened the chat are never his."""
-    if (not isinstance(e, dict) or e.get("type") != "user" or e.get("isSidechain") or e.get("isMeta")
-            or e.get("isCompactSummary")):
+def _within(seconds, fn, *args):
+    """fn(*args), or TimeoutError when it takes longer: a stalled Google Drive mount must cost one
+    line of the hook, never Kevin's message (review of 19 Nov 2026)."""
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn(*args)
+        except Exception as e:   # handed back to the caller below
+            box["error"] = e
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise TimeoutError("took over %ss" % seconds)
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def _words(content):
+    """The text of a message with the app's reminders and paste tags taken out."""
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return PASTE_RE.sub("", REMINDER_RE.sub("", str(content or ""))).strip()
+
+
+def _kevin(text):
+    return bool(text) and not text.startswith("<") and not text.startswith(NOT_KEVIN) \
+        and "[agent-chats setup]" not in text and BRIEF_MARK not in text
+
+
+def turn_start(e):
+    """Does this entry start a new turn, and did Kevin type it? None: not a new turn (a tool result,
+    a meta entry, a reminder on its own, Claude Code's summary). "": a turn something else started
+    (a notice, another session, the setup prompt). Else Kevin's own words.
+    A message he types while the agent is still working is saved as a queued_command attachment,
+    not a user entry (review of 19 Nov 2026): it counts, and the reply after it is its answer.
+    The app puts reminders in front of what he types, in the same block or a block of their own,
+    so those are cut out, never used to throw his message away. Where an entry carries an origin,
+    only "human" is his."""
+    if not isinstance(e, dict) or e.get("isSidechain"):
+        return None
+    if e.get("type") == "attachment":
+        a = e.get("attachment") or {}
+        if a.get("type") != "queued_command":
+            return None
+        origin = a.get("origin") if isinstance(a.get("origin"), dict) else {}
+        text = _words(a.get("prompt"))
+        if a.get("commandMode") != "prompt" or origin.get("kind") != "human" or not _kevin(text):
+            return ""
+        return text
+    if e.get("type") != "user" or e.get("isMeta") or e.get("isCompactSummary"):
         return None
     content = (e.get("message") or {}).get("content")
-    if isinstance(content, list):
-        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
-            return None
-        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-    text = REMINDER_RE.sub("", str(content or "")).strip()
-    if (not text or text.startswith("<") or text.startswith(SUMMARY_START)
-            or "[agent-chats setup]" in text):
+    if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
         return None
+    text = _words(content)
+    if not text:
+        return None
+    origin = e.get("origin") if isinstance(e.get("origin"), dict) else {}
+    if origin.get("kind") not in (None, "human") or not _kevin(text):
+        return ""
     return text
 
 
-def _is_prompt(e):
-    """A new turn someone or something started (Kevin, a notice, the setup prompt): not a tool
-    result and not a meta entry. A reply after it belongs to it, not to Kevin's last question."""
-    if not isinstance(e, dict) or e.get("type") != "user" or e.get("isSidechain") or e.get("isMeta") \
-            or e.get("isCompactSummary"):
-        return False
-    content = (e.get("message") or {}).get("content")
-    return not (isinstance(content, list)
-                and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content))
+def typed_text(e):
+    """Kevin's own words in one transcript entry, else None."""
+    return turn_start(e) or None
 
 
 def answer_line(text, limit=ASK_LIMIT):
@@ -654,7 +699,8 @@ def answer_line(text, limit=ASK_LIMIT):
 def exchanges(lines):
     """Kevin's typed messages in one conversation, oldest first, each with the first line of the
     answer he got: [{"at", "ask", "answer"}]. The answer is the agent's last text before the next
-    prompt, so a "checking that now" line before a lookup is replaced by the reply itself."""
+    turn, so a "checking that now" line before a lookup is replaced by the reply itself. An API
+    error the app writes in the agent's place is never an answer."""
     out, cur = [], None
     for raw in lines:
         try:
@@ -663,18 +709,21 @@ def exchanges(lines):
             continue
         if not isinstance(e, dict):
             continue
-        text = typed_text(e)
-        if text is not None:
-            t = _parse_time(e.get("timestamp"))
+        text = turn_start(e)
+        if text == "":
+            cur = None
+            continue
+        if text:
+            stamp = e.get("timestamp") or (e.get("attachment") or {}).get("timestamp")
+            t = _parse_time(stamp)
             cur = {"at": t, "ask": first_line(" ".join(text.split()), ASK_LIMIT), "answer": ""} if t else None
             if cur:
                 out.append(cur)
             continue
-        if _is_prompt(e):
-            cur = None
-            continue
-        if cur and e.get("type") == "assistant" and not e.get("isSidechain"):
-            content = (e.get("message") or {}).get("content")
+        msg = e.get("message") or {}
+        if (cur and e.get("type") == "assistant" and not e.get("isSidechain")
+                and not e.get("isApiErrorMessage") and msg.get("model") != "<synthetic>"):
+            content = msg.get("content")
             said = ("\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
                     if isinstance(content, list) else str(content or ""))
             line = answer_line(said)
@@ -701,10 +750,12 @@ def compacted_at(lines):
 
 
 def _read_lines(path):
+    """A saved conversation's lines. A character cut in half (Claude Code writes as Kevin sends)
+    is replaced, never a reason to lose the whole hook (review of 19 Nov 2026)."""
     if not path:
         return []
     try:
-        with open(os.path.expanduser(path)) as fh:
+        with open(os.path.expanduser(path), encoding="utf-8", errors="replace") as fh:
             return fh.read().splitlines()
     except OSError:
         return []
@@ -735,23 +786,25 @@ def chat_log_path(key, day):
 
 
 def written_down(key, limit=RECALL_NOTES):
-    """The last lines written down in the brain from this chat, newest last: [(day, line)].
-    The hook's own Q&A lines are left out (they are already in the questions above)."""
+    """The last lines written down in the brain from this chat, oldest of them first: [(day, line)].
+    Reads the newest files first and stops once it has enough. The hook's own Q&A lines are left
+    out (they are already in the questions above)."""
     name = (CHATS.get(key) or ROOMS[key])["name"]
     suffix = " %s chat.md" % name
     names = sorted(x for x in os.listdir(CHAT_LOGS) if x.endswith(suffix) and re.match(r"\d{4}-\d{2}-\d{2} ", x))
     notes = []
-    for fname in names[-RECALL_LOG_FILES:]:
+    for fname in reversed(names[-RECALL_LOG_FILES:]):
         try:
             day = date.fromisoformat(fname[:10])
-            with open(os.path.join(CHAT_LOGS, fname)) as fh:
+            with open(os.path.join(CHAT_LOGS, fname), encoding="utf-8", errors="replace") as fh:
                 body = fh.read()
         except (OSError, ValueError):
             continue
-        for line in body.splitlines():
-            line = line.strip()
-            if line.startswith("- ") and AUTO_MARK not in line:
-                notes.append((day, first_line(line[2:], ASK_LIMIT)))
+        lines = [ln.strip() for ln in body.splitlines()]
+        found = [(day, first_line(ln[2:], ASK_LIMIT)) for ln in lines if ln.startswith("- ") and AUTO_MARK not in ln]
+        notes = found + notes
+        if len(notes) >= limit:
+            break
     return notes[-limit:]
 
 
@@ -793,7 +846,7 @@ def recall_block(key, now, prompt="", transcript_path=None, after_summary=False)
         if asks and not asks[-1]["answer"] and asks[-1]["ask"] == first_line(" ".join(prompt.split()), ASK_LIMIT):
             asks.pop()   # the message Kevin is sending now is not "last time"
         try:
-            notes, why = written_down(key), None
+            notes, why = _within(DRIVE_BUDGET_S, written_down, key), None
         except OSError as e:
             notes, why = [], "the brain's CEO Conversations folder could not be read (%s)" % (e.strerror or e)
         return recall_text(key, asks[-RECALL_ASKS:], notes, now, after_summary, why)
@@ -803,14 +856,17 @@ def recall_block(key, now, prompt="", transcript_path=None, after_summary=False)
 
 
 def _append_log_line(key, day, line):
-    """One line into the chat's brain log for that day, above its Links footer. Atomic write."""
+    """One line into the chat's brain log for that day, above its Links footer, once: a line
+    already there is left alone, so a retry after a failed or cut-off write never doubles it."""
     path = chat_log_path(key, day)
     name = (CHATS.get(key) or ROOMS[key])["name"]
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8", errors="replace") as fh:
             body = fh.read()
     except FileNotFoundError:
         body = "# %s (%s): %s chat\n\nLinks: [[ceo-conversations-moc]]\n" % (day.isoformat(), day.strftime("%A"), name)
+    if line in body.splitlines():
+        return
     cut = body.rfind("\nLinks:")
     if cut >= 0:
         head = body[:cut].rstrip("\n")
@@ -819,23 +875,26 @@ def _append_log_line(key, day, line):
     else:
         body = body.rstrip("\n") + "\n" + line + "\n"
     tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(body)
     os.replace(tmp, path)
 
 
 def log_exchanges(key, exs, logged_after):
-    """Write each answered question newer than `logged_after` to the brain, one line each.
-    Returns the time of the newest one written (the new marker), or None if none."""
+    """Write each answered question newer than `logged_after` to the brain, one line each, oldest
+    first. Returns the time of the newest one written (the new marker), or None if none. A write
+    that fails stops the run there; the lines already written keep their marker."""
     after = _parse_time(logged_after)
     newest = None
-    for ex in exs:
+    for ex in sorted(exs, key=lambda x: x["at"]):
         if not ex["answer"] or (after and ex["at"] <= after):
             continue
-        day = london(ex["at"]).date()
         line = "- %s, %s. Kevin: \"%s\" Answer: \"%s\"" % (
             london(ex["at"]).strftime("%H:%M"), AUTO_MARK, ex["ask"], ex["answer"])
-        _append_log_line(key, day, line)
+        try:
+            _append_log_line(key, london(ex["at"]).date(), line)
+        except OSError:
+            break
         newest = ex["at"]
     return newest.isoformat() if newest else None
 
@@ -1149,6 +1208,71 @@ def selftest():
             body = fh.read()
         check("log: a line joins an existing file above its Links footer",
               body.index("- 11:00, Q&A") < body.index("Links:") and body.index("- 10:00") < body.index("- 11:00"))
+        # The review of 19 Nov 2026, one check per finding, shaped from real saved entries.
+        def queued(at, text, kind="human", mode="prompt"):
+            return json.dumps({"type": "attachment", "timestamp": at, "attachment": {
+                "type": "queued_command", "commandMode": mode, "origin": {"kind": kind}, "prompt": text}})
+        busy = [
+            entry("user", "2026-11-18T19:00:00Z", "Who is late?"),
+            entry("assistant", "2026-11-18T19:00:05Z", [{"type": "text", "text": "Two are late."}]),
+            entry("assistant", "2026-11-18T19:00:06Z", [{"type": "tool_use", "name": "Bash", "input": {}}]),
+            queued("2026-11-18T19:00:07Z", "Also chase flat 5"),
+            entry("user", "2026-11-18T19:00:08Z", [{"type": "tool_result", "content": "x"}]),
+            entry("assistant", "2026-11-18T19:00:20Z", [{"type": "text", "text": "Raised a chase for flat 5."}]),
+            queued("2026-11-18T19:01:00Z", "<task-notification>done</task-notification>", "task-notification",
+                   "task-notification"),
+            entry("assistant", "2026-11-18T19:01:05Z", [{"type": "text", "text": "A background job finished."}]),
+            entry("user", "2026-11-18T19:02:00Z", "[Request interrupted by user]"),
+            entry("user", "2026-11-18T19:03:00Z", "\n\n<pasted_content id=\"a1\">\nRent list for Elm Row\n</pasted_content>"),
+            json.dumps({"type": "assistant", "timestamp": "2026-11-18T19:03:05Z", "isApiErrorMessage": True,
+                                 "message": {"role": "assistant", "model": "<synthetic>",
+                                             "content": [{"type": "text", "text": "API Error: Can't reach the API server"}]}}),
+            entry("user", "2026-11-18T19:04:00Z", "Background (from the session that started this one):\nbrief"),
+            entry("user", "2026-11-18T19:05:00Z", "<task-notification>x</task-notification>",
+                  origin={"kind": "task-notification"}),
+        ]
+        bx = exchanges(busy)
+        check("review 1: a message typed while the agent works is its own question, with its own answer",
+              [(x["ask"], x["answer"]) for x in bx][:2]
+              == [("Who is late?", "Two are late."), ("Also chase flat 5", "Raised a chase for flat 5.")])
+        check("review 1: a background notice's reply is never filed as Kevin's answer",
+              all("background job" not in x["answer"] for x in bx))
+        check("review 5: pasted text is his question; interruptions, briefs and notices are not",
+              [x["ask"] for x in bx] == ["Who is late?", "Also chase flat 5", "Rent list for Elm Row"])
+        check("review 6: an API error is never the answer", bx[2]["answer"] == "")
+        check("review 1: usage counts the queued message too", kevin_messages(busy, now - timedelta(days=14))[0] == 3)
+        dup = [{"at": datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc), "ask": "a", "answer": "b"},
+               {"at": datetime(2026, 11, 15, 9, 0, tzinfo=timezone.utc), "ask": "c", "answer": "d"}]
+        blocker = chat_log_path("compliance", date(2026, 11, 16))
+        os.makedirs(blocker)                      # the 16 Nov file cannot be written
+        mark = log_exchanges("compliance", dup, None)
+        os.rmdir(blocker)
+        mark2 = log_exchanges("compliance", dup, mark)
+        mark3 = log_exchanges("compliance", dup, None)   # a run cut off before its marker was saved
+        with open(chat_log_path("compliance", date(2026, 11, 15))) as fh:
+            d15 = fh.read()
+        with open(blocker) as fh:
+            d16 = fh.read()
+        check("review 2: a failed write keeps the marker of the lines before it, oldest first",
+              mark == "2026-11-15T09:00:00+00:00" and mark2 == "2026-11-16T09:00:00+00:00")
+        check("review 2: a retry never writes a line twice", d15.count(AUTO_MARK) == 1 and d16.count(AUTO_MARK) == 1
+              and mark3 == mark2)
+        torn = os.path.join(tdir, "torn.jsonl")
+        with open(torn, "wb") as fh:
+            fh.write(("\n".join(convo[:9]) + "\n").encode() + '{"type":"user","message":{"content":"caf'.encode()
+                     + "é".encode()[:1])
+        out7 = cmd_hook(json.dumps({"session_id": "s11", "transcript_path": torn, "prompt": "hi"}), env, now,
+                        lambda k, n: facts)
+        check("review 3: a character cut in half never costs the scorecard or the recall",
+              out7.startswith("AGENT CHAT SCORECARD") and "Elm Row" in out7)
+        started = time.time()
+        try:
+            _within(0.2, time.sleep, 2)
+            slow = False
+        except TimeoutError:
+            slow = time.time() - started < 1
+        check("review 4: a stalled brain folder gives up on time", slow)
+
         CHAT_LOGS = os.path.join(CHAT_LOGS, "missing")
         out5 = recall_block("compliance", now)
         check("recall: an unreadable brain says unavailable, never 'nothing written down'",
