@@ -449,13 +449,15 @@ NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b{NIL_GAP}{NIL_FIGURE}")
 # (two review rounds of the wording fix, 19 Nov 2026: a list of payout wording is never complete, so "Transfer to
 # landlord £454.40", "(£454.40)" and "Total payments to landlord £454.40, Outstanding payments to landlord £0.00" all
 # passed a phrase check). Money is a £ figure or a figure with two decimals; a date, a reference or a Gmail id is not.
-MONEY_RE = re.compile(r"£\s?\(?\s?(\d[\d,]*(?:\.\d+)?)|(?<![\d.£\w])(\d[\d,]*\.\d{2})(?![\d.])")
+# A bare two-decimal figure is not money when it is a time (9.30am, at 14.05), a percentage or a flat number (round 3).
+MONEY_RE = re.compile(r"(?i)(?:£|\bgbp)\s?\(?\s?(\d[\d,]*(?:\.\d+)?)|(\d[\d,]*(?:\.\d+)?)\s?gbp\b|"
+                      r"(?<![\d.£\w])(?<!\bat )(?<!\bflat )(?<!\bapartment )(\d[\d,]*\.\d{2})(?![\d.])(?!\s?(?:%|am\b|pm\b))")
 
 
 def money_above_zero(text):
     """The first money figure above zero in the text, as written, or ''."""
     for m in MONEY_RE.finditer(text or ""):
-        figure = m.group(1) or m.group(2)
+        figure = m.group(1) or m.group(2) or m.group(3)
         try:
             if float(figure.replace(",", "")) > 0:
                 return m.group(0).strip()

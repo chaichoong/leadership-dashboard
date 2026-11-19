@@ -149,6 +149,8 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
       transfer: 'Example Lettings statement, emailed 8 Oct 2026: Transfer to landlord £454.40, Balance due to landlord £0.00',
       dated: 'Example Lettings statement, emailed 8 Oct 2026: Payments to landlord on 3 Oct £454.40, Outstanding payments to landlord £0.00',
       noPound: 'Example Lettings statement, emailed 8 Oct 2026: Payout 0.00, rent received 454.40',
+      // Round 3: money written with GBP.
+      gbp: 'Example Lettings statement, emailed 8 Oct 2026: Transfer to landlord GBP454.40, Balance due to landlord £0.00',
     };
     for (const [name, quote] of Object.entries(lines)) {
       const r = door(ARGS('2026-10-10', quote));
@@ -160,7 +162,9 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
     // Round 2: genuine nil lines a statement or an agent's email writes are still read (two columns of nil, a date
     // after the line, a nil with words after it).
     for (const quote of ['Total payments to landlord 0.00 0.00', 'TOTAL PAYMENTS TO LANDLORD £0.00 30/09/2026',
-      'Net payment nil this month', 'Payout NIL as rent unpaid']) {
+      'Net payment nil this month', 'Payout NIL as rent unpaid',
+      // Round 3: a time, a flat number and a percentage are not money.
+      'sent at 9.30am, payout £0.00', 'Apartment 3.04: payout £0.00', 'Management fee 12.00% £0.00, payout £0.00']) {
       const r = door(ARGS('2026-10-10', `Example Lettings statement for September, emailed 8 Oct 2026: ${quote}`));
       expect([quote, r.code, r.readBack]).toEqual([quote, 0, ['2026-10-10']]);
     }
