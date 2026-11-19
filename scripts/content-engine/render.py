@@ -750,26 +750,167 @@ def teaser_for_day_before(role, spoken, date_day, ledger):
 # the same refusal for the short one, with the flag as the tie-break so the answer does not depend
 # on which clip finishes rendering last.
 FLAGGED_DAY = "disagrees with the date"
+# The reasons watch.resolve_episode and teaser_for_day_before give when the clip SAYS a day number that fits. "no spoken
+# day, date used" is not among them: a clip that names no day has not agreed with anything (finding 20261020-...-1015).
+SPOKEN_AGREES = ("spoken day matches the date", "catch-up for the missed previous day", "teaser for day ")
+SECOND_LONG = "a second long recording for episode"   # the episode branch's refusal, as older ledgers hold it
+CLOCK_SLACK_S = 2.0   # the camera stamps whole seconds and the ledger rounds duration to 0.1 s
+PAIR_WINDOW_S = 600   # a teaser recorded more than ten minutes after a long recording ends is not paired to it
+
+
+# ---------- a teaser is the summary of the long recording it FOLLOWS (finding 20261020-agent-dispatch-1016) ----------
+# 7 Mar 2026 (day 2106) holds four clips: long 001 (14:18:15, 428.2 s), short 002 (14:25:28, 5 s after 001 ends), long
+# 003 (14:26:34, 384.5 s) and short 004 (14:33:12, 14 s after 003 ends). Kevin's 10 Oct note: the episode is 001 with
+# its own summary 002. The engine refused 003 as a second long recording but marked it "failed, needs a person", which
+# held the card for a ruling he had already given, and on 18 Oct it let 004, which names no day, replace 002 because a
+# missing spoken day counted as agreeing. The camera's start time and each clip's length say which recording a short
+# clip belongs to, so the engine now reads them. Review of PR 979: a teaser is set aside only when it starts within
+# PAIR_WINDOW_S of a set-aside recording OF ITS OWN EPISODE ending, names no day, and the day keeps another summary.
+# Times are absolute (date plus camera time), so a recording that runs past midnight still pairs.
+
+def camera_seconds(hms):
+    """'142634' -> seconds since midnight; None for anything that is not a six-digit camera time."""
+    s = str(hms or "")
+    if len(s) != 6 or not s.isdigit(): return None
+    h, m, sec = int(s[:2]), int(s[2:4]), int(s[4:])
+    return h * 3600 + m * 60 + sec if h < 24 and m < 60 and sec < 60 else None
+
+
+def clip_start(v):
+    """A clip's start in absolute seconds (shooting date plus camera time), or None."""
+    sec = camera_seconds(v.get("hms"))
+    try: return None if sec is None else dt.date.fromisoformat(str(v.get("date"))).toordinal() * 86400 + sec
+    except ValueError: return None
+
+
+def is_long_recording(v):
+    """A clip the night treats as a long recording: role episode, or (before its role is known) longer than a teaser."""
+    if v.get("status") == "broll": return False
+    if v.get("role"): return v.get("role") == "episode"
+    return isinstance(v.get("duration"), (int, float)) and v["duration"] > TEASER_MAX_SECONDS
+
+
+def is_set_aside(v):
+    """True for a clip set aside as not this day's episode. A held second recording (failed, needs a person) is NOT:
+    it may be a part 2 the engine missed, and then the teaser after it is the episode's real summary."""
+    return v.get("status") == watch.SET_ASIDE
+
+
+def long_recording_before(key, ledger):
+    """(key, entry) of the long recording the clip `key` follows: the long recording that started last before it, on
+    any date. Trusted only when that recording's start plus its duration ends at or before this clip's start and no
+    more than PAIR_WINDOW_S before it, so a name whose time is not a real camera clock (the day-named Dec 2025 batches)
+    and a teaser recorded hours later never pair. None when unknown."""
+    t0 = clip_start(ledger.get(key) or {})
+    if t0 is None: return None
+    best = None
+    for k2, v in ledger.items():
+        if k2 == key or not is_long_recording(v): continue
+        s = clip_start(v)
+        if s is not None and s < t0 and (best is None or s > best[2]): best = (k2, v, s)
+    if not best: return None
+    k2, v, s = best
+    dur = v.get("duration")
+    if not isinstance(dur, (int, float)) or not (t0 - PAIR_WINDOW_S <= s + dur <= t0 + CLOCK_SLACK_S): return None
+    return k2, v
+
+
+def follows_episode(key, day, ledger):
+    """True when the clip follows episode `day`'s rendered long recording, False when it follows a recording of that
+    episode that was set aside, None when that cannot be told."""
+    lead = long_recording_before(key, ledger)
+    if not lead or lead[1].get("episode") != day: return None
+    if is_set_aside(lead[1]): return False
+    return True if lead[1].get("status") == "rendered" else None
+
+
+def teaser_day_from_lead(key, role, spoken, day, reason, ledger):
+    """A teaser that names no day belongs to the episode of the long recording it follows, which is not always the
+    date's: across midnight, or after a catch-up recording. (day, reason), unchanged when it names a day or pairs
+    with nothing."""
+    if role != "teaser" or spoken is not None: return day, reason
+    lead = long_recording_before(key, ledger)
+    if not lead: return day, reason
+    ep = lead[1].get("episode")
+    if not ep or ep == day or not (lead[1].get("status") == "rendered" or is_set_aside(lead[1])): return day, reason
+    return ep, "no spoken day; it follows %s, episode %d's long recording, so it is that episode's teaser" % (lead[0], ep)
+
+
+def other_summary(key, day, ledger):
+    """True when episode `day` has another clip in the SUMMARY role that is rendered or still waiting to render, and
+    that is plainly the episode's: it named the day, or it follows the episode's own recording. A clip that has not
+    yet shown itself to be a teaser never counts: unrendered B-roll (redo-day resets it to new) or a clip later
+    refused would otherwise set 004 aside and leave the day with no summary (third review of PR 979)."""
+    for k2, v in ledger.items():
+        if k2 == key or v.get("role") != "teaser" or (v.get("episode") or v.get("day")) != day: continue
+        if v.get("status") not in ("rendered", "new", "pulled", "pulling", "rendering"): continue
+        if str(v.get("episode_reason") or "").startswith(SPOKEN_AGREES) or follows_episode(k2, day, ledger) is True:
+            return True
+    return False
+
+
+def set_aside(e, why):
+    """Mark a clip set aside: settled on purpose, never failed, never "it needs a person", never requeued."""
+    e["status"] = watch.SET_ASIDE; e["set_aside"] = why
+    for f in ("error", "requeued", "render_failed"): e.pop(f, None)
+
+
+def second_long_recording(e, day, first, spoken):
+    """A second long recording of episode `day` that is not a recognised part. One that names a day of its own opened
+    as an episode, so it is set aside and the card is not held. One that names no day may be a part 2 the continuation
+    check missed (review of PR 979), so it fails as before: "it needs a person", listed in the morning report, and
+    resubmit_due holds the card for a ruling."""
+    if spoken is not None and spoken != day:
+        set_aside(e, "%s %d (%s is already its episode) and not a part of it: it names day %d, not %d, so it is set "
+                     "aside and cannot replace that episode" % (SECOND_LONG, day, first, spoken, day))
+        return
+    e["status"] = "failed"; e["requeued"] = "not requeued: it needs a person"   # the page names it; a retry would do the same
+    e["error"] = ("%s %d (%s is already its episode) and not a part of it: not rendered, so it cannot replace that "
+                  "episode; it names %s, so it may be a part the engine did not recognise"
+                  % (SECOND_LONG, day, first, "no day" if spoken is None else "this episode's own day"))
+    e["render_failed"] = dt.datetime.now().isoformat(timespec="seconds")   # steps the day aside in the redo queue (982)
 
 
 def summary_rival(key, day, reason, ledger):
-    """What to do with a teaser when episode `day` already has a rendered summary.
+    """What to do with a teaser for episode `day`.
 
-    Returns ("", "") to render it as the first summary of the day, ("replace", why) when the summary
-    on the record came from a clip whose spoken day disagreed with its date and this one's agrees, or
-    ("refuse", why) when it must not be rendered at all. Pure: it reads the ledger and nothing else.
+    Returns ("set-aside", why) when it follows a long recording that was set aside (it is that recording's teaser, not
+    the episode's), ("", "") to render it as the first summary of the day, ("replace", why) when it follows the day's
+    episode and the summary on the record does not, or when that summary's spoken day disagreed with its date and this
+    one's agrees, or ("refuse", why) when it must not be rendered at all. A clip that names no day never counts as
+    agreeing. Pure: it reads the ledger and nothing else.
     """
+    lead = long_recording_before(key, ledger)
+    mine_agrees = str(reason or "").startswith(SPOKEN_AGREES)
+    # Set aside only when it is plainly the refused recording's: it starts within the pairing window of a set-aside
+    # recording OF THIS EPISODE ending, it names no day that fits, and the day keeps another summary (review, PR 979).
+    if lead and follows_episode(key, day, ledger) is False and not mine_agrees and other_summary(key, day, ledger):
+        return "set-aside", ("a short recording that starts %d s after %s, the second long recording of episode %d, "
+                             "ends; that recording was set aside, so this is its teaser, not the episode's summary"
+                             % (clip_start(ledger[key]) - clip_start(lead[1]) - lead[1]["duration"], lead[0], day))
     done = sorted(k2 for k2, v in ledger.items()
                   if k2 != key and v.get("episode") == day and v.get("role") == "teaser"
                   and v.get("status") == "rendered")
     if not done:
         return "", ""
+    mine, theirs = follows_episode(key, day, ledger), {k2: follows_episode(k2, day, ledger) for k2 in done}
+    if mine is False and any(t is True for t in theirs.values()):
+        # It follows the set-aside recording and SAYS the right day (else it was set aside above): it never replaces a
+        # summary that follows the episode's own recording, whatever their spoken days (re-review of PR 979). Set aside,
+        # never refused: a refusal is "failed, needs a person" and would hold the card again (third review).
+        return "set-aside", ("a short recording that follows %s, a second long recording of episode %d that was set "
+                             "aside; %s follows the episode's own recording and stays its summary"
+                             % (lead[0], day, ", ".join(k2 for k2, t in theirs.items() if t is True)))
+    if mine is True and all(t is False for t in theirs.values()):
+        return "replace", ("episode %d's summary came from %s, which follows a long recording that was set aside; this one "
+                           "follows the episode's own recording (%s), so it is the day's summary"
+                           % (day, ", ".join(done), lead[0]))
     mine_flagged = FLAGGED_DAY in str(reason or "")
-    agreed = [k2 for k2 in done if FLAGGED_DAY not in str(ledger[k2].get("episode_reason") or "")]
-    if mine_flagged or agreed:
+    all_flagged = all(FLAGGED_DAY in str(ledger[k2].get("episode_reason") or "") for k2 in done)
+    if not (mine_agrees and all_flagged):
         return "refuse", ("a second short recording for episode %d (%s is already its summary%s): not rendered, so it "
                           "cannot replace that summary" % (day, done[0], ", and this one's spoken day disagrees with "
-                          "the date" if mine_flagged else ""))
+                          "the date" if mine_flagged else "" if mine_agrees else ", and this one names no day"))
     return "replace", ("episode %d's summary came from %s, whose spoken day disagreed with its date; this one's agrees, "
                        "so it is the day's summary" % (day, ", ".join(done)))
 
@@ -1134,6 +1275,7 @@ def process(key, ledger, keep=False):
         day, reason = spoken, "teaser for day %d, recorded the next day (it says day %d)" % (spoken, spoken)
     else:
         day, reason = watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)
+    day, reason = teaser_day_from_lead(key, role, spoken, day, reason, ledger)   # across midnight, or after a catch-up
     if e.get("outputs") and e.get("episode") is not None and e.get("episode") != day:
         # The files on the entry are the OLD episode's. Kept under the new number, a render that stops before writing
         # its own made the old episode's correct record read as crossed (qa.crossed_record) and its card was refused
@@ -1164,7 +1306,14 @@ def process(key, ledger, keep=False):
             b = ledger[earlier[0]]
             kept = b.get("keep_masters") or ""
             if not is_continuation(key, text):
-                why = "a second long recording for episode %d (%s is already its episode) and not a part of it: not rendered, so it cannot replace that episode" % (day, earlier[0])
+                # Names a day of its own: set aside, the card is not held (finding 20261020-agent-dispatch-1016).
+                # Names none: it may be a missed part 2, so it is held for a person as before (review of PR 979).
+                second_long_recording(e, day, earlier[0], spoken)
+                if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+                watch.save_ledger(ledger)
+                if e["status"] == watch.SET_ASIDE: print("%s: SET ASIDE: %s" % (key, e["set_aside"]))
+                else: print("%s: NOT rendered: %s" % (key, e["error"]), file=sys.stderr)
+                return
             elif not all(os.path.exists(os.path.join(kept, "master_%s.mp4" % a.replace(":", "x"))) for a in RECIPE) or not os.path.exists(os.path.join(kept, "transcript.srt")):
                 why = "part of episode %d, but %s's masters are gone, so it cannot be joined; re-render both parts (set both to new in the ledger)" % (day, earlier[0])
             else:
@@ -1176,6 +1325,10 @@ def process(key, ledger, keep=False):
                 watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
     if role == "teaser":
         what, why = summary_rival(key, day, reason, ledger)
+        if what == "set-aside":
+            set_aside(e, why)
+            if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+            watch.save_ledger(ledger); print("%s: SET ASIDE: %s" % (key, why)); return
         if what == "refuse":
             e["status"] = "failed"; e["error"] = why
             e["requeued"] = "not requeued: it needs a person"       # a retry would do the same
@@ -2266,8 +2419,8 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         # Carried across the reset, so the re-render reuses it rather than asking the
         # detector that missed the section in the first place (9 Oct 2026).
         hand = e.get("lfmd_window") if e.get("lfmd_window_by") == "operator" else None
-        if e.get("status") == "failed":
-            for f in RESET_STALE: e.pop(f, None)
+        if e.get("status") in ("failed", watch.SET_ASIDE):     # a set-aside clip is decided again on the current code
+            for f in RESET_STALE + ("set_aside",): e.pop(f, None)
         if doubt and e.get("role") == "episode" and (hand or e.get("lfmd_window_keep") or e.get("lfmd_at_keep")):
             # His note says the clip is in the wrong place and gives no time: the window he rejected is not carried as
             # the answer. The finder decides, and the window is the fallback only (process), so no clip is lost.
@@ -2681,9 +2834,88 @@ def _selftest_copy_goes_with_render():
         approval.load_state = real
 
 
+def _selftest_teaser_pairing():
+    """Day 2106's shape (finding 20261020-agent-dispatch-1016), invented names on the real clock: long 001 at 14:18:15
+    for 428.2 s, its teaser 002 at 14:25:28, a second long 003 at 14:26:34 for 384.5 s, and 004 at 14:33:12."""
+    D, FLAG, NO_DAY = "2026-03-07", "spoken day 2101 disagrees with the date (2106); date used, flagged", "no spoken day, date used"
+    led = {"c001.insv": {"date": D, "hms": "141815", "duration": 428.2, "role": "episode", "episode": 2106, "status": "rendered",
+                         "rendered": "2026-11-19T01:00:00", "episode_reason": FLAG},
+           "c002.insv": {"date": D, "hms": "142528", "duration": 47.5, "status": "new", "day": 2106, "role": "teaser", "episode": 2106},
+           "c003.insv": {"date": D, "hms": "142634", "duration": 384.5, "role": "episode", "episode": 2106, "status": watch.SET_ASIDE},
+           "c004.insv": {"date": D, "hms": "143312", "duration": 35.8, "status": "new", "day": 2106}}
+    assert camera_seconds("142634") == 51994 and camera_seconds("011000") == 4200
+    assert camera_seconds("2071 Full") is None and camera_seconds("251000") is None and camera_seconds(None) is None
+    assert long_recording_before("c002.insv", led)[0] == "c001.insv", "002 starts 5 s after 001 ends: it is 001's teaser"
+    assert long_recording_before("c004.insv", led)[0] == "c003.insv", "004 starts 14 s after 003 ends: it is 003's teaser"
+    assert long_recording_before("c001.insv", led) is None, "nothing long came before 001"
+    over = dict(led, **{"c002.insv": dict(led["c002.insv"], hms="142000")})
+    assert long_recording_before("c002.insv", over) is None, "a start inside 001's own length is not a real clock: no pairing"
+    broll = dict(led, **{"c003.insv": dict(led["c003.insv"], status="broll", role=None)})
+    assert long_recording_before("c004.insv", broll)[0] == "c001.insv", "B-roll is never the recording a teaser follows"
+    # 004 follows the set-aside 003, so it is set aside with it, whichever of the two teasers renders first
+    assert summary_rival("c004.insv", 2106, NO_DAY, led)[0] == "set-aside"
+    first = dict(led, **{"c002.insv": dict(led["c002.insv"], role="teaser", episode=2106, status="rendered", episode_reason=FLAG)})
+    assert summary_rival("c004.insv", 2106, NO_DAY, first)[0] == "set-aside", "the 18 Oct fault: 004 replaced 002"
+    assert summary_rival("c002.insv", 2106, FLAG, led) == ("", ""), "002 follows the episode: the day's first summary renders"
+    # 004 rendered as the summary by an older night, 003 now set aside: 002 takes the summary back
+    old = dict(led, **{"c004.insv": dict(led["c004.insv"], role="teaser", episode=2106, status="rendered", episode_reason=NO_DAY)})
+    assert follows_episode("c004.insv", 2106, old) is False
+    assert follows_episode("c002.insv", 2106, old) is True and summary_rival("c002.insv", 2106, FLAG, old)[0] == "replace"
+    # a held second recording (failed, needs a person) is not set aside: it may be a part 2, so its teaser is not either
+    held = dict(old, **{"c003.insv": dict(led["c003.insv"], status="failed", error=SECOND_LONG + " 2106 (c001.insv is already its episode)",
+                                          requeued="not requeued: it needs a person")})
+    assert not is_set_aside(held["c003.insv"]) and follows_episode("c004.insv", 2106, held) is None
+    # the review's cases (PR 979): outside the window, naming the right day, or the day's last summary: never set aside
+    late = dict(led, **{"c004.insv": dict(led["c004.insv"], hms="190000")})
+    assert long_recording_before("c004.insv", late) is None and summary_rival("c004.insv", 2106, NO_DAY, late)[0] != "set-aside"
+    assert summary_rival("c004.insv", 2106, "spoken day matches the date", led)[0] != "set-aside", "names the right day"
+    alone = dict(led, **{"c002.insv": dict(led["c002.insv"], role="teaser", episode=2106, status="failed")})
+    assert summary_rival("c004.insv", 2106, NO_DAY, alone) == ("", ""), "the day's last remaining summary is rendered"
+    a2, a3 = {}, {}
+    second_long_recording(a2, 2106, "c001.insv", None); second_long_recording(a3, 2106, "c001.insv", 2102)
+    assert a2["status"] == "failed" and a2["requeued"].endswith("needs a person") and a2.get("render_failed"), a2
+    assert a3["status"] == watch.SET_ASIDE and "names day 2102, not 2106" in a3["set_aside"], a3
+    a4 = {}; second_long_recording(a4, 2106, "c001.insv", 2106)
+    assert a4["status"] == "failed" and "this episode's own day" in a4["error"], "a missed part 2 opening 'day 2106' is held"
+    says = dict(first, **{"c004.insv": dict(led["c004.insv"], duration=None)})
+    assert summary_rival("c004.insv", 2106, "spoken day matches the date", says)[0] == "set-aside", "004 saying 2106 never replaces 002"
+    # a fresh day, 004 decided before 002 has shown itself to be a teaser: 004 renders, then 002 takes the summary back
+    early = dict(led, **{"c002.insv": {"date": D, "hms": "142528", "status": "pulled", "day": 2106}})
+    assert summary_rival("c004.insv", 2106, NO_DAY, early) == ("", ""), "no clip has shown itself to be the other summary"
+    early["c004.insv"] = dict(early["c004.insv"], role="teaser", episode=2106, status="rendered", episode_reason=NO_DAY)
+    assert summary_rival("c002.insv", 2106, FLAG, early)[0] == "replace", "002 follows the episode: it takes the summary back"
+    broll = dict(led, **{"c002.insv": {"date": D, "hms": "142528", "status": "new", "day": 2106, "reset": "redo"}})
+    assert not other_summary("c004.insv", 2106, broll), "unrendered B-roll is never the day's other summary"
+    # across midnight: absolute time pairs it, and a teaser naming no day takes the episode of the recording it follows
+    night = {"l": {"date": D, "hms": "235200", "duration": 400.0, "role": "episode", "episode": 2106, "status": "rendered"},
+             "t": {"date": "2026-03-08", "hms": "000110", "duration": 40.0, "status": "new", "day": 2107}}
+    assert long_recording_before("t", night)[0] == "l" and teaser_day_from_lead("t", "teaser", None, 2107, NO_DAY, night)[0] == 2106
+    assert teaser_day_from_lead("t", "teaser", 2107, 2107, "spoken day matches the date", night)[0] == 2107, "a named day wins"
+    # with no camera times, a clip that names no day never counts as agreeing (finding 20261020-agent-dispatch-1015)
+    nohms = {"a.insv": {"episode": 2106, "role": "teaser", "status": "rendered", "episode_reason": FLAG}}
+    assert summary_rival("b.insv", 2106, NO_DAY, nohms)[0] == "refuse", "no spoken day must not replace a flagged summary"
+    assert "names no day" in summary_rival("b.insv", 2106, NO_DAY, nohms)[1]
+    # set aside is settled: no error, no "it needs a person", no failure stamp that would step the day aside
+    e = {"status": "failed", "error": "x", "requeued": "not requeued: it needs a person", "render_failed": "t", "role": "episode"}
+    set_aside(e, "why")
+    assert e == {"status": watch.SET_ASIDE, "set_aside": "why", "role": "episode"}, e
+    # the card goes back once the day is 001 + 002 with 003 and 004 set aside; the old marking held it for a ruling
+    done = dict(led, **{"c002.insv": first["c002.insv"], "c004.insv": dict(led["c004.insv"], role="teaser", episode=2106, status=watch.SET_ASIDE)})
+    copy = {"YouTube Copy": "copy", "AI Last Run": "2026-11-19T02:00:00Z"}
+    receipt = dt.datetime(2026, 11, 18, 12, 0).timestamp()
+    assert resubmit_due(2106, done, receipt, {"verdict": "changes"}, copy) == "", resubmit_due(2106, done, receipt, {"verdict": "changes"}, copy)
+    held_day = dict(done, **{"c003.insv": held["c003.insv"]})
+    assert "needs a ruling from Kevin" in resubmit_due(2106, held_day, receipt, {"verdict": "changes"}, copy), "a held recording still holds the card"
+    import inspect as _ip; pr = _ip.getsource(process)
+    assert "set_aside(e, why)" in pr and 'if what == "set-aside":' in pr, "process acts on the teaser's set-aside decision"
+    assert "second_long_recording(e, day, earlier[0], spoken)" in pr, "process decides a second long recording through the helper"
+    assert "teaser_day_from_lead(key, role, spoken, day, reason, ledger)" in pr, "process takes a no-day teaser's episode from its pair"
+
+
 def selftest():
     _selftest_copy_goes_with_render()
     _selftest_parts()
+    _selftest_teaser_pairing()
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
     assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
     assert output_names(2225)["full_yt"] == "Episode_2225_Full_Episode_YT.mp4" and output_names(2225)["lfmd_srt"] == "Ep2225_LFMD_YT.srt"
@@ -2940,7 +3172,7 @@ def selftest():
     assert 'e.pop("intro_at_override", None)' in rd, "a jingle point with no figure must drop a stored one"
     assert "intro_at_override" not in RESET_STALE, "his figure must survive a failed-clip reset"
     _selftest_note_times()
-    print(json.dumps({"checks": 118, "failed": []}))
+    print(json.dumps({"checks": 155, "failed": []}))
 
 
 def _selftest_note_times():
