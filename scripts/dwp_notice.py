@@ -308,17 +308,14 @@ def decision_sentence(body):
 
 
 def auto_reply_skips(reason, decided, named=False):
-    """True for a message the scan flagged as an automatic reply with no decision sentence in it. A decision is
-    never skipped: "Thank you for contacting Universal Credit." can open a real decision (review rounds 2-3).
-    A message flagged only by a receipt phrase in its body is skipped only when it also names nobody (review
-    round 4: "We have received your request for <tenant>. Rent will now be paid to you directly..." states a
-    fact in words the decision list does not hold). The Auto-Submitted header and an auto-reply subject skip
-    whenever nothing is decided."""
+    """True for a message the scan flagged as an automatic reply by its Auto-Submitted header or an auto-reply
+    subject, with no decision sentence in it. A message flagged only by a receipt phrase in its body is never
+    skipped (review rounds 2 to 5): "Thank you for contacting Universal Credit." can open a fact in words no list
+    holds ("We will pay the housing costs for <tenant> directly to you"), and a lost DWP fact is the costlier
+    error. The cost: a pure receipt becomes a RENT CHECK task with no tenant. `named` is kept for the callers."""
     if not reason or decided:
         return False
-    if str(reason).strip().lower().startswith("body") and named:
-        return False
-    return True
+    return not str(reason).strip().lower().startswith("body")
 
 
 def summary(subject, body):

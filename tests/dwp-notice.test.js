@@ -574,7 +574,7 @@ result = {"dwp": ["dwp" in cache[k] for k in ("m81", "m82")], "acted": acted["co
     expect(r.dwp).toEqual([true, false]);
     expect(r.acted).toBe(0);
     expect(r.comments).toEqual(['recTYALDER0000001']);
-    expect(r.skips).toEqual([true, false, true]);
+    expect(r.skips).toEqual([false, false, true]);
   });
 
   it('note --do answered on a cached DWP message still files it AND records it; act then note records once', () => {
@@ -894,18 +894,22 @@ result = {"acted": acted, "noted": noted, "replay": replay["rows"], "noWhy": no_
   });
 
   // Fix 2: any scan-flagged automatic reply with nothing decided is skipped, the receipt-phrase reading included.
-  it('a flagged receipt with nothing decided gets no DWP reading and is skipped by the plan', () => {
+  // Review round 5: a reply flagged only by a receipt phrase in its body is never skipped, because a fact can follow
+  // the receipt in words no list holds. The stated cost: a pure receipt naming nobody becomes one task, no comment.
+  it('a receipt flagged only by its body is read, not skipped: naming nobody, it becomes one task', () => {
     const r = py(`${TRIAGE}
 ack = "Thank you for contacting Universal Credit. We will reply within 10 working days."
 t.write_scan_cache([msg("m71", "Your message", ack, auto_reply="body: thank you for contacting")])
 cache = t.read_scan_cache()
 acted = run(["act", "--id", "m71", "--do", "archive", "--reason", "filed"])
-skip = d.plan("m71", dict(ctx("${UC}", "Your message", ack), auto_reply="body: thank you for contacting"), TODAY)
-result = {"dwp": "dwp" in cache["m71"], "acted": acted["code"], "comments": calls["comments"], "tasks": calls["tasks"], "plan": skip["do"]}`);
-    expect(r.dwp).toBe(false);
+planned = d.plan("m71", dict(ctx("${UC}", "Your message", ack), auto_reply="body: thank you for contacting",
+                             dwp=cache["m71"].get("dwp")), TODAY)
+result = {"dwp": "dwp" in cache["m71"], "acted": acted["code"], "comments": calls["comments"], "tasks": len(calls["tasks"]),
+          "plan": planned["do"]}`);
+    expect(r.dwp).toBe(true);
     expect(r.acted).toBe(0);
-    expect([r.comments, r.tasks]).toEqual([[], []]);
-    expect(r.plan).toBe('skip');
+    expect(r.comments).toEqual([]);
+    expect(r.tasks).toBe(1);
   });
 
   // Fix 2: a sentence that begins "If" is boilerplate, never the decision that keeps a flagged reply.
