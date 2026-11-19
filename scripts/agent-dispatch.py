@@ -5951,7 +5951,8 @@ def cmd_handover(args):
             "Airtable accepts it without complaint."
         )
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
-    reason = (args.reason or "").strip() or "approved reassignment"
+    # One line (review of PR #978): a reason with line breaks could plant a stamped Notes line.
+    reason = " ".join(str(args.reason or "").split()) or "approved reassignment"
     t = get_task(args.task)
     # A handover emails the task and its draft to a colleague. A trial task goes to nobody (2 Oct 2026).
     _tf = t.get("fields", {}) or {}
@@ -8618,6 +8619,11 @@ def cmd_annotate(args):
     # nine times that way while its house had no insurance (25 Sep 2026). A
     # wall is now a `block` with a kind, which routes the fix and wakes the
     # task when it lands. The free-text form is refused so it cannot come back.
+    if (DECIDED_NOTE_MARK + ":") in (args.note or ""):
+        # Only `decided`, route and handover write it, and `complete` reads it as Kevin's carried-out
+        # approval (finding 20261106-agent-dispatch-1223): a typed one would close a task he never approved.
+        sys.exit(f"ERROR: refusing a note on {args.task} that writes the '{DECIDED_NOTE_MARK}' mark. Only "
+                 "the dispatcher writes it, when it carries out Kevin's answer on a decision card.")
     if HANDLED_MARK in (args.note or ""):
         # Only submit writes this marker (a Level A carry-out or a filed status update), and the
         # status line is the clock a task rests on: a typed one would rest it with nothing filed.
@@ -8725,6 +8731,67 @@ def due_move_problem(fields, new_due, today, quote):
         return (f"{new_due.isoformat()} is more than {DUE_FAR_DAYS} days out and Kevin's quoted words do not name its "
                 "month or date: quote the words that say when")
     return ""
+
+
+def restore_park_problem(t, today_iso):
+    """(date, '') when Kevin's own park on this task stands and may be put back, else ('', why not).
+
+    A FOLD MUST NOT UNDO HIS PARK (findings 20261105-agent-dispatch-1209 and 20261105-agent-dispatch-1207). On
+    19 Oct Kevin parked the weekly trust review card to 17 Jan 2027; on 2 Nov the next trust review folded into
+    it and the gate moved it back to Approval. He then approved putting it back, and no command could: `due`
+    refuses a task at Approval and `decided` refuses a card without DECIDE:. The park line is the
+    dispatcher's own stamp (KEVIN_PARK_RE); it stands when its date is still ahead and no answer of his is
+    newer than it (Approved At after the park's day: his newer answer decides)."""
+    if t["status"] in ("Completed", "Cancelled"):
+        return "", f"the task is {t['status']}"
+    parks = list(KEVIN_PARK_RE.finditer(str(t["notes"] or "")))
+    if not parks:
+        return "", "no park of Kevin's is recorded on this task (an agent-dispatch 'Parked until <date> on Kevin's answer' line)"
+    until = parks[-1].group(1)
+    if until <= today_iso:
+        return "", f"his park ran to {until}, which has passed"
+    # Anything on record AFTER his park is newer than it (review of PR #978): a card submitted since (submit
+    # clears Approved At), an escalation, a decision carried out, or a due date moved on his words.
+    later = str(t["notes"] or "")[parks[-1].end():]
+    newer = [what for what, rx in (("a card was submitted", SUBMITTED_LINE_RE),
+                                   ("it was escalated to him", ESCALATED_LINE_RE),
+                                   ("a decision of his was carried out", DECIDED_ANY_LINE_RE),
+                                   ("its due date was moved on his words", DUE_MOVED_LINE_RE)) if rx.search(later)]
+    if newer:
+        return "", f"since his park, {' and '.join(newer)}: the newer step decides, not the park"
+    if t.get("_hardDeadline") and str(t.get("dueDate") or "")[:10] and str(t["dueDate"])[:10] < until:
+        return "", f"a Hard Deadline of {str(t['dueDate'])[:10]} falls before the park's {until}: the deadline decides"
+    m = re.match(r"\[(\d{1,2} \w{3} \d{4})", parks[-1].group(0))
+    try:
+        park_day = datetime.strptime(m.group(1), "%d %b %Y").date().isoformat() if m else ""
+    except ValueError:
+        park_day = ""
+    approved = str(t.get("approvedAt") or "")[:10]
+    if approved and park_day and approved > park_day:
+        return "", f"Kevin answered on {approved}, after his park of {park_day}: his newer answer decides"
+    if t["status"] == "Upcoming" and str(t.get("dueDate") or "")[:10] == until:
+        return "", f"the park already stands (Upcoming, due {until})"
+    return until, ""
+
+
+# Tasks "Hard Deadline" (scripts/create-agent-task.py F["hardDeadline"]; js/config.js).
+HARD_DEADLINE_FIELD = "fldZKzIxgyrQ8CG8a"
+
+
+def cmd_restore_park(args):
+    """Put back a park Kevin gave that a fold or a stray write undid (restore_park_problem)."""
+    rec = get_task(args.task)
+    t = dict(task_view(rec), _hardDeadline=bool((rec.get("fields") or {}).get(HARD_DEADLINE_FIELD)))
+    until, why = restore_park_problem(t, today_london())
+    if why:
+        sys.exit(f"REFUSED: {args.task}: {why}.")
+    stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    note = (f"[{stamp} — agent-dispatch] Parked until {until} on Kevin's answer (his earlier park, put back after "
+            f"something moved the task to {t['status']}).")
+    fields = {AF["status"]: "Upcoming", AF["dueDate"]: until, AF["sentForApprovalBy"]: [],
+              AF["notes"]: (str(t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:]}
+    patch_task(args.task, fields)
+    print(json.dumps({"parkRestored": args.task, "until": until, "was": t["status"]}))
 
 
 def cmd_due(args):
@@ -11156,12 +11223,93 @@ def woke_close_problem(task_id, t, changed_said, what):
     return f"refusing to {what}: {problem}." + snap_note if problem else ""
 
 
+DECIDED_OUTPUT_RE = re.compile(r"\s*DECIDED \(Kevin, [^)]+\): (Approved as-is|Approved with minor edits)\b")
+DECIDED_MARK_LINE_RE = re.compile(
+    r"^\[\d{1,2} \w{3} \d{4}(?: \d{2}:\d{2})? — agent-dispatch\] " + re.escape(DECIDED_NOTE_MARK)
+    + r": (Approved as-is|Approved with minor edits)\b", re.M)
+SUBMITTED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] SUBMITTED\b", re.M)
+ESCALATED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] Escalated to Kevin as a decision card\b", re.M)
+DECIDED_ANY_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DECIDED_NOTE_MARK) + r":", re.M)
+DUE_MOVED_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DUE_MOVED_MARK) + r"\b", re.M)
+PLAN_REPAIR_CARD_RE = re.compile(r"\bThe Your turn plan for (rec[A-Za-z0-9]{14})\b")
+
+
+def standing_park(notes, status, today_iso):
+    """The date of Kevin's park when it still STANDS, else '': his newest stamped park line is ahead, the task is
+    Upcoming, and no newer step is on record after it (a card submitted, an escalation, a decision carried out,
+    a due date moved on his words). An overridden park never holds a task (re-review of PR #978)."""
+    parks = list(KEVIN_PARK_RE.finditer(str(notes or "")))
+    if not parks or status != "Upcoming" or parks[-1].group(1) <= today_iso:
+        return ""
+    later = str(notes or "")[parks[-1].end():]
+    if any(rx.search(later) for rx in (SUBMITTED_LINE_RE, ESCALATED_LINE_RE, DECIDED_ANY_LINE_RE, DUE_MOVED_LINE_RE)):
+        return ""
+    return parks[-1].group(1)
+
+
+def decided_card_verdict(t):
+    """Kevin's approval on a decision card the dispatcher ITSELF closed with `decided`, or ''.
+
+    THE ANSWER WAS CARRIED OUT, THEN NOTHING COULD CLOSE THE TASK (findings 20261001-task-manager-board-687
+    and 20261106-agent-dispatch-1223). decision_carry_out_fields archives his verdict and clears Approval
+    Outcome and Approved At, so `complete` refused the task for ever ("outcome is 'empty'"): an approved
+    certificate close and an approved price-cap card sat open for weeks. The archived verdict counts only
+    as the dispatcher wrote it: the Agent Output opens 'DECIDED (Kevin, <date>): Approved...', a stamped
+    'agent-dispatch] Decision carried out: Approved...' line is in Notes (annotate refuses that mark typed),
+    and no card was SUBMITTED after it (a newer card carries its own verdict)."""
+    m = DECIDED_OUTPUT_RE.match(str(t.get("agentOutput") or ""))
+    if not m:
+        return ""
+    notes = str(t.get("notes") or "")
+    marks = list(DECIDED_MARK_LINE_RE.finditer(notes))
+    if not marks or SUBMITTED_LINE_RE.search(notes[marks[-1].end():]):
+        return ""
+    return marks[-1].group(1)
+
+
+def plan_repair_closable(t):
+    """The card id when this is a 'YOUR TURN PLAN REFUSED' task whose card's plan now passes the window's
+    own check (a positive PLAN OK, never 'could not check'), or whose plan is gone while the card no longer
+    waits as Kevin's step, else ''. The task told its agent to 'close
+    this task with that result as evidence', and `complete` refused it as unapproved (finding 687)."""
+    if not str(t.get("name") or "").startswith(PLAN_REPAIR_PREFIX):
+        return ""
+    m = PLAN_REPAIR_CARD_RE.search(str(t.get("description") or ""))
+    if not m:
+        return ""
+    kind = handover_plan_verdict(m.group(1))[0]
+    if kind == "ok":
+        return m.group(1)
+    if kind == "none":
+        # The plan is gone. Moot only when the card no longer waits in Kevin's lane as his step (read live):
+        # a Your step card with no plan is still owed one.
+        try:
+            card = task_view(get_task(m.group(1)))
+        except Exception as e:  # noqa: BLE001 - said, then refused: a card that cannot be read is not "done"
+            print(f"WARNING: could not read card {m.group(1)} for plan repair {t['id']}: {e}", file=sys.stderr)
+            return ""
+        return m.group(1) if card["status"] != "Approval" else ""
+    return ""
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
-        sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
-                 f"'{t['outcome'] or 'empty'}', not an approval. Only "
-                 "approved, carried-out work completes.")
+        evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
+        # Only a task with NO live verdict and nothing waiting (review of PR #978): a card back at Approval, a
+        # verdict of Changes requested or Rejected, or a park he gave that still stands keeps the door shut.
+        parked_until = standing_park(t["notes"], t["status"], today_london())
+        door = ""
+        if not t["outcome"] and t["status"] not in ("Approval", "Completed", "Cancelled") and not parked_until:
+            door = decided_card_verdict(t) or plan_repair_closable(t)
+        if not door:
+            sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
+                     f"'{t['outcome'] or 'empty'}', not an approval. Only "
+                     "approved, carried-out work completes (or a decision card the dispatcher closed with "
+                     "Kevin's approval, or a Your turn plan repair whose plan now passes).")
+        if len(evidence) < 20:
+            sys.exit(f"ERROR: refusing to complete {args.task} with no evidence: its approval was carried out "
+                     "and archived (or its plan now passes), so --evidence must say what was done and where.")
 
     # A MERGE card closes only on its merge (7 Oct 2026): merge-approved.py completes it with the
     # merge commit. Closed any other way, the PR would sit open with its TOOL walls for ever.
@@ -11592,9 +11740,17 @@ def handover_plan_problem(task_id):
     when Kevin pressed Your turn, so a hand-written plan missing a step's "until" put a button on his
     card that opened nothing but "BROWSER REFUSED: step 6 (kevin) needs say and one of untilUrl...".
     The check is agent-browser.js's own assertHandoverPlan, run through node, so the two never drift."""
+    kind, text = handover_plan_verdict(task_id)
+    return text if kind == "refused" else ""
+
+
+def handover_plan_verdict(task_id):
+    """('none' | 'ok' | 'refused' | 'unchecked', why) for a task's Your turn plan. handover_plan_problem
+    fails OPEN ('' when the check could not run, so the window still checks); a door that CLOSES
+    something must need a positive 'ok' (finding 20261001-task-manager-board-687)."""
     path = os.path.join(HANDOVER_DIR, (task_id or "") + ".json")
     if not TURN_TASK_RE.match(task_id or "") or not os.path.isfile(path):
-        return ""
+        return "none", ""
     js = ("const ab=require(process.argv[1]);const fs=require('fs');"
           "try{ab.assertHandoverPlan(JSON.parse(fs.readFileSync(process.argv[2],'utf8')));console.log('PLAN OK')}"
           "catch(e){console.log('PLAN REFUSED '+String((e&&e.message)||e).replace(/\\s+/g,' '))}")
@@ -11602,15 +11758,16 @@ def handover_plan_problem(task_id):
         r = subprocess.run([node_bin(), "-e", js, AGENT_BROWSER, path], capture_output=True, text=True, timeout=60)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         print(f"WARNING: the Your turn plan for {task_id} could not be checked: {e}", file=sys.stderr)
-        return ""
+        return "unchecked", str(e)
     lines = (r.stdout or "").strip().splitlines()
     last = lines[-1] if lines else ""
     if last.startswith("PLAN REFUSED "):
-        return last[len("PLAN REFUSED "):].replace("BROWSER REFUSED: ", "").strip()
-    if last != "PLAN OK":
-        print(f"WARNING: the Your turn plan check for {task_id} said nothing usable: {(r.stderr or '')[-200:]}",
-              file=sys.stderr)
-    return ""
+        return "refused", last[len("PLAN REFUSED "):].replace("BROWSER REFUSED: ", "").strip()
+    if last == "PLAN OK":
+        return "ok", ""
+    print(f"WARNING: the Your turn plan check for {task_id} said nothing usable: {(r.stderr or '')[-200:]}",
+          file=sys.stderr)
+    return "unchecked", (r.stderr or "")[-200:]
 
 
 PLAN_REPAIR_STATE = "plan-repairs.json"
@@ -16851,6 +17008,10 @@ def main():
     du.add_argument("--why", required=True, help="the reason, in a sentence")
     du.add_argument("--quote", required=True, help="Kevin's own words from his feedback on the task, verbatim")
 
+    rp = sub.add_parser("restore-park",
+                        help="put back Kevin's own park (an agent-dispatch 'Parked until' line) that a fold undid")
+    rp.add_argument("task")
+
     an = sub.add_parser("annotate")
     an.add_argument("task")
     an.add_argument("--note", required=True)
@@ -17061,7 +17222,7 @@ def main():
     # as success. Nothing looked wrong because the handlers that refuse do it by
     # calling sys.exit() — but `reconcile` and `lessons` report by RETURNING, so
     # discarding the result here would make both checks ornamental.
-    return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate, "decided": cmd_decided,
+    return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate, "decided": cmd_decided, "restore-park": cmd_restore_park,
             "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
             "ended-costs": cmd_ended_costs,
             "annotate": cmd_annotate, "due": cmd_due, "intent": cmd_intent,

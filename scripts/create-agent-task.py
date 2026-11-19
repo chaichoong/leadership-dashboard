@@ -2297,6 +2297,10 @@ def fetch_recent_completed(days=COMPLETED_JOIN_DAYS):
             return records
 
 
+# Mirrors KEVIN_PARK_RE in scripts/agent-dispatch.py (tests/agent-dispatch-restore-park.test.js holds them equal).
+KEVIN_PARK_LINE_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] Parked until (\d{4}-\d{2}-\d{2}) on Kevin's answer", re.M)
+
+
 def build_update(existing_fields, incoming_fields, today_iso):
     """The pure patch builder for a fold.
 
@@ -2338,7 +2342,24 @@ def build_update(existing_fields, incoming_fields, today_iso):
         patch[F["inboundUrl"]] = (old_url + " " + new_url).strip()
 
     existing_status = _sel_name(existing_fields.get(F["status"]))
-    if existing_status != "Approval":
+    # HIS PARK STANDS (finding 20261105-agent-dispatch-1207). A task Kevin parked to a date (the dispatcher's own
+    # "Parked until <date> on Kevin's answer" line, KEVIN_PARK_RE in agent-dispatch.py, mirrored here and
+    # drift-tested) keeps its Status and Due Date when something folds into it: on 2 Nov 2026 the weekly trust
+    # review folded into a card he had parked for 90 days and put it back in front of him. The fold's text
+    # still lands in the Description; it is read on the park's date.
+    parked = KEVIN_PARK_LINE_RE.findall(str(existing_fields.get(F["notes"]) or ""))
+    park_stands = (existing_status == "Upcoming" and bool(parked) and parked[-1] > today_iso
+                   and str(existing_fields.get(F["due"]) or "")[:10] > today_iso)
+    # A real deadline beats a park (review of PR #978): a hard date earlier than the park ends it.
+    _in_due = str(incoming_fields.get(F["due"]) or "")[:10]
+    if park_stands and bool(incoming_fields.get(F["hardDeadline"])) and _in_due and _in_due < parked[-1]:
+        park_stands = False
+    if park_stands:
+        # Said, never silent: what folded in is read on the park's date.
+        patch[F["notes"]] = (str(existing_fields.get(F["notes"]) or "").rstrip() + "\n\n[%s — create-agent-task] "
+                             "Folded in while Kevin's park stands until %s: read on that date (see the Description)."
+                             % (today_iso, parked[-1])).strip()[-90000:]
+    if existing_status != "Approval" and not park_stands:
         # Same allowed set as a create: the fold path PATCHes with typecast
         # on, so an unvalidated value here would mint the phantom option the
         # create path now refuses.
@@ -2361,7 +2382,7 @@ def build_update(existing_fields, incoming_fields, today_iso):
                 patch[F["sentForApprovalBy"]] = senders
 
     ex_due = str(existing_fields.get(F["due"]) or "")[:10]
-    in_due = str(incoming_fields.get(F["due"]) or "")[:10]
+    in_due = "" if park_stands else str(incoming_fields.get(F["due"]) or "")[:10]
     ex_hard = bool(existing_fields.get(F["hardDeadline"]))
     in_hard = bool(incoming_fields.get(F["hardDeadline"]))
     # WHOSE HARD DATE IS IT (28 Oct 2026, finding 20261024-phase-3-1067). The
