@@ -59,6 +59,12 @@ USAGE
                                               for Kevin to read: label 19,
                                               archive, and queue it for this
                                               run's INBOX card (Kevin, 14 Oct 2026)
+                                              Every act and note on a DWP or Universal Credit
+                                              notice also puts it on the tenancy record
+                                              (scripts/dwp_notice.py): one comment on the one
+                                              matching live tenancy, else one RENT CHECK task.
+                                              Exit 5 = the decision stands and is logged, but
+                                              the notice is not on the record (said on stderr)
   inbound-triage.py inbox-card [--slot HH:MM] [--dry-run]
                                               ONE approval card listing every
                                               queued "for Kevin to read" email
@@ -118,6 +124,7 @@ from gmail_pacer import (  # noqa: E402  one ledger and one cost model for every
     GMAIL_UNITS_GET, GMAIL_UNITS_LIST, GMAIL_UNITS_PER_MINUTE,
     _pace, gmail_note_refusal, gmail_pace, gmail_units,
 )
+import dwp_notice  # noqa: E402  a DWP notice reaches the tenancy record in code (finding 20261118-agent-dispatch-1353)
 
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
 
@@ -527,6 +534,17 @@ def write_scan_cache(messages):
             # TO this message's sender? Stamped by the scan; read by `note`.
             "reply_state": m.get("reply_state", ""),
         }
+        # A DWP or Universal Credit notice: the tenant it names and what was decided, read off the
+        # full body like `deadline`. Every act and note on the message reads it back and puts the
+        # fact on the tenancy record (finding 20261118-agent-dispatch-1353).
+        if dwp_notice.is_dwp_notice(cache[m["id"]]["sender"]):
+            subject = (m.get("headers") or {}).get("subject", "")
+            try:
+                cache[m["id"]]["dwp"] = dwp_notice.cache_entry(subject, unquote(m.get("body", "")))
+            except Exception as exc:  # noqa: BLE001 — the scan never dies on it; the notice becomes a task
+                progress("DWP NOTICE NOT READ for %s (%s): it will be raised as a RENT CHECK task with no name"
+                         % (m["id"], str(exc)[:160]))
+                cache[m["id"]]["dwp"] = {"tenant": "", "summary": " ".join(str(subject).split())[:300]}
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
     (d / "scan-cache.json").write_text(json.dumps(cache))
@@ -1154,7 +1172,42 @@ def cmd_act(msg_id, action, reason, label_num=None, override=None, task_id=None)
     result = worker_post("/gmail/modify", {"ids": [msg_id], "addLabels": add, "removeLabels": remove})
     digest_append({"id": msg_id, "do": digest_do, "sender": ctx.get("sender", ""),
                    "subject": ctx.get("subject", ""), "reason": reason})
-    print(json.dumps({"done": digest_do, "id": msg_id, "modified": result.get("modified")}))
+    return finish_with_dwp({"done": digest_do, "id": msg_id, "modified": result.get("modified")},
+                           *record_dwp_notice(msg_id, ctx))
+
+
+# THE DECISION STANDS, AND A DWP NOTICE STILL REACHES THE TENANCY (finding 20261118-agent-dispatch-1353).
+# Until 19 Nov 2026 a Universal Credit or DWP notice filed as "answered" or archived never reached the
+# tenancy it was about. Every act and note now ends here, AFTER the Gmail move and the digest line, so a
+# record that fails can never block or lose the decision: it is said on stderr and the command exits
+# DWP_RECORD_EXIT. dwp_notice.record is idempotent on the message id, so act-then-note records once.
+DWP_RECORD_EXIT = 5
+
+
+def record_dwp_notice(msg_id, ctx):
+    """(what was recorded, the problem). Both empty for a message with no DWP reading in the cache."""
+    if not isinstance((ctx or {}).get("dwp"), dict):
+        return None, ""
+    try:
+        return dwp_notice.record(msg_id, ctx), ""
+    except Exception as exc:  # noqa: BLE001 — never swallowed: finish_with_dwp says it and exits non-zero
+        return None, (str(exc) or exc.__class__.__name__)[:400]
+
+
+def finish_with_dwp(out, dwp, problem):
+    """Print the decision's JSON (with the DWP result) and give the exit code."""
+    if dwp:
+        out["dwp"] = dwp
+    if problem:
+        out["dwpProblem"] = problem
+    print(json.dumps(out))
+    if problem:
+        progress("DWP NOTICE NOT RECORDED for %s: %s. The triage decision stands and is logged, so do not "
+                 "decide the message again; the notice is not on any tenancy record yet. "
+                 "`python3 scripts/dwp_notice.py backfill --dry-run` lists every DWP notice still off the record."
+                 % (out.get("id", ""), problem))
+        return DWP_RECORD_EXIT
+    return 0
 
 
 def cmd_note(msg_id, action, reason, override=None):
@@ -1218,7 +1271,8 @@ def cmd_note(msg_id, action, reason, override=None):
             filed = True
     digest_append({"id": msg_id, "do": action, "sender": ctx.get("sender", ""),
                    "subject": ctx.get("subject", ""), "reason": reason})
-    print(json.dumps({"noted": action, "id": msg_id, "filedOutOfInbox": filed}))
+    return finish_with_dwp({"noted": action, "id": msg_id, "filedOutOfInbox": filed},
+                           *record_dwp_notice(msg_id, ctx))
 
 
 # ─── THE INBOX CARD (Kevin, 14 Oct 2026) ─────────────────────────────────
@@ -4803,14 +4857,14 @@ def main(argv):
         action = opt("--do")
         if not msg_id or not action:
             fail("act needs --id and --do")
-        cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"),
-                opt("--override"), opt("--task"))
+        return cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"),
+                       opt("--override"), opt("--task"))
     elif cmd == "note":
         msg_id = opt("--id")
         action = opt("--do")
         if not msg_id or not action:
             fail("note needs --id and --do")
-        cmd_note(msg_id, action, opt("--reason", ""), opt("--override"))
+        return cmd_note(msg_id, action, opt("--reason", ""), opt("--override"))
     elif cmd == "inbox-card":
         return cmd_inbox_card(opt("--slot"), dry_run="--dry-run" in argv)
     elif cmd == "inbox-lessons":
