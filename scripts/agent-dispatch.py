@@ -125,7 +125,9 @@ from agent_email_format import (  # noqa: E402
     # Kevin's six rulings (16 Nov 2026, decision card recinoFWz6fQ6JVVB): who sends property mail.
     PROPERTY_SENDER,
     TEXT_CARD_MARKS,
-    RENT_CHASE_PREFIXES,
+    RENT_ARREARS_STAGE,
+    RENT_KEY_RE,
+    rent_chase_card,
     AGENT_RENT_LATE_PREFIX,
     SIX_RULINGS,
     FREE_MAIL_DOMAINS,
@@ -6701,8 +6703,8 @@ def tenant_notice_problem(name, output, task_type, notice):
 # stops a card for rent that landed between the morning rent check and the agent's submit. Back-test:
 # 10 keyed RENT LATE cards, none refused (nothing had landed for the owed cycle when each was
 # submitted). The send reads the bank again through rent_landed_state (16 Nov 2026): send-email.py
-# rent_landed_refusal, which send-text.py calls for the same card's text.
-RENT_KEY_RE = re.compile(r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):\d")
+# rent_landed_refusal, which send-text.py calls for the same card's text. RENT_KEY_RE (the key line, with its stage)
+# and rent_chase_card (which cards are read) live in agent_email_format.py, shared with the send (finding 1355).
 RENT_FIELD = "fldDMyfZLFMeONPq8"               # Tenancies: monthly rent (rent-check.py TY["rent"])
 TX_TENANCY_FIELD = "fldPmAMmxwqs4SdPa"         # Transactions: Tenancy link (rent-check.py TX["tenancy"])
 EARLY_RENT_DAYS = 5                            # rent-check.py EARLY_PAY_DAYS
@@ -6738,12 +6740,13 @@ def rent_landed_state(name, notes, description, records=None):
     when it is not a rent chase card (RENT_CHASE_PREFIXES: RENT LATE, and RENT ARREARS since finding 1355)
     or the rent has not landed. The card lets the three that could not be checked through with a NOT
     CHECKED stamp (rent_paid_problem); the send refuses all three (review of PR 959: running is not working)."""
-    if not str(name or "").startswith(RENT_CHASE_PREFIXES):
+    if not rent_chase_card(name, notes, description):
         return {"state": ""}
     key = RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")
     if not key:
         return {"state": "nokey"}
     tenancy, owed = key.group(1), datetime.strptime(key.group(2), "%Y-%m-%d").date()
+    arrears = int(key.group(3)) >= RENT_ARREARS_STAGE
     since = (owed - timedelta(days=EARLY_RENT_DAYS + 1)).isoformat()
     try:
         rows = (records or query_records)(TENANCIES_TABLE, formula=f"RECORD_ID()='{tenancy}'",
@@ -6761,19 +6764,37 @@ def rent_landed_state(name, notes, description, records=None):
         bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
         return {"state": "unchecked", "detail": str(exc)[:120]}
-    cycle = owed_cycle_lines(bank, tenancy, owed, due_day)
+    if arrears:
+        # An arrears card is sent weeks or months after the rent it chases fell due, so the owed cycle's window has
+        # closed by then: every line matched to the tenancy since that due date counts, with no upper bound, or a
+        # payment made today would go unseen (review of finding 1355). Money out nets, as in a cycle.
+        lo = (owed - timedelta(days=EARLY_RENT_DAYS)).isoformat()
+        cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] >= lo]
+    else:
+        cycle = owed_cycle_lines(bank, tenancy, owed, due_day)
     paid = [b for b in cycle if b["amount"] > 0]
     total = sum(b["amount"] for b in cycle)
     if total < rent - RENT_SLACK:
         return {"state": ""}
     shown = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in paid[:4])
-    return {"state": "landed", "shown": shown, "total": total, "rent": rent, "owed": owed,
-            "detail": (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: "
-                       f"{shown}, £{total:,.2f} against rent of £{rent:,.2f}")}
+    if arrears:
+        detail = (f"£{total:,.2f} has been paid to this tenancy since the rent due {owed.strftime('%d %b %Y')} that this "
+                  f"arrears card chases: {shown}, against rent of £{rent:,.2f}")
+    else:
+        detail = (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: "
+                  f"{shown}, £{total:,.2f} against rent of £{rent:,.2f}")
+    return {"state": "landed", "shown": shown, "total": total, "rent": rent, "owed": owed, "detail": detail}
 
 
 def rent_paid_problem(name, notes, description):
     landed = rent_landed_state(name, notes, description)
+    if landed["state"] == "nokey" and str(name or "").startswith("RENT ARREARS: "):
+        # Nobody's code raises a RENT ARREARS card, so its key is whoever made it's to write. Without one the send
+        # refuses after Kevin approves, and his approval is wasted (review of finding 1355): say so at submit.
+        return ("it is a RENT ARREARS card with no RENT CHECK KEY line, so the bank cannot be read for it here or at the "
+                "send, which would refuse it after Kevin approved. Add the key for the oldest unpaid rent it chases, "
+                "then submit again: python3 scripts/agent-dispatch.py annotate <this task> --note \"RENT CHECK KEY: "
+                f"<tenancy id>:<that rent's due date, YYYY-MM-DD>:{RENT_ARREARS_STAGE}\"")
     if landed["state"] in ("notenancy", "norent"):
         note_not_checked(f"rent paid-again check: tenancy {landed['tenancy']} has no rent on its record, so code could "
                          "not tell whether what was matched to it since the due day covers the rent")

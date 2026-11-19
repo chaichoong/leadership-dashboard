@@ -289,6 +289,17 @@ TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ARREARS: ", "RENT ASK: ", "RE
 # A chase card with no key is refused at the send, never sent unchecked (review of PR 981).
 RENT_CHASE_PREFIXES = ("RENT LATE: ", "RENT ARREARS: ")
 RENT_ARREARS_STAGE = 4
+# The key line of a rent chase: tenancy, the due date of the rent chased, the stage. No other lane's key has this
+# shape (RENT ASK's names a step word, RENT CAP's starts cap:, RENT DETAILS' details:, the proof of residency's
+# residency:), so a card carrying one is a rent chase whatever its name says (review of finding 1355: a RENT
+# ARREARS card's name is typed by hand, and "Rent arrears: ..." must not skip the bank).
+RENT_KEY_RE = re.compile(r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):(\d)")
+
+
+def rent_chase_card(name="", notes="", description=""):
+    """True for a card that chases owed rent: by its name, or by a rent chase key line in its Notes or Description."""
+    return (str(name or "").startswith(RENT_CHASE_PREFIXES)
+            or bool(RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")))
 
 
 def parse_plan(output):

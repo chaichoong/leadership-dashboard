@@ -187,7 +187,7 @@ state = AD.rent_landed_state(ARREARS, "no key line", "")
 print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items()}, "state": state,
                   "lane": ARREARS.startswith(AD.RENT_LANE_PREFIXES)}))`);
     for (const k of ['landedText', 'landedEmail']) {
-      expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/the rent for the cycle due .* has arrived since the check ran: .*recRentLineAaaaaa.*Nothing was sent/)]);
+      expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/£500\.00 has been paid to this tenancy since the rent due .* that this arrears card chases: .*recRentLineAaaaaa.*Nothing was sent/)]);
       expect([k, r.r[k][1], r.r[k][2]]).toEqual([k, [], ['rent', 'bank']]);
     }
     for (const k of ['clearText', 'clearEmail']) {
@@ -203,13 +203,44 @@ print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out
     expect(r.lane).toBe(true);
   });
 
-  it('only a RENT LATE card is read again: another rent lane card and an ordinary email touch no bank', () => {
+  // The independent review of the first draft: an arrears card is sent long after the rent it chases fell due, so
+  // the owed cycle's window had closed and a payment made yesterday went unseen; a hand-typed name ("Rent arrears:")
+  // opened the text door through its key but skipped the bank; and a keyless card passed submit, only to be
+  // refused at the send after Kevin approved it.
+  it('an arrears key 50 days old still sees money paid yesterday; a hand-typed name with a key is read; submit refuses a keyless card', () => {
+    const r = py(`
+OLD = (date.today() - timedelta(days=50)).isoformat()
+KEYED = "[19 Nov 2026 — agent] RENT CHECK KEY: %s:%s:4" % (TENANCY, OLD)
+STATE["rent"] = 500.0
+out = {}
+BANK[:] = [{"id": "recLateLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
+CARD = dict(fields("RENT ARREARS: Unit 9 - 1 Example Road, unpaid after three chases"), **{AF["notes"]: KEYED})
+out["oldText"], out["oldEmail"] = run("text"), run("email")
+for i, nm in enumerate(["Rent arrears: Unit 9 - 1 Example Road", "RENT ARREARS - Unit 9 - 1 Example Road"]):
+    CARD = dict(fields(nm), **{AF["notes"]: KEYED})
+    out["typed%dText" % i], out["typed%dEmail" % i] = run("text"), run("email")
+BANK[:] = []
+CARD = dict(fields("Rent arrears: Unit 9 - 1 Example Road"), **{AF["notes"]: KEYED})
+out["typedClear"] = run("text")
+AD.note_not_checked = lambda *a, **k: None
+submit = AD.rent_paid_problem("RENT ARREARS: Unit 9 - 1 Example Road", "no key line", "")
+print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items()}, "submit": submit}))`);
+    for (const k of ['oldText', 'oldEmail', 'typed0Text', 'typed0Email', 'typed1Text', 'typed1Email']) {
+      expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/has been paid to this tenancy since the rent due .*recLateLineAaaaaa.*Nothing was sent/)]);
+      expect([k, r.r[k][1], r.r[k][2]]).toEqual([k, [], ['rent', 'bank']]);
+    }
+    expect([r.r.typedClear[0], r.r.typedClear[1].length, r.r.typedClear[2]]).toEqual([null, 1, ['rent', 'bank']]);
+    expect(r.submit).toMatch(/a RENT ARREARS card with no RENT CHECK KEY line.*annotate <this task> --note "RENT CHECK KEY: <tenancy id>:<that rent's due date, YYYY-MM-DD>:4"/);
+  });
+
+  it('only a rent chase card is read again: another rent lane card and an ordinary email touch no bank', () => {
     const r = py(`
 BANK[:] = [{"id": "recRentLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
-CARD = fields("INBOUND: reply from Sam about the boiler")
+# A chase is known by its name or its key line (review of finding 1355), so the ordinary email carries neither.
+CARD = dict(fields("INBOUND: reply from Sam about the boiler"), **{AF["notes"]: "a note with no key line"})
 other = run("email")
 print(json.dumps({"other": [other["refused"], len(other["sent"]), other["reads"]],
-                  "state": AD.rent_landed_state("RENT ASK: Unit 9", CARD[AF["notes"]], "")}))`);
+                  "state": AD.rent_landed_state("RENT ASK: Unit 9", "RENT CHECK KEY: %s:uc47:1:ask" % TENANCY, "")}))`);
     expect(r.other).toEqual([null, 1, []]);
     expect(r.state).toEqual({ state: '' });
   });

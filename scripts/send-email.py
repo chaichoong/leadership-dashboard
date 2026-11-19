@@ -101,8 +101,8 @@ from agent_email_format import (  # noqa: E402
     parse_text,
     TASK_TENANCIES,
     TENANCIES_TABLE,
-    RENT_CHASE_PREFIXES,
     RENT_ARREARS_STAGE,
+    rent_chase_card,
     tenancies_to_note,
     tenancy_comment,
     BUSINESS_SENDER,
@@ -1127,11 +1127,13 @@ def rent_landed_refusal(task_id, task_name, fields=None):
     """'' or why a rent chase email or text (RENT LATE, RENT ARREARS), or an AGENT RENT LATE email, must not go
     now. `fields` is the task as the send already read it; with none, it is read here."""
     name = str(task_name or "")
-    if not (name.startswith(RENT_CHASE_PREFIXES) or name.startswith("AGENT RENT LATE: ")):
-        return ""
     f = fields if fields is not None else (get_task(task_id).get("fields", {}) or {})
     if name.startswith("AGENT RENT LATE: "):
         return agent_rent_landed_refusal(task_id, f)
+    # By its name OR its key line (review of finding 1355): send-text.py texts a card that carries the key, so the
+    # bank is read for every such card, whatever its hand-typed name says.
+    if not rent_chase_card(name, f.get(AF["notes"], ""), f.get(AF["description"], "")):
+        return ""
     landed = dispatch_module().rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
                                                  f.get(AF["description"], ""), records=_rent_rows)
     if landed.get("state") == "landed":
