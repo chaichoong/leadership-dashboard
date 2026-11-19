@@ -99,6 +99,8 @@ from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_output as parse_email_output,
     parse_text,
+    SEPARATOR_LINE_RE,
+    SPEND_STEP_RE,
     TASK_TENANCIES,
     TENANCIES_TABLE,
     tenancies_to_note,
@@ -461,6 +463,97 @@ def parse_output(output, task_id):
                  "See the format in this script's docstring.")
 
 
+# ─── A SPEND LINE INSIDE AN ALREADY-APPROVED EMAIL ───────────────────
+# Finding 20261118-agent-dispatch-1363. agent_email_format refuses an email whose
+# body carries a "SPEND:" line: the line declares OUR money for Kevin's approval
+# card and the recipient must never read it. At SUBMIT that refusal is right — the
+# draft is rewritten before Kevin ever reads it. On the SEND path it strands work
+# he has already approved: a card approved BEFORE the rule existed can never be
+# sent, because `revise` only repairs a minor-edits approval, so an as-is approval
+# is stuck for ever (recdD2hamAFbRmIoE, 18 Nov 2026, still unsent).
+#
+# So the send path REPAIRS the body instead of refusing, by the narrowest door that
+# cannot change what Kevin approved. Removing a line he never intended the recipient
+# to read does not change the email he approved; it is the line's presence that is
+# the mistake. The leak guard is NOT weakened:
+#   * only when the task carries real approval evidence — no evidence, same refusal;
+#   * only a line that STARTS with the marker and runs on into no second sentence,
+#     so spend wording inside a sentence the recipient reads is refused exactly as
+#     now, because cutting it would change what the recipient reads;
+#   * whole raw lines are dropped and nothing is rewritten, so the rest of the body
+#     is byte-identical (checked by length below, not assumed);
+#   * the repaired output must parse cleanly and hold no SPEND line afterwards, or
+#     the parser's own refusal stands.
+# The declaration is not lost: it goes into the task's Notes as a dated line beside
+# the SENT stamp, so the money the agent declared stays on the record.
+SPEND_SENTENCE_RE = re.compile(r"[.!?][ \t]+\S")
+SPEND_REFUSAL_MARK = "a SPEND line sits inside the email"
+
+
+def strip_spend_declaration(output):
+    """Return (output, removed): standalone SPEND lines taken out of the body.
+
+    `removed` is the stripped declaration(s), for the audit trail. If the line
+    cannot be taken out cleanly, the output comes back untouched and the
+    parser's own refusal stands. Never cuts part of a line.
+    """
+    text = str(output or "")
+    if not SPEND_STEP_RE.search(text):
+        return text, ""
+    try:
+        parse_email_output(text)
+        return text, ""                      # the parser does not object: change nothing
+    except EmailFormatError as exc:
+        if SPEND_REFUSAL_MARK not in str(exc):
+            return text, ""                  # a different refusal: report it unchanged
+    flat = text.replace("\r\n", "\n").replace("\r", "\n")
+    sep = SEPARATOR_LINE_RE.search(flat)
+    if sep:
+        cut = sep.end()
+    elif "---" in flat:
+        cut = flat.find("---") + 3           # the same split parse_output falls back to
+    else:
+        return text, ""                      # no body: nothing this function may touch
+    head, body = flat[:cut], flat[cut:]
+    keep, removed, dropped = [], [], []
+    drop_blank = False
+    for line in body.splitlines(keepends=True):
+        if drop_blank:
+            drop_blank = False
+            if not line.strip():
+                dropped.append(line)         # the blank line the SPEND line left behind
+                continue
+        if not SPEND_STEP_RE.match(line):
+            keep.append(line)
+            continue
+        if SPEND_SENTENCE_RE.search(SPEND_STEP_RE.sub("", line, count=1)):
+            return text, ""                  # it runs on into the email: never cut a sentence
+        removed.append(line.strip())
+        dropped.append(line)
+        drop_blank = (not keep) or (not keep[-1].strip())
+    if not removed:
+        return text, ""
+    if sum(len(x) for x in keep) + sum(len(x) for x in dropped) != len(body):
+        return text, ""                      # not an exact partition of the raw lines
+    repaired = head + "".join(keep)
+    try:
+        parsed = parse_email_output(repaired)
+    except EmailFormatError:
+        return text, ""                      # the repair does not stand on its own
+    if SPEND_STEP_RE.search(parsed["body"]):
+        return text, ""
+    return repaired, " | ".join(removed)
+
+
+def spend_audit_line(mail, stamp):
+    """The dated Notes record for a SPEND declaration kept out of an email body."""
+    spend = (mail.get("spendRemoved") or "").strip()
+    if not spend:
+        return ""
+    return (f"\n[{stamp} — send-email] SPEND DECLARATION KEPT OUT OF THE EMAIL "
+            f"(it was declared for your approval card, never for the recipient): {spend}")
+
+
 # ─── WAS IT REALLY APPROVED? ─────────────────────────────────────────
 # Finding 20260922-agent-dispatch-572: the Approval Outcome string alone is not an approval. The
 # check, its history and its limit live in scripts/approval_evidence.py, shared with
@@ -530,9 +623,17 @@ def load_approved(task_id, require_approval=True, rule=None):
     if not output.strip():
         sys.exit(f"ERROR: task {task_id} has an empty Agent Output")
 
+    # Kevin approved these words. A SPEND line he never meant the recipient to read
+    # comes OUT of the body rather than stranding the card (1363). Only with real
+    # approval evidence: without it the parser's refusal stands, as it did before.
+    spend_removed = ""
+    if not evidence:
+        output, spend_removed = strip_spend_declaration(output)
+
     parsed = parse_output(output, task_id)
     parsed.update({"taskName": name, "outcome": outcome, "approvalProblem": evidence,
-                   "approvedAt": f.get(AF["approvedAt"]) or "", "fields": f})
+                   "approvedAt": f.get(AF["approvedAt"]) or "", "fields": f,
+                   "spendRemoved": spend_removed})
     return parsed
 
 
@@ -552,6 +653,9 @@ def cmd_preview(args):
         # by `send` after Kevin has already approved the words.
         "senderProblem": business_identity_mismatch(
             mail["subject"], mail["body"], mail["from"]) or None,
+        # Said out loud here, not silently: the body below is the email, the
+        # declaration goes to the Notes trail on the send (1363).
+        "spendLineRemoved": mail.get("spendRemoved") or None,
     }, indent=2))
     print("\n--- body ---\n" + mail["body"])
 
@@ -750,6 +854,7 @@ def _cmd_send(args):
                           "attachment": ({"filename": attachment["filename"],
                                           "bytes": attachment["bytes"]}
                                          if attachment else None),
+                          "spendLineRemoved": mail.get("spendRemoved") or None,
                           "bodyChars": len(mail["body"])}, indent=2))
         return
 
@@ -804,6 +909,7 @@ def _cmd_send(args):
         att = f" with {attachment['filename']}" if attachment else ""
         line = (f"[{stamp} — send-email] SENT: email to {', '.join(mail['to'])} "
                 f"\"{mail['subject']}\"{att} (message {result.get('id') or '?'})")
+        line += spend_audit_line(mail, stamp)
         live = get_task(args.task).get("fields", {}) or {}
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
         api("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",
@@ -985,6 +1091,7 @@ def send_each(args, mail, sender_problem):
                 f"({len(wanted & now_done - now_retry)} of {len(wanted)} done)"
                 + (f". UNCERTAIN (may or may not have arrived, never resent): {', '.join(unsure)}" if unsure else "")
                 + (f". STOPPED: {error}" if error else "."))
+        line += spend_audit_line(mail, stamp)
         live = get_task(args.task).get("fields", {}) or {}
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
         api("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",

@@ -8629,6 +8629,17 @@ def cmd_annotate(args):
         # status line is the clock a task rests on: a typed one would rest it with nothing filed.
         sys.exit(f"ERROR: refusing a note on {args.task} that writes the {HANDLED_MARK} marker. A status "
                  "update is filed by `submit` with a STATUS ONLY output, never typed.")
+    if APPROVED_ELSEWHERE_MARK in (args.note or ""):
+        # Only `due`, `complete` and `hard-deadline-off` write this line, and only after reading the
+        # ruling task live. A typed one would claim an approval of Kevin's that nothing checked.
+        sys.exit(f"ERROR: refusing a note on {args.task} that writes the '{APPROVED_ELSEWHERE_MARK}' mark. "
+                 "It is written only by `due`, `complete` or `hard-deadline-off` with --approved-on, "
+                 "which read the ruling task's approval first.")
+    if RECORD_WRITE_MARK in (args.note or ""):
+        # Only `delete-rows` and `record-field` write this line, and only after the delete or the
+        # write came back proved. A typed one would claim a record change nothing checked happened.
+        sys.exit(f"ERROR: refusing a note on {args.task} that writes the '{RECORD_WRITE_MARK}' mark. It is "
+                 "written only by `delete-rows` or `record-field`, which read the record back first.")
     if BLOCKER_OPEN_MARK in (args.note or "") or BLOCKER_CLEARED_MARK in (args.note or ""):
         # Only block, unblock (with evidence) and the sweep write these lines; a
         # hand-written CLEARED line would let a task close with nothing proved.
@@ -8712,8 +8723,14 @@ def quote_names_date(quote, new_due):
     return any(_MONTH_NUM[w.lower()] == new_due.month for w in _MONTH_WORD.findall(quote))
 
 
-def due_move_problem(fields, new_due, today, quote):
-    """'' when the due date may move to new_due on these words of Kevin's, else why not."""
+def due_move_problem(fields, new_due, today, quote, elsewhere=""):
+    """'' when the due date may move to new_due on these words of Kevin's, else why not.
+
+    `elsewhere` is the ruling task id when his approval of this move is recorded on ANOTHER task and
+    approved_elsewhere_problem has already passed on it (19 Nov 2026). It changes exactly two of the
+    checks below and no others: the quote is read against the ruling task rather than this one, and a
+    past date is allowed when his words name that day. Status, the far-date rule and the closed-task
+    rule stand untouched on both routes."""
     status = sel(fields.get(AF["status"]))
     if status in ("Completed", "Cancelled"):
         return f"the task is {status}"
@@ -8722,9 +8739,13 @@ def due_move_problem(fields, new_due, today, quote):
     if status == "In Progress":
         return "a robot holds the task In Progress; its own lane moves it"
     if new_due < today:
-        return f"{new_due.isoformat()} is in the past"
+        if not elsewhere:
+            return f"{new_due.isoformat()} is in the past"
+        if not quote_names_exact_date(FEEDBACK_STAMP.sub(" ", quote or ""), new_due):
+            return (f"{new_due.isoformat()} is in the past and Kevin's approved words do not name that day: a "
+                    "past due date is set only to the date he actually said")
     q = _norm_words(FEEDBACK_STAMP.sub(" ", quote or ""))
-    if len(q) < 12 or q not in _norm_words(kevins_newest_note(fields)):
+    if not elsewhere and (len(q) < 12 or q not in _norm_words(kevins_newest_note(fields))):
         return ("--quote is not Kevin's own words in his NEWEST note on this task (Approval Feedback, else the last "
                 "entry of Feedback History), word for word; an agent never moves its own work")
     if (new_due - today).days > DUE_FAR_DAYS and not quote_names_date(FEEDBACK_STAMP.sub(" ", quote), new_due):
@@ -8778,6 +8799,394 @@ def restore_park_problem(t, today_iso):
 HARD_DEADLINE_FIELD = "fldZKzIxgyrQ8CG8a"
 
 
+# ─── AN APPROVAL KEVIN GAVE ON ANOTHER TASK (19 Nov 2026) ────────────
+#
+# An approved card on task A routinely rules on tasks B, C, D: a carry-out plan that moves a
+# checkpoint, a queue card whose answer sets rules on thirteen other tasks, a one-field fix on a
+# third task. Every write path read approval evidence from the TARGET task only, so three critical
+# findings sat blocked for 10 to 35 days with no door at all:
+#
+#   - 20261015-agent-dispatch-915: the approved carry-out moved checkpoint 3 (recWaLzLuxyqWUmCk)
+#     from 2 Nov to 16 Nov. `due` needs Kevin's words on THAT task; it has none. Same wall on 5 Oct.
+#   - 20261021-agent-dispatch-1028: an approved card ruled on 13 other tasks. `due` refused 9 of
+#     them, `complete` refused item 6, and no command could untick a Hard Deadline at all.
+#   - 20261108-agent-dispatch-1246: one field, Due Date on the BPO Collections task, back from
+#     2026-11-06 to 2026-11-05. `due` also refuses a past date outright.
+#
+# The answer is NOT to soften either check. It is one more door, named out loud by the caller and
+# audited on the record: --approved-on <ruling task> --quote "<his words>". The ruling task passes
+# the SAME approval_evidence_problem the target would have had to pass (it went through the gate,
+# an approval was recorded, and it was recorded after the task existed) AND carries a real approved
+# verdict, his quoted words must be in his approved text on it, and those words must NAME this
+# target. Nothing here reads a bare "Approved" string: that is finding 20260922-agent-dispatch-572.
+APPROVED_ELSEWHERE_MARK = "APPROVED ELSEWHERE"
+# Twelve characters is the same floor `due` already puts on a quote: shorter is not a sentence of his.
+APPROVED_ELSEWHERE_MIN_QUOTE = 12
+# Four words in a row, as CHANGED_QUOTE_WORDS already uses for "is this sentence about that change".
+APPROVED_ELSEWHERE_DETAIL_WORDS = 4
+
+
+def approved_elsewhere_text(fields):
+    """Every place Kevin's approved words on a ruling task are kept: his live feedback, the output
+    his verdict was given on, and the durable Feedback History a resubmit cannot wipe. The same
+    three the file already reads (lesson_source_text, kevins_newest_note, note_with_verdict)."""
+    return " ".join(str(fields.get(AF[k]) or "")
+                    for k in ("approvalFeedback", "agentOutput", "feedbackHistory"))
+
+
+def quote_names_target(quote, target_id, target_fields):
+    """(True, '') when his quoted words name THIS task: its record id, or at least
+    APPROVED_ELSEWHERE_DETAIL_WORDS words in a row from its name. Else (False, why not).
+
+    This is the whole protection against one approval of his being spent on anything an agent
+    fancies. A ruling that does not say which task it rules on is not a ruling on this one."""
+    said = str(quote or "")
+    if target_id and target_id in said:
+        return True, ""
+    q = _norm_words(FEEDBACK_STAMP.sub(" ", said))
+    name = _norm_words(target_fields.get(AF["name"]) or "")
+    words = name.split()
+    n = APPROVED_ELSEWHERE_DETAIL_WORDS
+    if words and (" ".join(words) in q if len(words) < n else
+                  any(" ".join(words[i:i + n]) in q for i in range(len(words) - n + 1))):
+        return True, ""
+    return False, (f"Kevin's quoted words do not name this task: they must contain its record id "
+                   f"({target_id}) or at least {n} words in a row from its name "
+                   f"({name[:70] or 'untitled'})")
+
+
+def quote_names_exact_date(quote, day):
+    """True when his words name this exact DAY, not merely its month. A past due date moves only to
+    a date he actually said, so quote_names_date (which a month satisfies) is not enough here."""
+    q = " ".join(str(quote or "").split())
+    if day.isoformat() in q:
+        return True
+    for a, b in re.findall(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b", q):
+        if (int(a), int(b)) == (day.day, day.month):
+            return True
+    for word in sorted((k for k, v in _MONTH_NUM.items() if v == day.month), key=len, reverse=True):
+        w, d = re.escape(word), day.day
+        if re.search(r"\b%d(?:st|nd|rd|th)?\s+(?:of\s+)?%s\b" % (d, w), q, re.I) \
+                or re.search(r"\b%s\s+%d(?:st|nd|rd|th)?\b" % (w, d), q, re.I):
+            return True
+    return False
+
+
+def approved_elsewhere_problem(ruling_id, quote, target_id, target_fields):
+    """'' when `ruling_id` carries a real approval of Kevin's whose quoted words name this target,
+    else why it does not. Reads the ruling task LIVE: a caller's claim about it counts for nothing."""
+    ruling_id = str(ruling_id or "").strip()
+    if not ruling_id:
+        return "no ruling task was named (--approved-on)"
+    if ruling_id == target_id:
+        return ("--approved-on names this same task; an approval on the task itself goes through the "
+                "plain route, which reads it")
+    q = _norm_words(FEEDBACK_STAMP.sub(" ", quote or ""))
+    if len(q) < APPROVED_ELSEWHERE_MIN_QUOTE:
+        return (f"--quote needs Kevin's own words from the ruling card, verbatim (at least "
+                f"{APPROVED_ELSEWHERE_MIN_QUOTE} characters)")
+    try:
+        rec = get_task(ruling_id)
+    except (Exception, SystemExit) as exc:        # noqa: BLE001 — said, never swallowed
+        return f"the ruling task {ruling_id} could not be read ({str(exc)[:160]})"
+    rf = rec.get("fields") or {}
+    outcome = sel(rf.get(AF["approvalOutcome"]))
+    if outcome not in APPROVED:
+        return (f"{ruling_id} carries no approval of Kevin's: its Approval Outcome is "
+                f"'{outcome or 'empty'}'")
+    evidence = approval_evidence_problem(rf, rec.get("createdTime") or "")
+    if evidence:
+        return f"{ruling_id} does not carry the marks of a real approval: {evidence}"
+    if q not in _norm_words(approved_elsewhere_text(rf)):
+        return (f"--quote is not in Kevin's approved words on {ruling_id} (its Approval Feedback, "
+                "Agent Output or Feedback History), word for word")
+    named, why = quote_names_target(quote, target_id, target_fields)
+    if not named:
+        return f"{why} — so {ruling_id} does not rule on it"
+    return ""
+
+
+def approved_elsewhere_note(stamp, target_id, ruling_id, quoted, what):
+    """The dated audit line the target task carries: which ruling task approved this, and his words.
+    One line, so a quote with line breaks in it can never forge a stamped line of its own."""
+    return (f"[{stamp} — agent-dispatch] {APPROVED_ELSEWHERE_MARK}: {what} on {target_id} on Kevin's "
+            f"approval recorded on {ruling_id}, not on this task. His words: "
+            f"\"{' '.join(str(quoted).split())}\"")
+
+
+# ─── TWO RECORDS KEVIN APPROVED CHANGING, OUTSIDE THE TASKS TABLE (19 Nov 2026) ──────
+#
+# Findings 20261011-agent-dispatch-832 and 20261015-agent-dispatch-917, both critical, both blocked
+# for 34 and 38 days. They are the same shape as the APPROVED ELSEWHERE door above: Kevin approved a
+# change to a record that is not a task, no agent door could make it, and the carry-out rules forbid
+# a hand-rolled Airtable write. So the work simply sat there.
+#
+#   - 832 (task recPoUouP5OgTtA3G): delete the 60 repeat RECORDING BRIEF rows in tblEPzZdwBZeSXFRB,
+#     keeping the oldest per title (70 rows, 10 distinct titles, newest created 5 Oct). There was no
+#     gated delete command in this file at all.
+#   - 917 (task rec8nPucxweLqCF0e): on one tenant, field Notes, delete line 1 and keep lines 2 and 3
+#     word for word. tenancy-record.py writes tenancies only, and the one tenant-note door
+#     (roy-assistant.py tenant-note) appends and never edits.
+#
+# Two narrow doors, on the SAME evidence bar as --approved-on: the approval is read LIVE off the task
+# named by --task (the gate, an Approved At after the task existed, an approved verdict — never a
+# bare "Approved" string, finding 20260922-agent-dispatch-572), --quote must be his words on it word
+# for word, and those words must NAME the thing being changed. On top of that each door carries an
+# allowlist IN THIS FILE of what it may ever touch, because a delete cannot be undone and an
+# allowlist the caller supplies is not an allowlist.
+RECORD_WRITE_MARK = "RECORD WRITE"
+RECORD_ID_RE = re.compile(r"rec[A-Za-z0-9]{14}")
+# Airtable deletes at most 10 records a request. The cap is 10 so one run is exactly one request: a
+# bigger job is several audited runs, never a loop that can stop half way and still print a success.
+DELETE_MAX_IDS = 10
+
+# The ONLY tables a robot may ever delete a row from, and why. `phrase` is wording of Kevin's own
+# that his approved words must carry when they do not name the table id, so one approval of a
+# tidy-up can never be spent on another table's rows.
+DELETE_ALLOWED = {
+    # Finding 20261011-agent-dispatch-832: the od topics lane wrote the same RECORDING BRIEF row back
+    # every run — 70 rows across 10 titles — and Kevin approved keeping the oldest per title. That
+    # lane is paused until January, so these rows are inert content briefs: no money, no tenancy and
+    # no compliance record hangs off them, and nothing computes from them. That is why this one table
+    # is here and nothing else is. Adding a table here is a decision for Kevin, not for a session.
+    "tblEPzZdwBZeSXFRB": {"what": "RECORDING BRIEF rows (the paused od topics lane)",
+                          "phrase": "recording brief"},
+}
+
+# The ONLY (table, field name) pairs `record-field` may ever read-modify-write, and why. The value is
+# the FIELD ID, and both the read and the write use that id — one key style on both sides, because a
+# name-keyed read against an id-keyed write is exactly how three Descriptions were wiped (28 Sep
+# 2026). The name in the key is the label the caller types; it never reaches Airtable.
+RECORD_FIELD_ALLOWED = {
+    # Finding 20261015-agent-dispatch-917: Kevin approved removing one line from one tenant's Notes.
+    # Tenants.Notes is free text an agent already appends to (roy-assistant.py tenant-note), it holds
+    # no money, status or occupancy, and nothing computes off it. Every other field on a tenant drives
+    # rent, tenancy or compliance, so none of them is here.
+    (TENANTS_TABLE, "Notes"): TENANT_NOTES_FIELD,
+}
+
+
+def record_write_approval_problem(task_id, fields, created_time, quote, must_name):
+    """'' when the task named by --task carries a real approval of Kevin's whose quoted words name
+    the record being changed, else why it does not.
+
+    The same bar as approved_elsewhere_problem, read off THIS task instead of a ruling one: an
+    approved verdict, the marks of a real approval (approval_evidence_problem), his words word for
+    word in his approved text, and those words naming the thing. `must_name` is a list of
+    (what, tokens): his words must carry at least one token from EVERY group, so an approval of one
+    tidy-up is never a blank cheque over a different table, record or field."""
+    q = _norm_words(FEEDBACK_STAMP.sub(" ", quote or ""))
+    if len(q) < APPROVED_ELSEWHERE_MIN_QUOTE:
+        return (f"--quote needs Kevin's own words from the approved card, verbatim (at least "
+                f"{APPROVED_ELSEWHERE_MIN_QUOTE} characters)")
+    outcome = sel(fields.get(AF["approvalOutcome"]))
+    if outcome not in APPROVED:
+        return (f"{task_id} carries no approval of Kevin's: its Approval Outcome is "
+                f"'{outcome or 'empty'}'")
+    evidence = approval_evidence_problem(fields, created_time or "")
+    if evidence:
+        return f"{task_id} does not carry the marks of a real approval: {evidence}"
+    if q not in _norm_words(approved_elsewhere_text(fields)):
+        return (f"--quote is not in Kevin's approved words on {task_id} (its Approval Feedback, "
+                "Agent Output or Feedback History), word for word")
+    for what, tokens in must_name:
+        if not any(_norm_words(tok) in q for tok in tokens if tok):
+            return (f"Kevin's approved words do not name {what}: they must contain "
+                    + " or ".join(repr(t) for t in tokens if t))
+    return ""
+
+
+def record_write_note(stamp, task_id, quoted, what):
+    """The dated audit line the approving task carries, in the shape approved_elsewhere_note uses:
+    what was changed outside the Tasks table, and his words that approved it. One line, so a quote
+    with line breaks in it can never forge a stamped line of its own.
+
+    `what` names ids, fields and counts and NEVER the text that changed: these records hold personal
+    identifiers and this repo is public."""
+    return (f"[{stamp} — agent-dispatch] {RECORD_WRITE_MARK}: {what}, on Kevin's approval recorded "
+            f"on {task_id}. His words: \"{' '.join(str(quoted).split())}\"")
+
+
+def records_in_table(table, record_ids, fields=None):
+    """The named records as THIS TABLE holds them, keyed by record id, fields keyed by field id.
+
+    A GET by record id ignores the table in the URL (CLAUDE.md), so membership is proved by LISTING
+    the table filtered to those ids: an id this table does not hold simply does not come back."""
+    found, ids = {}, [str(r).strip() for r in record_ids if str(r).strip()]
+    for i in range(0, len(ids), 50):
+        formula = "OR(" + ",".join(f"RECORD_ID()='{r}'" for r in ids[i:i + 50]) + ")"
+        for rec in query_records(table, formula, fields):
+            found[rec.get("id")] = rec
+    return found
+
+
+def read_value_file(path, flag):
+    """A whole file as the text to compare or write. Exactly one trailing newline comes off, because
+    a heredoc and every editor adds one that the Airtable field does not carry. Nothing else is
+    normalised: the comparisons in cmd_record_field are bytes."""
+    if not os.path.isfile(str(path or "")):
+        sys.exit(f"ERROR: {flag} names no file: {path}")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    return text[:-1] if text.endswith("\n") else text
+
+
+def lines_removed(before, after):
+    """(line numbers of `before` that `after` drops, '') when `after` is `before` with whole lines
+    removed and every kept line byte for byte in its order, else ([], why not).
+
+    This door only REMOVES lines. An added or reworded line is a different job and goes through the
+    door that owns the field (for a tenant that is roy-assistant.py tenant-note, which appends)."""
+    b, a = before.split("\n"), after.split("\n")
+    kept, j = set(), 0
+    for i, line in enumerate(b):
+        if j < len(a) and a[j] == line:
+            kept.add(i)
+            j += 1
+    if j != len(a):
+        return [], ("--after is not --expect-before with whole lines removed: line "
+                    f"{j + 1} of --after is not the next matching line of --expect-before, word for word")
+    return [i + 1 for i in range(len(b)) if i not in kept], ""
+
+
+def cmd_delete_rows(args):
+    """Delete rows Kevin approved deleting, from a table on DELETE_ALLOWED (finding 832).
+
+    A delete cannot be undone, so every guard here is a refusal: an allowlisted table, his approval
+    read live off --task, his words naming the table or its rows, every id read back off THAT table
+    first, a capped single request, and an exact count. One id missing or living in another table
+    refuses the whole batch: a partial delete that prints a success is the failure this exists for."""
+    table = str(args.table or "").strip()
+    allowed = DELETE_ALLOWED.get(table)
+    if not allowed:
+        sys.exit(f"ERROR: refusing to delete from {table!r}: it is not a table a robot may ever delete "
+                 f"from. The allowlist in agent-dispatch.py holds: "
+                 f"{', '.join(sorted(DELETE_ALLOWED)) or 'nothing'}. A delete cannot be undone, so that "
+                 "list lives in the code and is never a flag.")
+    ids = [p.strip() for p in str(args.ids or "").split(",") if p.strip()]
+    if not ids:
+        sys.exit("ERROR: --ids needs at least one record id")
+    if len(set(ids)) != len(ids):
+        sys.exit("ERROR: --ids names the same record twice; the count is reported, so the list is exact")
+    bad = [r for r in ids if not RECORD_ID_RE.fullmatch(r)]
+    if bad:
+        sys.exit(f"ERROR: not Airtable record ids: {', '.join(bad)}")
+    if len(ids) > DELETE_MAX_IDS:
+        sys.exit(f"ERROR: {len(ids)} ids — Airtable deletes {DELETE_MAX_IDS} a request, so this door takes "
+                 f"at most {DELETE_MAX_IDS} at a time and a bigger job is several audited runs.")
+    rec = get_task(args.task)
+    tf = rec.get("fields") or {}
+    problem = record_write_approval_problem(
+        args.task, tf, rec.get("createdTime") or "", args.quote,
+        [(f"the table being deleted from ({table}, {allowed['what']})", (table, allowed["phrase"]))])
+    if problem:
+        print(json.dumps({"refused": args.task, "why": problem}))
+        return 2
+    # READ BACK FIRST, off this table.
+    live = records_in_table(table, ids)
+    missing = [r for r in ids if r not in live]
+    if missing:
+        print(json.dumps({"refused": args.task, "why": (
+            f"{len(missing)} of the {len(ids)} ids are not in {table} — missing, or in another table: "
+            f"{', '.join(missing)}. Nothing was deleted.")}))
+        return 2
+    body = _request("DELETE", f"/{table}?" + urllib.parse.urlencode([("records[]", r) for r in ids]))
+    # A reply with no `records` key is an error, not an empty population (finding 20261104-phase-2-1187).
+    if not isinstance(body.get("records"), list):
+        sys.exit(f"ERROR: Airtable's reply to the delete of {len(ids)} rows in {table} carries no records "
+                 f"list, so nothing is proved: {str(body)[:200]}")
+    deleted = sorted(r.get("id") for r in body["records"] if r.get("deleted"))
+    if deleted != sorted(ids):
+        sys.exit(f"ERROR: asked Airtable to delete {len(ids)} rows from {table} and it reports "
+                 f"{len(deleted)} deleted ({', '.join(deleted) or 'none'}). Check {table} by hand before "
+                 "running this again.")
+    still = records_in_table(table, ids)
+    if still:
+        sys.exit(f"ERROR: {len(still)} of the {len(ids)} rows still read back from {table} after the delete "
+                 f"({', '.join(sorted(still))}). Check {table} by hand before running this again.")
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    note = record_write_note(stamp, args.task, args.quote,
+                             f"deleted {len(ids)} rows from {table} ({', '.join(ids)})")
+    patch_task(args.task, {AF["notes"]: cap_notes(
+        (str(tf.get(AF["notes"]) or "") + "\n\n" + note).strip(), task_id=args.task)})
+    print(json.dumps({"deleted": len(ids), "table": table, "ids": ids, "task": args.task}))
+    return 0
+
+
+def cmd_record_field(args):
+    """Rewrite ONE allowlisted field on ONE record to the value Kevin approved (finding 917).
+
+    A read-modify-write, so the live value is proved before anything is written: it must match
+    --expect-before BYTE FOR BYTE, and a blank read is a STOP, never a starting point (28 Sep 2026,
+    three Descriptions wiped by writing over a value nobody had proved). Read and write both use the
+    field ID the allowlist holds, so the two sides can never drift into different key styles."""
+    table, label = str(args.table or "").strip(), str(args.field or "").strip()
+    field_id = RECORD_FIELD_ALLOWED.get((table, label))
+    if not field_id:
+        pairs = ", ".join(f"{t}.{f}" for t, f in sorted(RECORD_FIELD_ALLOWED)) or "nothing"
+        sys.exit(f"ERROR: refusing to write {label!r} on {table!r}: it is not a field a robot may edit. "
+                 f"The allowlist in agent-dispatch.py holds: {pairs}. Every other field drives rent, "
+                 "tenancy, money or compliance, so it is changed by the door that owns it.")
+    rid = str(args.record or "").strip()
+    if not RECORD_ID_RE.fullmatch(rid):
+        sys.exit(f"ERROR: not an Airtable record id: {rid!r}")
+    before = read_value_file(args.expect_before, "--expect-before")
+    after = read_value_file(args.after, "--after")
+    if not after.strip():
+        sys.exit(f"ERROR: --after is empty: this door edits {label} on {rid}, it never clears it.")
+    if after == before:
+        sys.exit(f"ERROR: --after is --expect-before unchanged, so there is nothing to write to {rid}.")
+    if redact_secrets(after) != after:
+        sys.exit("ERROR: --after carries something secret-shaped; a credential never goes in a record.")
+    removed, why = lines_removed(before, after)
+    if why:
+        sys.exit(f"ERROR: {why}.")
+    rec = get_task(args.task)
+    tf = rec.get("fields") or {}
+    problem = record_write_approval_problem(
+        args.task, tf, rec.get("createdTime") or "", args.quote,
+        [(f"the record being changed ({rid})", (rid, table)),
+         (f"the field being changed ({label})", (label,))])
+    if problem:
+        print(json.dumps({"refused": args.task, "why": problem}))
+        return 2
+    live_rec = records_in_table(table, [rid], [field_id]).get(rid)
+    if live_rec is None:
+        print(json.dumps({"refused": args.task, "why": (
+            f"{rid} is not in {table} — missing, or in another table. Nothing was written.")}))
+        return 2
+    live = str((live_rec.get("fields") or {}).get(field_id) or "")
+    if not live.strip():
+        print(json.dumps({"refused": args.task, "why": (
+            f"{label} on {rid} reads blank. A blank read is a STOP, never a starting point "
+            "(28 Sep 2026): nothing was written.")}))
+        return 2
+    if live != before:
+        print(json.dumps({"refused": args.task, "why": (
+            f"{label} on {rid} does not match --expect-before byte for byte ({len(live)} characters "
+            f"and {len(live.splitlines())} lines live, {len(before)} and {len(before.splitlines())} "
+            "expected), so the value this edit was approved on is not the value there now. Nothing "
+            "was written.")}))
+        return 2
+    _request("PATCH", f"/{table}/{rid}", {"fields": {field_id: after}})
+    back = records_in_table(table, [rid], [field_id]).get(rid) or {}
+    wrote = str((back.get("fields") or {}).get(field_id) or "")
+    if wrote != after:
+        sys.exit(f"ERROR: {label} on {rid} reads {len(wrote)} characters after writing {len(after)}; "
+                 f"check {rid} in {table} by hand.")
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    note = record_write_note(stamp, args.task, args.quote, (
+        f"{label} on {rid} in {table} rewritten: {len(before.splitlines())} lines before, "
+        f"{len(after.splitlines())} after, line{'s' if len(removed) != 1 else ''} "
+        f"{', '.join(str(n) for n in removed) or 'none'} removed"))
+    patch_task(args.task, {AF["notes"]: cap_notes(
+        (str(tf.get(AF["notes"]) or "") + "\n\n" + note).strip(), task_id=args.task)})
+    print(json.dumps({"wrote": rid, "table": table, "field": label, "removedLines": removed,
+                      "linesBefore": len(before.splitlines()), "linesAfter": len(after.splitlines()),
+                      "task": args.task}))
+    return 0
+
+
 def cmd_restore_park(args):
     """Put back a park Kevin gave that a fold or a stray write undid (restore_park_problem)."""
     rec = get_task(args.task)
@@ -8805,7 +9214,15 @@ def cmd_due(args):
     t = get_task(args.task)
     fields = t.get("fields", {}) or {}
     today = datetime.now(LONDON).date()
-    problem = due_move_problem(fields, new_due, today, args.quote)
+    # His approval recorded on ANOTHER task, named out loud (findings 915, 1028 and 1246). Checked
+    # before the move itself, so a bad ruling task never reaches the write.
+    elsewhere = str(getattr(args, "approved_on", "") or "").strip()
+    if elsewhere:
+        blocked = approved_elsewhere_problem(elsewhere, args.quote, args.task, fields)
+        if blocked:
+            print(json.dumps({"refused": args.task, "why": blocked}))
+            return 2
+    problem = due_move_problem(fields, new_due, today, args.quote, elsewhere=elsewhere)
     if problem:
         print(json.dumps({"refused": args.task, "why": problem}))
         return 2
@@ -8813,17 +9230,66 @@ def cmd_due(args):
     status = "Upcoming" if new_due > today else "Today"
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     quoted = " ".join(str(args.quote).split())
+    said = f"Kevin on {elsewhere}" if elsewhere else "Kevin"
     note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
-            f"(Kevin: \"{quoted}\")")
+            f"({said}: \"{quoted}\")")
+    # The audit line goes FIRST, so the DUE MOVED line stays the last note (the surfaces that read
+    # "the last note" keep reading the move) and the mark is on its own greppable line.
+    added = note if not elsewhere else (
+        approved_elsewhere_note(stamp, args.task, elsewhere, quoted,
+                                f"due date moved to {new_due.isoformat()}") + "\n\n" + note)
     patch_task(args.task, {
         AF["dueDate"]: new_due.isoformat(),
         AF["status"]: status,
-        AF["notes"]: cap_notes((str(fields.get(AF["notes"]) or "") + "\n\n" + note).strip(), task_id=args.task),
+        AF["notes"]: cap_notes((str(fields.get(AF["notes"]) or "") + "\n\n" + added).strip(), task_id=args.task),
     })
     check = get_task(args.task).get("fields", {}) or {}
     if str(check.get(AF["dueDate"]) or "") != new_due.isoformat():
         sys.exit(f"ERROR: {args.task} reads due {check.get(AF['dueDate'])!r} after writing {new_due.isoformat()}")
-    print(json.dumps({"due": args.task, "from": old, "to": new_due.isoformat(), "status": status}))
+    print(json.dumps({"due": args.task, "from": old, "to": new_due.isoformat(), "status": status,
+                      **({"approvedOn": elsewhere} if elsewhere else {})}))
+    return 0
+
+
+def cmd_hard_deadline_off(args):
+    """Untick a Hard Deadline on Kevin's approval recorded on another task.
+
+    Finding 20261021-agent-dispatch-1028: his approved card ruled that one of the thirteen tasks no
+    longer carried a hard deadline, and NO command could untick it. This is the only route: there is
+    deliberately no plain one, because a Hard Deadline is a promise to someone outside and an agent
+    does not get to drop its own. Same evidence bar as the due route."""
+    why = " ".join(str(args.why or "").split())
+    if len(why) < 10:
+        sys.exit("ERROR: --why needs Kevin's words or the reason, in a sentence")
+    rec = get_task(args.task)
+    fields = rec.get("fields") or {}
+    elsewhere = str(getattr(args, "approved_on", "") or "").strip()
+    if not elsewhere:
+        sys.exit(f"ERROR: refusing to untick the Hard Deadline on {args.task}: there is no route that unticks it "
+                 "on this task's own say-so. Name the task Kevin approved it on (--approved-on) and quote his "
+                 "words (--quote).")
+    blocked = approved_elsewhere_problem(elsewhere, args.quote, args.task, fields)
+    if blocked:
+        print(json.dumps({"refused": args.task, "why": blocked}))
+        return 2
+    status = sel(fields.get(AF["status"]))
+    if status in ("Completed", "Cancelled"):
+        print(json.dumps({"refused": args.task, "why": f"the task is {status}"}))
+        return 2
+    if not fields.get(HARD_DEADLINE_FIELD):
+        print(json.dumps({"refused": args.task, "why": "its Hard Deadline is not ticked"}))
+        return 2
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    note = approved_elsewhere_note(stamp, args.task, elsewhere, args.quote,
+                                   f"Hard Deadline unticked ({why})")
+    patch_task(args.task, {
+        HARD_DEADLINE_FIELD: False,
+        AF["notes"]: cap_notes((str(fields.get(AF["notes"]) or "") + "\n\n" + note).strip(), task_id=args.task),
+    })
+    check = get_task(args.task).get("fields", {}) or {}
+    if check.get(HARD_DEADLINE_FIELD):
+        sys.exit(f"ERROR: {args.task} still reads a Hard Deadline after unticking it")
+    print(json.dumps({"hardDeadlineOff": args.task, "approvedOn": elsewhere}))
     return 0
 
 
@@ -11293,7 +11759,9 @@ def plan_repair_closable(t):
 
 
 def cmd_complete(args):
-    t = task_view(get_task(args.task))
+    rec = get_task(args.task)
+    t = task_view(rec)
+    approved_elsewhere = ""
     if t["outcome"] not in APPROVED:
         evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
         # Only a task with NO live verdict and nothing waiting (review of PR #978): a card back at Approval, a
@@ -11302,6 +11770,17 @@ def cmd_complete(args):
         door = ""
         if not t["outcome"] and t["status"] not in ("Approval", "Completed", "Cancelled") and not parked_until:
             door = decided_card_verdict(t) or plan_repair_closable(t)
+            # HIS APPROVAL ON THE RULING TASK (finding 20261021-agent-dispatch-1028, item 6). Same
+            # conditions as the doors above it: no live verdict of its own, nothing waiting, no
+            # standing park. Named out loud by the caller and checked against the ruling task LIVE.
+            if not door and str(getattr(args, "approved_on", "") or "").strip():
+                ruling = str(args.approved_on).strip()
+                blocked = approved_elsewhere_problem(ruling, getattr(args, "quote", ""), args.task,
+                                                     rec.get("fields") or {})
+                if blocked:
+                    sys.exit(f"ERROR: refusing to complete {args.task} on an approval recorded elsewhere: "
+                             f"{blocked}.")
+                door = approved_elsewhere = ruling
         if not door:
             sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                      f"'{t['outcome'] or 'empty'}', not an approval. Only "
@@ -11595,6 +12074,10 @@ def cmd_complete(args):
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         no_cert_note = (no_cert_note + "\n\n" if no_cert_note else "") + \
             f"[{stamp} — agent] DONE, evidence: {evidence[:600]}"
+    if approved_elsewhere:
+        no_cert_note = (no_cert_note + "\n\n" if no_cert_note else "") + approved_elsewhere_note(
+            datetime.now(LONDON).strftime("%d %b %Y %H:%M"), args.task, approved_elsewhere,
+            getattr(args, "quote", ""), "closed")
     if sign_note:
         no_cert_note = (no_cert_note + "\n\n" if no_cert_note else "") + sign_note
     declared =({AF["notes"]: ((t["notes"] or "") + "\n\n" + no_cert_note).strip()[-90000:]}
@@ -17007,6 +17490,48 @@ def main():
     du.add_argument("date", help="YYYY-MM-DD, today or later")
     du.add_argument("--why", required=True, help="the reason, in a sentence")
     du.add_argument("--quote", required=True, help="Kevin's own words from his feedback on the task, verbatim")
+    du.add_argument("--approved-on", default="", metavar="RULINGTASKID",
+                    help="the task Kevin's approval of THIS move is recorded on, when it is not this task "
+                         "(an approved card that rules on others). That task must carry a real approval "
+                         "(the gate, an Approved At after it existed, an approved verdict), --quote must be "
+                         "his words on it, and those words must name this task's record id or its name. A "
+                         "past date is allowed only here, and only when his words name that day.")
+
+    hd = sub.add_parser("hard-deadline-off",
+                        help="untick a Hard Deadline on Kevin's approval recorded on another task")
+    hd.add_argument("task")
+    hd.add_argument("--why", required=True, help="the reason, in a sentence")
+    hd.add_argument("--approved-on", required=True, metavar="RULINGTASKID",
+                    help="the task his approval of the untick is recorded on (there is no other route)")
+    hd.add_argument("--quote", required=True, help="his own words on that task, verbatim, naming this task")
+
+    dr = sub.add_parser("delete-rows",
+                        help="delete rows Kevin approved deleting, from a table on the DELETE_ALLOWED "
+                             "allowlist in this file")
+    dr.add_argument("table", metavar="TABLEID", help="the table to delete from (must be allowlisted)")
+    dr.add_argument("--ids", required=True, metavar="rec1,rec2",
+                    help=f"the record ids to delete, comma separated, at most {DELETE_MAX_IDS} "
+                         "(one Airtable request, so a run can never half-delete)")
+    dr.add_argument("--task", required=True, metavar="TASKID",
+                    help="the task carrying Kevin's approval of the delete")
+    dr.add_argument("--quote", required=True,
+                    help="his approved words on that task, verbatim, naming the table or its rows")
+
+    rf = sub.add_parser("record-field",
+                        help="rewrite one allowlisted field on one record to the value Kevin approved")
+    rf.add_argument("record", metavar="RECORDID", help="the record to change")
+    rf.add_argument("--table", required=True, metavar="TABLEID", help="the table that record is in")
+    rf.add_argument("--field", required=True, metavar="NAME",
+                    help='the field, as RECORD_FIELD_ALLOWED spells it (e.g. "Notes")')
+    rf.add_argument("--task", required=True, metavar="TASKID",
+                    help="the task carrying Kevin's approval of the edit")
+    rf.add_argument("--quote", required=True,
+                    help="his approved words on that task, verbatim, naming the record and the field")
+    rf.add_argument("--expect-before", required=True, metavar="FILE",
+                    help="a file holding the value the field must read NOW, byte for byte; a mismatch "
+                         "or a blank read refuses and writes nothing")
+    rf.add_argument("--after", required=True, metavar="FILE",
+                    help="a file holding the value to write: --expect-before with whole lines removed")
 
     rp = sub.add_parser("restore-park",
                         help="put back Kevin's own park (an agent-dispatch 'Parked until' line) that a fold undid")
@@ -17045,6 +17570,13 @@ def main():
     c.add_argument("--evidence", default="",
                    help="what proves the job is done (a merge commit, a receipt); written to Notes "
                         "with the close")
+    c.add_argument("--approved-on", default="", metavar="RULINGTASKID",
+                   help="the task Kevin's approval of THIS close is recorded on, when this task carries no "
+                        "verdict of its own (an approved card that rules on others). Same bar as `due "
+                        "--approved-on`: a real approval on that task, --quote his words on it, naming this "
+                        "task. Never over a live verdict, a card at Approval or a park that stands.")
+    c.add_argument("--quote", default="",
+                   help="with --approved-on: his own words on the ruling task, verbatim, naming this task")
     c.add_argument("--not-signed", default="", metavar="REASON",
                    help="a SIGN AS KEVIN task the robot did not sign: say what happened instead; "
                         "recorded in Notes")
@@ -17226,6 +17758,8 @@ def main():
             "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
             "ended-costs": cmd_ended_costs,
             "annotate": cmd_annotate, "due": cmd_due, "intent": cmd_intent,
+            "hard-deadline-off": cmd_hard_deadline_off,
+            "delete-rows": cmd_delete_rows, "record-field": cmd_record_field,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "trial-settle": cmd_trial_settle, "revise": cmd_revise, "retype": cmd_retype,
