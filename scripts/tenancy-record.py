@@ -435,14 +435,44 @@ def cmd_set_off(a):
 # A nil payout, as the letting agent's statement writes it: a payout phrase with 0.00, £0 or nil right after it
 # ("payout 0.00", "Balance paid to landlord: £0.00", "Total remitted 0.00", "net payment nil"). The figure must follow
 # the phrase within a few characters with no other figure between (review of the first draft: "payout £450.00, fees
-# 0.00" passed when the two were searched apart).
+# 0.00" passed when the two were searched apart). "Total payments to landlord £0.00" is how one agent's statement heads
+# it (the first live record, 19 Nov 2026).
 PAYOUT_PHRASE = (r"(?:pay\s?-?outs?|paid\s+out|paid\s+to\s+(?:the\s+)?(?:landlord|you)|due\s+to\s+(?:the\s+)?landlord|"
+                 r"payments?\s+to\s+(?:the\s+)?(?:landlord|you)|"
                  r"landlord\s+payment|remitted|remittance|net\s+(?:payment|payable|amount|to\s+(?:the\s+)?landlord|to\s+you))")
 NIL_FIGURE = r"(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.£])0\.00(?!\d)|\bnil\b)"
 # Between the words and the figure: only separators and a few linking words, never another item's words (review round
 # 2: "Remittance advice: nil deductions. Payout £450.00" passed on a gap of any 25 letters).
 NIL_GAP = r"(?:[\s:=\-–]|\b(?:of|is|amount|total|gbp)\b)*"
 NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b{NIL_GAP}{NIL_FIGURE}")
+# Money above zero ANYWHERE in the quote means the statement shows money moving, so it is not a nil statement as quoted
+# (two review rounds of the wording fix, 19 Nov 2026: a list of payout wording is never complete, so "Transfer to
+# landlord £454.40", "(£454.40)" and "Total payments to landlord £454.40, Outstanding payments to landlord £0.00" all
+# passed a phrase check). Money is a £ figure or a figure with two decimals; a date, a reference or a Gmail id is not.
+MONEY_RE = re.compile(r"(?i)(?:£|\bgbp)\s?\(?\s?(\d[\d,]*(?:\.\d+)?)|(?<![\w.£/:])(\d[\d,]*(?:\.\d+)?)\s?gbp\b|"
+                      r"(?<![\d.£\w])(\d[\d,]*\.\d{2})(?![\d.])")
+CLOCK_RE = re.compile(r"(?:[01]?\d|2[0-3])\.[0-5]\d")
+
+
+def money_above_zero(text):
+    """The first money figure above zero in the text, as written, or ''. A bare two-decimal figure is skipped when it is
+    a percentage, a flat number (Apartment 3.04) or a clock time beside "at", "am" or "pm" (9.30am); 454.40 pm is
+    never a time, so it is money per month (review rounds 3 and 4, 19 Nov 2026)."""
+    t = text or ""
+    for m in MONEY_RE.finditer(t):
+        figure = m.group(1) or m.group(2) or m.group(3)
+        if m.group(3):
+            before, after = t[:m.start()].lower(), t[m.end():].lower()
+            if re.match(r"\s?%", after) or re.search(r"\b(?:flat|apartment)\s$", before):
+                continue
+            if CLOCK_RE.fullmatch(figure) and (re.search(r"\bat\s$", before) or re.match(r"\s?(?:am|pm)\b", after)):
+                continue
+        try:
+            if float(figure.replace(",", "")) > 0:
+                return m.group(0).strip()
+        except ValueError:
+            return m.group(0).strip()                         # an unreadable figure is not a nil
+    return ""
 
 
 def nil_statement_problem(tenancy, tenants, due, evidence, today):
@@ -471,6 +501,10 @@ def nil_statement_problem(tenancy, tenants, due, evidence, today):
     text = " ".join(str(evidence or "").split())
     if rc.NIL_MARK_RE.search(text):
         return "--evidence is the statement's own words, not a NIL STATEMENT line"
+    paid = money_above_zero(text)
+    if paid:
+        return (f"--evidence shows money above zero ({paid}): quote only the statement's nil lines (its payout and "
+                "income), and record nothing if any money was paid to us for that rent")
     if len(text) < 20 or not NIL_PAYOUT_RE.search(text):
         return ("--evidence quotes the statement itself: who sent it, its date, and its payout line showing 0.00 or nil "
                 "right after the payout words (for example \"StayCay statement for September, emailed 8 Oct 2026: "
