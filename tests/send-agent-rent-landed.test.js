@@ -53,6 +53,8 @@ def fields(name=NAME):
             AF["sentForApprovalBy"]: ["rec7aHLK1Q8fMLRXH"], AF["teamMember"]: ["rec7aHLK1Q8fMLRXH"],
             AF["tenants"] if "tenants" in AF else ST.AF["tenants"]: ["recTenantRentAaaa"], aef.TASK_TENANCIES: [TENANCY]}
 BANK, READS, SENT = [], [], []
+# A tenancy's comments, for the letting agent's nil statements (finding 1354). None = a read that fails.
+COMMENTS = {}
 STATE = {"bankFails": False, "rent": 500.0, "tenancyFound": True}
 def rows_for(url):
     q = urllib.parse.unquote(url)
@@ -75,6 +77,10 @@ def rows_for(url):
 def api(method, url, payload=None):
     r = rows_for(url)
     if r is not None: return r
+    if method == "GET" and "/comments" in url:
+        tid = url.split("/comments")[0].rsplit("/", 1)[1]
+        if COMMENTS.get(tid, []) is None: return {"error": {"type": "SERVER_ERROR"}}
+        return {"comments": COMMENTS.get(tid, [])}
     if url.endswith("/comments") or method == "PATCH": return {}
     raise RuntimeError("no fixture for " + method + " " + url[:80])
 SE.api = api
@@ -199,5 +205,32 @@ res = run("email")
 print(json.dumps({"refused": res["refused"], "reads": res["reads"]}))`);
     expect(r.refused).toMatch(/every unit on this card has been paid since the card was made: Unit 1 – 7 Example Road/);
     expect(r.reads).toEqual(['rent:recUnitOneAaaaaaa', 'bank']);
+  });
+
+  // Finding 1354: a nil statement moves the rent check past a month, so the card raised before it (keyed on that
+  // month) must not go out on its own: the send reads the tenancy's nil statements too.
+  it('a unit the letting agent\'s statement showed as nil counts as covered; a comments read that fails refuses', () => {
+    const r = py(`
+NIL = "18 Nov 2026 10:00: NIL STATEMENT %s: the letting agent's statement shows no payout for the rent due that day, so the rent check does not count it as owed. Evidence: x" % OWED
+out = {}
+COMMENTS.update({t: [{"text": NIL, "createdTime": "2026-11-18T10:00:00.000Z"}] for t in UNITS})
+out["allNil"] = run("email")
+COMMENTS.clear(); COMMENTS["recUnitOneAaaaaaa"] = [{"text": NIL, "createdTime": "2026-11-18T10:00:00.000Z"}]
+BANK[:] = [line("recUnitTwoAaaaaaa", 618.30)]
+out["oneNilOnePaid"] = run("email")
+BANK[:] = []
+COMMENTS.clear(); COMMENTS["recUnitOneAaaaaaa"] = [{"text": "Kevin: per the agent, NIL STATEMENT %s: the letting agent's statement shows no payout for the rent due that day" % OWED}]
+out["quoted"] = run("email")
+COMMENTS.clear(); COMMENTS["recUnitTwoAaaaaaa"] = None
+out["broken"] = run("email")
+print(json.dumps({k: [v["refused"], v["sent"]] for k, v in out.items()}))`);
+    expect(r.allNil[0]).toMatch(/every unit on this card has been paid since the card was made: .*the letting agent's statement showed no payout for the rent due/);
+    expect(r.allNil[1]).toEqual([]);
+    expect(r.oneNilOnePaid[0]).toMatch(/2 unit\(s\) on this card have been paid since the card was made/);
+    expect(r.oneNilOnePaid[0]).toMatch(/Still unpaid: Unit 3 – 7 Example Road/);
+    // A comment that only quotes the marker is not a nil statement: the email goes.
+    expect([r.quoted[0], r.quoted[1].length]).toEqual([null, 1]);
+    expect(r.broken[0]).toMatch(/NOT CHECKED\. Nothing was sent/);
+    expect(r.broken[1]).toEqual([]);
   });
 });

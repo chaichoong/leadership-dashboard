@@ -1073,6 +1073,22 @@ def _rent_rows(table, formula=None, fields=None, max_records=None):
             return rows
 
 
+def _rent_comments(tenancy_id):
+    """One tenancy's comments, through this file's `api` door, for the nil statements a letting agent's email is read
+    against (finding 1354). A reply with no comments list is an error, never "no comments"."""
+    out, offset = [], None
+    while True:
+        q = [("pageSize", "100")] + ([("offset", offset)] if offset else [])
+        page = api("GET", f"https://api.airtable.com/v0/{BASE_ID}/{TENANCIES_TABLE}/{tenancy_id}/comments?"
+                   + urllib.parse.urlencode(q))
+        if not isinstance(page, dict) or not isinstance(page.get("comments"), list):
+            raise RuntimeError(f"the comments read for {tenancy_id} returned no comments list")
+        out += page["comments"]
+        offset = page.get("offset")
+        if not offset:
+            return out
+
+
 # THE RENT IS READ AGAIN AT THE SEND (Kevin, 16 Nov 2026; cash-flow-voids lesson of 30 Oct 2026: a chase
 # reached a tenant for rent Kevin had already seen arrive). agent-dispatch.py refuses a RENT LATE card when
 # the bank shows the cycle's rent at SUBMIT (rent_paid_problem, PR 950), but Kevin approves hours or days
@@ -1092,7 +1108,8 @@ def agent_rent_landed_refusal(task_id, f):
     """'' or why an AGENT RENT LATE email to a letting agent must not go now (Kevin, 16 Nov 2026): every unit it
     names is read again, through agent-dispatch.py agent_rent_landed_state, by the same rules as RENT LATE."""
     landed = dispatch_module().agent_rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
-                                                       f.get(AF["description"], ""), records=_rent_rows)
+                                                       f.get(AF["description"], ""), records=_rent_rows,
+                                                       comments=_rent_comments)
     state = landed.get("state")
     if state == "landed":
         return (f"every unit on this card has been paid since the card was made: {_units(landed['paid'])}. Nothing was "
