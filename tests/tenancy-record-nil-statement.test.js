@@ -118,4 +118,20 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
     expect([none.code, none.posted]).toEqual([0, []]);
     expect(none.out.unchanged).toMatch(/no nil statement for 2026-10-10 is recorded/);
   });
+
+  // The first live record (19 Nov 2026): the letting agent's own statement heads its payout line "TOTAL PAYMENTS TO
+  // LANDLORD", which the phrase list did not hold, so the very statement 1354 was built for was refused.
+  it('reads a statement that heads its payout line "Total payments to landlord"', () => {
+    const quote = 'Example Lettings landlord statement, 01 Sep 2026 to 30 Sep 2026, emailed 8 Oct 2026: Total income £0.00, '
+      + 'Total payments to landlord £0.00, Rent to be collected £0.00';
+    const ok = door(ARGS('2026-10-10', quote));
+    expect([ok.code, ok.readBack]).toEqual([0, ['2026-10-10']]);
+    // A real payment under the same heading, with a nil elsewhere on the line, is still refused.
+    const paid = door(ARGS('2026-10-10', 'Example Lettings statement, emailed 8 Oct 2026: Total payments to landlord £454.40, '
+      + 'Rent to be collected £0.00'));
+    expect([paid.code, paid.posted]).toEqual([2, []]);
+    // "Rent to be collected £0.00" alone is not a payout line.
+    const owed = door(ARGS('2026-10-10', 'Example Lettings statement, emailed 8 Oct 2026: Rent to be collected £0.00'));
+    expect([owed.code, owed.posted]).toEqual([2, []]);
+  });
 });

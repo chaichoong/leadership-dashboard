@@ -435,8 +435,10 @@ def cmd_set_off(a):
 # A nil payout, as the letting agent's statement writes it: a payout phrase with 0.00, £0 or nil right after it
 # ("payout 0.00", "Balance paid to landlord: £0.00", "Total remitted 0.00", "net payment nil"). The figure must follow
 # the phrase within a few characters with no other figure between (review of the first draft: "payout £450.00, fees
-# 0.00" passed when the two were searched apart).
+# 0.00" passed when the two were searched apart). "Total payments to landlord £0.00" is how one agent's statement heads
+# it (the first live record, 19 Nov 2026).
 PAYOUT_PHRASE = (r"(?:pay\s?-?outs?|paid\s+out|paid\s+to\s+(?:the\s+)?(?:landlord|you)|due\s+to\s+(?:the\s+)?landlord|"
+                 r"payments?\s+to\s+(?:the\s+)?(?:landlord|you)|"
                  r"landlord\s+payment|remitted|remittance|net\s+(?:payment|payable|amount|to\s+(?:the\s+)?landlord|to\s+you))")
 NIL_FIGURE = r"(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.£])0\.00(?!\d)|\bnil\b)"
 # Between the words and the figure: only separators and a few linking words, never another item's words (review round
