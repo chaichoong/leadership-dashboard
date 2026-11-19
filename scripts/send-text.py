@@ -20,7 +20,10 @@ Agent Output of an approved Correspondence task. It refuses, in this order:
   * while text sending is switched off: until ~/.config/od/text-sending-on exists (Kevin's switch,
     only at the cut-over), nothing is ever sent, whatever else is true;
   * a trial agent's card (TRIAL_AGENTS, scripts/agent_email_format.py): never sent, approved or not;
-  * any card but a rent lane's own tenant card (text_card: RENT LATE / RENT ASK, or their key line);
+  * any card whose own approved output does not declare a text (text_card: the TEXT TO / TEXT block, or a
+    rent lane's own tenant card by its name or key line). Until 19 Nov 2026 this read the task NAME only,
+    and two texts Kevin had approved as-is could not be sent at all (findings 20261118-agent-dispatch-1344
+    and -1355): a renamed rent lane (RENT ARREARS:) and a plain Correspondence chase;
   * a closed card (Completed or Cancelled), or one the trial settled (TRIAL CHECKED): at the cut-over,
     the cards Kevin approved during the trial are history, never a queue of texts;
   * a card Kevin has not approved AS-IS in an approval surface (scripts/approval_evidence.py): an edit he
@@ -51,8 +54,8 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import approval_evidence_problem  # noqa: E402
 from agent_email_format import (PROPERTY_SENDER, TASK_TENANCIES, TENANCIES_TABLE, TRIAL_STAMP,  # noqa: E402
-                                EmailFormatError, parse_text, tenancies_to_note, tenancy_comment, text_card,
-                                trial_problem)
+                                EmailFormatError, parse_text, rent_chase_card, rent_chase_check_name,
+                                tenancies_to_note, tenancy_comment, text_card, trial_problem)
 
 BASE_ID, TASKS, TENANTS = "appnqjDpqDniH3IRl", "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh"
 AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
@@ -62,6 +65,7 @@ AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
     "tenants": "fld6ZcfEogJmeQj2c",
 }
 TENANT_PHONE = "fldraHUkWfqo4olLF"          # Tenants: Contact Number
+TENANCY_TENANTS = "fld1i5bDoHL3B6rUf"       # Tenancies: the tenants on the tenancy (agent-dispatch.py TENANCY_TENANTS)
 APPROVED_AS_IS = "Approved as-is"
 SENT_STAMP = "— send-text] SENT:"
 CONFIG = os.path.expanduser("~/.config/od")
@@ -131,9 +135,18 @@ def uk_mobile(raw):
 
 
 def tenant_numbers(task_fields):
-    """The UK mobiles of the tenants linked to the task, read from their records."""
+    """The UK mobiles of the tenants the task names: its own Tenants link, and, when it links none, the
+    tenants of the tenancies it links. A rent lane card names the TENANCY and often no tenant (task
+    recHBYGEM1qw0XUJF, finding 20261118-agent-dispatch-1355), and the number is still read off a record of
+    ours. The approved output is the only source of the number; this read is the corroboration that it is a
+    number we hold, so a mistyped or invented number never goes out."""
+    ids = list(task_fields.get(AF["tenants"]) or [])
+    if not ids:
+        for tid in task_fields.get(TASK_TENANCIES) or []:
+            rec = airtable("GET", f"{TENANCIES_TABLE}/{tid}?returnFieldsByFieldId=true")
+            ids += list((rec.get("fields") or {}).get(TENANCY_TENANTS) or [])
     out = set()
-    for tid in task_fields.get(AF["tenants"]) or []:
+    for tid in ids:
         rec = airtable("GET", f"{TENANTS}/{tid}?returnFieldsByFieldId=true")
         n = uk_mobile((rec.get("fields") or {}).get(TENANT_PHONE))
         if n:
@@ -177,9 +190,20 @@ def load_card(task_id, dry_run):
                           f.get(AF["name"], ""), notes, f.get(AF["approvedAt"]) or "")
     if trial and not dry_run:
         sys.exit(f"REFUSED: task {task_id} is a trial card and is never texted: {trial}.")
+    # The card's own approved words are read BEFORE the gate, so a malformed text block is named as such
+    # rather than reported as the wrong kind of card.
+    try:
+        found = parse_text(f.get(AF["agentOutput"]) or "")
+    except EmailFormatError as exc:
+        sys.exit(f"REFUSED: task {task_id}: {exc}.")
+    if not found and not text_card(f.get(AF["name"], ""), notes, f.get(AF["agentOutput"], ""),
+                                   list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or [])):
+        sys.exit(f"REFUSED: task {task_id} carries no TEXT TO and TEXT lines and is no rent lane card either, "
+                 "so there is no text to send.")
     if not text_card(f.get(AF["name"], ""), notes, f.get(AF["agentOutput"], ""),
                      list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or [])):
-        sys.exit(f"REFUSED: task {task_id} is not a rent lane's tenant card, and only those are texted.")
+        sys.exit(f"REFUSED: task {task_id} is not a card a text may be sent from: its approved output "
+                 "declares no text.")
     if SENT_STAMP in notes:
         sys.exit(f"REFUSED: task {task_id} carries a SENT stamp from send-text: it was texted. Never sent twice.")
     status = f.get(AF["status"]) or ""
@@ -200,10 +224,6 @@ def load_card(task_id, dry_run):
     ttype = ttype.get("name", "") if isinstance(ttype, dict) else ttype
     if ttype != "Correspondence":
         sys.exit(f"REFUSED: task {task_id} is Task Type {ttype or '(empty)'}, not Correspondence.")
-    try:
-        found = parse_text(f.get(AF["agentOutput"]) or "")
-    except EmailFormatError as exc:
-        sys.exit(f"REFUSED: task {task_id}: {exc}.")
     if not found:
         sys.exit(f"REFUSED: task {task_id} carries no TEXT TO and TEXT lines, so there is no text to send.")
     number, message = uk_mobile(found[0]), found[1]
@@ -232,13 +252,22 @@ def _cmd_send(args):
                  f"({SWITCH}).")
     f, number, message, trial, outcome = load_card(args.task, args.dry_run)
     # The bank is read again at the send (Kevin, 16 Nov 2026): send-email.py's rent_landed_refusal, the one
-    # reading the email and the card share, so the text and the email on one card can never disagree.
+    # reading the email and the card share, so the text and the email on one card can never disagree. Every
+    # chase of a rent cycle is read, under whichever name its lane writes (RENT ARREARS is the same matter
+    # as RENT LATE, finding 20261118-agent-dispatch-1355), so a rename can never skip a money check. A card
+    # that chases no rent has no rent cycle to read: that is said as NOT APPLICABLE, never as a check passed.
     se = send_email_module()
-    rent_landed = se.rent_landed_refusal(args.task, f.get(AF["name"], ""), f)
+    rent_landed, rent_check = "", "NOT APPLICABLE: this card chases no rent, so there is no rent cycle to read again"
+    if rent_chase_card(f.get(AF["name"], ""), str(f.get(AF["notes"]) or "")):
+        checked = dict(f)
+        checked[AF["name"]] = rent_chase_check_name(f.get(AF["name"], ""))
+        rent_landed = se.rent_landed_refusal(args.task, checked[AF["name"]], checked)
+        rent_check = rent_landed or "CHECKED: the rent for the owed cycle has not arrived since the card was made"
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task, "switchedOn": on, "trial": trial or None,
                           "approvalOutcome": outcome or "(not yet approved)", "route": f"{TEXT_FROM} by ClickSend email-to-text",
-                          "numberEnds": number[-3:], "chars": len(message), "rentLanded": rent_landed or None}, indent=2))
+                          "numberEnds": number[-3:], "chars": len(message), "rentLanded": rent_landed or None,
+                          "rentCheck": rent_check}, indent=2))
         return 0
     if rent_landed:
         sys.exit(f"REFUSED: task {args.task}: {rent_landed}.")

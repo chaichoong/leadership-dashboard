@@ -323,8 +323,14 @@ const BUILTIN_SITES = {
   // hand-back poll visits these while they are in use (session-keepalive.py warm). Xero: 60 minutes,
   // Xero's staff on its product ideas forum; seen 14 Oct 2026, the last read at 10:18, signed out at
   // 11:20, Kevin signed in again at 11:26, while reads 55 and 57 minutes apart on 13 Oct held.
+  // alsoHosts (19 Nov 2026, finding 20261005-agent-dispatch-750): Xero signs in on login.xero.com
+  // and then LIVES on go.xero.com, so every read of the subscription page, the org list or a ledger
+  // was refused "not on the allowlist" and task recW01dJGmEpNmdpZ sat 45 days with no door. One
+  // login, one cookie, one keep-alive, so it is ONE entry with its app hosts listed, never four
+  // entries that would each ask Kevin to sign in again.
   'login.xero.com':             { label: 'Xero', login: true,
-                                  loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
+                                  loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60,
+                                  alsoHosts: ['go.xero.com', 'my.xero.com', 'central.xero.com', 'reporting.xero.com'] },
   // The Acturis insurance portal for AXA. AXA showed "Sorry, your session has timed out" an hour after
   // Kevin's sign-in on 7 Oct 2026; Acturis publishes no limit, so 60 is the longest it can be.
   // Swinton's Acturis portal sat here too until 15 Nov 2026, when Kevin took it off the robot: it is
@@ -333,6 +339,14 @@ const BUILTIN_SITES = {
                                   loginUrl: 'https://www.landlordaxainsurance.com/',
                                   checkUrl: 'https://www.landlordaxainsurance.com/AWE/Container.aspx?CurrentStep=MyAXA&CurrentWorkflow=Direct',
                                   idleMinutes: 60 },
+  // The Gas Care Solutions certificate portal (19 Nov 2026, finding 20261117-agent-dispatch-1340).
+  // Its door asks for an email address and emails back a login code: no password input and an
+  // ordinary address, so the session check called it signed in and wrote BLOCKER CLEARED on
+  // rechq1EFCIurfoeaa at 17 Nov 07:31 while the login form was on the screen. signedOutText is the
+  // page's own wording, read before any verdict.
+  'portal.gascaresolutions.co.uk': { label: 'Gas Care Solutions (certificates)', login: true,
+                                  loginUrl: 'https://portal.gascaresolutions.co.uk/',
+                                  signedOutText: ['Email me a login code', 'Sign in to view your documents'] },
   // The same portal without "www": its door is AXA's marketing front page, which has no password box,
   // so its check read "signed in" every morning while the www check read "timed out". It checks My AXA.
   'landlordaxainsurance.com':   { label: 'AXA landlord insurance', login: true,
@@ -484,12 +498,44 @@ function loadSites() {
   return merged;
 }
 
-function hostAllowed(url) {
+// Every host name an allowlist entry owns: its own key, plus any `alsoHosts` it lists. An app
+// that signs in on one host and then runs on another (Xero: login.xero.com, then go.xero.com)
+// is one site with one session, so the alias hosts hang off the entry rather than becoming
+// entries of their own, which would multiply its sign-in rows and its keep-alive checks.
+function entryHosts(host, entry) {
+  const also = Array.isArray(entry && entry.alsoHosts) ? entry.alsoHosts : [];
+  return [host, ...also].map(h => String(h || '').toLowerCase().trim()).filter(Boolean);
+}
+function allowedHosts(sites) {
+  const out = [];
+  for (const [host, entry] of Object.entries(sites || {})) out.push(...entryHosts(host, entry));
+  return out;
+}
+// The ONE answer to "may the robot open this address?". Every caller goes through here: the read
+// path, `session`, `prepare`/`commit`, the handover, and the `host-allowed` command that the
+// SITE-wall check in scripts/agent-dispatch.py calls. A second copy of this rule is what finding
+// 20261005-agent-dispatch-750 was: the read path refused go.xero.com while the wall check called
+// it listed, so the task had no door and no wall either.
+function hostAllowed(url, sites) {
   let h;
   try { h = new URL(url).hostname.toLowerCase(); } catch { return false; }
   // AND, never OR: a retired host is refused even under a parent the list still holds (acturis.com).
   if (retiredSite(url)) return false;
-  return Object.keys(loadSites()).some(d => h === d || h.endsWith('.' + d));
+  return allowedHosts(sites || loadSites()).some(d => h === d || h.endsWith('.' + d));
+}
+// Which entry owns the address, or '' when none does. The SITE-wall check needs the entry, not
+// just a yes: a host that is listed is a SIGN-IN wall at most, never a SITE wall.
+function allowedOwner(url, sites) {
+  let h;
+  try { h = new URL(url).hostname.toLowerCase(); } catch { return ''; }
+  if (retiredSite(url)) return '';
+  let best = '';
+  for (const [host, entry] of Object.entries(sites || loadSites())) {
+    for (const d of entryHosts(host, entry)) {
+      if ((h === d || h.endsWith('.' + d)) && d.length > best.length) best = host;
+    }
+  }
+  return best;
 }
 
 // sites.json as written, without the builtins merged in. A missing file is an
@@ -1109,15 +1155,51 @@ function doorLanding(url, site) {
   if (login && site && site.start && hostAndPath(site.start) !== login && here === login) return "the site's own sign-in page";
   return '';
 }
+// A sign-in page with NO password box (19 Nov 2026, finding 20261117-agent-dispatch-1340). The Gas
+// Care portal, and every portal that emails a login code instead of taking a password, shows an
+// email field and a button, on an ordinary address. Nothing in the old verdict saw that, so the
+// check read "signed in", the wall was cleared, and the task then failed in silence against a
+// login screen. Two layers on purpose:
+//   - `signedOutText` on the site's entry: the exact wording of a portal somebody has annotated;
+//   - SIGNIN_FORM_RE: the generic shape, so a portal NOBODY has annotated still fails safe.
+// Default signed OUT, because the cost of a false "in" is a wall cleared on a door that is shut.
+const SIGNIN_FORM_RE = new RegExp([
+  "e-?mail me a (?:login|log-?in|sign-?in|magic|one-?time) (?:code|link)",
+  "send me a (?:login|log-?in|sign-?in|magic|one-?time) (?:code|link)",
+  "(?:sign|log) in to (?:view|see|access|continue|download|manage)",
+  "enter (?:the|your) (?:login|log-?in|sign-?in|one-?time|verification) code",
+  "request a (?:login|log-?in|sign-?in) code",
+].join('|'), 'i');
+function signedOutMarker(text = '', site) {
+  const body = String(text || '');
+  const entry = (site && site.entry) || {};
+  const marks = Array.isArray(entry.signedOutText) ? entry.signedOutText : [];
+  for (const m of marks) {
+    if (m && body.toLowerCase().includes(String(m).toLowerCase())) return `the site's own signed-out wording ("${m}")`;
+  }
+  const hit = SIGNIN_FORM_RE.exec(body);
+  return hit ? `a sign-in form ("${hit[0].trim()}")` : '';
+}
 function sessionVerdict(url, passwordFields, text = '', title = '', site) {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
   const door = doorLanding(url, site);
-  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url) || !!door;
+  const signedOut = signedOutMarker(text, site);
+  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url) || !!door || !!signedOut;
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
   const botCheck = isBotCheck(text, title);
   return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck,
-           ...(door ? { door } : {}) };
+           ...(door ? { door } : {}), ...(signedOut ? { signedOut } : {}) };
+}
+// What `login` records when its window closes. A sign-in that did not complete must never reach
+// the task as cleared: the sweep reads this line, so when the door still shows the sign-in form
+// the line says so and the wall stays up.
+function loginOutcome(verdict) {
+  if (!verdict) return {};                      // no check could run: nothing is claimed either way
+  if (verdict.botCheck) return { signedIn: false, stillSignedOut: 'a bot check' };
+  if (verdict.signedIn) return { signedIn: true };
+  return { signedIn: false,
+           stillSignedOut: verdict.signedOut || verdict.door || 'the sign-in form was still showing' };
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────────
@@ -4437,6 +4519,34 @@ function followUp(cmd, argv) {
   return r.status === 0 ? '' : `${path.basename(argv[0])} ${argv[1]} failed: ${((r.stderr || r.stdout || r.error || '') + '').trim().slice(0, 200)}`;
 }
 
+// The door read again once Kevin's sign-in window has closed (19 Nov 2026, finding
+// 20261117-agent-dispatch-1340). A window he opened and closed without finishing used to be
+// recorded exactly like one he finished, and the sweep read that line as the wall cleared. A
+// headless read of the entry's own door decides instead, and a read that cannot run claims
+// nothing: {} rather than a signed-in line.
+async function postLoginVerdict(profile, url) {
+  if (process.env.AGENT_BROWSER_SKIP_LOGIN_CHECK === '1') return {};
+  let sites, owner;
+  try { sites = loadSites(); owner = allowedOwner(url, sites); } catch { return {}; }
+  const entry = (owner && sites[owner]) || null;
+  if (!entry || !entry.login) return {};
+  const start = entry.checkUrl || entry.loginUrl || url;
+  if (!hostAllowed(start, sites)) return {};
+  try {
+    const verdict = await withPage(profile, false, async (page) => {
+      await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForTimeout(3000);
+      await settleBotCheck(page);
+      return sessionVerdict(page.url(), await passwordFieldCount(page), await domText(page, 600),
+                            await page.title(), { entry, start });
+    });
+    return loginOutcome(verdict);
+  } catch (e) {
+    console.error('NOTE: could not re-read the sign-in page after the window closed: ' + String(e && e.message || e));
+    return {};
+  }
+}
+
 async function main() {
   const [, , cmd, ...rest] = process.argv;
   const profile = arg(rest, 'profile', 'default');
@@ -4445,6 +4555,24 @@ async function main() {
     // --retired: the hosts Kevin took off the robot, each with why and the route instead.
     if (rest.includes('--retired')) { console.log(JSON.stringify(retiredSites(), null, 2)); return; }
     console.log(JSON.stringify(loadSites(), null, 2));
+    return;
+  }
+
+  // Is this address on the robot's list, and which entry owns it? The SITE-wall check in
+  // scripts/agent-dispatch.py reads this instead of matching the host itself: one rule, one
+  // answer, so a read that is refused and a wall that is refused can never both happen to the
+  // same address again (finding 20261005-agent-dispatch-750).
+  if (cmd === 'host-allowed') {
+    const url = arg(rest, 'url');
+    if (!url) die('--url is required');
+    const target = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : 'https://' + url;
+    const sites = loadSites();
+    const owner = allowedOwner(target, sites);
+    let host = '';
+    try { host = new URL(target).hostname.toLowerCase(); } catch { host = ''; }
+    console.log(JSON.stringify({ url: target, host, allowed: hostAllowed(target, sites), owner,
+                                 entry: owner ? sites[owner] : null,
+                                 ...(retiredRefusal(target) ? { retired: retiredRefusal(target) } : {}) }));
     return;
   }
 
@@ -4553,8 +4681,12 @@ async function main() {
       }
       const kept = persistSessionCookies(dir);
       console.log(`Kept ${kept} session cookie(s) alive (${SESSION_COOKIE_HOURS} hours, or the site's own sessionCookieHours).`);
+      const out = await postLoginVerdict(profile, url);
+      if (out.stillSignedOut) {
+        console.error(`SIGN-IN NOT COMPLETE: ${host} still shows ${out.stillSignedOut}, so nothing is signed in and no wall is cleared. Open the sign-in again and finish it.`);
+      }
       ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept,
-               ...(forWall ? { forWall } : {}), ...(timedOut ? { timedOut: true } : {}) });
+               ...out, ...(forWall ? { forWall } : {}), ...(timedOut ? { timedOut: true } : {}) });
       return;
     }
     let timedOut = false;
@@ -4564,8 +4696,12 @@ async function main() {
       await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => { timedOut = true; });
     });
     // withPage kept them as it closed; a second pass would find none (review, 29 Sep 2026).
+    const out = await postLoginVerdict(profile, url);
+    if (out.stillSignedOut) {
+      console.error(`SIGN-IN NOT COMPLETE: ${host} still shows ${out.stillSignedOut}, so nothing is signed in and no wall is cleared. Open the sign-in again and finish it.`);
+    }
     ledger({ cmd: 'login', host, profile, sessionCookiesKept: lastKept,
-             ...(forWall ? { forWall } : {}), ...(timedOut ? { timedOut: true } : {}) });
+             ...out, ...(forWall ? { forWall } : {}), ...(timedOut ? { timedOut: true } : {}) });
     return;
   }
 
@@ -5100,7 +5236,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, secretValueReason, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, postLoginVerdict, allowedOwner, allowedHosts, entryHosts, signedOutMarker, SIGNIN_FORM_RE, loginOutcome, pickLinks, runSteps, assertNotCredential, secretValueReason, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile, retiredSite, retiredRefusal, retiredSites, withRetiredRules, retiredResolverRules,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,

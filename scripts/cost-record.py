@@ -35,6 +35,11 @@ WHAT A WRITE NEEDS
         RECORD CHANGE: <cost id> Payment Status = Inactive
         RECORD NEW COST: <name> | <amount> | <frequency> | due <day> | first <YYYY-MM-DD> | ends <YYYY-MM-DD>
         RECORD NEW COST: <name> | <amount> | <frequency> | due <day> | first <YYYY-MM-DD> | no end date
+    where <day> is a day of the month (1 to 31) or, on a Weekly, Fortnightly or 4-Weekly cost, a WEEKDAY in words
+    ("due Friday"): the due day written is then the day of the month of the FIRST PAYMENT, and the weekday is kept
+    in words in the output, the ledger and the comment on the cost (due_spec). Backticks round a field or round the
+    line are stripped. A due day no reading gives is never written as NOT FOUND: the line is refused, and `owed`
+    says the line cannot be read rather than answering "nothing owed".
     and the command's own arguments must say the same thing.
   * A cost proven to be in the Costs table (a list read by RECORD_ID, never a GET by id, which
     ignores the table in the URL). Every linked id on a new cost is proven the same way in its table.
@@ -58,6 +63,8 @@ USAGE
   cost-record.py show COST                                      the record and its comments (read only)
   cost-record.py ended [--grace 5]                              counted costs past their End Date (read only)
   cost-record.py owed TASK                                      what the task's approved card still owes (read only)
+  cost-record.py note-applied TASK --output-file F --why "..."  Kevin's minor-edits note was information: record
+                                                                that no text changed, in the agent's own words
   cost-record.py payments --payee "lemonade" [--amount 37.58] [--days 120]
                                                                 payments to a payee, oldest first (read only)
   cost-record.py expected COST 16.36 --task T --why "..."       Expected Cost, on an approved line
@@ -129,7 +136,17 @@ ENDED_GRACE_DAYS = 5
 # 2026: "End Date =" then "none" on its own line would otherwise clear a date).
 CHANGE_RE = re.compile(r"^RECORD CHANGE:[ \t]*(?P<cost>rec[A-Za-z0-9]{14})[ \t]+"
                        r"(?P<label>Expected Cost|End Date|Payment Status|Property)[ \t]*=[ \t]*(?P<value>[^\n]+?)[ \t]*$", re.M)
-NEW_RE = re.compile(r"^RECORD NEW COST:[ \t]*(?P<body>[^\n]+?)[ \t]*$", re.M)
+# A card line arrives as Kevin's agents write it, and they write markdown: a backtick round the line, a bullet, a
+# blockquote. Anchored hard to the start of the line, this matched NONE of those, and an unmatched line is invisible
+# (19 Nov 2026, finding 20261119-agent-dispatch-1365: the approved Roy pay line was written in backticks, NEW_RE
+# matched nothing, `owed` answered [] and a close would have passed with the cost unwritten). The decoration is
+# allowed in and stripped; the words and the six fields are unchanged.
+NEW_RE = re.compile(r"^[ \t>*\-_`]*RECORD NEW COST:[ \t]*(?P<body>[^\n]+?)[ \t`*_]*$", re.M)
+# The backstop for the same failure: a line that MEANS to be a cost line (it names RECORD NEW COST and a colon) and
+# that NEW_RE still cannot read is reported by `owed`, never dropped. Prose about a cost line has no colon. A line
+# carrying a dated stamp ("29 Oct 2026") is a quote of another task in the track record, not a line on this card
+# (the same rule PURCHASE_CLEARED_RE keeps), so it is left where it is.
+NEW_INTENT_RE = re.compile(r"^(?![^\n]*\d{1,2} [A-Z][a-z]{2} \d{4})[^\n]*RECORD NEW COST[ \t]*:[^\n]*$", re.M | re.I)
 # Up to £9,999,999.99, with or without thousands commas; a leading zero group ("0,500") is not an amount.
 AMOUNT_RE = re.compile(r"^(?:£|GBP)?\s*((?:[1-9]\d{0,2},\d{3}|[1-9],\d{3},\d{3}|\d{1,7})(?:\.\d{1,2})?)$", re.I)
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -225,7 +242,9 @@ def approved_lines(task):
     if before is None:
         raise Refused(f"task {task['id']} was Approved with minor edits and his note has not been applied to the card: "
                       f"run agent-dispatch.py revise {task['id']} --output-file <file> first (complete asks the same), "
-                      "then only the lines his edit left alone can be written")
+                      "then only the lines his edit left alone can be written. If his note changes nothing in the "
+                      f"text (it is information), record that instead: cost-record.py note-applied {task['id']} "
+                      "--output-file <the card's text, unchanged> --why \"<why no text changed, in words>\"")
     original = tr.approved_original(before)
     read = {squash(x) for x in original.splitlines() if squash(x)}
     # A RECORD CHANGE line his edit changed counts only when its new value is one his note names, on a line he
@@ -344,29 +363,85 @@ def edited_hint(task):
     return ""
 
 
+# A WEEKLY COST DUE ON A WEEKDAY (19 Nov 2026, finding 20261119-agent-dispatch-1365)
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+# Only a cost paid by the week has a weekday: "due Friday" on a Monthly cost is not a day of the month.
+WEEKDAY_FREQUENCIES = ("Weekly", "Fortnightly", "4-Weekly")
+
+
+def due_spec(field, first, freq):
+    """(day of the month, weekday in words or None, problem) from a card's due field or --due-day.
+
+    THE CONVENTION, explicit here and in the usage above (19 Nov 2026, finding
+    20261119-agent-dispatch-1365, and Kevin's rule "a date the policy papers leave out is on the first payment"):
+    Kevin approved Roy's pay as a weekly cost "due Friday". Airtable's Due Day is a 1-31 single select and holds no
+    weekday, --due-day took 1-31 only, and so the approved line had no route at all. A weekly cost now records its
+    due day as the DAY OF THE MONTH OF ITS FIRST PAYMENT, and the weekday is kept in words beside it (in the
+    output, the ledger line and the dated comment on the cost) so nothing the card said is lost.
+
+    The weekday must be the weekday the first payment falls on: they are two readings of one date, so a mismatch is
+    one of them being wrong and is refused rather than written. With no first payment yet there is nothing to take
+    the day from, and "NOT FOUND" is never written: that is refused too, and the first payment is read off the bank
+    (`cost-record.py payments`)."""
+    t = squash(field).strip("`*_ ")
+    if re.fullmatch(r"\d{1,2}", t):
+        n = int(t)
+        if not 1 <= n <= 31:
+            return None, None, f"the due day must be a day of the month, 1 to 31, not {t}"
+        return n, None, ""
+    name = next((w for w in WEEKDAYS if w.casefold() == t.casefold()), None)
+    if not name:
+        return None, None, (f"the due day must be a day of the month (1 to 31) or a weekday in words "
+                            f"({', '.join(WEEKDAYS)}), not {t!r}")
+    if freq not in WEEKDAY_FREQUENCIES:
+        return None, None, (f"only a {', '.join(WEEKDAY_FREQUENCIES)} cost is due on a weekday; this one is {freq}, "
+                            "so its due day is a day of the month (1 to 31)")
+    if not first:
+        return None, None, (f"a {freq} cost due {name} records the day of the month of its FIRST PAYMENT, and this "
+                            "one has no first payment yet: read it off the bank (cost-record.py payments --payee "
+                            "<who it is paid to>) and resubmit the line with that date. A date is never written as "
+                            "NOT FOUND")
+    d = rc.parse_day(first)
+    if d is None:
+        return None, None, f"the first payment ({first!r}) is not a real date written YYYY-MM-DD"
+    if WEEKDAYS[d.weekday()] != name:
+        return None, None, (f"the card says due {name} but its first payment {first} is a "
+                            f"{WEEKDAYS[d.weekday()]}: one of the two is wrong, so put the corrected line on a card "
+                            "for Kevin rather than writing a due day neither of them gives")
+    return d.day, name, ""
+
+
 def parse_new_line(body):
-    """The six parts of a RECORD NEW COST line as a dict, or None when the line is not that shape."""
-    parts = [squash(p) for p in body.split("|")]
+    """The six parts of a RECORD NEW COST line as a dict, or None when the line is not that shape.
+
+    A field may be written in backticks or bold, as Kevin's agents write markdown (`due Friday`); the decoration is
+    stripped and the value read. The due field is a day of the month or a weekday (see due_spec)."""
+    parts = [squash(p).strip("`*_ ") for p in body.split("|")]
     if len(parts) != 6 or not parts[0]:
         return None
     freq = next((f for f in FREQUENCIES if f.casefold() == parts[2].casefold()), None)
-    due = re.fullmatch(r"due (\d{1,2})", parts[3], re.I)
-    first = re.fullmatch(r"first (\S+)", parts[4], re.I)
+    due = re.fullmatch(r"due[ \t]+(.+)", parts[3], re.I)
+    first = re.fullmatch(r"first[ \t]+(\S+)", parts[4], re.I)
     if parts[5].casefold() == "no end date":
         end = ""
     else:
-        m = re.fullmatch(r"ends (\S+)", parts[5], re.I)
+        m = re.fullmatch(r"ends[ \t]+(\S+)", parts[5], re.I)
         end = day(m.group(1)) if m else None
-    if amount(parts[1]) is None or not freq or not due or not first or not day(first.group(1)) or end is None:
+    first_day = day(first.group(1)) if first else None
+    if amount(parts[1]) is None or not freq or not due or not first_day or end is None:
         return None
-    return {"name": parts[0], "expected": amount(parts[1]), "frequency": freq, "dueDay": int(due.group(1)),
-            "first": day(first.group(1)), "end": end}
+    due_day, weekday, problem = due_spec(due.group(1), first_day, freq)
+    if problem:
+        return None
+    return {"name": parts[0], "expected": amount(parts[1]), "frequency": freq, "dueDay": due_day,
+            "dueWeekday": weekday, "first": first_day, "end": end}
 
 
 def new_line(spec):
     """The card line that approves `spec`, written the way Kevin reads it."""
     end = f"ends {spec['end']}" if spec["end"] else "no end date"
-    return (f"RECORD NEW COST: {spec['name']} | {spec['expected']} | {spec['frequency']} | due {spec['dueDay']} | "
+    due = spec.get("dueWeekday") or spec["dueDay"]
+    return (f"RECORD NEW COST: {spec['name']} | {spec['expected']} | {spec['frequency']} | due {due} | "
             f"first {spec['first']} | {end}")
 
 
@@ -379,7 +454,7 @@ def new_problem(task, spec):
     for m in NEW_RE.finditer(text):
         card = parse_new_line(m.group("body"))
         if card and name_key(card["name"]) == name_key(spec["name"]) and all(
-                card[k] == spec[k] for k in ("expected", "frequency", "dueDay", "first", "end")):
+                card.get(k) == spec.get(k) for k in ("expected", "frequency", "dueDay", "dueWeekday", "first", "end")):
             return note_value_problem(task, {"amount": spec["expected"], "dates": [spec["first"], spec["end"]]})
     return (f"the card Kevin approved (task {task['id']}) has no line '{new_line(spec)}'{edited_hint(task)}: put the "
             "new cost on a card for him to approve (one tap)")
@@ -414,7 +489,23 @@ def owed_new_costs(task_id, output, notes, live_costs, ledger_rows):
             for n, e in live_costs if squash(n)}
     made = {name_key(x.get("name")) for x in ledger_rows if x.get("kind") == "create" and x.get("task") == task_id}
     owed, lines = [], 0
-    for m in NEW_RE.finditer(tr.approved_original(output)):
+    text = tr.approved_original(output)
+    # A LINE NOTHING COULD EVEN READ IS THE WORST CASE, so it is said first (19 Nov 2026, finding
+    # 20261119-agent-dispatch-1365). An approved cost line NEW_RE cannot match used to be invisible here, and []
+    # reads as "nothing owed", so `complete` would have closed the task with the cost unwritten. Kevin's rule is
+    # that a task carrying a RECORD NEW COST line closes only once the cost is written or someone says why none is
+    # owed; an unreadable line answers neither, so it is reported and the close is refused.
+    read_lines = {squash(m.group(0)) for m in NEW_RE.finditer(text)}
+    for m in NEW_INTENT_RE.finditer(text):
+        line = squash(m.group(0))
+        if line in read_lines:
+            continue
+        owed.append(f"'{line[:200]}' names a RECORD NEW COST but cannot be read as one, so nothing can say whether "
+                    "the cost is written: the line is <name> | <amount> | <frequency> | due <1-31 or a weekday> | "
+                    "first <YYYY-MM-DD> | ends <YYYY-MM-DD> (or 'no end date'), six fields separated by '|'. "
+                    "Resubmit THIS task with the line in that shape for Kevin to approve. This task does not close "
+                    "on an unread line")
+    for m in NEW_RE.finditer(text):
         lines += 1
         body = squash(m.group("body"))
         parts = body.split("|")
@@ -702,11 +793,14 @@ def cmd_new(a):
     freq = next((f for f in FREQUENCIES if f.casefold() == str(a.frequency).casefold()), None)
     if not freq:
         raise Refused(f"--frequency must be one of {', '.join(FREQUENCIES)}, not {a.frequency!r}")
-    if not 1 <= a.due_day <= 31:
-        raise Refused(f"--due-day must be a day of the month, 1 to 31, not {a.due_day}")
     first = day(a.first_payment)
     if not first:
         raise Refused(f"--first-payment must be a real date written YYYY-MM-DD, not {a.first_payment!r}")
+    # 1-31, or a weekday in words for a weekly cost (due_spec: the day written is then the first payment's day of
+    # the month, and the weekday is kept in words).
+    due_day, due_weekday, due_problem = due_spec(a.due_day, first, freq)
+    if due_problem:
+        raise Refused(f"--due-day: {due_problem}")
     if a.no_end_date == bool(a.end_date):
         raise Refused("say how the cost ends: --end-date YYYY-MM-DD (the last payment) or --no-end-date, one of them")
     end = "" if a.no_end_date else day(a.end_date)
@@ -717,7 +811,8 @@ def cmd_new(a):
     name = squash(a.name)
     if not name or "|" in name:
         raise Refused("--name must be the cost's name, without a '|'")
-    spec = {"name": name, "expected": expected, "frequency": freq, "dueDay": a.due_day, "first": first, "end": end}
+    spec = {"name": name, "expected": expected, "frequency": freq, "dueDay": due_day, "dueWeekday": due_weekday,
+            "first": first, "end": end}
     task = tr.load_task(a.task)
     why = new_problem(task, spec)
     if why:
@@ -737,7 +832,8 @@ def cmd_new(a):
     if missing:
         raise Refused(f"a new cost needs its {', '.join(missing)} (every report groups by them): pass the flag, or "
                       "--like the cost this one replaces")
-    out = {"name": name, "expectedCost": money(expected), "frequency": freq, "dueDay": a.due_day,
+    out = {"name": name, "expectedCost": money(expected), "frequency": freq, "dueDay": due_day,
+           "dueWeekday": due_weekday,
            "firstPayment": first, "endDate": end or "no end date", "task": task["id"],
            "links": {"business": links[COST_BUSINESS], "category": links[COST_CATEGORY],
                      "subCategory": links[COST_SUBCAT], "property": links[COST_PROPERTY]}}
@@ -748,7 +844,7 @@ def cmd_new(a):
     made = [x for x in read_ledger() if x.get("kind") == "create" and x.get("task") == task["id"]
             and name_key(x.get("name")) == name_key(name) and x.get("cost") in ids]
     if made:
-        spec_keys = ("expectedCost", "frequency", "dueDay", "firstPayment", "endDate")
+        spec_keys = ("expectedCost", "frequency", "dueDay", "dueWeekday", "firstPayment", "endDate")
         if all(made[-1].get(k) == out[k] for k in spec_keys):
             return dict(out, cost=made[-1]["cost"], unchanged=True,
                         note=f"this card's cost already exists as {made[-1]['cost']}")
@@ -763,7 +859,7 @@ def cmd_new(a):
                       "record instead, or give the new one its own name (a policy number tells two apart)")
     if a.dry_run:
         return dict(out, dryRun=True)
-    fields = {COST_NAME: name, COST_EXPECTED: float(expected), COST_FREQUENCY: freq, COST_DUE_DAY: str(a.due_day),
+    fields = {COST_NAME: name, COST_EXPECTED: float(expected), COST_FREQUENCY: freq, COST_DUE_DAY: str(due_day),
               COST_DUE_DATE: first, COST_PAY_STATUS: "In Payment", COST_STATUS_NEW: "In Payment",
               **{k: v for k, v in links.items() if v}}
     if end:
@@ -777,14 +873,81 @@ def cmd_new(a):
     g = (tr._one(T_COSTS, cost_id) or {}).get("fields") or {}
     read = (squash(g.get(COST_NAME)), amount(g.get(COST_EXPECTED)), rc.sel(g.get(COST_FREQUENCY)),
             rc.sel(g.get(COST_DUE_DAY)), g.get(COST_END) or "", rc.sel(g.get(COST_PAY_STATUS)))
-    if read != (name, expected, freq, str(a.due_day), end, "In Payment"):
+    if read != (name, expected, freq, str(due_day), end, "In Payment"):
         ledger(dict(out, kind="unlanded"))
         raise RuntimeError(f"{cost_id} reads {read!r} after the create: the write did not land as approved")
     ledger(dict(out, kind="create", why=a.why))
-    return comment(cost_id, f"{stamp()}: created by an agent ({money(expected)} {freq}, due {a.due_day}, first payment "
+    due_said = f"due {due_day}" + (f" (every {due_weekday}, the weekday the card named)" if due_weekday else "")
+    return comment(cost_id, f"{stamp()}: created by an agent ({money(expected)} {freq}, {due_said}, first payment "
                             f"{first}, last payment {end or 'none set: no end date'}), on the RECORD NEW COST line of "
                             f"the card Kevin approved, task {task['id']} ({tr.task_label(task)}). Why: {why_text(a)}",
                    out)
+
+
+# ─── AN INFORMATIONAL MINOR-EDIT NOTE (19 Nov 2026, finding 20261119-agent-dispatch-1365) ──────────
+# Kevin approved Roy's pay cost line "with minor edits" and his note was INFORMATION ("Roy now emails
+# info@"): it changed nothing in the text. `new` and `complete` both demand that `agent-dispatch.py revise`
+# has applied the note, and `revise` refuses a text identical to the one he approved, so the approved line
+# could not be written by any route and the task sat there. This is the route, and it is deliberately narrow:
+# the agent says IN WORDS why no text changed, those words are stored on the task beside Kevin's note, and
+# the texts must actually be identical. A real edit still goes through `revise`.
+NO_TEXT_CHANGE_MARK = "no text change needed."
+
+
+def cmd_note_applied(a):
+    """Record that Kevin's minor-edits note needed no change to the text, with the reason in the agent's words.
+
+    Writes the same EDITS APPLIED block to the task's Notes that `agent-dispatch.py revise` writes (so this door
+    and `complete` both read it), with the text Kevin approved archived unchanged beneath it. REFUSES when the
+    submitted text differs from the card by so much as a line: that is a real edit and `revise` applies it."""
+    task = tr.load_task(a.task)
+    f = task.get("fields") or {}
+    problem = tr.approval_problem(task)
+    if problem:
+        raise Refused(problem)
+    outcome = rc.sel(f.get(tr.TK["approvalOutcome"]))
+    if outcome != "Approved with minor edits":
+        raise Refused(f"task {task['id']} was {outcome or 'not approved'}, not Approved with minor edits: there is no "
+                      "note to record. An Approved as-is card is carried out as it stands")
+    note = squash(f.get(tr.TK["approvalFeedback"]))
+    if not note:
+        raise Refused(f"task {task['id']} carries no note, so there was no edit and the card already counts as it "
+                      "stands: nothing to record")
+    try:
+        with open(a.output_file) as fh:
+            submitted = fh.read().strip()
+    except OSError as e:
+        raise Refused(f"--output-file could not be read: {e}")
+    if not submitted:
+        raise Refused("--output-file is empty: it holds the card's text exactly as it stands, which is what makes "
+                      "this an informational note")
+    current = str(f.get(tr.TK["agentOutput"]) or "").strip()
+    if not current:
+        raise Refused(f"task {task['id']} has no Agent Output to compare: nothing on it was approved")
+    if [squash(x) for x in submitted.splitlines() if squash(x)] != [squash(x) for x in current.splitlines()
+                                                                   if squash(x)]:
+        raise Refused(f"the text in --output-file is not the text on task {task['id']}: his note changed something, "
+                      f"so it is a real edit. Apply it with agent-dispatch.py revise {task['id']} --output-file "
+                      "<file>. This route records only that NOTHING in the text changed")
+    if text_before_edit(f.get(tr.TK["notes"]), f.get(APPROVED_AT)) is not None:
+        return {"task": task["id"], "unchanged": True,
+                "note": "his note is already recorded as applied on this task; nothing written"}
+    reason = why_text(a)
+    out = {"task": task["id"], "kevinsNote": note[:300], "reason": reason, "textChanged": False}
+    if a.dry_run:
+        return dict(out, dryRun=True)
+    block = (f"[{stamp()} — agent] {EDITS_APPLIED_MARK} {NO_TEXT_CHANGE_MARK} {reason[:300]} Kevin's note, "
+             f"which is information and not an edit: {note[:300]}\n\n{EDITS_ARCHIVE_HEAD}\n{current[:20000]}")
+    existing = str(f.get(tr.TK["notes"]) or "").rstrip()
+    rc.api("PATCH", f"{rc.T_TASKS}/{task['id']}",
+           {"fields": {tr.TK["notes"]: (existing + "\n\n" + block).strip()[-90000:]}})
+    fresh = (tr.load_task(a.task).get("fields") or {})
+    if text_before_edit(fresh.get(tr.TK["notes"]), fresh.get(APPROVED_AT)) is None:
+        ledger(dict(out, kind="unlanded"))
+        raise RuntimeError(f"the note on {task['id']} does not read as applied after writing it: the write did not "
+                           "land, so the approved line still cannot be written")
+    ledger(dict(out, kind="note-applied", why=reason))
+    return dict(out, recorded=True)
 
 
 def read_ledger():
@@ -804,6 +967,11 @@ def main(argv=None):
     n.add_argument("--grace", type=int, default=ENDED_GRACE_DAYS)
     o = sub.add_parser("owed")
     o.add_argument("task")
+    na = sub.add_parser("note-applied")
+    na.add_argument("task")
+    na.add_argument("--output-file", required=True, help="the card's text as it stands, which must be identical to it")
+    na.add_argument("--why", required=True, help="why his note needed no change to the text, in a sentence")
+    na.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("payments")
     p.add_argument("--payee", required=True)
     p.add_argument("--amount")
@@ -827,7 +995,8 @@ def main(argv=None):
     w.add_argument("--name", required=True)
     w.add_argument("--expected", required=True)
     w.add_argument("--frequency", required=True)
-    w.add_argument("--due-day", type=int, required=True)
+    w.add_argument("--due-day", required=True, help="a day of the month (1 to 31), or a weekday in words for a "
+                                                   "Weekly, Fortnightly or 4-Weekly cost")
     w.add_argument("--first-payment", required=True)
     w.add_argument("--end-date")
     w.add_argument("--no-end-date", action="store_true")
@@ -843,7 +1012,7 @@ def main(argv=None):
     try:
         out = {"show": cmd_show, "ended": cmd_ended, "owed": cmd_owed, "payments": cmd_payments,
                "expected": cmd_expected, "end": cmd_end, "inactive": cmd_inactive, "new": cmd_new,
-               "property": cmd_property}[a.cmd](a)
+               "property": cmd_property, "note-applied": cmd_note_applied}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2

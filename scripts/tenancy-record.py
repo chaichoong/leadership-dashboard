@@ -42,10 +42,22 @@ WHAT EVERY WRITE DOES
   appends one line to LEDGER. A write whose comment then fails is said (exit 1), never undone.
 
 WHAT IT NEVER DOES
-  Void a unit, edit a rent (a rent change is a NEW tenancy: Kevin, 5 Oct 2026), or write any field not
-  listed here. Payment Status takes only In Payment, CFV or CFV Actioned: voiding has its own
-  six-question gate (airtable-tenancy-ender skill). It ends a tenancy, creates a tenancy or a tenant, or
-  touches a tenant record ONLY in onboard and rent-change below.
+  Edit a rent (a rent change is a NEW tenancy: Kevin, 5 Oct 2026), or write any field not listed here.
+  Payment Status takes only In Payment, CFV or CFV Actioned: a Void goes through move-out below, which runs
+  the six-question gate (airtable-tenancy-ender skill) in code. It ends a tenancy, voids a unit, creates a
+  tenancy or a tenant, or touches a tenant record ONLY in move-out, onboard and rent-change below.
+
+THE MOVE-OUT DOOR (move-out; finding 20261118-agent-dispatch-1345)
+  On 18 Nov 2026 Kevin approved a move-out as-is and there was no door for it: no command here, a rule
+  forbidding a hand-rolled PATCH to a tenancy, tenant or unit, and the Cash Flow Voids page's Moved out
+  button reaching only a tenancy listed on that page. move-out is the door for every other tenancy. It
+  refuses unless the card Kevin approved AS-IS carries 'RECORD CHANGE: <tenancy> Move-out = <YYYY-MM-DD>'
+  with the marks of a real approval, runs the airtable-tenancy-ender skill's SIX QUESTIONS IN CODE before
+  it touches the unit (refusing with the question that failed, in particular another LIVE tenancy on the
+  unit through EITHER of its links, or no unit linked at all), then writes in this declared order, reading
+  each one back before the next: the tenancy End Date, its Payment Status cleared, the tenant Former and
+  off the unit, the unit Void. A write or read-back that fails stops everything and says exactly what
+  landed and what did not. The ledger keys it on the tenancy, so a re-run writes nothing twice.
 
 THE MOVE-IN AND RENT-CHANGE DOORS (onboard, rent-change; Kevin's rulings of 2, 5 and 9 Oct 2026)
   Only on the `TENANCY RECORD:` task the rent check raised (scripts/rent_signed_check.py), approved by Kevin
@@ -72,6 +84,10 @@ USAGE
                                                           rent a letting agent keeps against our bill
                                                           counts as PAID for whole rent periods from D
                                                           (a due date) to D (the day before one)
+  tenancy-record.py move-out TENANCY --end YYYY-MM-DD --task T --evidence "..."
+                                                          the tenant has gone: ends the tenancy, clears its
+                                                          payment status, makes the tenant Former and off the
+                                                          unit, and voids the unit (six questions first)
   tenancy-record.py onboard --task T --unit RU --due-day N --type "Universal Credit" --email E [--replace TENANCY]
                                                           a NEW tenant from a signed agreement
   tenancy-record.py rent-change OLD --task T              a continuing tenant's new rent = a NEW tenancy
@@ -114,7 +130,7 @@ REC_RE = re.compile(r"rec[A-Za-z0-9]{14}")
 # Your step text is cut off before this runs by approved_original().
 CHANGE_BULLET = r"[ \t]*(?:[-*•–][ \t]+|\d+[.)][ \t]+)?"
 CHANGE_RE = re.compile(rf"^{CHANGE_BULLET}RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{{14}}|[0-9a-f]{{12,24}})\s+"
-                       r"(?P<label>Payment Status|Due Day|Set-off|Onboard|Rent change)\s*=\s*(?P<value>[^\n]+?)\s*$", re.M)
+                       r"(?P<label>Payment Status|Due Day|Set-off|Move-out|Onboard|Rent change)\s*=\s*(?P<value>[^\n]+?)\s*$", re.M)
 # Kept identical to scripts/agent-dispatch.py (tests/tenancy-record.test.js reads both). `block --kind KEVIN --steps`
 # puts agent-written steps ON TOP of an approved card's Agent Output and keeps the approval (review round 3,
 # 9 Oct 2026): only the original below the LAST divider is what Kevin approved.
@@ -826,6 +842,227 @@ def cmd_rent_change(a):
     return out
 
 
+# ─── move-out (finding 20261118-agent-dispatch-1345) ─────────────────
+# Kevin approved a move-out on 18 Nov 2026 and there was no door: this file had no move-out command, the
+# agent rules forbid ending a tenancy, voiding a unit or writing a tenant record by hand-rolled PATCH, and
+# the Cash Flow Voids page's Moved out button only reaches a tenancy listed on that page. This is the door
+# for every other tenancy. It runs the airtable-tenancy-ender skill's SIX-QUESTION SAFETY GATE in CODE, so
+# it cannot be forgotten, and refuses with the question that failed.
+UNIT_STATUS = "fldBvqysXBm9rIm0E"           # Rental Units: Unit Status (js/config.js F.unitStatus)
+UNIT_TENANCIES = "fldxOnUDg49C2PNVW"        # Rental Units: Tenancies (F.unitTenancies)
+UNIT_TENANCIES_COPY = "fldmpIYp1cN0eQgWt"   # Rental Units: Tenancies copy — the dead legacy link, read for Q3
+UNIT_TENANTS_TEXT = "fldUs1pONuxxL6Mcm"     # Rental Units: Tenants Field — PLAIN TEXT, never evidence (Q4)
+END_DATE = rc.TY["end"]
+CUSTOMERS = rc.TY["tenants"]                # Tenancies: Customers (the link to Tenants)
+TENANT_NAME, TENANT_STATUS, TENANT_UNIT = TEN["name"], TEN["status"], TEN["unit"]
+FORMER = "Former"
+VOID = "Void"
+# Only an Occupied or blank unit is voided: Rent Ready and Not Ready already say nobody lives there
+# (the Moved out button's rule, js/cfv.js moBuildPlan).
+VOIDABLE_UNIT_STATUSES = ("", "Occupied")
+
+
+def live_tenancy_ids_on(unit_row, tenancy_id):
+    """Every tenancy id linked to this unit, other than the one being ended, from BOTH links. The ids only;
+    whether each is live is read off the Tenancies table, never off the unit."""
+    f = unit_row.get("fields") or {}
+    ids = []
+    for field in (UNIT_TENANCIES, UNIT_TENANCIES_COPY):
+        for x in f.get(field) or []:
+            if isinstance(x, str) and REC_RE.fullmatch(x) and x != tenancy_id and x not in ids:
+                ids.append(x)
+    return ids
+
+
+def is_live(row, today):
+    """A tenancy with no end date, or one still to come, is live (the skill's test, widened to a future end
+    date: a let that ends next month is not a free room)."""
+    end = rc.parse_day((row.get("fields") or {}).get(END_DATE))
+    return end is None or end >= today
+
+
+def tenancies_by_id(ids):
+    """{id: row} for these tenancy ids, read through ONE paginated list on the Tenancies table (a GET by id
+    would find a record of another table too). An id missing from the result is not in that table."""
+    out = {}
+    if not ids:
+        return out
+    formula = "OR(" + ",".join(f"RECORD_ID()='{i}'" for i in ids) + ")"
+    for row in rc.fetch_all(rc.T_TENANCIES, {"filterByFormula": formula,
+                                             "fields[]": [END_DATE, REF, CUSTOMERS]}):
+        out[row["id"]] = row
+    return out
+
+
+def payments_after(tenancy_id, end):
+    """The payments on THIS tenancy dated after the move-out date, read off each TRANSACTION's own Tenancy
+    link (question 6: the tenancy record that displays a payment is not whose money it is)."""
+    out = []
+    for tx in rc.fetch_all(rc.T_TX, {"fields[]": [TX_TENANCY, TX_DATE],
+                                     "filterByFormula": f"IS_AFTER({{**Date}}, '{end.isoformat()}')"}):
+        if tenancy_id in ((tx.get("fields") or {}).get(TX_TENANCY) or []):
+            out.append(tx["id"])
+    return out
+
+
+def move_out_gate(tenancy, end, today):
+    """The airtable-tenancy-ender skill's six questions, in code, before anything is written. Returns
+    (what to write, what to say) or raises Refused naming the question that failed."""
+    f = tenancy.get("fields") or {}
+    tenancy_id = tenancy["id"]
+    # Q5 first, for every record this touches: proved by a LIST on its own table (load_tenancy already did
+    # this one), never a GET by id, which resolves across the whole base and returns 200 from a dead table.
+    existing_end = rc.parse_day(f.get(END_DATE))
+    if existing_end and existing_end != end:
+        raise Refused(f"tenancy {tenancy_id} already ended on {existing_end}, not {end}: a second move-out date is "
+                      "Kevin's, on a card")
+    # Q1: WHOSE tenancy is it? The tenant comes from this tenancy's Customers LINK, never from a name match,
+    # so two tenant records with one name cannot be confused. A linked tenant that does not read back from
+    # the Tenants table is a doubt, not a skip: it fails toward marking the wrong person Former.
+    tenant_ids = [t for t in (f.get(CUSTOMERS) or []) if isinstance(t, str) and REC_RE.fullmatch(t)]
+    if not tenant_ids:
+        raise Refused(f"question 1 (whose tenancy is it): tenancy {tenancy_id} links no tenant, so this door cannot "
+                      "mark anyone Former; put the move-out on a card for Kevin")
+    tenants = []
+    for tid in tenant_ids:
+        row = _one(rc.T_TENANTS, tid, [TENANT_NAME, TENANT_STATUS, TENANT_UNIT])
+        if not row:
+            raise Refused(f"question 1 (whose tenancy is it): tenant {tid} on tenancy {tenancy_id} is not in the "
+                          "Tenants table (a list by RECORD_ID found nothing), so nothing is written")
+        tenants.append(row)
+    # Q2: does the tenancy actually link a rental unit? Never inferred from a document name, a tenancy
+    # reference or the unit's Tenants Field.
+    unit_ids = [u for u in (f.get(TY_IN["unit"]) or []) if isinstance(u, str) and REC_RE.fullmatch(u)]
+    if not unit_ids:
+        raise Refused(f"question 2 (is a rental unit linked): tenancy {tenancy_id} links no rental unit, so no unit "
+                      "can be voided; the move-out is Kevin's, on a card")
+    if len(unit_ids) > 1:
+        raise Refused(f"question 2 (is a rental unit linked): tenancy {tenancy_id} links {len(unit_ids)} rental units "
+                      f"({', '.join(unit_ids)}): which room is void is Kevin's, on a card")
+    unit_id = unit_ids[0]
+    unit = _one(T_UNITS, unit_id, [UNIT_NAME, UNIT_STATUS, UNIT_TENANCIES, UNIT_TENANCIES_COPY])
+    if not unit:
+        raise Refused(f"question 5 (is the record in the table you think): {unit_id} is not in the Rental Units table "
+                      "(a list by RECORD_ID found nothing), so nothing is written")
+    uf = unit.get("fields") or {}
+    # Q4: the unit's Tenants Field is plain text, unmaintained, and was 17 months out of date on 18 Sep 2026.
+    # It is never read: the fields[] above leaves it out, and this proves it did.
+    if UNIT_TENANTS_TEXT in uf:
+        raise Refused("question 4 (is the unit's Tenants Field being used as evidence): it was read, and it is plain "
+                      "text that is not maintained; ownership lives in the link fields only")
+    unit_name = " ".join(str(uf.get(UNIT_NAME) or "").split()) or unit_id
+    unit_status = rc.sel(uf.get(UNIT_STATUS))
+    # Q3: does that unit have another LIVE tenancy on it? BOTH links, and each candidate read off the
+    # Tenancies table. An id on the unit that is not in that table is a doubt, never "gone".
+    others = live_tenancy_ids_on(unit, tenancy_id)
+    rows = tenancies_by_id(others)
+    missing = [i for i in others if i not in rows]
+    if missing:
+        raise Refused(f"question 3 (another live tenancy on the unit): {unit_name} links tenancy "
+                      f"{', '.join(missing)}, which is not in the Tenancies table, so whether the room is free "
+                      "cannot be proved; nothing is written")
+    live = [i for i in others if is_live(rows[i], today)]
+    if live:
+        shown = ", ".join(f"{i} ({(rows[i].get('fields') or {}).get(REF) or 'no reference'})" for i in live)
+        raise Refused(f"question 3 (another live tenancy on the unit): {unit_name} still has live tenancy {shown} on "
+                      "it, so it is NOT void; end that tenancy separately. Nothing is written")
+    if unit_status not in VOIDABLE_UNIT_STATUSES:
+        raise Refused(f"question 3 (another live tenancy on the unit): {unit_name} reads {unit_status!r}, not Occupied, "
+                      "so this door does not change it; the move-out is Kevin's, on a card")
+    # Q6: whose money is it? Read off each transaction's own Tenancy link. Said, never guessed from the
+    # tenancy's rollups, and never a reason to keep the room let.
+    after = payments_after(tenancy_id, end)
+    plan = {"tenancy": tenancy_id, "end": end.isoformat(), "unit": unit_id, "unitName": unit_name,
+            "unitStatus": unit_status or "blank",
+            "tenants": [{"id": t["id"], "name": " ".join(str((t.get("fields") or {}).get(TENANT_NAME) or "").split()) or t["id"],
+                         "status": rc.sel((t.get("fields") or {}).get(TENANT_STATUS)),
+                         "unit": list((t.get("fields") or {}).get(TENANT_UNIT) or [])} for t in tenants],
+            "gate": "the six questions in the airtable-tenancy-ender skill all pass"}
+    if after:
+        plan["paymentsAfterEnd"] = after
+    return plan
+
+
+def _patch_and_read(table, rec_id, fields, want, what, done, out):
+    """One write, read back from its own table before the next one runs. A read-back that disagrees stops the
+    whole move-out and says exactly what landed and what did not."""
+    rc.api("PATCH", f"{table}/{rec_id}", {"fields": fields})
+    row = _one(table, rec_id, list(want))
+    got = {k: rc.sel((row.get("fields") or {}).get(k)) if not isinstance(v, list) else list((row.get("fields") or {}).get(k) or [])
+           for k, v in want.items()}
+    wanted = {k: (v if isinstance(v, list) else rc.sel(v)) for k, v in want.items()}
+    if got != wanted:
+        ledger(dict(out, kind="partial", done=done, stoppedAt=what, read=got))
+        raise RuntimeError(f"{what} did not land: it reads {got} after writing {wanted}. Landed before it: "
+                           + ("; ".join(done) if done else "nothing")
+                           + f". NOT confirmed: {what}. Not done after it: see the declared order")
+
+
+def cmd_move_out(a):
+    """End a tenancy Kevin approved as a move-out: the tenancy's End Date, its Payment Status cleared, the
+    tenant Former and off the unit, the unit Void. In that order, each read back before the next."""
+    end = rc.parse_day(a.end)
+    if not end:
+        raise Refused("--end is a date, YYYY-MM-DD")
+    today = rc.today_london()
+    if end > today:
+        raise Refused(f"--end {end} is in the future: a move-out is recorded once it has happened")
+    tenancy = load_tenancy(a.tenancy)
+    start = rc.parse_day((tenancy.get("fields") or {}).get(TY_IN["start"]))
+    if start and end < start:
+        raise Refused(f"--end {end} is before tenancy {a.tenancy} began ({start})")
+    # Kevin's approval OF THIS MOVE-OUT, on the card he approved as-is: the line names this tenancy and this
+    # date, so a card approved for something else can never move a tenant out.
+    tenancy, task = gate(a.tenancy, a.task, ("Move-out", end.isoformat()))
+    rows = ledger_rows()
+    done_before = [r for r in rows if r.get("kind") == "move-out" and r.get("tenancy") == a.tenancy]
+    if done_before:
+        raise Refused(f"tenancy {a.tenancy} was moved out already on {done_before[-1].get('end')} "
+                      f"(task {done_before[-1].get('task')}): nothing is written twice")
+    plan = move_out_gate(tenancy, end, today)
+    if a.dry_run:
+        return dict(plan, task=task["id"], dryRun=True)
+    out = dict(plan, task=task["id"], written=[], unchanged=[])
+    done = out["written"]
+
+    def step(what, table, rec_id, fields, want, already):
+        if already:
+            out["unchanged"].append(what)
+            return
+        _patch_and_read(table, rec_id, fields, want, what, done, out)
+        done.append(what)
+
+    f = tenancy.get("fields") or {}
+    # THE DECLARED ORDER. The tenancy first, so a stop part way leaves a tenancy that has ended rather than a
+    # void room with a live tenancy on it.
+    step(f"tenancy {a.tenancy} End Date {end}", rc.T_TENANCIES, a.tenancy, {END_DATE: end.isoformat()},
+         {END_DATE: end.isoformat()}, rc.parse_day(f.get(END_DATE)) == end)
+    step(f"tenancy {a.tenancy} Payment Status cleared", rc.T_TENANCIES, a.tenancy, {PAY_STATUS: None},
+         {PAY_STATUS: ""}, not rc.sel(f.get(PAY_STATUS)))
+    for t in plan["tenants"]:
+        fields, want = {}, {}
+        if t["status"] != FORMER:
+            fields[TENANT_STATUS] = FORMER
+            want[TENANT_STATUS] = FORMER
+        if plan["unit"] in t["unit"]:
+            fields[TENANT_UNIT] = [u for u in t["unit"] if u != plan["unit"]]
+            want[TENANT_UNIT] = fields[TENANT_UNIT]
+        step(f"tenant {t['id']} ({t['name']}) Former and off {plan['unitName']}", rc.T_TENANTS, t["id"],
+             fields, want, not fields)
+    step(f"unit {plan['unit']} ({plan['unitName']}) Void", T_UNITS, plan["unit"], {UNIT_STATUS: VOID},
+         {UNIT_STATUS: VOID}, plan["unitStatus"] == VOID)
+    ledger(dict(out, kind="move-out", why=a.evidence))
+    text = (f"{stamp()}: moved out {end.strftime('%-d %b %Y')}. Tenancy ended and its payment status cleared "
+            f"(was {rc.sel(f.get(PAY_STATUS)) or 'blank'}); "
+            + "; ".join(f"{t['name']} marked Former and taken off {plan['unitName']}" for t in plan["tenants"])
+            + f"; {plan['unitName']} set to Void. The six-question safety gate (airtable-tenancy-ender skill) "
+              f"passed on every question. By the Accounts Receivable agent on the RECORD CHANGE line of the card "
+              f"Kevin approved, task {task['id']} ({task_label(task)}). Evidence: {a.evidence}"
+            + (f" Payments dated after the move-out: {', '.join(plan['paymentsAfterEnd'])} — check whether any is "
+               "owed back." if plan.get("paymentsAfterEnd") else ""))
+    comment_or_say(out, a.tenancy, text)
+    return out
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -855,6 +1092,12 @@ def main(argv=None):
     so.add_argument("--task", required=True)
     so.add_argument("--why", required=True)
     so.add_argument("--dry-run", action="store_true")
+    mo = sub.add_parser("move-out")
+    mo.add_argument("tenancy")
+    mo.add_argument("--end", required=True, help="the move-out date, YYYY-MM-DD, as the approved card says")
+    mo.add_argument("--task", required=True)
+    mo.add_argument("--evidence", required=True, help="what proves the move-out, in a sentence")
+    mo.add_argument("--dry-run", action="store_true")
     ob = sub.add_parser("onboard")
     ob.add_argument("--task", required=True)
     ob.add_argument("--unit", required=True)
@@ -873,9 +1116,13 @@ def main(argv=None):
     if getattr(a, "why", None) is not None and len(" ".join(a.why.split())) < 10:
         print(json.dumps({"refused": "--why needs the reason in a sentence"}))
         return 2
+    if getattr(a, "evidence", None) is not None and len(" ".join(a.evidence.split())) < 15:
+        print(json.dumps({"refused": "--evidence needs what proves the move-out, in a sentence"}))
+        return 2
     try:
         out = {"show": cmd_show, "comment": cmd_comment, "status": cmd_status, "due-day": cmd_due_day,
-               "set-off": cmd_set_off, "onboard": cmd_onboard, "rent-change": cmd_rent_change}[a.cmd](a)
+               "set-off": cmd_set_off, "move-out": cmd_move_out, "onboard": cmd_onboard,
+               "rent-change": cmd_rent_change}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2

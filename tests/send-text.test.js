@@ -167,14 +167,17 @@ res = run(card(agent=OTHER)); out["trialByName"] = [res.get("refused", "")[:80],
 trial_ended()
 for key, rec in (
                  ("unapproved", card(outcome="")), ("changes", card(outcome="Changes requested")),
-                 ("minorEdits", card(outcome="Approved with minor edits")), ("notRentCard", card(name="Book the boiler", notes="")),
+                 ("minorEdits", card(outcome="Approved with minor edits")),
                  ("completed", card(status="Completed")), ("cancelled", card(status="Cancelled")),
                  ("trialSettled", card(notes="RENT CHECK KEY: recTenancyTextAaa:2026-10-01:1\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict")),
                  ("stamped", card(notes="RENT CHECK KEY: recTenancyTextAaa:2026-10-01:1\\n[03 Oct 2026 10:00 — send-text] SENT: text to the number ending 123")),
                  ("copied", card(approved_at="2026-10-03T08:30:00.000Z")), ("blankApproval", card(approved_at=None)),
                  ("inTrial", card(approved_at="2026-10-03T07:00:00.000Z")), ("admin", card(ttype="Admin")),
                  ("noText", card(output=OUTPUT.split("TO: sam")[0].replace("TEXT TO: 07700 900123\\n", "").replace(
-                      "TEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n", "") + "TO: sam" + OUTPUT.split("TO: sam")[1]))):
+                      "TEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n", "") + "TO: sam" + OUTPUT.split("TO: sam")[1])),
+                 # LAST in this loop on purpose: it sends, and the sent row in the shared ledger would
+                 # refuse every card after it as "already texted".
+                 ("notRentCard", card(name="Book the boiler", notes=""))):
     res = run(rec)
     out[key] = [res.get("refused", "")[:160], len(sends(res))]
 print(json.dumps(out))`);
@@ -184,7 +187,10 @@ print(json.dumps(out))`);
     expect(r.changes[0]).toMatch(/is not approved/);
     // An edit he asked for cannot be checked against a text: only a plain approval is texted.
     expect(r.minorEdits[0]).toMatch(/is not approved as-is/);
-    expect(r.notRentCard[0]).toMatch(/not a rent lane's tenant card/);
+    // 19 Nov 2026 (findings 20261118-agent-dispatch-1344 and -1355): the gate reads the card's own
+    // approved output, not its name, so this card's approved text to a linked tenant's number goes.
+    // What the card is called decides nothing; tests/send-text-non-rent-card.test.js holds the rule.
+    expect(r.notRentCard).toEqual(['', 1]);
     expect(r.completed[0]).toMatch(/closed or was settled on the trial/);
     expect(r.cancelled[0]).toMatch(/closed or was settled on the trial/);
     // At the cut-over, the cards approved during the trial are history.
@@ -198,7 +204,8 @@ print(json.dumps(out))`);
     expect(r.inTrial[0]).toMatch(/trial card and is never texted: it was approved during the trial run/);
     expect(r.admin[0]).toMatch(/not Correspondence/);
     expect(r.noText[0]).toMatch(/carries no TEXT TO and TEXT lines/);
-    for (const k of Object.keys(r)) expect(r[k][1]).toBe(0);
+    // notRentCard is the one that sends: its own approved words carry it (see the note above).
+    for (const k of Object.keys(r)) if (k !== 'notRentCard') expect([k, r[k][1]]).toEqual([k, 0]);
   });
 
   it('the number must be a UK mobile and the Contact Number of a tenant linked to the task', () => {

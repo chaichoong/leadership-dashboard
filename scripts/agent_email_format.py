@@ -331,11 +331,29 @@ def parse_plan(output):
 
 
 def text_card(name="", notes="", output="", holders=()):
-    """True for a card scripts/send-text.py may text from: a rent lane's own tenant card, by its name or
-    its key line, or a reply card that carries a payment plan held by the rent lane's own agent (a tenant's
-    reply has neither mark)."""
+    """True for a card scripts/send-text.py may text from: one whose OWN APPROVED OUTPUT declares a text
+    (the TEXT TO / TEXT block above the email's headers), a rent lane's own tenant card by its name or its
+    key line, or a reply card that carries a payment plan held by the rent lane's own agent (a tenant's
+    reply has neither mark).
+
+    THE OUTPUT BRANCH IS THE GATE (findings 20261118-agent-dispatch-1344 and -1355). Until 19 Nov 2026 this
+    read the task NAME only, so two cards Kevin had approved as-is could not be texted at all: a
+    `RENT ARREARS:` card from Accounts Receivable (the lane was renamed) and a plain Correspondence chase
+    whose second nudge was agreed as a text. Both carried the words and the number he approved, and both
+    were refused "not a rent lane's tenant card"; the texts simply never went. A lane keyed on the task name
+    is only as good as every door that writes the name (.claude/rules/agent-task-pipeline.md), so the gate
+    now asks what the card IS: do its own approved words declare a text? What it is called decides nothing.
+    Nothing else moves: the trial gate, the approval evidence, the recipient check, the length cap, the
+    ledger and the rent-landed re-read are send-text.py's and are unchanged."""
     if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or TEXT_CARD_MARKS["note"] in str(notes or ""):
         return True
+    try:
+        if parse_text(output):
+            return True
+    except EmailFormatError:
+        # A half or malformed text block is send-text.py's refusal to word, not this gate's: it parses the
+        # output itself before it asks here, so the card is told what is wrong with its own lines.
+        return False
     if not any(h in TRIAL_TASK_MARKS for h in holders or ()):
         return False
     try:
@@ -1173,6 +1191,32 @@ def mailout_recipients_problem(task_name, parsed):
 # Ruling 6: a quote request is one email per company, never two firms on one email.
 # Submit only, like the rest of validate_submission: an email Kevin already approved still goes out.
 AGENT_RENT_LATE_PREFIX = "AGENT RENT LATE: "     # kept identical to AGENT_LATE_PREFIX in scripts/rent-check.py
+# ONE MATTER, TWO NAMES (finding 20261118-agent-dispatch-1355). The rent lane writes a chase as
+# `RENT LATE:` and Accounts Receivable's arrears work writes the same matter as `RENT ARREARS:`. The
+# rent-landed re-read at the send (send-email.py rent_landed_refusal, agent-dispatch.py rent_landed_state)
+# keys on `RENT LATE: `, so a renamed prefix would walk past a money check. Every chase of a rent cycle is
+# read by the same name here, and a card that chases no rent has NO rent check to run, which is said as
+# NOT APPLICABLE and never as a check that passed.
+RENT_CHASE_PREFIXES = ("RENT LATE: ", "RENT ARREARS: ")
+RENT_CHECK_PREFIX = "RENT LATE: "
+
+
+def rent_chase_card(name="", notes=""):
+    """True when a card chases rent that may have landed since it was made, so the rent-landed re-read
+    applies to it. False means there is no rent cycle to read again: NOT APPLICABLE."""
+    name = str(name or "")
+    return bool(name.startswith(RENT_CHASE_PREFIXES) or name.startswith(AGENT_RENT_LATE_PREFIX))
+
+
+def rent_chase_check_name(name=""):
+    """The name the rent-landed re-read must judge this card by: a rent chase under any of its lane's
+    names is read as `RENT LATE: `, so the money check cannot be skipped by a rename. Any other name,
+    an `AGENT RENT LATE: ` card included (it has its own reader), is returned unchanged."""
+    name = str(name or "")
+    for prefix in RENT_CHASE_PREFIXES:
+        if name.startswith(prefix):
+            return RENT_CHECK_PREFIX + name[len(prefix):]
+    return name
 ROY_NAME_LINE_RE = re.compile(r"^Roy Lavin\b")
 AGILE_LETS_LINE_RE = re.compile(r"^Agile Lets\b")
 # A signer other than Roy on info@: Kevin by name, or the other company's name, on a line of its own. "On
