@@ -1129,11 +1129,17 @@ def rent_landed_refusal(task_id, task_name, fields=None, created=None):
     now. `fields` is the task as the send already read it, `created` its createdTime; with none, they are read
     here. An arrears card is weighed against the rents owed by the day it was made (review round 3, finding 1355)."""
     name = str(task_name or "")
-    if fields is None or created is None:
+    if fields is None:
         rec = get_task(task_id)
-        fields = fields if fields is not None else (rec.get("fields", {}) or {})
+        fields = rec.get("fields", {}) or {}
         created = created if created is not None else rec.get("createdTime", "")
     f = fields
+    if name.startswith("AGENT RENT LATE: "):
+        return agent_rent_landed_refusal(task_id, f)
+    # By its name OR its key line (review of finding 1355): send-text.py texts a card that carries the key, so the
+    # bank is read for every such card, whatever its hand-typed name says.
+    if not rent_chase_card(name, f.get(AF["notes"], ""), f.get(AF["description"], "")):
+        return ""
     # The day the card Kevin approved was made: its last SUBMITTED stamp (submit weighs the rents owed as at that
     # day, so the two readings agree: review round 4), else the task's creation day, else today.
     stamps = list(dispatch_module().REST_CARD_STAMP_RE.finditer(str(f.get(AF["notes"]) or "")))
@@ -1142,15 +1148,11 @@ def rent_landed_refusal(task_id, task_name, fields=None, created=None):
             made = datetime.strptime(stamps[-1].group("day"), "%d %b %Y").date()
         else:
             from zoneinfo import ZoneInfo
+            if created is None:
+                created = get_task(task_id).get("createdTime", "")
             made = datetime.fromisoformat(str(created).replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/London")).date()
     except (ValueError, TypeError):
         made = None                                           # no readable day: weighed as at today
-    if name.startswith("AGENT RENT LATE: "):
-        return agent_rent_landed_refusal(task_id, f)
-    # By its name OR its key line (review of finding 1355): send-text.py texts a card that carries the key, so the
-    # bank is read for every such card, whatever its hand-typed name says.
-    if not rent_chase_card(name, f.get(AF["notes"], ""), f.get(AF["description"], "")):
-        return ""
     landed = dispatch_module().rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
                                                  f.get(AF["description"], ""), records=_rent_rows, made=made)
     if landed.get("state") == "landed":
