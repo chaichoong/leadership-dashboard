@@ -29,9 +29,25 @@ WHAT A SCORECARD SAYS, AND WHERE EACH NUMBER COMES FROM
 
 A source that cannot be read prints "unavailable: <why>" on its line. Never a zero.
 
+LAST TIME WE SPOKE (Kevin's note, 19 Nov 2026)
+-----------------------------------------------
+"How do we manage the context capping out in each conversation and how can we ensure that the
+agents do not forget things discussed in previous communications?" A full chat is summarised by
+Claude Code and detail drops; a new chat starts blank. So the same hook also:
+- Recalls: with the scorecard, and again on the first message after a summary, the chat gets
+  Kevin's last questions in this chat (every saved conversation in the chat's folder, the primary
+  record) with the first line of each answer, and the last lines written down in the brain from
+  this chat (CEO Conversations/<date> <plain name> chat.md).
+- Logs: every finished question and answer becomes one line in that brain log, marked
+  "Q&A (auto)", written when Kevin sends his next message. A plain question used to leave no
+  record past Claude Code's own 30-day transcript clean-up.
+Kevin's own words are what he typed: system reminders the app puts in front, tool results, the
+summary Claude Code writes and the setup prompt that opened the chat are never his.
+
 Usage:
   python3 scripts/agent-scorecard.py hook                 UserPromptSubmit hook (JSON on stdin)
   python3 scripts/agent-scorecard.py show <chat>          print one chat's scorecard
+  python3 scripts/agent-scorecard.py recall <chat>        print the LAST TIME WE SPOKE block
   python3 scripts/agent-scorecard.py usage [--days 14]    Kevin's messages per chat, for the review
   python3 scripts/agent-scorecard.py selftest             offline checks, JSON {checks, failed}
 Auth: ~/.config/od/airtable_pat (never printed). Read-only: this file has no write path to Airtable.
@@ -66,6 +82,15 @@ ESTATE = "tblZVrdzivyBueZVf"        # Estate Status
 RECON_AUDIT = "tblbfuxYxu4uMMWwT"   # AI Recon Audit
 RA_DATE, RA_OK, RA_SLICE = "fldJC9UcHCaXAaxKV", "fld9n62GxQijQWqSA", "fldzAqifUzN5HIQpE"
 
+BRAIN = os.environ.get("OD_BRAIN_DIR") or os.path.join(
+    HOME, "Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk", "My Drive", "00 AI Context")
+CHAT_LOGS = os.path.join(BRAIN, "CEO Conversations")
+RECALL_ASKS = 5             # Kevin's last questions shown in LAST TIME WE SPOKE
+RECALL_NOTES = 3            # lines written down in the brain shown with them
+RECALL_FILES = 10           # newest saved conversations read per chat
+RECALL_LOG_FILES = 30       # newest brain log files looked through for written-down lines
+ASK_LIMIT = 200             # characters kept of a question or an answer
+AUTO_MARK = "Q&A (auto)"    # the hook's own log lines; never shown back as "written down"
 SHOW_AGAIN_HOURS = 3        # a scorecard again after Kevin has been away this long
 READ_BUDGET_S = 20          # every Airtable read shares this; the hook's own timeout is 60
 HANDBACK_STALE_MIN = 120    # the AI Agents page's own HANDBACK_STALE_MIN
@@ -528,7 +553,9 @@ def _write_state(path, state):
 
 
 def cmd_hook(stdin_text, env=None, now=None, gather_fn=gather):
-    """UserPromptSubmit: the scorecard when it is due, else nothing. Never blocks a prompt."""
+    """UserPromptSubmit: the scorecard and LAST TIME WE SPOKE when they are due, the recall alone
+    after Claude Code has summarised the chat, else nothing. Every message also logs the questions
+    already answered in this conversation to the brain. Never blocks a prompt."""
     try:
         data = json.loads(stdin_text or "{}")
     except ValueError:
@@ -543,43 +570,287 @@ def cmd_hook(stdin_text, env=None, now=None, gather_fn=gather):
             state = json.load(fh)
     except (OSError, ValueError):
         state = {}
+    prompt = str(data.get("prompt") or "")
+    lines = _read_lines(data.get("transcript_path"))
+    logged = state.get("logged")
+    try:   # the questions this conversation has already answered, one brain line each
+        logged = log_exchanges(key, exchanges(lines), logged) or logged
+    except Exception:
+        pass   # the log is a record, never a reason to cost Kevin his message
+    summarised = compacted_at(lines)
+    recalled = _parse_time(state.get("recalled"))
     if not due(state, now):
+        new = dict(state, last=now.isoformat(), logged=logged)
+        text = ""
+        if summarised and (recalled is None or summarised > recalled):
+            text = recall_block(key, now, prompt, data.get("transcript_path"), after_summary=True)
+            new["recalled"] = now.isoformat()
         try:   # Kevin is still here: "away" counts from his latest message
-            _write_state(path, dict(state, last=now.isoformat()))
+            _write_state(path, new)
         except OSError:
             pass
-        return ""
+        return text
     try:
         text = render(key, gather_fn(key, now), now)
     except Exception as e:  # a broken scorecard must never cost Kevin his message
-        return ("AGENT CHAT SCORECARD for %s could not be built (%s). Tell Kevin in one line that "
+        text = ("AGENT CHAT SCORECARD for %s could not be built (%s). Tell Kevin in one line that "
                 "the scorecard is unavailable; never guess its numbers." % (key, e.__class__.__name__))
+    text += "\n\n" + recall_block(key, now, prompt, data.get("transcript_path"))
     try:
-        _write_state(path, {"shown": now.isoformat(), "last": now.isoformat(), "chat": key})
+        _write_state(path, {"shown": now.isoformat(), "last": now.isoformat(), "chat": key,
+                            "recalled": now.isoformat(), "logged": logged})
     except OSError as e:
         text += "\n(scorecard state not saved: %s; it will show again next message)" % e.strerror
     return text
 
 
+# ----------------------------------------------------------------------------- last time we spoke
+
+REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
+FENCE_RE = re.compile(r"```.*?```", re.S)
+SUMMARY_START = "This session is being continued from a previous conversation"
+
+
+def typed_text(e):
+    """Kevin's own words in one transcript entry, else None. The app puts system reminders in front
+    of what he types, in the same block or a block of their own (seen 19 Nov 2026), so those are cut
+    out, not used to throw the message away. Tool results, meta entries, the summary Claude Code
+    writes when a chat fills up and the setup prompt that opened the chat are never his."""
+    if (not isinstance(e, dict) or e.get("type") != "user" or e.get("isSidechain") or e.get("isMeta")
+            or e.get("isCompactSummary")):
+        return None
+    content = (e.get("message") or {}).get("content")
+    if isinstance(content, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return None
+        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    text = REMINDER_RE.sub("", str(content or "")).strip()
+    if (not text or text.startswith("<") or text.startswith(SUMMARY_START)
+            or "[agent-chats setup]" in text):
+        return None
+    return text
+
+
+def _is_prompt(e):
+    """A new turn someone or something started (Kevin, a notice, the setup prompt): not a tool
+    result and not a meta entry. A reply after it belongs to it, not to Kevin's last question."""
+    if not isinstance(e, dict) or e.get("type") != "user" or e.get("isSidechain") or e.get("isMeta") \
+            or e.get("isCompactSummary"):
+        return False
+    content = (e.get("message") or {}).get("content")
+    return not (isinstance(content, list)
+                and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content))
+
+
+def answer_line(text, limit=ASK_LIMIT):
+    """The first real line of a reply: the scorecard's code block and markdown marks left out."""
+    for line in FENCE_RE.sub("", str(text or "")).split("\n"):
+        line = line.replace("**", "").strip().lstrip("#>*- ").strip()
+        if line:
+            return first_line(line, limit)
+    return ""
+
+
+def exchanges(lines):
+    """Kevin's typed messages in one conversation, oldest first, each with the first line of the
+    answer he got: [{"at", "ask", "answer"}]. The answer is the agent's last text before the next
+    prompt, so a "checking that now" line before a lookup is replaced by the reply itself."""
+    out, cur = [], None
+    for raw in lines:
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        text = typed_text(e)
+        if text is not None:
+            t = _parse_time(e.get("timestamp"))
+            cur = {"at": t, "ask": first_line(" ".join(text.split()), ASK_LIMIT), "answer": ""} if t else None
+            if cur:
+                out.append(cur)
+            continue
+        if _is_prompt(e):
+            cur = None
+            continue
+        if cur and e.get("type") == "assistant" and not e.get("isSidechain"):
+            content = (e.get("message") or {}).get("content")
+            said = ("\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+                    if isinstance(content, list) else str(content or ""))
+            line = answer_line(said)
+            if line:
+                cur["answer"] = line
+    return out
+
+
+def compacted_at(lines):
+    """When Claude Code last summarised this conversation (its compact boundary), else None."""
+    last = None
+    for raw in lines:
+        if '"compact_boundary"' not in raw:
+            continue
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and e.get("type") == "system" and e.get("subtype") == "compact_boundary":
+            t = _parse_time(e.get("timestamp"))
+            if t and (last is None or t > last):
+                last = t
+    return last
+
+
+def _read_lines(path):
+    if not path:
+        return []
+    try:
+        with open(os.path.expanduser(path)) as fh:
+            return fh.read().splitlines()
+    except OSError:
+        return []
+
+
+def chat_transcripts(key, extra=None):
+    """The chat's saved conversations, newest RECALL_FILES by last change, plus this one."""
+    d = project_dir(folder_for(key))
+    try:
+        paths = [os.path.join(d, x) for x in os.listdir(d) if x.endswith(".jsonl")]
+    except OSError:
+        paths = []
+
+    def changed(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0
+    paths = sorted(paths, key=changed)[-RECALL_FILES:]
+    if extra and os.path.realpath(os.path.expanduser(extra)) not in {os.path.realpath(p) for p in paths}:
+        paths.append(os.path.expanduser(extra))
+    return paths
+
+
+def chat_log_path(key, day):
+    name = (CHATS.get(key) or ROOMS[key])["name"]
+    return os.path.join(CHAT_LOGS, "%s %s chat.md" % (day.isoformat(), name))
+
+
+def written_down(key, limit=RECALL_NOTES):
+    """The last lines written down in the brain from this chat, newest last: [(day, line)].
+    The hook's own Q&A lines are left out (they are already in the questions above)."""
+    name = (CHATS.get(key) or ROOMS[key])["name"]
+    suffix = " %s chat.md" % name
+    names = sorted(x for x in os.listdir(CHAT_LOGS) if x.endswith(suffix) and re.match(r"\d{4}-\d{2}-\d{2} ", x))
+    notes = []
+    for fname in names[-RECALL_LOG_FILES:]:
+        try:
+            day = date.fromisoformat(fname[:10])
+            with open(os.path.join(CHAT_LOGS, fname)) as fh:
+                body = fh.read()
+        except (OSError, ValueError):
+            continue
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("- ") and AUTO_MARK not in line:
+                notes.append((day, first_line(line[2:], ASK_LIMIT)))
+    return notes[-limit:]
+
+
+def recall_text(key, asks, notes, now, after_summary=False, notes_error=None):
+    name = (CHATS.get(key) or ROOMS[key])["name"]
+    head = ("LAST TIME WE SPOKE (%s chat, read %s London)%s. Read it before you answer and never ask "
+            "Kevin to repeat what is here. If he refers to something not listed, search this chat's "
+            "logs in the brain (CEO Conversations, \"%s chat\") before saying you do not know."
+            % (name, london(now).strftime("%d %b %H:%M"),
+               ", after Claude Code summarised this chat: do not show it, just use it" if after_summary
+               else ". Under the scorecard, one line to Kevin: \"Last time we spoke (<day>): <his last "
+                    "question, in a few words>.\" Leave the line out when there is nothing earlier",
+               name))
+    out = [head, "Kevin's last questions here, oldest first:"]
+    if asks:
+        for a in asks:
+            out.append("- %s: \"%s\" You said: \"%s\"" % (
+                london(a["at"]).strftime("%d %b %H:%M"), a["ask"], a["answer"] or "(no answer saved)"))
+    else:
+        out.append("- none yet: nothing earlier in this chat.")
+    out.append("Written down from this chat (brain):")
+    if notes_error:
+        out.append("- unavailable: %s" % notes_error)
+    elif notes:
+        out.extend("- %s: %s" % (short_day(d), line) for d, line in notes)
+    else:
+        out.append("- nothing written down yet.")
+    return "\n".join(out)
+
+
+def recall_block(key, now, prompt="", transcript_path=None, after_summary=False):
+    """LAST TIME WE SPOKE for one chat, from its saved conversations and its brain log. A part that
+    cannot be read says so; the block itself never fails the hook."""
+    try:
+        asks = []
+        for p in chat_transcripts(key, transcript_path):
+            asks.extend(exchanges(_read_lines(p)))
+        asks.sort(key=lambda a: a["at"])
+        if asks and not asks[-1]["answer"] and asks[-1]["ask"] == first_line(" ".join(prompt.split()), ASK_LIMIT):
+            asks.pop()   # the message Kevin is sending now is not "last time"
+        try:
+            notes, why = written_down(key), None
+        except OSError as e:
+            notes, why = [], "the brain's CEO Conversations folder could not be read (%s)" % (e.strerror or e)
+        return recall_text(key, asks[-RECALL_ASKS:], notes, now, after_summary, why)
+    except Exception as e:
+        return ("LAST TIME WE SPOKE for %s could not be built (%s). Tell Kevin in one line that you cannot "
+                "see your earlier chats; never guess what was said." % (key, e.__class__.__name__))
+
+
+def _append_log_line(key, day, line):
+    """One line into the chat's brain log for that day, above its Links footer. Atomic write."""
+    path = chat_log_path(key, day)
+    name = (CHATS.get(key) or ROOMS[key])["name"]
+    try:
+        with open(path) as fh:
+            body = fh.read()
+    except FileNotFoundError:
+        body = "# %s (%s): %s chat\n\nLinks: [[ceo-conversations-moc]]\n" % (day.isoformat(), day.strftime("%A"), name)
+    cut = body.rfind("\nLinks:")
+    if cut >= 0:
+        head = body[:cut].rstrip("\n")
+        gap = "\n\n" if "\n" not in head else "\n"   # a blank line under the heading, none between lines
+        body = head + gap + line + "\n\n" + body[cut + 1:]
+    else:
+        body = body.rstrip("\n") + "\n" + line + "\n"
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(body)
+    os.replace(tmp, path)
+
+
+def log_exchanges(key, exs, logged_after):
+    """Write each answered question newer than `logged_after` to the brain, one line each.
+    Returns the time of the newest one written (the new marker), or None if none."""
+    after = _parse_time(logged_after)
+    newest = None
+    for ex in exs:
+        if not ex["answer"] or (after and ex["at"] <= after):
+            continue
+        day = london(ex["at"]).date()
+        line = "- %s, %s. Kevin: \"%s\" Answer: \"%s\"" % (
+            london(ex["at"]).strftime("%H:%M"), AUTO_MARK, ex["ask"], ex["answer"])
+        _append_log_line(key, day, line)
+        newest = ex["at"]
+    return newest.isoformat() if newest else None
+
+
 def kevin_messages(lines, since):
     """(count, London days) of Kevin's own typed messages in one transcript: tool results,
-    system notices, scheduled runs and the setup prompt that opened the chat do not count."""
+    system notices, summaries, scheduled runs and the setup prompt that opened the chat do not
+    count, and a reminder the app puts in front of his message no longer hides it (19 Nov 2026)."""
     n, days = 0, set()
     for raw in lines:
         try:
             e = json.loads(raw)
         except ValueError:
             continue
-        if not isinstance(e, dict) or e.get("type") != "user" or e.get("isSidechain") or e.get("isMeta"):
-            continue
-        msg = e.get("message") or {}
-        content = msg.get("content")
-        if isinstance(content, list):
-            if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
-                continue
-            content = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-        text = str(content or "").strip()
-        if not text or text.startswith("<") or "[agent-chats setup]" in text:
+        if typed_text(e) is None:
             continue
         t = _parse_time(e.get("timestamp"))
         if not t or t < since:
@@ -761,8 +1032,10 @@ def selftest():
     check("an hour later -> not due", not due({"shown": (now - timedelta(hours=1)).isoformat()}, now))
     check("3 hours later -> due", due({"shown": (now - timedelta(hours=3)).isoformat()}, now))
     import tempfile
-    global STATE_DIR
+    global STATE_DIR, PROJECTS_DIR, CHAT_LOGS
     keep, STATE_DIR = STATE_DIR, tempfile.mkdtemp()
+    keep_p, PROJECTS_DIR = PROJECTS_DIR, tempfile.mkdtemp()   # never the real saved chats
+    keep_l, CHAT_LOGS = CHAT_LOGS, tempfile.mkdtemp()         # never the real brain
     try:
         stdin = json.dumps({"session_id": "s1", "cwd": "/tmp"})
         env = {"OD_AGENT_CHAT": "accounts-receivable"}
@@ -784,8 +1057,107 @@ def selftest():
             raise RuntimeError("boom")
         msg = cmd_hook(json.dumps({"session_id": "s2"}), env, now, broken)
         check("a broken gather never blocks and says unavailable", "could not be built" in msg and "never guess" in msg)
+
+        # LAST TIME WE SPOKE (Kevin's note, 19 Nov 2026). An invented conversation shaped like the
+        # saved chats read on 19 Nov 2026: the app's reminder in a block of its own in front of
+        # Kevin's words, the scorecard's code block on top of an answer, a "checking" line before a
+        # lookup, the setup prompt, and Claude Code's summary marker and summary.
+        def entry(kind, at, content, **kw):
+            return json.dumps(dict({"type": kind, "timestamp": at, "message": {"role": kind, "content": content}}, **kw))
+        convo = [
+            entry("user", "2026-11-18T18:00:00Z",
+                  "<system-reminder>\nLinked sessions now\n</system-reminder>\n\n[agent-chats setup] Introduce yourself"),
+            entry("assistant", "2026-11-18T18:00:09Z", [{"type": "text", "text": "```\nAccounts Receivable\n```\nI look after rent."}]),
+            entry("user", "2026-11-18T19:00:00Z", [{"type": "text", "text": "<system-reminder>\nnote\n</system-reminder>\n\n"},
+                                                   {"type": "text", "text": "Who is late at Elm Row?"}]),
+            entry("assistant", "2026-11-18T19:00:05Z", [{"type": "text", "text": "Checking the rent row."}]),
+            entry("assistant", "2026-11-18T19:00:06Z", [{"type": "tool_use", "name": "Bash", "input": {}}]),
+            entry("user", "2026-11-18T19:00:07Z", [{"type": "tool_result", "content": "x"}]),
+            entry("assistant", "2026-11-18T19:00:20Z",
+                  [{"type": "text", "text": "```\nscore\n```\n\nTwo tenants at Elm Row are late: flat 2 and flat 5.\nMore."}]),
+            entry("user", "2026-11-18T19:10:00Z", "Chase flat 5 on Friday"),
+            entry("assistant", "2026-11-18T19:10:30Z", [{"type": "text", "text": "**Done**: task raised for Friday."}]),
+            json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-18T19:20:00Z"}),
+            entry("user", "2026-11-18T19:20:01Z", "This session is being continued from a previous conversation that ran out "
+                  "of context.", isCompactSummary=True),
+            entry("user", "2026-11-18T19:30:00Z", "And the void at Oak House?"),
+        ]
+        exs = exchanges(convo)
+        check("recall: the setup prompt and the summary are never Kevin's questions",
+              [x["ask"] for x in exs] == ["Who is late at Elm Row?", "Chase flat 5 on Friday", "And the void at Oak House?"])
+        check("usage: a reminder in front of Kevin's words no longer hides them, a summary is not his",
+              kevin_messages(convo, now - timedelta(days=14))[0] == 3)
+        check("recall: the answer is the reply, not the 'checking' line or the scorecard",
+              exs[0]["answer"] == "Two tenants at Elm Row are late: flat 2 and flat 5.")
+        check("recall: markdown marks are cut from an answer", exs[1]["answer"] == "Done: task raised for Friday.")
+        check("recall: a question not answered yet has no answer", exs[2]["answer"] == "")
+        check("recall: the summary marker is found", compacted_at(convo) == datetime(2026, 11, 18, 19, 20, tzinfo=timezone.utc))
+        check("recall: no summary, no marker", compacted_at(convo[:9]) is None)
+        check("a room's brain log is named by its plain name",
+              chat_log_path("ceo-room", date(2026, 11, 19)).endswith("2026-11-19 CEO room chat.md"))
+
+        tdir = project_dir(folder_for("accounts-receivable"))
+        os.makedirs(tdir)
+        tpath = os.path.join(tdir, "s9.jsonl")
+        with open(tpath, "w") as fh:
+            fh.write("\n".join(convo[:9]) + "\n")   # the chat before Claude Code summarised it
+
+        def hook_in(prompt, sid="s9"):
+            return json.dumps({"session_id": sid, "transcript_path": tpath, "prompt": prompt})
+        t0 = datetime(2026, 11, 18, 19, 15, tzinfo=timezone.utc)   # after two answers, before the summary
+        out1 = cmd_hook(hook_in("How is rent today?"), env, t0, lambda k, n: facts)
+        check("recall: the first message gets the scorecard, then LAST TIME WE SPOKE",
+              out1.startswith("AGENT CHAT SCORECARD") and "\n\nLAST TIME WE SPOKE (Accounts Receivable chat" in out1)
+        check("recall: Kevin's questions come back with the answers he got",
+              '"Who is late at Elm Row?" You said: "Two tenants at Elm Row are late: flat 2 and flat 5."' in out1
+              and '"Chase flat 5 on Friday" You said: "Done: task raised for Friday."' in out1)
+        check("recall: the chat tells Kevin in one line when they last spoke", "Last time we spoke (<day>)" in out1)
+        log18 = chat_log_path("accounts-receivable", date(2026, 11, 18))
+        with open(log18) as fh:
+            body = fh.read()
+        check("log: each answered question is one brain line",
+              body.count(AUTO_MARK) == 2
+              and '- 19:00, Q&A (auto). Kevin: "Who is late at Elm Row?" Answer: "Two tenants at Elm Row are late' in body)
+        check("log: a new day's file has its heading and keeps the Links footer last",
+              body.startswith("# 2026-11-18 (Wednesday): Accounts Receivable chat\n\n- 19:00, Q&A")
+              and "\n- 19:10, Q&A" in body and "\n\n- 19:10" not in body
+              and body.rstrip().endswith("Links: [[ceo-conversations-moc]]"))
+        check("recall: the hook's own Q&A lines are not shown again as written down",
+              "Written down from this chat (brain):\n- nothing written down yet." in out1)
+        out2 = cmd_hook(hook_in("ok"), env, t0 + timedelta(minutes=2), lambda k, n: facts)
+        with open(log18) as fh:
+            check("log: nothing is logged twice", fh.read().count(AUTO_MARK) == 2)
+        check("recall: quiet on the next message", out2 == "")
+        with open(tpath, "w") as fh:
+            fh.write("\n".join(convo) + "\n")      # Claude Code summarised the chat; Kevin carries on
+        out3 = cmd_hook(hook_in("And the void at Oak House?"), env, t0 + timedelta(minutes=16), lambda k, n: facts)
+        check("recall: after a summary the recall comes back alone, for the agent, not shown to Kevin",
+              out3.startswith("LAST TIME WE SPOKE") and "do not show it" in out3 and "SCORECARD" not in out3
+              and "Elm Row" in out3)
+        check("recall: the message Kevin is sending now is not 'last time'", "Oak House" not in out3)
+        out4 = cmd_hook(hook_in("thanks"), env, t0 + timedelta(minutes=20), lambda k, n: facts)
+        check("recall: once per summary", out4 == "")
+
+        log17 = chat_log_path("accounts-receivable", date(2026, 11, 17))
+        with open(log17, "w") as fh:
+            fh.write("# 2026-11-17 (Tuesday): Accounts Receivable chat\n\n"
+                     "- 10:00, Kevin agreed flat 5 goes on a payment plan.\n\nLinks: [[ceo-conversations-moc]]\n")
+        check("recall: written-down lines come back with their day, Q&A lines left out",
+              written_down("accounts-receivable") == [(date(2026, 11, 17), "10:00, Kevin agreed flat 5 goes on a payment plan.")])
+        _append_log_line("accounts-receivable", date(2026, 11, 17), "- 11:00, Q&A (auto). Kevin: \"x\" Answer: \"y\"")
+        with open(log17) as fh:
+            body = fh.read()
+        check("log: a line joins an existing file above its Links footer",
+              body.index("- 11:00, Q&A") < body.index("Links:") and body.index("- 10:00") < body.index("- 11:00"))
+        CHAT_LOGS = os.path.join(CHAT_LOGS, "missing")
+        out5 = recall_block("compliance", now)
+        check("recall: an unreadable brain says unavailable, never 'nothing written down'",
+              "- unavailable: the brain's CEO Conversations folder could not be read" in out5)
+        check("recall: a chat with no saved conversations says none yet", "- none yet: nothing earlier in this chat." in out5)
+        out6 = cmd_hook(hook_in("hello", sid="s10"), env, now, lambda k, n: facts)
+        check("log: a brain that cannot be written never costs Kevin his message", out6.startswith("AGENT CHAT SCORECARD"))
     finally:
-        STATE_DIR = keep
+        STATE_DIR, PROJECTS_DIR, CHAT_LOGS = keep, keep_p, keep_l
 
     # Usage counting for the 14-day review
     since = now - timedelta(days=14)
@@ -833,6 +1205,13 @@ def main(argv):
             return 2
         now = datetime.now(timezone.utc)
         print(render(key, gather(key, now), now))
+        return 0
+    if cmd == "recall":
+        key = argv[1] if len(argv) > 1 else None
+        if key not in CHATS and key not in ROOMS:
+            print("unknown chat %r; one of: %s" % (key, ", ".join(all_keys())), file=sys.stderr)
+            return 2
+        print(recall_block(key, datetime.now(timezone.utc)))
         return 0
     if cmd == "usage":
         days = int(argv[argv.index("--days") + 1]) if "--days" in argv else 14
