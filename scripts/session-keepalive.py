@@ -49,6 +49,16 @@ never a quiet board. The stated cost: a job never stops using its site, so a
 card closed without a sign-in comes back the next morning while the site is
 still signed out. Take the site off the job's list to stop that.
 
+A job can list a sign-in held in a separate robot profile too, as
+{"host": ..., "profile": ...} (18 Nov 2026: the podcast upload runs on the
+`spotify` profile, which nothing ever checked). It is checked on that profile
+from the profile's own sign-in page in the site's `profiles` list, under the
+same hold rules on that profile. Signed out, it is asked for by a card the
+Task Manager holds with a SIGN-IN wall on that profile (agent-dispatch.py
+block): the wall gives the card the Sign in button that opens the profile, the
+half-hourly sweep walks the profile's door, and the wall clearing closes the
+card. Any wall already on that profile is the ask, so nothing more is raised.
+
 No task for a site that did not stay signed in after his last two sign-ins,
 or his last four for a site that has held one before (2 Oct 2026,
 signin_hold.py): EDF had 15 of these cards, Amazon 7 and BW Legal's portal,
@@ -143,8 +153,10 @@ def session_state(result):
     return "signed-in" if result.get("signedIn") else "signed-out"
 
 
-def read_site(host, entry, timeout=300):
+def read_site(host, entry, timeout=300, profile="", url=""):
+    """`agent-browser.js session` on HOST: the main profile, or PROFILE from its own sign-in page URL."""
     cmd = [node_bin(), os.path.join(REPO, "scripts", "agent-browser.js"), "session", "--site", host]
+    cmd += (["--profile", profile] if profile else []) + (["--url", url] if url else [])
     try:
         # 300: a site the robot signs itself back in to (Amazon) walks twice around a 20-second window.
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -158,27 +170,29 @@ def read_site(host, entry, timeout=300):
         return {"error": "unreadable output"}
 
 
-def not_holding_note(host, entry, events=None):
+def not_holding_note(host, entry, events=None, profile="default"):
     """Why no task is raised for a signed-out HOST, or '' when one should be.
 
     `events` is the browser ledger read AFTER this run's own check of the
-    site, so that check counts toward the newest sign-in."""
+    site, so that check counts toward the newest sign-in. ENTRY is the site's
+    entry, or a profile's own entry for a separate PROFILE (its loginUrl)."""
     url_host = urllib.parse.urlsplit(entry.get("loginUrl") or "").hostname
-    unheld = signin_hold.unheld_signins(signin_hold.load_events() if events is None else events, host, url_host)
+    unheld = signin_hold.unheld_signins(signin_hold.load_events() if events is None else events, host, url_host,
+                                        profile or "default")
     if not unheld:
         return ""
     days = [(d.astimezone(LONDON) if LONDON else d).strftime("%d %b").lstrip("0") for d in unheld]
     return "not raised: signed out again after the sign-ins of %s" % " and ".join([", ".join(days[:-1]), days[-1]])
 
 
-def kevin_try_failed(host, entry, events=None, now=None):
+def kevin_try_failed(host, entry, events=None, now=None, profile="default"):
     """True when his sign-in window on HOST in the last week was followed by a signed-out read
     within signin_hold.TRY_READ_HOURS (this run's own check included) and nothing read signed in
     since. The same rule as agent-dispatch.py kevin_tried_reason for a SIGN-IN wall."""
     url_host = urllib.parse.urlsplit(entry.get("loginUrl") or "").hostname
     since = ((now or datetime.now().astimezone()) - timedelta(days=7)).isoformat()
     return bool(signin_hold.kevin_signin_failed(signin_hold.load_events() if events is None else events,
-                                                {host, url_host}, since))
+                                                {host, url_host}, since, profile or "default"))
 
 
 def waiting_groups():
@@ -191,10 +205,39 @@ def waiting_groups():
                        capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("signin-waiting failed: " + (r.stderr or "")[:200])
-    groups = json.loads(r.stdout).get("sites")
+    said = json.loads(r.stdout)
+    groups = said.get("sites")
     if not isinstance(groups, list):
         raise RuntimeError("signin-waiting printed no list of sites")
-    return groups
+    # Walls on a separate profile are listed apart, away from the app's main-profile windows (18 Nov 2026).
+    return groups + [g for g in said.get("profileWalls") or [] if isinstance(g, dict)]
+
+
+DECLINED = os.environ.get("KEEPALIVE_DECLINED_FILE") or os.path.join(STATE_DIR, "declined.jsonl")
+DECLINED_DAYS = 7      # agent-dispatch.py KEEPALIVE_DECLINED_DAYS
+
+
+def kevin_declined(host, profile, now=None, path=None):
+    """His newest "I can't do this" on the keep-alive's card for HOST and PROFILE in the last
+    DECLINED_DAYS ({at, why}), or None. agent-dispatch.py send_back_blocked writes the lines. A file
+    that cannot be read raises: the caller says so and asks anyway, never a quiet skip."""
+    floor = (now or datetime.now(timezone.utc)) - timedelta(days=DECLINED_DAYS)
+    best = None
+    try:
+        with open(path or DECLINED, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return None
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        at = signin_hold._at(rec.get("at")) if isinstance(rec, dict) else None
+        if at and at >= floor and rec.get("host") == host and (rec.get("profile") or "") == (profile or "") \
+                and (not best or at > best[0]):
+            best = (at, rec)
+    return {"at": best[0], "why": str(best[1].get("why") or "")} if best else None
 
 
 # The name signin_task_fields gives this file's own cards. A card of ours is a
@@ -202,9 +245,12 @@ def waiting_groups():
 KEEPALIVE_NAME_RE = re.compile(r"^SIGN-IN: .+ session lapsed$")
 
 
-def waiting_on(host, groups):
-    """(work, ours): the tasks waiting on HOST that are real work, and this file's own open cards."""
-    tasks = [t for g in groups if g.get("host") == host for t in (g.get("tasks") or [])]
+def waiting_on(host, groups, profile=""):
+    """(work, ours): the tasks waiting on HOST that are real work, and this file's own open cards.
+    PROFILE picks a separate profile's group (signin-waiting lists a wall on one by itself, 18 Nov
+    2026); the main profile's groups carry none."""
+    tasks = [t for g in groups if g.get("host") == host and (g.get("profile") or "") == (profile or "")
+             for t in (g.get("tasks") or [])]
     ours = [t for t in tasks if KEEPALIVE_NAME_RE.match(str(t.get("name") or ""))]
     return [t for t in tasks if t not in ours], ours
 
@@ -234,9 +280,38 @@ def card_host(host, entry, sites):
     return door if door and door != best and (sites.get(door) or {}).get("login") else best
 
 
+PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")     # agent-browser.js PROFILE_NAME_RE, a plain folder name
+
+
+def need_key(host, profile=""):
+    """A sign-in's key in this file's reports: the host on the main profile, "host (profile)" on another."""
+    return host if (profile or "default") == "default" else "%s (%s)" % (host, profile)
+
+
+def split_need(key):
+    """(host, profile) from need_key's form; the main profile's is ''."""
+    m = re.match(r"^(\S+) \(([a-z0-9][a-z0-9-]*)\)$", key)
+    return (m.group(1), m.group(2)) if m else (key, "")
+
+
+def profile_entry(sites, host, profile):
+    """A site's entry for one of its separate profiles ({profile, label, loginUrl}), or None."""
+    entry = sites.get(host) or {}
+    if not entry.get("login"):
+        return None
+    for p in entry.get("profiles") or []:
+        if isinstance(p, dict) and p.get("profile") == profile:
+            # A profile opens its own site only, as agent-browser.js signinTargets lists it.
+            door = _url_host(p.get("loginUrl"))
+            return p if door == host or door.endswith("." + host) else None
+    return None
+
+
 def job_signins(path=None):
-    """({host: [job, ...]}, [problem, ...]): the robot sign-ins each scheduled job uses, from the
-    `signins` list on its entry in scripts/job-schedule.json. A job switched off (`enabled: false`)
+    """({key: [job, ...]}, [problem, ...]): the robot sign-ins each scheduled job uses, from the
+    `signins` list on its entry in scripts/job-schedule.json, keyed by need_key. An item is a host
+    (the main profile) or {"host": ..., "profile": ...} for a separate profile (18 Nov 2026: the
+    podcast upload runs on the robot's `spotify` profile). A job switched off (`enabled: false`)
     uses nothing. A malformed list is a problem for that job alone, named, while every other job's
     sign-ins are still read. Raises when the file cannot be read: never an empty map, because an
     empty map reads as "no job needs anything" and silences the ask (18 Nov 2026)."""
@@ -251,11 +326,22 @@ def job_signins(path=None):
         hosts = cfg.get("signins")
         if hosts is None:
             continue
-        if not isinstance(hosts, list) or not all(isinstance(h, str) and h.strip() for h in hosts):
-            problems.append("%s: signins must be a list of hosts" % job)
+        keys = []
+        for h in hosts if isinstance(hosts, list) else [None]:
+            if isinstance(h, str) and h.strip():
+                keys.append(need_key(h.strip().lower()))
+            elif isinstance(h, dict) and isinstance(h.get("host"), str) and h["host"].strip() \
+                    and isinstance(h.get("profile"), str) and PROFILE_NAME_RE.match(h["profile"]):
+                keys.append(need_key(h["host"].strip().lower(), h["profile"]))
+            else:
+                keys = None
+                break
+        if keys is None:
+            problems.append("%s: signins must be a list of hosts, or {\"host\", \"profile\"} for a separate "
+                            "profile" % job)
             continue
-        for h in hosts:
-            needs.setdefault(h.strip().lower(), []).append(job)
+        for k in keys:
+            needs.setdefault(k, []).append(job)
     return needs, problems
 
 
@@ -318,9 +404,70 @@ def create_task(fields, dry_run):
     # point; `waiting_on` is the dedupe, per host, before we get here.
     r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "create-agent-task.py"), "create",
                         "--force", "--fields-json", json.dumps(fields)], capture_output=True, text=True)
+    out = r.stdout.strip()
+    try:
+        said = json.loads(out.splitlines()[-1]) if out else {}
+    except ValueError:
+        said = {}
     if r.returncode != 0:
+        # Exit 4: the task EXISTS with fields missing (create-agent-task.py). Named as a card that was
+        # created, so the run fails loudly rather than leaving a half-made card unremarked (review, 18 Nov 2026).
+        if said.get("taskId"):
+            raise RuntimeError("card %s was created but incomplete (exit %d): %s"
+                               % (said["taskId"], r.returncode, (r.stderr or out)[:250]))
         raise RuntimeError("create-agent-task failed: " + (r.stderr or r.stdout)[:300])
-    return {"created": True, "out": r.stdout.strip()[:200]}
+    return {"created": True, "action": said.get("action"), "taskId": said.get("taskId"), "out": out[:200]}
+
+
+def profile_card_fields(host, profile, label, when, jobs):
+    """The keep-alive's card for a lapsed sign-in on a separate profile (18 Nov 2026). It is created
+    as the Task Manager's task and walled at once (raise_profile_card): the wall is what puts it in
+    Kevin's queue with a Sign in button for that profile, so it carries no SIGN-IN NEEDED line, which
+    would send him to the main profile's window instead."""
+    stamp = when.strftime("%d %b %Y %H:%M")
+    output = (f"The robot's login to {label} has lapsed (daily session check, {stamp}), and "
+              f"{'a scheduled job uses' if len(jobs) == 1 else 'scheduled jobs use'} it "
+              f"({', '.join(job_names(jobs))}). It is held in the robot's separate {profile} browser profile.\n\n"
+              "**Carrying this out will involve:** Nothing until you sign in from this card; the next check "
+              "that finds the session live closes it by itself.")
+    return {
+        F["name"]: f"SIGN-IN: {label} session lapsed",
+        F["description"]: f"Daily session keep-alive found {label} ({host}, profile {profile}) signed out on {stamp}.",
+        F["status"]: "Today",
+        F["dueDate"]: when.strftime("%Y-%m-%d"),
+        F["teamMember"]: [TASK_MANAGER],
+        F["taskType"]: "Admin",
+        F["agentOutput"]: output,
+        F["notes"]: f"[{stamp} — session-keepalive] KEEPALIVE CHECK: {label} ({host}, profile {profile}) signed out. "
+                    "A SIGN-IN wall on that profile puts it in Kevin's queue; the wall clearing closes it.",
+    }
+
+
+def raise_profile_card(host, profile, fields, why, dry_run):
+    """Create the card and record a SIGN-IN wall on PROFILE with `agent-dispatch.py block`. The wall
+    gives the card its Sign in button (robotsignin://profile/<profile>), has the half-hourly sweep
+    walk that profile's own door, and closes the card when the session is live (wake_blocked). A card
+    the gate did not create is never walled: the id would be another task's."""
+    if dry_run:
+        return {"dryRun": True, "wall": need_key(host, profile)}
+    made = create_task(fields, False)             # raises "card <id> was created but incomplete" on exit 4
+    tid = made.get("taskId")
+    if made.get("action") != "created" or not tid:
+        raise RuntimeError("the task gate did not create the card (%s): %s" % (made.get("action"), made.get("out")))
+    try:
+        block_wall(tid, host, profile, why)
+    except Exception as e:                                  # noqa: BLE001
+        raise RuntimeError("card %s was created but its sign-in wall was refused: %s" % (tid, str(e)[:300]))
+    return {"created": True, "taskId": tid, "wall": need_key(host, profile)}
+
+
+def block_wall(task_id, host, profile, why):
+    """`agent-dispatch.py block TASK --kind SIGN-IN --subject HOST --profile PROFILE`; raises on a refusal."""
+    r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "agent-dispatch.py"), "block", task_id,
+                        "--kind", "SIGN-IN", "--subject", host, "--profile", profile, "--why", why],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout or "block failed").strip())
 
 
 def cmd_run(dry_run=False):
@@ -336,7 +483,10 @@ def cmd_run(dry_run=False):
         (needs, needs_problems), needs_error = job_signins(), ""
     except Exception as e:                                  # noqa: BLE001
         needs, needs_problems, needs_error = {}, [], str(e)[:300]
-    unchecked = {h: jobs for h, jobs in sorted(needs.items()) if h not in sites}
+    def checkable(key):
+        host, prof = split_need(key)
+        return profile_entry(all_sites, host, prof) is not None if prof else host in sites
+    unchecked = {k: jobs for k, jobs in sorted(needs.items()) if not checkable(k)}
     report["jobNeeds"], report["jobNeedsUnchecked"] = needs, unchecked
     if needs_error:
         report["jobNeedsError"] = needs_error
@@ -401,6 +551,67 @@ def cmd_run(dry_run=False):
         elif state == "unknown":
             row["error"] = res.get("error", "")
         report["sites"][host] = row
+    # A sign-in a job uses on a separate profile (18 Nov 2026: the podcast upload's `spotify` profile).
+    # Checked on that profile from its own sign-in page, the same hold rules on that profile, and asked
+    # for with a SIGN-IN wall on it, never the main profile's card: the main window would not reach it.
+    for key, jobs in sorted(needs.items()):
+        host, prof = split_need(key)
+        if not prof or key in unchecked:
+            continue
+        pent = profile_entry(all_sites, host, prof)
+        label = pent.get("label") or "%s (%s)" % (all_sites[host].get("label") or host, prof)
+        try:
+            res = read_site(host, all_sites[host], profile=prof, url=pent.get("loginUrl") or "")
+        except Exception as e:                              # noqa: BLE001
+            res = {"error": str(e)[:300]}
+        state = session_state(res)
+        row = {"label": label, "profile": prof, "state": state, "landedOn": str(res.get("url") or "")[:120],
+               "neededBy": jobs}
+        if state == "signed-out":
+            try:
+                note = not_holding_note(host, pent, profile=prof)
+            except Exception as e:                          # noqa: BLE001
+                note, row["notHoldingError"] = "", str(e)[:200]
+            try:
+                if note:
+                    row["notHolding"], row["task"] = True, note
+                else:
+                    if groups is None:
+                        groups = waiting_groups()
+                    work, ours = waiting_on(host, groups, prof)
+                    row["waiting"] = [t.get("id") for t in work]
+                    try:
+                        declined = kevin_declined(host, prof)
+                    except Exception as e:                  # noqa: BLE001
+                        declined, row["kevinDeclinedError"] = None, str(e)[:200]
+                    if ours or work:
+                        # A wall on this profile is already a card in Kevin's queue with this profile's button.
+                        row["task"] = "already waiting"
+                    elif declined:
+                        # His "I can't do this" on the last card: not asked again for DECLINED_DAYS.
+                        row["kevinDeclined"] = True
+                        row["task"] = "not raised: Kevin said on %s he cannot sign in: %s" % (
+                            (declined["at"].astimezone(LONDON) if LONDON else declined["at"]).strftime("%d %b").lstrip("0"),
+                            declined["why"][:160])
+                    else:
+                        try:
+                            tried = kevin_try_failed(host, pent, profile=prof)
+                        except Exception as e:              # noqa: BLE001
+                            tried, row["kevinTriedError"] = False, str(e)[:200]
+                        if tried:
+                            row["kevinTried"], row["task"] = True, "not raised: his own sign-in did not get the robot in"
+                        else:
+                            fields = profile_card_fields(host, prof, label, when, jobs)
+                            why = ("the 06:40 keep-alive found the robot's %s session signed out on its %s profile, "
+                                   "and %s uses it" % (label, prof, ", ".join(job_names(jobs))))
+                            row["task"] = raise_profile_card(host, prof, fields, why, dry_run)
+                            groups.append({"host": host, "profile": prof, "tasks": [
+                                {"id": row["task"].get("taskId") or "", "name": fields[F["name"]]}]})
+            except Exception as e:                          # noqa: BLE001
+                row["task"] = {"error": str(e)[:200]}
+        elif state == "unknown":
+            row["error"] = res.get("error", "")
+        report["sites"][key] = row
     os.makedirs(STATE_DIR, exist_ok=True)
     tmp = STATUS + ".tmp"
     with open(tmp, "w") as fh:
@@ -419,6 +630,13 @@ def cmd_run(dry_run=False):
                                      if isinstance(r.get("task"), dict) and r["task"].get("error")],
                       "unknown": [r["label"] for r in report["sites"].values() if r["state"] == "unknown"]}, indent=1))
     code = 0
+    stranded = [str(r["task"]["error"]) for r in report["sites"].values()
+                if isinstance(r.get("task"), dict) and r["task"].get("error")
+                and re.search(r"\bcard \S+ was created but\b", str(r["task"]["error"]))]
+    if stranded:
+        # A half-made card, or one with no wall, is in nobody's queue as a sign-in: said loudly, never quietly.
+        print("ERROR: " + "; ".join(stranded), file=sys.stderr)
+        code = 1
     if needs_error:
         print("ERROR: scripts/job-schedule.json could not be read, so no job's sign-ins were asked for: "
               + needs_error, file=sys.stderr)
@@ -674,18 +892,34 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         sched = os.path.join(tmp, "job-schedule.json")
         with open(sched, "w") as fh:
-            json.dump({"_comment": "not a job", "publisher": {"cron": "15 7-20 * * *", "signins": ["Studio.YouTube.com", "www.facebook.com"]},
+            json.dump({"_comment": "not a job", "publisher": {"cron": "15 7-20 * * *", "signins": [
+                           "Studio.YouTube.com", "www.facebook.com", {"host": "Creators.Spotify.com", "profile": "spotify"}]},
                        "sharer": {"cron": "0 9 * * *", "signins": ["www.facebook.com"]},
                        "retired": {"cron": "0 9 * * *", "enabled": False, "signins": ["app.pingen.com"]},
+                       "none": {"cron": "0 9 * * *", "signins": []},
                        "plain": {"cron": "0 9 * * *", "needs": ["network"]}}, fh)
-        want = ({"studio.youtube.com": ["publisher"], "www.facebook.com": ["publisher", "sharer"]}, [])
+        want = ({"studio.youtube.com": ["publisher"], "www.facebook.com": ["publisher", "sharer"],
+                 "creators.spotify.com (spotify)": ["publisher"]}, [])
         if job_signins(sched) != want:
             bad.append(("job sign-ins from the schedule", want, job_signins(sched)))
-        # One malformed list is that job's problem alone: the other job's sign-ins still count.
+        # One malformed list is that job's problem alone: the other job's sign-ins still count. A profile
+        # that is not a plain folder name is malformed too.
         with open(sched, "w") as fh:
-            json.dump({"publisher": {"signins": "studio.youtube.com"}, "sharer": {"signins": ["www.facebook.com"]}}, fh)
-        if job_signins(sched) != ({"www.facebook.com": ["sharer"]}, ["publisher: signins must be a list of hosts"]):
-            bad.append(("a malformed signins list", "named, the rest read", job_signins(sched)))
+            json.dump({"publisher": {"signins": "studio.youtube.com"}, "sharer": {"signins": ["www.facebook.com"]},
+                       "uploader": {"signins": [{"host": "creators.spotify.com", "profile": "../spotify"}]}}, fh)
+        got = job_signins(sched)
+        if got[0] != {"www.facebook.com": ["sharer"]} or [p.split(":")[0] for p in got[1]] != ["publisher", "uploader"]:
+            bad.append(("a malformed signins list", "named, the rest read", got))
+    if (split_need(need_key("creators.spotify.com", "spotify")), split_need(need_key("studio.youtube.com", "default"))) \
+            != (("creators.spotify.com", "spotify"), ("studio.youtube.com", "")):
+        bad.append(("need keys round trip", "host and profile back", need_key("creators.spotify.com", "spotify")))
+    prof_sites = {"creators.spotify.com": {"login": True, "loginUrl": "https://creators.spotify.com/pod/login",
+                                           "profiles": [{"profile": "spotify", "loginUrl": "https://creators.spotify.com/pod/login"},
+                                                        {"profile": "elsewhere", "loginUrl": "https://example.com/login"}]}}
+    if (profile_entry(prof_sites, "creators.spotify.com", "spotify") or {}).get("profile") != "spotify" \
+            or profile_entry(prof_sites, "creators.spotify.com", "elsewhere") is not None \
+            or profile_entry(prof_sites, "creators.spotify.com", "missing") is not None:
+        bad.append(("a profile's entry, only on its own site", "spotify only", prof_sites))
     # The publisher's own declaration, read off the file as written (parking the job must not break this).
     with open(SCHEDULE, encoding="utf-8") as fh:
         declared = (json.load(fh).get("content-engine-publish") or {}).get("signins") or []
@@ -713,7 +947,7 @@ def selftest():
         for b in bad:
             print("FAIL", b, file=sys.stderr)
         return 1
-    print(f"selftest OK ({len(cases) + 17} checks)")
+    print(f"selftest OK ({len(cases) + 19} checks)")
     return 0
 
 

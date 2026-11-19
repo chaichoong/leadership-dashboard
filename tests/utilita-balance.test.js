@@ -635,6 +635,12 @@ print('SIGNEDIN=' + str(r['signedIn']))
         expect(entry.loginUrl, 'a loginUrl here enrols Utilita in the daily keepalive on the WRONG profile').toBeFalsy();
         const keepalive = readFileSync(resolve(root, 'scripts/session-keepalive.py'), 'utf8');
         expect(keepalive).toMatch(/v\.get\("loginUrl"\)|entry\.get\("loginUrl"\)|get\("loginUrl"\)/);
-        expect(keepalive).not.toMatch(/--profile/);
+        // Since 18 Nov 2026 the keep-alive passes --profile, but only for a separate profile a scheduled
+        // job lists under `signins` (the podcast upload's `spotify` profile), checked from that profile's
+        // own sign-in page. Its main-profile loop never passes one, and no job lists a Utilita flat, so
+        // Utilita is still never checked on the wrong profile.
+        expect(keepalive).toMatch(/\n            res = read_site\(host, entry\)\n/);
+        const schedule = JSON.parse(readFileSync(resolve(root, 'scripts/job-schedule.json'), 'utf8'));
+        expect(JSON.stringify(Object.values(schedule).map(v => (v && v.signins) || null))).not.toMatch(/utilita/i);
     });
 });

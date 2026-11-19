@@ -266,9 +266,15 @@ const BUILTIN_SITES = {
   // creators.spotify.com/home/show/… when the session is live, proven 15 Sep
   // 2026 in the robot profile. sites.json carries the label and note; the
   // walk lives here so the two never drift apart.
+  // profiles (18 Nov 2026): the podcast upload (scripts/content-engine/spotify.py) runs on the
+  // robot's separate `spotify` profile, which no check ever read, so a lapse there would have asked
+  // nobody. Listed here, the Robot sign-in app opens it (robotsignin://profile/spotify), the 06:40
+  // keep-alive checks it for the job that lists it, and a SIGN-IN wall on it names the profile.
   'creators.spotify.com':       { label: 'Spotify for Creators', login: true,
                                   loginUrl: 'https://creators.spotify.com/pod/login',
-                                  sessionWalk: ['Continue with Spotify'] },
+                                  sessionWalk: ['Continue with Spotify'],
+                                  profiles: [{ profile: 'spotify', label: 'Spotify for Creators (podcast upload)',
+                                               loginUrl: 'https://creators.spotify.com/pod/login' }] },
   // The Runpreneur podcast's PUBLIC show page (21 Sep 2026). Spotify's embed page lists only the newest
   // episode, so on a night two or three episodes went out the older ones never got their open.spotify.com
   // link. The show page lists them all, but only once a browser has run its script. Read-only, no login:

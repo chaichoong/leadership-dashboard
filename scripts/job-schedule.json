@@ -611,9 +611,13 @@
   ],
   "signins": [
    "studio.youtube.com",
-   "www.facebook.com"
+   "www.facebook.com",
+   {
+    "host": "creators.spotify.com",
+    "profile": "spotify"
+   }
   ],
-  "signinsNote": "18 Nov 2026: the robot sign-ins this job uses on its default browser profile. The 06:40 keep-alive (session-keepalive.py run) raises the SIGN-IN card for a site listed here when it reads it signed out, with no task waiting on it. Before this, a lapsed site was asked for only when a TASK waited on it, and this job is not a task, so the robot's YouTube Studio sign-in lapsed on 16-17 Oct 2026 and nobody asked Kevin for 33 days while this job's Studio steps could not run. Spotify for Creators is NOT listed: the podcast upload runs on the robot's separate `spotify` profile, which the keep-alive does not check, so a card here would ask for a sign-in that never reaches this job.",
+  "signinsNote": "18 Nov 2026: the robot sign-ins this job uses. A host means the robot's default browser profile; {host, profile} means a separate profile listed in that site's `profiles`. The 06:40 keep-alive (session-keepalive.py run) asks for a sign-in listed here when it reads it signed out, with no task waiting on it. Before this, a lapsed site was asked for only when a TASK waited on it, and this job is not a task, so the robot's YouTube Studio sign-in lapsed on 16-17 Oct 2026 and nobody asked Kevin for 33 days while this job's Studio steps could not run. The podcast upload runs on the separate `spotify` profile, which nothing checked before: it is asked for by a card with a sign-in wall on that profile, whose button opens the profile itself.",
   "retryWhenDeferred": false,
   "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one.",
   "maxRuntimeMinutes": 60,

@@ -245,22 +245,34 @@ describe('the 06:40 keep-alive (session-keepalive.py cmd_run)', () => {
     // real scripts/job-schedule.json never decides a test that is not about it.
     const schedule = join(dir, 'job-schedule.json');
     writeFileSync(schedule, typeof opts.schedule === 'string' ? opts.schedule : JSON.stringify(opts.schedule || {}));
+    // Kevin's "I can't do this" lines (agent-dispatch.py keepalive_decline): none by default.
+    const declined = join(dir, 'declined.jsonl');
+    writeFileSync(declined, (opts.declined || []).map(e => JSON.stringify(e)).join('\n'));
     return py(`
 import contextlib, io
 ka = load('ka', 'session-keepalive.py')
 sh.LEDGER = arg['ledger']
 ka.SCHEDULE = arg['schedule']
+ka.DECLINED = arg['declined']
 ka.STATE_DIR = arg['dir']; ka.STATUS = os.path.join(arg['dir'], 'status.json')
 ka.load_sites = lambda: arg.get('sites') or {
   'www.edfenergy.com': {'label': 'EDF Energy', 'login': True, 'loginUrl': 'https://www.edfenergy.com/myaccount/login'},
   'www.topcashback.co.uk': {'label': 'TopCashback', 'login': True, 'loginUrl': 'https://www.topcashback.co.uk/logon/'}}
-def read_site(host, entry):
-    line = {'at': arg.get('readAt', '2026-10-02T05:40:30.921Z'), 'cmd': 'session', 'site': host, 'url': entry['loginUrl'], 'signedIn': False,
-            'botCheck': False, 'signinPage': True, 'profile': 'default'}
+checked = []
+def read_site(host, entry, timeout=300, profile='', url=''):
+    checked.append([host, profile or 'default', url])
+    live = (profile or 'default') in arg.get('liveProfiles', [])
+    line = {'at': arg.get('readAt', '2026-10-02T05:40:30.921Z'), 'cmd': 'session', 'site': host, 'url': url or entry['loginUrl'], 'signedIn': live,
+            'botCheck': False, 'signinPage': not live, 'profile': profile or 'default'}
     with open(arg['ledger'], 'a') as fh:
         fh.write(json.dumps(line) + '\\n')
     return line
 ka.read_site = read_site
+walls = []
+def block_wall(tid, host, profile, why):
+    walls.append([tid, host, profile])
+    if arg.get('blockRefused'): raise RuntimeError('ERROR: refusing a SIGN-IN wall: the test says no')
+ka.block_wall = block_wall
 # The waiting read (agent-dispatch.py signin-waiting --no-walk), stubbed: by default a task of real
 # work waits on each site, so the sign-in rule above is what decides (7 Oct 2026).
 WORK = {'host': None, 'tasks': [{'id': 'recWork', 'name': 'Read the bill'}]}
@@ -273,8 +285,12 @@ def waiting_groups():
 ka.waiting_groups = waiting_groups
 # The read before 7 Oct 2026, stubbed as well: a revert of that change must never reach Airtable from a test.
 ka.already_waiting = lambda host: False
-created, outputs = [], []
-ka.create_task = lambda fields, dry_run: created.append(fields[ka.F['name']]) or outputs.append(fields[ka.F['agentOutput']]) or {'created': True}
+created, outputs, statuses = [], [], []
+def create_task(fields, dry_run):
+    created.append(fields[ka.F['name']]); outputs.append(fields[ka.F['agentOutput']]); statuses.append(fields[ka.F['status']])
+    if arg.get('incomplete'): raise RuntimeError('card recNew was created but incomplete (exit 4): fields not written')
+    return {'created': True, 'action': arg.get('gateAction', 'created'), 'taskId': 'recNew'}
+ka.create_task = create_task
 if arg.get('broken'):
     def boom(*a, **k): raise RuntimeError('ledger unreadable')
     sh.unheld_signins = boom
@@ -285,9 +301,10 @@ buf, err = io.StringIO(), io.StringIO()
 with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
     code = ka.cmd_run()
 report = json.load(open(ka.STATUS))
-print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'outputs': outputs, 'said': json.loads(buf.getvalue()),
+print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'outputs': outputs, 'statuses': statuses, 'walls': walls,
+  'checked': checked, 'said': json.loads(buf.getvalue()),
   'status': report['sites'], 'report': {k: v for k, v in report.items() if k != 'sites'}, 'stderr': err.getvalue(),
-  'reads': len(reads)}))`, { ledger, dir, ...opts, schedule });
+  'reads': len(reads)}))`, { ledger, dir, ...opts, schedule, declined });
   };
 
   it('raises no card for EDF, still raises one for a site that held and then lapsed, and says so', () => {
@@ -412,6 +429,94 @@ print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'output
     expect(same.status[DOOR].task).toBe('already waiting');
   });
 
+  // 18 Nov 2026: the podcast upload runs on the robot's separate `spotify` profile, which no check read.
+  // An invented site shaped like it: a main-profile sign-in and one separate profile on the same host.
+  const POD = 'creators.example-pods.co.uk';
+  const POD_SITES = { [POD]: { label: 'Pods', login: true, loginUrl: `https://${POD}/login`,
+    profiles: [{ profile: 'podcast', label: 'Pods (podcast upload)', loginUrl: `https://${POD}/login?p=1` }] } };
+  const POD_JOB = { uploader: { cron: '15 7-20 * * *', signins: [{ host: POD, profile: 'podcast' }] } };
+  const POD_CARD = 'SIGN-IN: Pods (podcast upload) session lapsed';
+  const POD_KEY = `${POD} (podcast)`;
+  it('a separate profile a job uses is checked on that profile and, signed out, raises ONE card walled on it', () => {
+    const got = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [] });
+    expect(got.code).toBe(0);
+    expect(got.checked).toContainEqual([POD, 'podcast', `https://${POD}/login?p=1`]);   // that profile, from its own door
+    expect(got.created).toEqual([POD_CARD]);
+    expect(got.statuses).toEqual(['Today']);                       // the wall, not the create, puts it in Kevin's queue
+    expect(got.walls).toEqual([['recNew', POD, 'podcast']]);
+    expect(got.outputs[0]).not.toContain('SIGN-IN NEEDED');        // that line would open the main profile's window
+    expect(got.outputs[0]).toContain("robot's separate podcast browser profile");
+    expect(got.status[POD_KEY]).toMatchObject({ profile: 'podcast', state: 'signed-out', neededBy: ['uploader'] });
+    expect(got.status[POD].nothingWaiting).toBe(true);             // the main profile: no job, no task, nothing asked
+    expect(got.said.neededByJob).toEqual(['Pods (podcast upload)']);
+  });
+
+  it('the main profile being signed in says nothing about the separate one, and a live profile raises nothing', () => {
+    const mainLive = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], liveProfiles: ['default'] });
+    expect(mainLive.status[POD].state).toBe('signed-in');
+    expect(mainLive.walls).toEqual([['recNew', POD, 'podcast']]);
+    const profLive = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], liveProfiles: ['podcast'] });
+    expect(profLive.created).toEqual([]);
+    expect(profLive.walls).toEqual([]);
+    expect(profLive.status[POD_KEY].state).toBe('signed-in');
+  });
+
+  it('once per lapse on the profile: its own open card, or any wall on that profile, is the ask; a main-profile card is not', () => {
+    const own = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [{ host: POD, profile: 'podcast', tasks: [{ id: 'recOwn', name: POD_CARD }] }] });
+    expect(own.created).toEqual([]);
+    expect(own.status[POD_KEY].task).toBe('already waiting');
+    const wall = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [{ host: POD, profile: 'podcast', tasks: [{ id: 'recWork', name: 'Upload the episode' }] }] });
+    expect(wall.created).toEqual([]);
+    expect(wall.status[POD_KEY].task).toBe('already waiting');
+    const mainCard = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [{ host: POD, tasks: [{ id: 'recMain', name: 'SIGN-IN: Pods session lapsed' }] }] });
+    expect(mainCard.created).toEqual([POD_CARD]);
+  });
+
+  it('the "Kevin tried" rule reads that profile only', () => {
+    const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+    const tried = run([login(ago(1), POD, 'podcast')], { sites: POD_SITES, schedule: POD_JOB, groups: [], readAt: ago(0.5) });
+    expect(tried.created).toEqual([]);
+    expect(tried.status[POD_KEY].kevinTried).toBe(true);
+    // His window on the MAIN profile is no try at the separate one.
+    const other = run([login(ago(1), POD)], { sites: POD_SITES, schedule: POD_JOB, groups: [], readAt: ago(0.5) });
+    expect(other.created).toEqual([POD_CARD]);
+  });
+
+  it('a card whose wall is refused, or a gate that did not create it, fails loudly and walls nothing that is not ours', () => {
+    const refused = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], blockRefused: true });
+    expect(refused.code).toBe(1);
+    expect(refused.status[POD_KEY].task.error).toMatch(/card recNew was created but its sign-in wall was refused/);
+    expect(refused.stderr).toMatch(/ERROR: card recNew was created but its sign-in wall was refused/);
+    const folded = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], gateAction: 'updated' });
+    expect(folded.walls).toEqual([]);
+    expect(folded.status[POD_KEY].task.error).toMatch(/the task gate did not create the card \(updated\)/);
+    // A profile the site does not list is never checked, and fails the run.
+    const missing = run([], { sites: POD_SITES, schedule: { uploader: { signins: [{ host: POD, profile: 'other' }] } }, groups: [] });
+    expect(missing.code).toBe(1);
+    expect(missing.said.jobNeedsUnchecked).toEqual({ [`${POD} (other)`]: ['uploader'] });
+    expect(missing.checked.filter(c => c[1] === 'other')).toEqual([]);
+  });
+
+  it('his "I can\'t do this" on the profile\'s last card stops the ask for 7 days, then it asks again', () => {
+    const ago = (d) => new Date(Date.now() - d * 86400e3).toISOString();
+    const said = (at) => [{ at, host: POD, profile: 'podcast', task: 'recOld', why: 'I have no login for that account' }];
+    const recent = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], declined: said(ago(2)) });
+    expect(recent.created).toEqual([]);
+    expect(recent.status[POD_KEY].kevinDeclined).toBe(true);
+    expect(recent.status[POD_KEY].task).toMatch(/^not raised: Kevin said on .* he cannot sign in: I have no login for that account$/);
+    expect(run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], declined: said(ago(8)) }).created).toEqual([POD_CARD]);
+    // A "can't" on another profile of the same site is not this one's.
+    const other = [{ at: ago(1), host: POD, profile: 'elsewhere', task: 'recX', why: 'no' }];
+    expect(run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], declined: other }).created).toEqual([POD_CARD]);
+  });
+
+  it('a card the gate half-made (exit 4) fails the run and is named, never left quietly', () => {
+    const got = run([], { sites: POD_SITES, schedule: POD_JOB, groups: [], incomplete: true });
+    expect(got.code).toBe(1);
+    expect(got.walls).toEqual([]);
+    expect(got.stderr).toMatch(/ERROR: card recNew was created but incomplete/);
+  });
+
   it('card_host files a card exactly where signin-waiting files it, through the real card text and agent-dispatch.py\'s own rule', () => {
     // The builtin list (no sites.json), plus an invented site whose sign-in page sits on a sub-domain of
     // another login site that has no entry of its own: signin-waiting takes the longest parent entry.
@@ -475,7 +580,8 @@ print('---JSON---'); print(json.dumps(out))`, { sites });
     const oneBad = run(ONE_SIGNIN, { groups: [], schedule: { broken: { cron: '0 9 * * *', signins: EDF }, publisher: JOB.publisher } });
     expect(oneBad.code).toBe(1);
     expect(oneBad.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
-    expect(oneBad.said.jobNeedsProblems).toEqual(['broken: signins must be a list of hosts']);
+    expect(oneBad.said.jobNeedsProblems).toHaveLength(1);
+    expect(oneBad.said.jobNeedsProblems[0]).toMatch(/^broken: signins must be a list of hosts/);
     expect(oneBad.stderr).toMatch(/ERROR: scripts\/job-schedule\.json has a job whose sign-ins could not be read/);
   });
 
@@ -488,15 +594,21 @@ print('---JSON---'); print(json.dumps(out))`, { sites });
     const declared = Object.entries(schedule).filter(([k, v]) => !k.startsWith('_') && v && v.signins);
     const got = py(`
 ka = load('ka', 'session-keepalive.py')
-print('---JSON---'); print(json.dumps({'parsed': ka.job_signins(), 'checked': sorted(ka.keepalive_sites(arg['sites']))}))`, { sites });
+items = [i for cfg in arg['declared'] for i in cfg]
+bad = [i for i in items if not (isinstance(i, str) and i in ka.keepalive_sites(arg['sites'])
+                                or isinstance(i, dict) and ka.profile_entry(arg['sites'], i['host'], i['profile']))]
+print('---JSON---'); print(json.dumps({'parsed': ka.job_signins(), 'bad': bad, 'n': len(items)}))`,
+    { sites, declared: declared.map(([, cfg]) => cfg.signins) });
     expect(declared.length).toBeGreaterThan(0);                               // control: there are declarations to check
-    expect(got.parsed[1]).toEqual([]);                                        // and every list reads
-    for (const [, cfg] of declared) for (const host of cfg.signins) expect(got.checked).toContain(host);
+    expect(got.n).toBeGreaterThan(2);
+    expect(got.parsed[1]).toEqual([]);                                        // every list reads
+    expect(got.bad).toEqual([]);                                              // and every sign-in is one the keep-alive checks
     const publisher = schedule['content-engine-publish'].signins;
     expect(publisher).toContain('studio.youtube.com');
     expect(publisher).toContain('www.facebook.com');
-    // The podcast upload runs on the robot's separate `spotify` profile, which the keep-alive never
-    // reads: a card for the default profile's Spotify would ask for a sign-in that never reaches the job.
+    // The podcast upload runs on the robot's separate `spotify` profile: listed as that profile, never
+    // as the main profile's Spotify, whose card would open a window that never reaches the job.
+    expect(publisher).toContainEqual({ host: 'creators.spotify.com', profile: 'spotify' });
     expect(publisher).not.toContain('creators.spotify.com');
   });
 
@@ -533,6 +645,23 @@ src = {'targets': [{'label': 'EDF Energy', 'host': 'www.edfenergy.com', 'url': '
 now = datetime(2026, 10, 2, 6, 0, tzinfo=timezone.utc)
 print('---JSON---'); print(json.dumps({'line': es.signin_payload(now, src)['lines'][0], 'detail': es.robot_signins_row(now, src)['detail']}))`,
   { history, ledger });
+
+  it('a separate profile\'s line shows the robot\'s own check on that profile, never "not checked yet" (18 Nov 2026)', () => {
+    const POD = 'creators.example-pods.co.uk';
+    const line = (ledger) => py(`
+from datetime import datetime, timezone
+es = load('es', 'estate-status.py')
+src = {'targets': [{'label': 'Pods (podcast upload)', 'host': ${JSON.stringify(POD)}, 'url': 'https://${POD}/login', 'profile': 'podcast'}],
+       'sites': {${JSON.stringify(POD)}: {'login': True, 'loginUrl': 'https://${POD}/login'}},
+       'keepalive': {}, 'ledger': arg['ledger'], 'signinHistory': arg['ledger'], 'readings': [], 'accounts': []}
+now = datetime(2026, 11, 18, 7, 0, tzinfo=timezone.utc)
+print('---JSON---'); print(json.dumps(es.signin_payload(now, src)['lines'][0]))`, { ledger });
+    const read = (at, profile, signedIn) => ({ at, cmd: 'session', site: POD, url: `https://${POD}/login`, signedIn, botCheck: false, profile });
+    expect(line([read('2026-11-18T06:41:00Z', 'podcast', false)])).toMatchObject({ state: 'signed-out', how: 'robot check' });
+    expect(line([read('2026-11-18T06:41:00Z', 'podcast', true)])).toMatchObject({ state: 'signed-in', how: 'robot check' });
+    // A check on the main profile is not this profile's.
+    expect(line([read('2026-11-18T06:41:00Z', 'default', true)])).toMatchObject({ state: 'unchecked' });
+  });
 
   it('EDF reads "sign in when needed" with the reason, never a red Signed out', () => {
     const got = payload(EDF_LINES, EDF_LINES);

@@ -1349,10 +1349,21 @@ def signin_payload(now, src):
                         # sign-in button would not help (review, 25 Sep 2026).
                         seen.append((at, "bot-check" if e.get("botCheck") else
                                      ("signed-in" if e["signedIn"] else "signed-out"), "robot check"))
-        elif profile in last_read:
-            at, rd = last_read[profile]
-            seen.append((at, "signed-in" if rd.get("ok") else
-                         "bot-check" if str(rd.get("problem") or "").startswith("BOT CHECK") else "signed-out", "hourly read"))
+        else:
+            if profile in last_read:
+                at, rd = last_read[profile]
+                seen.append((at, "signed-in" if rd.get("ok") else
+                             "bot-check" if str(rd.get("problem") or "").startswith("BOT CHECK") else "signed-out", "hourly read"))
+            # The robot's own checks on that profile (18 Nov 2026): the 06:40 keep-alive checks the
+            # podcast upload's `spotify` profile, and the sweep walks a walled profile's door. Without
+            # this a profile with no hourly read showed "not checked yet" whatever the checks found.
+            for e in ledger:
+                if e.get("cmd") == "session" and e.get("site") == host and (e.get("profile") or "default") == profile \
+                        and isinstance(e.get("signedIn"), bool):
+                    at = _utc(e.get("at"))
+                    if at:
+                        seen.append((at, "bot-check" if e.get("botCheck") else
+                                     ("signed-in" if e["signedIn"] else "signed-out"), "robot check"))
         last = max(seen, key=lambda s: s[0]) if seen else None
         # Kevin's own sign-in, if it came after the last look.
         mine = [_utc(e.get("at")) for e in ledger
