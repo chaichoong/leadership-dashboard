@@ -240,13 +240,21 @@ CREATED[0] = (o - timedelta(days=3)).isoformat() + "T12:00:00.000Z"
 BANK[:] = [{"id": "recArrearsPaidAaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
 CARD = dict(fields("RENT ARREARS: Unit 9 - 1 Example Road"), **{AF["notes"]: "RENT CHECK KEY: %s:%s:4" % (TENANCY, prev.isoformat())})
 out["laterRentText"], out["laterRentEmail"] = run("text"), run("email")
+# Review round 4: the same card resubmitted after that rent fell due chases both, as submit weighed it then: one rent
+# paid is not both paid, so it goes. Submit's own reading (as at today) agrees.
+STAMP = "[%s 09:00 — agent-dispatch] SUBMITTED (round 2) as Correspondence" % (date.today() - timedelta(days=1)).strftime("%d %b %Y")
+CARD = dict(CARD, **{AF["notes"]: CARD[AF["notes"]] + "\\n\\n" + STAMP})
+out["resubmitted"] = run("text")
+submitState = AD.rent_landed_state(CARD[AF["name"]], CARD[AF["notes"]], "", records=SE._rent_rows)["state"]
 CREATED[0] = (date.today() - timedelta(days=1)).isoformat() + "T12:00:00.000Z"
 BANK[:] = []
 CARD = dict(fields("Rent arrears: Unit 9 - 1 Example Road"), **{AF["notes"]: KEYED})
 out["typedClear"] = run("text")
 AD.note_not_checked = lambda *a, **k: None
 submit = AD.rent_paid_problem("RENT ARREARS: Unit 9 - 1 Example Road", "no key line", "")
-print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items()}, "submit": submit}))`);
+print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items()}, "submit": submit,
+                  "submitState": submitState}))`);
+    expect([r.r.resubmitted[0], r.r.resubmitted[1].length, r.submitState]).toEqual([null, 1, '']);
     for (const k of ['oldText', 'oldEmail', 'typed0Text', 'typed0Email', 'typed1Text', 'typed1Email']) {
       expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/has been paid to this tenancy since the rent due .*recLateLineAaaaaa.*Nothing was sent/)]);
       expect([k, r.r[k][1], r.r[k][2]]).toEqual([k, [], ['rent', 'bank']]);

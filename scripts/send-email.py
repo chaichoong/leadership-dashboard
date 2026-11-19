@@ -1134,11 +1134,17 @@ def rent_landed_refusal(task_id, task_name, fields=None, created=None):
         fields = fields if fields is not None else (rec.get("fields", {}) or {})
         created = created if created is not None else rec.get("createdTime", "")
     f = fields
+    # The day the card Kevin approved was made: its last SUBMITTED stamp (submit weighs the rents owed as at that
+    # day, so the two readings agree: review round 4), else the task's creation day, else today.
+    stamps = list(dispatch_module().REST_CARD_STAMP_RE.finditer(str(f.get(AF["notes"]) or "")))
     try:
-        from zoneinfo import ZoneInfo
-        made = datetime.fromisoformat(str(created).replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/London")).date()
+        if stamps:
+            made = datetime.strptime(stamps[-1].group("day"), "%d %b %Y").date()
+        else:
+            from zoneinfo import ZoneInfo
+            made = datetime.fromisoformat(str(created).replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/London")).date()
     except (ValueError, TypeError):
-        made = None                                           # no readable creation day: weighed as at today
+        made = None                                           # no readable day: weighed as at today
     if name.startswith("AGENT RENT LATE: "):
         return agent_rent_landed_refusal(task_id, f)
     # By its name OR its key line (review of finding 1355): send-text.py texts a card that carries the key, so the
