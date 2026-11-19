@@ -101,7 +101,7 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
   it('a real payout beside a 0.00 fee is refused, a plain comment cannot write the marker, and --withdraw takes a date back', () => {
     const fee = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: payout £450.00, fees 0.00'));
     expect([fee.code, fee.posted]).toEqual([2, []]);
-    expect(fee.out.refused).toMatch(/shows a payout above zero \("payout £450\.00"\)/);
+    expect(fee.out.refused).toMatch(/shows money above zero \(£450\.00\)/);
     // Review round 2: another item's nil between the payout words and the payout figure.
     const advice = door(ARGS('2026-10-10', 'Example Lettings statement, emailed 8 Oct 2026. Remittance advice: nil deductions this month. Payout £450.00'));
     expect([advice.code, advice.posted]).toEqual([2, []]);
@@ -143,13 +143,26 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
       payout: 'Example Lettings statement, emailed 8 Oct 2026: Payout £454.40, Outstanding payout £0.00',
       columns: 'Example Lettings statement, emailed 8 Oct 2026: Total payments to landlord 0.00 454.40',
       nilWord: 'Example Lettings statement, emailed 8 Oct 2026: Payments to landlord: nil deductions, £454.40 paid',
+
+      // Round 2: wording no list holds, and brackets, still show money moving.
+      brackets: 'Example Lettings statement, emailed 8 Oct 2026: Total payments to landlord (£454.40), Balance due to landlord £0.00',
+      transfer: 'Example Lettings statement, emailed 8 Oct 2026: Transfer to landlord £454.40, Balance due to landlord £0.00',
+      dated: 'Example Lettings statement, emailed 8 Oct 2026: Payments to landlord on 3 Oct £454.40, Outstanding payments to landlord £0.00',
+      noPound: 'Example Lettings statement, emailed 8 Oct 2026: Payout 0.00, rent received 454.40',
     };
     for (const [name, quote] of Object.entries(lines)) {
       const r = door(ARGS('2026-10-10', quote));
       expect([name, r.code, r.posted]).toEqual([name, 2, []]);
     }
-    expect(door(ARGS('2026-10-10', lines.outstanding)).out.refused).toMatch(/shows a payout above zero/);
+    expect(door(ARGS('2026-10-10', lines.outstanding)).out.refused).toMatch(/shows money above zero \(£454\.40\)/);
     const nilEnd = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: net payment nil.'));
     expect([nilEnd.code, nilEnd.readBack]).toEqual([0, ['2026-10-10']]);
+    // Round 2: genuine nil lines a statement or an agent's email writes are still read (two columns of nil, a date
+    // after the line, a nil with words after it).
+    for (const quote of ['Total payments to landlord 0.00 0.00', 'TOTAL PAYMENTS TO LANDLORD £0.00 30/09/2026',
+      'Net payment nil this month', 'Payout NIL as rent unpaid']) {
+      const r = door(ARGS('2026-10-10', `Example Lettings statement for September, emailed 8 Oct 2026: ${quote}`));
+      expect([quote, r.code, r.readBack]).toEqual([quote, 0, ['2026-10-10']]);
+    }
   });
 });

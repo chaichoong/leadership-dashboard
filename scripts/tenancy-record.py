@@ -440,26 +440,27 @@ def cmd_set_off(a):
 PAYOUT_PHRASE = (r"(?:pay\s?-?outs?|paid\s+out|paid\s+to\s+(?:the\s+)?(?:landlord|you)|due\s+to\s+(?:the\s+)?landlord|"
                  r"payments?\s+to\s+(?:the\s+)?(?:landlord|you)|"
                  r"landlord\s+payment|remitted|remittance|net\s+(?:payment|payable|amount|to\s+(?:the\s+)?landlord|to\s+you))")
-# A nil counts only when no other figure or item follows it (review of the wording fix, 19 Nov 2026): "payments to
-# landlord 0.00 454.40" is a row of columns, and "nil deductions" is another item's nil.
-NIL_FIGURE = r"(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.£])0\.00(?!\d)|\bnil\b(?!\s+[A-Za-z]))(?!\s*£?\s?\d)"
+NIL_FIGURE = r"(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.£])0\.00(?!\d)|\bnil\b)"
 # Between the words and the figure: only separators and a few linking words, never another item's words (review round
 # 2: "Remittance advice: nil deductions. Payout £450.00" passed on a gap of any 25 letters).
 NIL_GAP = r"(?:[\s:=\-–]|\b(?:of|is|amount|total|gbp)\b)*"
 NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b{NIL_GAP}{NIL_FIGURE}")
-# Any payout phrase followed by a figure above zero means money was paid, whatever nil sits elsewhere: "Total payments
-# to landlord £454.40, Outstanding payments to landlord £0.00" (review of the wording fix, 19 Nov 2026).
-PAYOUT_FIGURE_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b{NIL_GAP}£?\s?(\d[\d,]*(?:\.\d+)?)")
+# Money above zero ANYWHERE in the quote means the statement shows money moving, so it is not a nil statement as quoted
+# (two review rounds of the wording fix, 19 Nov 2026: a list of payout wording is never complete, so "Transfer to
+# landlord £454.40", "(£454.40)" and "Total payments to landlord £454.40, Outstanding payments to landlord £0.00" all
+# passed a phrase check). Money is a £ figure or a figure with two decimals; a date, a reference or a Gmail id is not.
+MONEY_RE = re.compile(r"£\s?\(?\s?(\d[\d,]*(?:\.\d+)?)|(?<![\d.£\w])(\d[\d,]*\.\d{2})(?![\d.])")
 
 
-def payout_paid(text):
-    """The first payout phrase with a figure above zero after it, as written, or ''."""
-    for m in PAYOUT_FIGURE_RE.finditer(text or ""):
+def money_above_zero(text):
+    """The first money figure above zero in the text, as written, or ''."""
+    for m in MONEY_RE.finditer(text or ""):
+        figure = m.group(1) or m.group(2)
         try:
-            if float(m.group(1).replace(",", "")) > 0:
-                return m.group(0)
+            if float(figure.replace(",", "")) > 0:
+                return m.group(0).strip()
         except ValueError:
-            return m.group(0)                                 # an unreadable figure is not a nil
+            return m.group(0).strip()                         # an unreadable figure is not a nil
     return ""
 
 
@@ -489,10 +490,10 @@ def nil_statement_problem(tenancy, tenants, due, evidence, today):
     text = " ".join(str(evidence or "").split())
     if rc.NIL_MARK_RE.search(text):
         return "--evidence is the statement's own words, not a NIL STATEMENT line"
-    paid = payout_paid(text)
+    paid = money_above_zero(text)
     if paid:
-        return (f"--evidence shows a payout above zero (\"{paid}\"), so the statement paid money: quote only its nil "
-                "payout line, or record nothing if money was paid")
+        return (f"--evidence shows money above zero ({paid}): quote only the statement's nil lines (its payout and "
+                "income), and record nothing if any money was paid to us for that rent")
     if len(text) < 20 or not NIL_PAYOUT_RE.search(text):
         return ("--evidence quotes the statement itself: who sent it, its date, and its payout line showing 0.00 or nil "
                 "right after the payout words (for example \"StayCay statement for September, emailed 8 Oct 2026: "
