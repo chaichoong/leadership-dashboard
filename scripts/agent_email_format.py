@@ -278,7 +278,17 @@ def clean_email_body(body):
 # Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
 # their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
 # RENT CAP (lane C, 5 Oct 2026): the benefit-cap email to a tenant is the lane's own tenant card too.
-TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "), "note": "RENT CHECK KEY: "}
+# RENT ARREARS (finding 1355, 19 Nov 2026): raised once the rent check's three chase stages are spent and
+# the rent is still unpaid. It chases owed rent like RENT LATE, so it is in RENT_CHASE_PREFIXES below too.
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ARREARS: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "),
+                   "note": "RENT CHECK KEY: "}
+# The cards that chase rent a tenant owes. The bank is read again for each, at submit and at the send (Kevin,
+# 16 Nov 2026), through agent-dispatch.py rent_landed_state, so each must carry the line
+# "RENT CHECK KEY: <tenancy id>:<due date of the rent chased, YYYY-MM-DD>:<stage>". The rent check writes it on
+# every RENT LATE card; a RENT ARREARS card carries it with stage 4 (one past the check's three chase stages).
+# A chase card with no key is refused at the send, never sent unchecked (review of PR 981).
+RENT_CHASE_PREFIXES = ("RENT LATE: ", "RENT ARREARS: ")
+RENT_ARREARS_STAGE = 4
 
 
 def parse_plan(output):

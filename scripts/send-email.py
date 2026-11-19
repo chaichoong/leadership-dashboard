@@ -101,6 +101,8 @@ from agent_email_format import (  # noqa: E402
     parse_text,
     TASK_TENANCIES,
     TENANCIES_TABLE,
+    RENT_CHASE_PREFIXES,
+    RENT_ARREARS_STAGE,
     tenancies_to_note,
     tenancy_comment,
     BUSINESS_SENDER,
@@ -1122,10 +1124,10 @@ def agent_rent_landed_refusal(task_id, f):
 
 
 def rent_landed_refusal(task_id, task_name, fields=None):
-    """'' or why a RENT LATE email or text, or an AGENT RENT LATE email, must not go now. `fields` is the task as
-    the send already read it; with none, it is read here."""
+    """'' or why a rent chase email or text (RENT LATE, RENT ARREARS), or an AGENT RENT LATE email, must not go
+    now. `fields` is the task as the send already read it; with none, it is read here."""
     name = str(task_name or "")
-    if not (name.startswith("RENT LATE: ") or name.startswith("AGENT RENT LATE: ")):
+    if not (name.startswith(RENT_CHASE_PREFIXES) or name.startswith("AGENT RENT LATE: ")):
         return ""
     f = fields if fields is not None else (get_task(task_id).get("fields", {}) or {})
     if name.startswith("AGENT RENT LATE: "):
@@ -1141,6 +1143,12 @@ def rent_landed_refusal(task_id, task_name, fields=None):
                 "has landed since the card was made is NOT CHECKED. Nothing was sent. Run the send again; a late-rent "
                 "message goes only on a fresh read")
     # Running is not working (review of PR 959): a card the check cannot place is refused, never sent on a guess.
+    if landed.get("state") == "nokey" and name.startswith("RENT ARREARS: "):
+        # Nobody's code raises a RENT ARREARS card, so its key is written by whoever made it (finding 1355).
+        return ("it is a RENT ARREARS card with no RENT CHECK KEY line, so code cannot tell which tenancy and rent "
+                "cycle to read the bank for: NOT CHECKED. Nothing was sent. Add the key for the oldest unpaid rent it "
+                f"chases, then run the send again: python3 scripts/agent-dispatch.py annotate {task_id} --note "
+                f"\"RENT CHECK KEY: <tenancy id>:<that rent's due date, YYYY-MM-DD>:{RENT_ARREARS_STAGE}\"")
     if landed.get("state") == "nokey":
         return ("it is a RENT LATE card with no RENT CHECK KEY line, so code cannot tell which tenancy and rent cycle "
                 "to read the bank for: NOT CHECKED. Nothing was sent. The rent check writes that line on every RENT LATE "

@@ -167,6 +167,42 @@ print(json.dumps({k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items
     }
   });
 
+  // Finding 1355 (19 Nov 2026): a RENT ARREARS card, raised once the three chase stages were spent, could not
+  // be texted at all, and the first fix (PR 981, closed) opened the text door with no bank re-check. Now it is
+  // a rent chase card: its key is read like RENT LATE's, and a card with no key is refused with the line to add.
+  it('a RENT ARREARS card is a rent chase: texted and emailed only on a fresh bank read, refused with no key', () => {
+    const r = py(`
+ARREARS = "RENT ARREARS: Unit 9 - 1 Example Road, rent unpaid after three chases"
+# The key as agent-dispatch.py annotate writes it: a dated line in Notes, stage 4.
+KEYED = "[19 Nov 2026 — agent] RENT CHECK KEY: %s:%s:4" % (TENANCY, OWED)
+out = {}
+CARD = dict(fields(ARREARS), **{AF["notes"]: KEYED})
+BANK[:] = [{"id": "recRentLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
+out["landedText"], out["landedEmail"] = run("text"), run("email")
+BANK[:] = []
+out["clearText"], out["clearEmail"] = run("text"), run("email")
+CARD = dict(fields(ARREARS), **{AF["notes"]: "no key line on this card"})
+out["noKeyText"], out["noKeyEmail"] = run("text"), run("email")
+state = AD.rent_landed_state(ARREARS, "no key line", "")
+print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out.items()}, "state": state,
+                  "lane": ARREARS.startswith(AD.RENT_LANE_PREFIXES)}))`);
+    for (const k of ['landedText', 'landedEmail']) {
+      expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/the rent for the cycle due .* has arrived since the check ran: .*recRentLineAaaaaa.*Nothing was sent/)]);
+      expect([k, r.r[k][1], r.r[k][2]]).toEqual([k, [], ['rent', 'bank']]);
+    }
+    for (const k of ['clearText', 'clearEmail']) {
+      expect([k, r.r[k][0], r.r[k][1].length, r.r[k][2]]).toEqual([k, null, 1, ['rent', 'bank']]);
+    }
+    for (const k of ['noKeyText', 'noKeyEmail']) {
+      expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/a RENT ARREARS card with no RENT CHECK KEY line.*NOT CHECKED\. Nothing was sent/)]);
+      expect(r.r[k][0]).toMatch(/agent-dispatch\.py annotate recRentCardAaaaa1 --note "RENT CHECK KEY: <tenancy id>:<that rent's due date, YYYY-MM-DD>:4"/);
+      expect([k, r.r[k][1], r.r[k][2]]).toEqual([k, [], []]);
+    }
+    expect(r.state).toEqual({ state: 'nokey' });
+    // Its email is property mail like every rent lane card: from info@, signed Roy (Kevin's six rulings).
+    expect(r.lane).toBe(true);
+  });
+
   it('only a RENT LATE card is read again: another rent lane card and an ordinary email touch no bank', () => {
     const r = py(`
 BANK[:] = [{"id": "recRentLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]

@@ -125,6 +125,7 @@ from agent_email_format import (  # noqa: E402
     # Kevin's six rulings (16 Nov 2026, decision card recinoFWz6fQ6JVVB): who sends property mail.
     PROPERTY_SENDER,
     TEXT_CARD_MARKS,
+    RENT_CHASE_PREFIXES,
     AGENT_RENT_LATE_PREFIX,
     SIX_RULINGS,
     FREE_MAIL_DOMAINS,
@@ -6734,10 +6735,10 @@ def rent_landed_state(name, notes, description, records=None):
     with none, this file's query_records and fetch_bank_lines.
     {"state": "landed", "detail", "shown", "total", "rent", "owed"} | {"state": "unchecked", "detail"} |
     {"state": "nokey"} | {"state": "notenancy", "tenancy"} | {"state": "norent", "tenancy"} | {"state": ""}
-    when it is not a RENT LATE task or the rent has not landed. The card lets the three that could not be
-    checked through with a NOT CHECKED stamp (rent_paid_problem); the send refuses all three (review of PR
-    959: running is not working)."""
-    if not str(name or "").startswith("RENT LATE: "):
+    when it is not a rent chase card (RENT_CHASE_PREFIXES: RENT LATE, and RENT ARREARS since finding 1355)
+    or the rent has not landed. The card lets the three that could not be checked through with a NOT
+    CHECKED stamp (rent_paid_problem); the send refuses all three (review of PR 959: running is not working)."""
+    if not str(name or "").startswith(RENT_CHASE_PREFIXES):
         return {"state": ""}
     key = RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")
     if not key:
