@@ -243,6 +243,60 @@ def first_uncovered(newest, start, day, due_day):
     return due if due >= floor else next_due(due, due_day)
 
 
+# A LETTING AGENT'S NIL STATEMENT (finding 1354, 19 Nov 2026). An agent-managed rent is paid by the letting agent, net
+# of fees, after the tenant pays them. When the agent's statement for a month shows no payout, nothing was due to us on
+# that due date, so the rent check must not count it as owed (23 Viola Street read 39 days late on 18 Nov 2026 while the
+# real gap was 8: StayCay's September statement, emailed 8 Oct, showed a 0.00 payout). The fact is written once, as a
+# dated comment on the tenancy, by `tenancy-record.py nil-statement` (the agent's own written figure, quoted), and read
+# back here. Agent-managed tenancies only: anything else's comment is ignored.
+NIL_STATEMENT_MARK = "NIL STATEMENT "
+NIL_STATEMENT_RE = re.compile(r"\bNIL STATEMENT (\d{4}-\d{2}-\d{2}):")
+
+
+def nil_statement_dates(comments):
+    """The due dates a tenancy's comments record a nil statement for (comment dicts as Airtable returns them)."""
+    out = set()
+    for c in comments or []:
+        for d in NIL_STATEMENT_RE.findall(str((c or {}).get("text") or "")):
+            day = parse_day(d)
+            if day:
+                out.add(day)
+    return out
+
+
+def read_comments(tenancy_id):
+    """Every comment on one tenancy, following offset."""
+    out, offset = [], None
+    while True:
+        params = {"pageSize": 100, **({"offset": offset} if offset else {})}
+        page = api("GET", f"{T_TENANCIES}/{tenancy_id}/comments", params=params)
+        if "comments" not in page:
+            raise RuntimeError(f"the comments read for {tenancy_id} returned no comments list")
+        out += page.get("comments") or []
+        offset = page.get("offset")
+        if not offset:
+            return out
+
+
+def read_nil_statements(tenancies, tenants, day):
+    """({tenancy id: {nil due dates}}, {tenancy ids whose comments could not be read}) for the live agent-managed
+    tenancies. One paginated comments read each. A read that fails is named, never read as "no nil statement"."""
+    by_tenant = {r["id"]: r.get("fields") or {} for r in tenants}
+    found, unchecked = {}, set()
+    for rec in tenancies:
+        f = rec.get("fields") or {}
+        if not is_live(f, day) or tenant_type(f, by_tenant) != AGENT_MANAGED:
+            continue
+        try:
+            dates = nil_statement_dates(read_comments(rec["id"]))
+        except Exception:                            # noqa: BLE001 — said on the row as NOT CHECKED, never a pass
+            unchecked.add(rec["id"])
+            continue
+        if dates:
+            found[rec["id"]] = dates
+    return found, unchecked
+
+
 def set_off_window(f):
     """(from, until) of rent paid by set-off, or None. Both dates are needed and from must not be after until: a
     half-written window covers nothing (independent review, 9 Oct 2026)."""
@@ -402,6 +456,7 @@ def load(day):
     }
     check_controls(data)
     check_no_chase(data)
+    data["nilDues"], data["nilUnchecked"] = read_nil_statements(data["tenancies"], data["tenants"], day)
     return data
 
 
@@ -507,7 +562,20 @@ def is_live(f, day):
     return not ("former" in names and "active" not in names)
 
 
-def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
+def judge(rec, tenants, payments, day, feed, pre_slate, late_before, nil=(), nil_unchecked=False):
+    """One tenancy's row. `nil` holds the due dates a letting agent's statement showed no payout for (agent-managed
+    rents only); `nil_unchecked` says that tenancy's comments could not be read, so a nil month may be counted owed."""
+    said = []
+    row = _judge(rec, tenants, payments, day, feed, pre_slate, late_before, nil, said)
+    if nil_unchecked and row.get("type") == AGENT_MANAGED:
+        # Overstating is the safe direction: the row is judged as before, and says so.
+        said.append("nil statements NOT CHECKED")
+    if said:
+        row["note"] = f"{row['note']}; {'; '.join(said)}"
+    return row
+
+
+def _judge(rec, tenants, payments, day, feed, pre_slate, late_before, nil, said):
     f = rec.get("fields") or {}
     status = sel(f.get(TY["payStatus"]))
     # A live tenancy can sit unlinked from a unit (Kevin, 1 Oct 2026), so the surname stands in.
@@ -533,6 +601,14 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
     covered = bool(set_off and set_off[0] <= owed <= set_off[1])
     while covered and owed <= set_off[1]:
         owed = next_due(owed, due_day)
+    # A letting agent's nil statement (finding 1354): nothing was due to us on that due date, so it is not owed.
+    if row["type"] == AGENT_MANAGED:
+        skipped = []
+        while owed in nil:
+            skipped.append(owed)
+            owed = next_due(owed, due_day)
+        if skipped:
+            said.append("nil statement for " + ", ".join(d.strftime("%-d %b") for d in skipped))
     as_at, bank_why = bank_view(feed, payments)
     # With a fresh feed, everything is judged as at the feed's day (never a day ahead of today).
     # With a stale or missing one the calendar decides whether rent is overdue, and an overdue
@@ -628,7 +704,9 @@ def assess(data, day, now):
         start = parse_day(f.get(TY["start"]))
         if not is_live(f, day) or (start and start > day):
             continue
-        row = judge(rec, tenants, pay.get(rec["id"], []), day, feed, pre_slate, late_before)
+        row = judge(rec, tenants, pay.get(rec["id"], []), day, feed, pre_slate, late_before,
+                    nil=(data.get("nilDues") or {}).get(rec["id"], ()),
+                    nil_unchecked=rec["id"] in (data.get("nilUnchecked") or ()))
         if rec["id"] in no_chase_tenancies or no_chase & set(f.get(TY["tenants"]) or []):
             row["noChase"] = True
             if not row["paying"]:

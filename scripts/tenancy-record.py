@@ -72,6 +72,10 @@ USAGE
                                                           rent a letting agent keeps against our bill
                                                           counts as PAID for whole rent periods from D
                                                           (a due date) to D (the day before one)
+  tenancy-record.py nil-statement TENANCY --due D --task T --evidence "<sender, date, payout 0.00 line>"
+                                                          a letting agent's statement shows no payout for the
+                                                          rent due on D (Agent-Managed only; no approval, a
+                                                          dated comment the rent check reads: finding 1354)
   tenancy-record.py onboard --task T --unit RU --due-day N --type "Universal Credit" --email E [--replace TENANCY]
                                                           a NEW tenant from a signed agreement
   tenancy-record.py rent-change OLD --task T              a continuing tenant's new rent = a NEW tenancy
@@ -423,6 +427,71 @@ def cmd_set_off(a):
     except Exception as e:                                   # noqa: BLE001 — the write stands; said loudly
         out["commentProblem"] = f"the set-off was written but the tenancy comment failed: {str(e)[:200]}"
     return out
+
+
+# A nil payout, as the letting agent's statement writes it: "0.00", "£0", "nil", beside a payout word.
+NIL_FIGURE_RE = re.compile(r"(?i)(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.])0\.00(?![\d])|\bnil\b)")
+PAYOUT_WORD_RE = re.compile(r"(?i)\b(?:pay\s?-?out|paid out|net (?:payment|payable|to (?:the )?landlord|to you))\b")
+
+
+def nil_statement_problem(tenancy, tenants, due, evidence, today):
+    """'' when a nil statement for `due` may be recorded on this tenancy, else why not."""
+    f = tenancy.get("fields") or {}
+    if not due:
+        return "--due is a date, YYYY-MM-DD"
+    if not rc.is_live(f, today) or ended(tenancy):
+        return f"tenancy {tenancy['id']} has ended; nothing is recorded on it"
+    if rc.tenant_type(f, tenants) != rc.AGENT_MANAGED:
+        return (f"tenancy {tenancy['id']} is not Agent-Managed: only a letting agent's statement can show that no "
+                "payout was due, and the rent check reads a nil statement on an agent-managed rent only")
+    try:
+        due_day = int(rc.sel(f.get(DUE_DAY)))
+    except ValueError:
+        return f"tenancy {tenancy['id']} has no due day, so --due cannot be checked against its rent dates"
+    if rc.due_on(due.year, due.month, due_day) != due:
+        return f"{due.isoformat()} is not one of this tenancy's due dates (its rent falls due on the {due_day}th)"
+    start = rc.parse_day(f.get(rc.TY["start"]))
+    if start and due < start:
+        return f"{due.isoformat()} is before the tenancy began ({start.isoformat()})"
+    if due > today:
+        return f"{due.isoformat()} is in the future: a statement can only say a payout was nil for a rent already due"
+    text = " ".join(str(evidence or "").split())
+    if len(text) < 20 or not NIL_FIGURE_RE.search(text) or not PAYOUT_WORD_RE.search(text):
+        return ("--evidence quotes the statement itself: who sent it, its date, and its payout line showing 0.00 or nil "
+                "(for example \"StayCay statement for September, emailed 8 Oct 2026: payout 0.00\")")
+    if rc.NIL_STATEMENT_MARK.strip() in text.upper():
+        return "--evidence is the statement's own words, not a NIL STATEMENT line"
+    return ""
+
+
+def cmd_nil_statement(a):
+    """A letting agent's statement shows no payout for one rent due date (finding 1354, 19 Nov 2026). The rent check
+    then does not count that rent as owed (rent-check.py read_nil_statements). It needs no approval: like a comment,
+    it records the agent's own written figure, quoted in the comment, on a task that names the tenancy. It changes no
+    field, and a nil statement written in error is answered by a comment saying so (the rent check reads the dates)."""
+    due = rc.parse_day(a.due)
+    tenancy, task = gate(a.tenancy, a.task)
+    f = tenancy.get("fields") or {}
+    tenants = {}
+    for tid in f.get(rc.TY["tenants"]) or []:
+        row = _one(rc.T_TENANTS, tid, [rc.TN["payType"]])
+        if row:
+            tenants[tid] = row.get("fields") or {}
+    why = nil_statement_problem(tenancy, tenants, due, a.evidence, rc.today_london())
+    if why:
+        raise Refused(why)
+    if due in rc.nil_statement_dates(rc.read_comments(a.tenancy)):
+        return {"tenancy": a.tenancy, "unchanged": f"a nil statement for {due.isoformat()} is already recorded"}
+    evidence = " ".join(str(a.evidence).split())
+    body = (f"{stamp()}: {rc.NIL_STATEMENT_MARK}{due.isoformat()}: the letting agent's statement shows no payout for "
+            f"the rent due that day, so the rent check does not count it as owed. Evidence: {evidence} "
+            f"(task {task['id']}: {task_label(task)})")
+    if a.dry_run:
+        return {"tenancy": a.tenancy, "comment": body, "dryRun": True}
+    c = post_comment(a.tenancy, body)
+    ledger({"kind": "nil-statement", "tenancy": a.tenancy, "due": due.isoformat(), "task": task["id"],
+            "comment": c.get("id")})
+    return {"tenancy": a.tenancy, "nilStatement": due.isoformat(), "commented": c.get("id")}
 
 
 # ─── move-in and rent change ─────────────────────────────────────────
@@ -855,6 +924,12 @@ def main(argv=None):
     so.add_argument("--task", required=True)
     so.add_argument("--why", required=True)
     so.add_argument("--dry-run", action="store_true")
+    ns = sub.add_parser("nil-statement")
+    ns.add_argument("tenancy")
+    ns.add_argument("--due", required=True)
+    ns.add_argument("--task", required=True)
+    ns.add_argument("--evidence", required=True)
+    ns.add_argument("--dry-run", action="store_true")
     ob = sub.add_parser("onboard")
     ob.add_argument("--task", required=True)
     ob.add_argument("--unit", required=True)
@@ -875,7 +950,8 @@ def main(argv=None):
         return 2
     try:
         out = {"show": cmd_show, "comment": cmd_comment, "status": cmd_status, "due-day": cmd_due_day,
-               "set-off": cmd_set_off, "onboard": cmd_onboard, "rent-change": cmd_rent_change}[a.cmd](a)
+               "set-off": cmd_set_off, "nil-statement": cmd_nil_statement, "onboard": cmd_onboard,
+               "rent-change": cmd_rent_change}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2

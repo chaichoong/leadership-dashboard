@@ -1455,3 +1455,61 @@ print(json.dumps({"ok": check(["recT_uc"], ["recTcy"]),
     expect(r.strayTenancy).toContain('(noChaseTenancies) matched no tenancy');
   });
 });
+
+// Finding 1354 (19 Nov 2026): a letting agent's statement showing a 0.00 payout for one month was counted as rent
+// owed, so an agent-managed unit read 39 days late while the real gap was 8. The fact is a dated NIL STATEMENT comment
+// on the tenancy (scripts/tenancy-record.py nil-statement), and the rent check skips that due date. Invented ids.
+describe('rent-check: a letting agent\'s nil statement month is not rent owed (finding 1354)', () => {
+  const NIL_DAY = 'NOV = date(2026, 11, 18)\nNIL = {date(2026, 10, 10)}\n';
+  it('a nil statement on the oldest owed cycle moves owed to the next due date; without one it reads 39 days late', () => {
+    const r = py(NIL_DAY + `
+t = tenancy("recAGM", 10, 500, tenant="recT_agent", unit="Unit 1 – 2 Example Street")
+tx = [paid("recAGM", "2026-09-10", 500)]
+w = world([t], tx, day=NOV); w["nilDues"] = {"recAGM": NIL}
+now = datetime(2026, 11, 18, 12, 30, tzinfo=timezone.utc)
+withNil = {r["id"]: r for r in rc.assess(w, NOV, now)["tenancies"]}["recAGM"]
+_, rows = run([t], tx, day=NOV)
+print(json.dumps({"nil": withNil, "plain": rows["recAGM"]}))`);
+    expect([r.plain.owed, r.plain.daysLate]).toEqual(['2026-10-10', 39]);
+    expect([r.nil.owed, r.nil.daysLate, r.nil.lane]).toEqual(['2026-11-10', 8, 'late']);
+    expect(r.nil.note).toBe('late 8 days, due 10 Nov, last matched payment 10 Sep; nil statement for 10 Oct');
+  });
+
+  it('a nil date on a tenancy that is not agent-managed is ignored; a comments read that failed says NOT CHECKED', () => {
+    const r = py(NIL_DAY + `
+uc = tenancy("recUC1", 10, 500, tenant="recT_uc")
+agm = tenancy("recAGM", 10, 500, tenant="recT_agent")
+tx = [paid("recUC1", "2026-09-10", 500), paid("recAGM", "2026-09-10", 500)]
+w = world([uc, agm], tx, day=NOV); w["nilDues"] = {"recUC1": NIL}; w["nilUnchecked"] = {"recAGM"}
+rows = {r["id"]: r for r in rc.assess(w, NOV, datetime(2026, 11, 18, 12, 30, tzinfo=timezone.utc))["tenancies"]}
+print(json.dumps({"uc": [rows["recUC1"]["owed"], rows["recUC1"]["note"]], "agm": [rows["recAGM"]["owed"], rows["recAGM"]["note"]]}))`);
+    expect(r.uc).toEqual(['2026-10-10', 'late 39 days, due 10 Oct, last matched payment 10 Sep']);
+    expect(r.agm[0]).toBe('2026-10-10');
+    expect(r.agm[1]).toMatch(/; nil statements NOT CHECKED$/);
+  });
+
+  it('read_nil_statements reads only live agent-managed tenancies, follows offset, and names a failed read', () => {
+    const r = py(`
+NOV = date(2026, 11, 18)
+calls = []
+def api(method, path, payload=None, params=None):
+    calls.append([path, (params or {}).get("offset")])
+    if "recAGMbroken" in path: raise RuntimeError("HTTP 503 (invented)")
+    if "recAGMlive" in path and not (params or {}).get("offset"):
+        return {"comments": [{"text": "18 Nov 2026 10:00: NIL STATEMENT 2026-10-10: the letting agent's statement shows no payout"}], "offset": "p2"}
+    if "recAGMlive" in path:
+        return {"comments": [{"text": "a plain note that names NIL STATEMENT with no date"}, {"text": "19 Nov 2026 09:00: NIL STATEMENT 2026-08-10: earlier"}]}
+    return {"comments": []}
+rc.api = api
+ts = [tenancy("recAGMlive", 10, 500, tenant="recT_agent"), tenancy("recUC1", 10, 500, tenant="recT_uc"),
+      tenancy("recAGMended", 10, 500, tenant="recT_agent", **{TY["end"]: "2026-09-30"}),
+      tenancy("recAGMbroken", 10, 500, tenant="recT_agent")]
+found, unchecked = rc.read_nil_statements(ts, list(TENANTS), NOV)
+print(json.dumps({"found": {k: sorted(d.isoformat() for d in v) for k, v in found.items()}, "unchecked": sorted(unchecked),
+                  "read": sorted({c[0].split("/")[1] for c in calls}), "pages": [c[1] for c in calls if "recAGMlive" in c[0]]}))`);
+    expect(r.found).toEqual({ recAGMlive: ['2026-08-10', '2026-10-10'] });
+    expect(r.unchecked).toEqual(['recAGMbroken']);
+    expect(r.read).toEqual(['recAGMbroken', 'recAGMlive']);
+    expect(r.pages).toEqual([null, 'p2']);
+  });
+});
