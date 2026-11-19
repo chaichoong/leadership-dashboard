@@ -436,10 +436,13 @@ def cmd_set_off(a):
 # ("payout 0.00", "Balance paid to landlord: £0.00", "Total remitted 0.00", "net payment nil"). The figure must follow
 # the phrase within a few characters with no other figure between (review of the first draft: "payout £450.00, fees
 # 0.00" passed when the two were searched apart).
-PAYOUT_PHRASE = (r"(?:pay\s?-?outs?|paid\s+out|paid\s+to\s+(?:the\s+)?landlord|due\s+to\s+(?:the\s+)?landlord|remitted|"
-                 r"remittance|net\s+(?:payment|payable|amount|to\s+(?:the\s+)?landlord|to\s+you))")
+PAYOUT_PHRASE = (r"(?:pay\s?-?outs?|paid\s+out|paid\s+to\s+(?:the\s+)?(?:landlord|you)|due\s+to\s+(?:the\s+)?landlord|"
+                 r"landlord\s+payment|remitted|remittance|net\s+(?:payment|payable|amount|to\s+(?:the\s+)?landlord|to\s+you))")
 NIL_FIGURE = r"(?:£\s?0(?:\.00)?(?![\d.])|(?<![\d.£])0\.00(?!\d)|\bnil\b)"
-NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b[^0-9£\n]{{0,25}}{NIL_FIGURE}")
+# Between the words and the figure: only separators and a few linking words, never another item's words (review round
+# 2: "Remittance advice: nil deductions. Payout £450.00" passed on a gap of any 25 letters).
+NIL_GAP = r"(?:[\s:=\-–]|\b(?:of|is|amount|total|gbp)\b)*"
+NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b{NIL_GAP}{NIL_FIGURE}")
 
 
 def nil_statement_problem(tenancy, tenants, due, evidence, today):

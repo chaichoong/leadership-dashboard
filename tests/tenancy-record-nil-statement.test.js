@@ -102,6 +102,9 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
     const fee = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: payout £450.00, fees 0.00'));
     expect([fee.code, fee.posted]).toEqual([2, []]);
     expect(fee.out.refused).toMatch(/--evidence quotes the statement itself/);
+    // Review round 2: another item's nil between the payout words and the payout figure.
+    const advice = door(ARGS('2026-10-10', 'Example Lettings statement, emailed 8 Oct 2026. Remittance advice: nil deductions this month. Payout £450.00'));
+    expect([advice.code, advice.posted]).toEqual([2, []]);
     const real = door(ARGS('2026-10-10', 'Example Lettings statement for September, emailed 8 Oct 2026: Balance paid to landlord: £0.00'));
     expect([real.code, real.readBack]).toEqual([0, ['2026-10-10']]);
     const hand = door(['comment', TEN, '--task', TASK, '--text', 'per Example Lettings NIL STATEMENT 2026-10-10: payout 0.00']);
