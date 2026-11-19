@@ -25,6 +25,8 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/render.py',
   // 13 Nov 2026: the clause a slot's "run OK" line carries, called from slot-postrun.sh
   'scripts/slot-tally.py',
+  // 18 Nov 2026: the WhatsApp lookup slot-postrun.sh runs outside claude (finding 20261011-agent-dispatch-834)
+  'scripts/whatsapp-sweep.py',
   'scripts/padel-emails.py',
   // 18 Nov 2026: the scorecard every agent chat opens with (UserPromptSubmit hook)
   'scripts/agent-scorecard.py',
