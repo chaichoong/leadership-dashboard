@@ -151,6 +151,8 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
       noPound: 'Example Lettings statement, emailed 8 Oct 2026: Payout 0.00, rent received 454.40',
       // Round 3: money written with GBP.
       gbp: 'Example Lettings statement, emailed 8 Oct 2026: Transfer to landlord GBP454.40, Balance due to landlord £0.00',
+      // Round 4: "pm" after a figure that cannot be a clock time is per month.
+      perMonth: 'Example Lettings statement, emailed 8 Oct 2026: Rent received 454.40 pm, payout 0.00',
     };
     for (const [name, quote] of Object.entries(lines)) {
       const r = door(ARGS('2026-10-10', quote));
@@ -164,7 +166,9 @@ describe('tenancy-record nil-statement: the letting agent\'s nil payout, recorde
     for (const quote of ['Total payments to landlord 0.00 0.00', 'TOTAL PAYMENTS TO LANDLORD £0.00 30/09/2026',
       'Net payment nil this month', 'Payout NIL as rent unpaid',
       // Round 3: a time, a flat number and a percentage are not money.
-      'sent at 9.30am, payout £0.00', 'Apartment 3.04: payout £0.00', 'Management fee 12.00% £0.00, payout £0.00']) {
+      'sent at 9.30am, payout £0.00', 'Apartment 3.04: payout £0.00', 'Management fee 12.00% £0.00, payout £0.00',
+      // Round 4: a date or a clock time before GBP is not money.
+      'Payment date 08/10/2026 GBP 0.00, payout 0.00', 'sent 14:05 GBP 0.00, payout 0.00']) {
       const r = door(ARGS('2026-10-10', `Example Lettings statement for September, emailed 8 Oct 2026: ${quote}`));
       expect([quote, r.code, r.readBack]).toEqual([quote, 0, ['2026-10-10']]);
     }

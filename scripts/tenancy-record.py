@@ -449,15 +449,24 @@ NIL_PAYOUT_RE = re.compile(rf"(?i)\b{PAYOUT_PHRASE}\b{NIL_GAP}{NIL_FIGURE}")
 # (two review rounds of the wording fix, 19 Nov 2026: a list of payout wording is never complete, so "Transfer to
 # landlord £454.40", "(£454.40)" and "Total payments to landlord £454.40, Outstanding payments to landlord £0.00" all
 # passed a phrase check). Money is a £ figure or a figure with two decimals; a date, a reference or a Gmail id is not.
-# A bare two-decimal figure is not money when it is a time (9.30am, at 14.05), a percentage or a flat number (round 3).
-MONEY_RE = re.compile(r"(?i)(?:£|\bgbp)\s?\(?\s?(\d[\d,]*(?:\.\d+)?)|(\d[\d,]*(?:\.\d+)?)\s?gbp\b|"
-                      r"(?<![\d.£\w])(?<!\bat )(?<!\bflat )(?<!\bapartment )(\d[\d,]*\.\d{2})(?![\d.])(?!\s?(?:%|am\b|pm\b))")
+MONEY_RE = re.compile(r"(?i)(?:£|\bgbp)\s?\(?\s?(\d[\d,]*(?:\.\d+)?)|(?<![\w.£/:])(\d[\d,]*(?:\.\d+)?)\s?gbp\b|"
+                      r"(?<![\d.£\w])(\d[\d,]*\.\d{2})(?![\d.])")
+CLOCK_RE = re.compile(r"(?:[01]?\d|2[0-3])\.[0-5]\d")
 
 
 def money_above_zero(text):
-    """The first money figure above zero in the text, as written, or ''."""
-    for m in MONEY_RE.finditer(text or ""):
+    """The first money figure above zero in the text, as written, or ''. A bare two-decimal figure is skipped when it is
+    a percentage, a flat number (Apartment 3.04) or a clock time beside "at", "am" or "pm" (9.30am); 454.40 pm is
+    never a time, so it is money per month (review rounds 3 and 4, 19 Nov 2026)."""
+    t = text or ""
+    for m in MONEY_RE.finditer(t):
         figure = m.group(1) or m.group(2) or m.group(3)
+        if m.group(3):
+            before, after = t[:m.start()].lower(), t[m.end():].lower()
+            if re.match(r"\s?%", after) or re.search(r"\b(?:flat|apartment)\s$", before):
+                continue
+            if CLOCK_RE.fullmatch(figure) and (re.search(r"\bat\s$", before) or re.match(r"\s?(?:am|pm)\b", after)):
+                continue
         try:
             if float(figure.replace(",", "")) > 0:
                 return m.group(0).strip()
