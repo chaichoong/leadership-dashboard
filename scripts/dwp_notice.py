@@ -307,11 +307,18 @@ def decision_sentence(body):
     return ""
 
 
-def auto_reply_skips(reason, decided):
-    """True for a message the scan flagged as an automatic reply (any reason: the Auto-Submitted header,
-    an auto-reply subject, or a receipt phrase) with no decision sentence in it. A decision is never
-    skipped: "Thank you for contacting Universal Credit." can open a real decision (review rounds 2-3)."""
-    return bool(reason) and not decided
+def auto_reply_skips(reason, decided, named=False):
+    """True for a message the scan flagged as an automatic reply with no decision sentence in it. A decision is
+    never skipped: "Thank you for contacting Universal Credit." can open a real decision (review rounds 2-3).
+    A message flagged only by a receipt phrase in its body is skipped only when it also names nobody (review
+    round 4: "We have received your request for <tenant>. Rent will now be paid to you directly..." states a
+    fact in words the decision list does not hold). The Auto-Submitted header and an auto-reply subject skip
+    whenever nothing is decided."""
+    if not reason or decided:
+        return False
+    if str(reason).strip().lower().startswith("body") and named:
+        return False
+    return True
 
 
 def summary(subject, body):
@@ -728,7 +735,8 @@ def plan(msg_id, ctx, today=None, now=None):
     dwp = ctx.get("dwp")
     if not is_dwp_notice(_sender(ctx)) or not is_dwp_notice(ctx.get("sender")):
         return {"do": "skip", "why": "not from a DWP or Universal Credit address"}
-    if auto_reply_skips(ctx.get("auto_reply"), (dwp or {}).get("decided") if isinstance(dwp, dict) else False):
+    if auto_reply_skips(ctx.get("auto_reply"), (dwp or {}).get("decided") if isinstance(dwp, dict) else False,
+                        named=bool(isinstance(dwp, dict) and (dwp.get("tenant") or dwp.get("names")))):
         return {"do": "skip", "why": "an automatic reply with nothing decided in it (%s)" % ctx.get("auto_reply")}
     if not isinstance(dwp, dict):
         return {"do": "skip", "why": "no DWP reading in the scan cache for this message"}

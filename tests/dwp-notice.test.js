@@ -556,6 +556,27 @@ result = {"dwp": ["dwp" in cache[k] for k in ("m9", "m10")], "acted": acted, "co
     expect(r.planned).toBe('comment');
   });
 
+  // Review round 4: a receipt phrase above a fact the decision list does not word ("Rent will now be paid to you
+  // directly") named a tenant, yet it was skipped as an automatic reply. A body-flagged message that names someone
+  // is read and recorded; the header and subject flags still skip when nothing is decided.
+  it('a body-flagged receipt that names a tenant is read and recorded, whatever words state the fact', () => {
+    const r = py(`${TRIAGE}
+body = "We have received your request for Jo Alder. Rent will now be paid to you directly from the next assessment period."
+t.write_scan_cache([msg("m81", "Universal Credit <${UC}>", "Managed payment", body, auto_reply="body: we have received your"),
+                    msg("m82", "Universal Credit <${UC}>", "Managed payment", body, auto_reply="header auto-submitted: auto-replied")])
+cache = t.read_scan_cache()
+acted = run(lambda: t.main(["act", "--id", "m81", "--do", "archive", "--reason", "filed"]))
+result = {"dwp": ["dwp" in cache[k] for k in ("m81", "m82")], "acted": acted["code"],
+          "comments": [c["tenancy"] for c in calls["comments"]],
+          "skips": [d.auto_reply_skips("body: we have received your", False, named=False),
+                    d.auto_reply_skips("body: we have received your", False, named=True),
+                    d.auto_reply_skips("header auto-submitted: auto-replied", False, named=True)]}`);
+    expect(r.dwp).toEqual([true, false]);
+    expect(r.acted).toBe(0);
+    expect(r.comments).toEqual(['recTYALDER0000001']);
+    expect(r.skips).toEqual([true, false, true]);
+  });
+
   it('note --do answered on a cached DWP message still files it AND records it; act then note records once', () => {
     const r = py(`${TRIAGE}
 t.write_scan_cache([msg("m1", "Universal Credit <${UC}>", "${SUBJ}", "${DIRECT}")])

@@ -553,7 +553,8 @@ def write_scan_cache(messages):
                          % (m["id"], str(exc)[:160]))
                 entry = {"tenant": "", "summary": " ".join(str(subject).split())[:300],
                          "from": dwp_notice.bare_email(raw_from), "decided": False}
-            if not dwp_notice.auto_reply_skips(m.get("auto_reply"), entry.get("decided")):
+            if not dwp_notice.auto_reply_skips(m.get("auto_reply"), entry.get("decided"),
+                                               named=bool(entry.get("tenant") or entry.get("names"))):
                 cache[m["id"]]["dwp"] = entry
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
