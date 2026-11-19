@@ -4681,7 +4681,11 @@ async function main() {
       }
       const kept = persistSessionCookies(dir);
       console.log(`Kept ${kept} session cookie(s) alive (${SESSION_COOKIE_HOURS} hours, or the site's own sessionCookieHours).`);
-      const out = await postLoginVerdict(profile, url);
+      // A window still open when the clock runs out was never finished, so timedOut already
+      // says the wall is not cleared. Re-reading the door would open a second page and wait on
+      // the network for nothing (finding 20261117-agent-dispatch-1340 asks for the check when
+      // the window CLOSES), so the re-read is skipped on a timeout.
+      const out = timedOut ? {} : await postLoginVerdict(profile, url);
       if (out.stillSignedOut) {
         console.error(`SIGN-IN NOT COMPLETE: ${host} still shows ${out.stillSignedOut}, so nothing is signed in and no wall is cleared. Open the sign-in again and finish it.`);
       }
@@ -4696,7 +4700,8 @@ async function main() {
       await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => { timedOut = true; });
     });
     // withPage kept them as it closed; a second pass would find none (review, 29 Sep 2026).
-    const out = await postLoginVerdict(profile, url);
+    // Skipped on a timeout, for the reason given on the plain-Chrome branch above.
+    const out = timedOut ? {} : await postLoginVerdict(profile, url);
     if (out.stillSignedOut) {
       console.error(`SIGN-IN NOT COMPLETE: ${host} still shows ${out.stillSignedOut}, so nothing is signed in and no wall is cleared. Open the sign-in again and finish it.`);
     }
