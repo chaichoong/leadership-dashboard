@@ -6730,7 +6730,7 @@ def owed_cycle_lines(bank, tenancy, owed, due_day):
     return [b for b in bank if tenancy in b["tenancyIds"] and lo <= b["date"] < hi]
 
 
-def rent_landed_state(name, notes, description, records=None):
+def rent_landed_state(name, notes, description, records=None, made=None):
     """Has the owed cycle's rent landed since the rent check raised this RENT LATE task? One reading for
     the card (rent_paid_problem, at submit) and for the send (send-email.py and send-text.py, at send
     time; Kevin, 16 Nov 2026), so the two can never disagree about what "landed" means. `records` is
@@ -6774,8 +6774,10 @@ def rent_landed_state(name, notes, description, records=None):
         # arrears stay unpaid is not the arrears paid.
         lo = (owed - timedelta(days=EARLY_RENT_DAYS)).isoformat()
         cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] >= lo]
-        today, due, rents = datetime.now(LONDON).date(), owed, 0
-        while rents == 0 or (today - due).days >= RENT_TOLERANCE_DAYS:
+        # Only the rents owed by the day the card was made (`made`; at submit, today): a rent that fell due after
+        # it is not one this card chases, and counting it would send a chase for rent already paid (review round 3).
+        asof, due, rents = made or datetime.now(LONDON).date(), owed, 0
+        while rents == 0 or (asof - due).days >= RENT_TOLERANCE_DAYS:
             rents, due = rents + 1, rent_next_due(due, due_day)
         owed_rent = rent * rents
     else:

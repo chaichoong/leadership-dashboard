@@ -211,7 +211,7 @@ def load_card(task_id, dry_run):
         sys.exit(f"REFUSED: task {task_id}: the TEXT TO number is not a UK mobile.")
     if number not in tenant_numbers(f):
         sys.exit(f"REFUSED: task {task_id}: the TEXT TO number is not the Contact Number of a tenant linked to the task.")
-    return f, number, message, trial, outcome
+    return f, number, message, trial, outcome, rec.get("createdTime", "")
 
 
 def cmd_send(args):
@@ -230,11 +230,11 @@ def _cmd_send(args):
     if not on and not args.dry_run:
         sys.exit("REFUSED: text sending is switched off. It is switched on only at the cut-over, by Kevin's decision "
                  f"({SWITCH}).")
-    f, number, message, trial, outcome = load_card(args.task, args.dry_run)
+    f, number, message, trial, outcome, created = load_card(args.task, args.dry_run)
     # The bank is read again at the send (Kevin, 16 Nov 2026): send-email.py's rent_landed_refusal, the one
     # reading the email and the card share, so the text and the email on one card can never disagree.
     se = send_email_module()
-    rent_landed = se.rent_landed_refusal(args.task, f.get(AF["name"], ""), f)
+    rent_landed = se.rent_landed_refusal(args.task, f.get(AF["name"], ""), f, created)
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task, "switchedOn": on, "trial": trial or None,
                           "approvalOutcome": outcome or "(not yet approved)", "route": f"{TEXT_FROM} by ClickSend email-to-text",

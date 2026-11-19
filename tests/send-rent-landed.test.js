@@ -212,6 +212,14 @@ print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out
 OLD = (date.today() - timedelta(days=50)).isoformat()
 KEYED = "[19 Nov 2026 — agent] RENT CHECK KEY: %s:%s:4" % (TENANCY, OLD)
 STATE["rent"] = 500.0
+# The card was made yesterday: every rent due since OLD up to then is one it chases.
+CREATED = [(date.today() - timedelta(days=1)).isoformat() + "T12:00:00.000Z"]
+SE.get_task = lambda tid: {"id": tid, "createdTime": CREATED[0], "fields": CARD}
+_st = ST.airtable
+def _st2(method, p, payload=None):
+    r = _st(method, p, payload)
+    return dict(r, createdTime=CREATED[0]) if isinstance(r, dict) and r.get("id") == "recRentCardAaaaa1" else r
+ST.airtable = _st2
 out = {}
 # 50 days back, two or three rents have fallen due since the keyed one: all of them are paid here.
 BANK[:] = [{"id": "recLateLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 1500.0}]
@@ -224,6 +232,15 @@ for i, nm in enumerate(["Rent arrears: Unit 9 - 1 Example Road", "RENT ARREARS -
 BANK[:] = [{"id": "recThisMonthAaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
 CARD = dict(fields("RENT ARREARS: Unit 9 - 1 Example Road, unpaid after three chases"), **{AF["notes"]: KEYED})
 out["currentOnly"] = run("text")
+# Review round 3: a rent that fell due AFTER the card was made is not one it chases. The key is one cycle before
+# OWED (6 days ago), the card was made in between, and one rent has been paid: the arrears are paid.
+d = int(OWED[8:10]); o = date.fromisoformat(OWED)
+prev = (o.replace(day=1) - timedelta(days=1)); prev = prev.replace(day=min(d, prev.day))
+CREATED[0] = (o - timedelta(days=3)).isoformat() + "T12:00:00.000Z"
+BANK[:] = [{"id": "recArrearsPaidAaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
+CARD = dict(fields("RENT ARREARS: Unit 9 - 1 Example Road"), **{AF["notes"]: "RENT CHECK KEY: %s:%s:4" % (TENANCY, prev.isoformat())})
+out["laterRentText"], out["laterRentEmail"] = run("text"), run("email")
+CREATED[0] = (date.today() - timedelta(days=1)).isoformat() + "T12:00:00.000Z"
 BANK[:] = []
 CARD = dict(fields("Rent arrears: Unit 9 - 1 Example Road"), **{AF["notes"]: KEYED})
 out["typedClear"] = run("text")
@@ -236,6 +253,10 @@ print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out
     }
     expect([r.r.typedClear[0], r.r.typedClear[1].length, r.r.typedClear[2]]).toEqual([null, 1, ['rent', 'bank']]);
     expect([r.r.currentOnly[0], r.r.currentOnly[1].length, r.r.currentOnly[2]]).toEqual([null, 1, ['rent', 'bank']]);
+    for (const k of ['laterRentText', 'laterRentEmail']) {
+      expect([k, r.r[k][0]]).toEqual([k, expect.stringMatching(/£500\.00 has been paid to this tenancy since the rent due .*recArrearsPaidAaa.*against £500\.00 of rent owed since then.*Nothing was sent/)]);
+      expect([k, r.r[k][1]]).toEqual([k, []]);
+    }
     expect(r.submit).toMatch(/a RENT ARREARS card with no RENT CHECK KEY line.*annotate <this task> --note "RENT CHECK KEY: <tenancy id>:<that rent's due date, YYYY-MM-DD>:4"/);
   });
 

@@ -501,7 +501,7 @@ def load_approved(task_id, require_approval=True, rule=None):
             sys.exit(f"REFUSED: task {task_id} does not qualify for the {rule!r} rule: "
                      f"{problem}. It needs Kevin's approval.")
         parsed.update({"taskName": f.get(AF["name"], "(Untitled)"),
-                       "outcome": f"rule:{rule}", "fields": f})
+                       "outcome": f"rule:{rule}", "fields": f, "createdTime": rec.get("createdTime", "")})
         return parsed
     name = f.get(AF["name"], "(Untitled)")
     outcome = sel(f.get(AF["approvalOutcome"]))
@@ -534,7 +534,8 @@ def load_approved(task_id, require_approval=True, rule=None):
 
     parsed = parse_output(output, task_id)
     parsed.update({"taskName": name, "outcome": outcome, "approvalProblem": evidence,
-                   "approvedAt": f.get(AF["approvedAt"]) or "", "fields": f})
+                   "approvedAt": f.get(AF["approvedAt"]) or "", "fields": f,
+                   "createdTime": rec.get("createdTime", "")})
     return parsed
 
 
@@ -717,7 +718,7 @@ def _cmd_send(args):
     rule = getattr(args, "rule", None)
     mail = load_approved(args.task, require_approval=not args.dry_run, rule=rule)
     # The bank is read again at the send, not only when the card was made (Kevin, 16 Nov 2026).
-    rent_landed = rent_landed_refusal(args.task, mail.get("taskName"), mail.get("fields"))
+    rent_landed = rent_landed_refusal(args.task, mail.get("taskName"), mail.get("fields"), mail.get("createdTime"))
     if rent_landed and not args.dry_run:
         sys.exit(f"REFUSED: task {args.task} ({mail['taskName']}): {rent_landed}.")
     if prior:
@@ -1123,11 +1124,21 @@ def agent_rent_landed_refusal(task_id, f):
     return ""
 
 
-def rent_landed_refusal(task_id, task_name, fields=None):
+def rent_landed_refusal(task_id, task_name, fields=None, created=None):
     """'' or why a rent chase email or text (RENT LATE, RENT ARREARS), or an AGENT RENT LATE email, must not go
-    now. `fields` is the task as the send already read it; with none, it is read here."""
+    now. `fields` is the task as the send already read it, `created` its createdTime; with none, they are read
+    here. An arrears card is weighed against the rents owed by the day it was made (review round 3, finding 1355)."""
     name = str(task_name or "")
-    f = fields if fields is not None else (get_task(task_id).get("fields", {}) or {})
+    if fields is None or created is None:
+        rec = get_task(task_id)
+        fields = fields if fields is not None else (rec.get("fields", {}) or {})
+        created = created if created is not None else rec.get("createdTime", "")
+    f = fields
+    try:
+        from zoneinfo import ZoneInfo
+        made = datetime.fromisoformat(str(created).replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/London")).date()
+    except (ValueError, TypeError):
+        made = None                                           # no readable creation day: weighed as at today
     if name.startswith("AGENT RENT LATE: "):
         return agent_rent_landed_refusal(task_id, f)
     # By its name OR its key line (review of finding 1355): send-text.py texts a card that carries the key, so the
@@ -1135,7 +1146,7 @@ def rent_landed_refusal(task_id, task_name, fields=None):
     if not rent_chase_card(name, f.get(AF["notes"], ""), f.get(AF["description"], "")):
         return ""
     landed = dispatch_module().rent_landed_state(f.get(AF["name"], ""), f.get(AF["notes"], ""),
-                                                 f.get(AF["description"], ""), records=_rent_rows)
+                                                 f.get(AF["description"], ""), records=_rent_rows, made=made)
     if landed.get("state") == "landed":
         return (f"{landed['detail']}. Nothing was sent: the rent landed after the card was made, so the chase is "
                 f"not owed (Kevin, 16 Nov 2026). Close the task naming the payment: python3 scripts/agent-dispatch.py "
