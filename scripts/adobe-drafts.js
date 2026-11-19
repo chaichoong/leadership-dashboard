@@ -180,6 +180,17 @@ async function filterToDrafts(page, wait = 9000) {
   return filtered;
 }
 
+/**
+ * A dry run stops where the real run would (19 Nov 2026). It used to carry on
+ * past a failed Drafts click, so it matched the four drafts cleanly while every
+ * real --delete refused at this line.
+ */
+function filterGate(filtered, dry) {
+  if (filtered) return true;
+  die(dry ? 'the Drafts filter did not draw (signed out?), so this dry run stopped where a real --delete would refuse'
+          : 'the Drafts filter did not draw (signed out?), so nothing was deleted');
+}
+
 async function list() {
   return withPage(async (page) => {
     const filtered = await filterToDrafts(page);
@@ -327,8 +338,7 @@ async function remove(patterns, dry) {
   return withPage(async (page) => {
     const deleted = [];
     const kept = [];
-    const filtered = await filterToDrafts(page);
-    if (!filtered && !dry) die('the Drafts filter did not draw (signed out?), so nothing was deleted');
+    filterGate(await filterToDrafts(page), dry);
     // Re-read every pass: removing a row reflows the list, so an index taken
     // once goes stale and the next delete hits the wrong agreement.
     for (let pass = 0; pass < 60; pass++) {
@@ -458,6 +468,8 @@ function selftest() {
     () => confirmGone([], []));
   check('a run whose deletes are all gone passes',
     () => confirmGone(['Lease_Jane_Testwood-agreement.pdf'], ['Other-agreement.pdf']));
+  check('a dry run stops where a real run would when the Drafts click fails',
+    () => refuses(() => filterGate(false, true)) && refuses(() => filterGate(false, false)) && filterGate(true, true));
   check('a matching agreement that is not a draft is refused, never deleted',
     () => refuses(() => nextTarget([{ title: 'Lease_Jane_Testwood-agreement.pdf', status: 'Completed' }],
       ['Lease_Jane_Testwood'], [])));
@@ -489,4 +501,4 @@ function selftest() {
 
 if (require.main === module) main().catch((e) => die(e.message));
 module.exports = { parsePatterns, matches, whenModified, baseName, planDuplicates,
-                   nextTarget, selectionInPage, deleteDraft, confirmGone, readVisible, filterToDrafts };
+                   nextTarget, selectionInPage, deleteDraft, confirmGone, readVisible, filterToDrafts, filterGate };

@@ -223,6 +223,14 @@ describe('adobe-drafts.js delete step (19 Nov 2026 layout)', () => {
     });
   });
 
+  it('a dry run stops where a real run would when the Drafts click fails', () => {
+    // 19 Nov 2026: the dry run matched four drafts cleanly while every real
+    // --delete refused at the Drafts check, so the dry run hid the bug.
+    expect(() => mod.filterGate(false, true)).toThrow(/dry run stopped where a real --delete would refuse/);
+    expect(() => mod.filterGate(false, false)).toThrow(/nothing was deleted/);
+    expect(mod.filterGate(true, true)).toBe(true);
+  });
+
   it('a signed agreement with "Draft" in its name is not read as a draft', async () => {
     const SIGNED = 'Lease_Draft_Jane_Testwood-agreement.pdf';
     await onPage(draftsPage([{ t: SIGNED, status: 'Completed' }, SHORT]), async (page) => {
