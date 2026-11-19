@@ -778,19 +778,19 @@ import time
 t.write_scan_cache([{"id": "m63", "threadId": "th63", "internalDate": str(int(time.time() * 1000)), "labelIds": ["INBOX"],
                      "headers": {"from": "Universal Credit <${UC}>", "subject": "${SUBJ}"},
                      "body": "Payment reference: CEDAR\\nYour application has been approved.", "auto_reply": None, "reply_state": ""}])
-out, err = io.StringIO(), io.StringIO()
-with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-    code = t.main(["note", "--id", "m63", "--do", "answered", "--reason", "x"])
-again = d.record("m63", t.read_scan_cache()["m63"], TODAY)
-result = {"code": code, "json": json.loads(out.getvalue().strip()), "stderr": err.getvalue(), "retry": retry_ids(),
-          "ledger": ledger(), "tasks": len(calls["tasks"]), "again": again["done"]}`);
-    expect(r.code).toBe(5);
-    expect(r.json.dwpProblem).toMatch(/recTASKDWP0000001 was raised but some fields did not stick \(Team Member\)/);
-    expect(r.stderr).toMatch(/DWP NOTICE NOT RECORDED for m63/);
+def run(args):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = t.main(args)
+    return {"code": code, "json": json.loads(out.getvalue().strip()), "stderr": err.getvalue()}
+first = run(["note", "--id", "m63", "--do", "answered", "--reason", "x"])
+result = {"first": first, "retry": retry_ids(), "ledger": ledger(), "tasks": len(calls["tasks"])}`);
+    expect(r.first.code).toBe(5);
+    expect(r.first.json.dwpProblem).toMatch(/recTASKDWP0000001 was raised but some fields did not stick \(Team Member\)/);
+    expect(r.first.stderr).toMatch(/DWP NOTICE NOT RECORDED for m63/);
     expect(r.retry).toEqual(['m63']);
     expect(r.ledger.map((x) => [x.task, x.fieldsNotWritten])).toEqual([['recTASKDWP0000001', 'Team Member']]);
     expect(r.tasks).toBe(1);
-    expect(r.again).toBe('already');
   });
 
   // Fix 5: one run per message at a time, so triage and a scheduled retry never both write.
@@ -811,6 +811,94 @@ result = {"err": err, "postsWhileHeld": posts_while_held, "out": out["done"], "p
     expect(r.postsWhileHeld).toBe(0);
     expect(r.out).toBe('commented');
     expect(r.posts).toBe(1);
+  });
+});
+
+// Review round 3 (e76246f6): two minors.
+describe('review round 3', () => {
+  const TRIAGE = `
+spec = importlib.util.spec_from_file_location("triage_t", ${JSON.stringify(resolve(SCRIPTS, 'inbound-triage.py'))})
+t = importlib.util.module_from_spec(spec); sys.modules["triage_t"] = t; spec.loader.exec_module(t)
+t.worker_post = lambda path, body: (calls["gmail"].append([path, body]) or {"modified": 1})
+import time
+def msg(mid, subject, body, auto_reply=None):
+    return {"id": mid, "threadId": "th" + mid, "internalDate": str(int(time.time() * 1000)), "labelIds": ["INBOX"],
+            "headers": {"from": "Universal Credit <${UC}>", "subject": subject}, "body": body,
+            "auto_reply": auto_reply, "reply_state": ""}
+def run(args):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = (t.main if args[0] in ("note", "act") else d.main)(args)
+    text = out.getvalue().strip()
+    return {"code": code, "json": json.loads(text) if text.startswith("{") else text, "stderr": err.getvalue()}
+`;
+
+  // Fix 1: the exit-4 warning is never worn away: every later pass exits 5, naming the task and the missing
+  // fields, and keeps the retry entry, until a person clears it with what they fixed.
+  it('a task with a field that did not stick keeps failing until `clear <id> --why` says what was fixed', () => {
+    const r = py(`${TRIAGE}
+def incomplete(fields):
+    tid = "recTASKDWP%07d" % (len(BOARD) + 1)
+    BOARD.append({"id": tid, "fields": {rc.TK["notes"]: fields["fldR7apBzSp3oxFxz"]}})
+    calls["tasks"].append(fields)
+    return 4, {"action": "created", "taskId": tid, "fieldsNotWritten": ["Team Member"]}
+d.create_task = incomplete
+t.write_scan_cache([msg("m70", "${SUBJ}", "Payment reference: CEDAR\\nYour application has been approved.")])
+acted = run(["act", "--id", "m70", "--do", "archive", "--reason", "filed"])
+noted = run(["note", "--id", "m70", "--do", "answered", "--reason", "x"])
+replay = d.retry(today=TODAY)
+no_why = run(["clear", "m70"])
+nothing = run(["clear", "m99", "--why", "nothing was wrong with this one"])
+cleared = run(["clear", "m70", "--why", "Team Member set to the Accounts Receivable agent by hand"])
+after = run(["note", "--id", "m70", "--do", "answered", "--reason", "x"])
+result = {"acted": acted, "noted": noted, "replay": replay["rows"], "noWhy": no_why, "nothing": nothing,
+          "cleared": cleared, "after": after, "retry": retry_ids(), "tasks": len(calls["tasks"]),
+          "ledger": [[x["kind"], x.get("why", "") if x["kind"] == "cleared" else x.get("fieldsNotWritten")] for x in ledger()]}`);
+    expect(r.acted.code).toBe(5);
+    expect(r.noted.code).toBe(5);
+    expect(r.noted.stderr).toMatch(/DWP NOTICE NOT RECORDED for m70: task recTASKDWP0000001 was raised but some fields did not stick \(Team Member\)/);
+    expect(r.noted.stderr).toMatch(/dwp_notice\.py clear m70 --why/);
+    expect(r.replay.map((x) => [x.id, x.do])).toEqual([['m70', 'error']]);
+    expect(r.noWhy.code).toBe(2);
+    expect(r.noWhy.json.error).toMatch(/clear needs --why/);
+    expect(r.nothing.code).toBe(2);
+    expect(r.nothing.json.error).toMatch(/nothing to clear/);
+    expect(r.cleared.code).toBe(0);
+    expect(r.cleared.json).toMatchObject({ cleared: 'm70', task: 'recTASKDWP0000001', fields: 'Team Member' });
+    expect(r.after.code).toBe(0);
+    expect(r.after.json.dwp.done).toBe('already');
+    expect(r.retry).toEqual([]);
+    expect(r.tasks).toBe(1);
+    expect(r.ledger).toEqual([['task', 'Team Member'], ['cleared', 'Team Member set to the Accounts Receivable agent by hand']]);
+  });
+
+  // Fix 2: any scan-flagged automatic reply with nothing decided is skipped, the receipt-phrase reading included.
+  it('a flagged receipt with nothing decided gets no DWP reading and is skipped by the plan', () => {
+    const r = py(`${TRIAGE}
+ack = "Thank you for contacting Universal Credit. We will reply within 10 working days."
+t.write_scan_cache([msg("m71", "Your message", ack, auto_reply="body: thank you for contacting")])
+cache = t.read_scan_cache()
+acted = run(["act", "--id", "m71", "--do", "archive", "--reason", "filed"])
+skip = d.plan("m71", dict(ctx("${UC}", "Your message", ack), auto_reply="body: thank you for contacting"), TODAY)
+result = {"dwp": "dwp" in cache["m71"], "acted": acted["code"], "comments": calls["comments"], "tasks": calls["tasks"], "plan": skip["do"]}`);
+    expect(r.dwp).toBe(false);
+    expect(r.acted).toBe(0);
+    expect([r.comments, r.tasks]).toEqual([[], []]);
+    expect(r.plan).toBe('skip');
+  });
+
+  // Fix 2: a sentence that begins "If" is boilerplate, never the decision that keeps a flagged reply.
+  it('an "If ..." sentence is never a decision, so a flagged reply holding only one is still skipped', () => {
+    const r = py(`${TRIAGE}
+body = "Thank you for contacting Universal Credit. If your payment has been suspended please call us. We will reply soon."
+t.write_scan_cache([msg("m72", "Your message", body, auto_reply="header auto-submitted: auto-replied")])
+result = {"dwp": "dwp" in t.read_scan_cache()["m72"], "sentence": d.decision_sentence(body),
+          "summary": d.summary("Your message", body),
+          "kept": d.decision_sentence("If you have questions, call us. Your claim has been approved.")}`);
+    expect(r.dwp).toBe(false);
+    expect(r.sentence).toBe('');
+    expect(r.summary).toBe('Your message');
+    expect(r.kept).toBe('Your claim has been approved.');
   });
 });
 

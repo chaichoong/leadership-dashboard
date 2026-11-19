@@ -27,6 +27,9 @@ the record is made, so a failed or killed attempt stays queued. `retry` (and `ba
 
 USAGE
   dwp_notice.py retry [--dry-run]               replay every notice in the retry file
+  dwp_notice.py clear <message id> --why "<what was fixed>"
+                                                a task raised with fields that did not stick fails on
+                                                every pass until a person fixes it and clears it here
   dwp_notice.py backfill --dry-run [--reread]   what a back-fill would do for every DWP message in the
                                                 retry file and the triage scan cache (reads only)
   dwp_notice.py backfill [--reread]             do it (comments and tasks, ledgered)
@@ -291,21 +294,24 @@ def _squash(s):
     return " ".join(str(s or "").split())
 
 
+CONDITIONAL_RE = re.compile(r"^[\W_]*if\b", re.I)
+
+
 def decision_sentence(body):
-    """The first sentence of the body that says what was decided, or ''."""
+    """The first sentence of the body that says what was decided, or ''. A sentence that begins "If" is
+    boilerplate, never a decision ("If your payment has been suspended please call us.")."""
     for part in SENTENCE_SPLIT_RE.split(str(body or "")):
         part = _squash(part)
-        if part and DECISION_RE.search(part):
+        if part and not CONDITIONAL_RE.match(part) and DECISION_RE.search(part):
             return part
     return ""
 
 
 def auto_reply_skips(reason, decided):
-    """True only for a real machine reply with nothing decided in it: the scan's reason is the
-    Auto-Submitted header or an auto-reply subject (never its receipt-phrase reading of the body, which
-    fires on "Thank you for contacting Universal Credit." above a decision), and no decision sentence."""
-    r = str(reason or "").lower()
-    return (r.startswith("header ") or r.startswith("subject:")) and not decided
+    """True for a message the scan flagged as an automatic reply (any reason: the Auto-Submitted header,
+    an auto-reply subject, or a receipt phrase) with no decision sentence in it. A decision is never
+    skipped: "Thank you for contacting Universal Credit." can open a real decision (review rounds 2-3)."""
+    return bool(reason) and not decided
 
 
 def summary(subject, body):
@@ -477,26 +483,39 @@ def retry_path():
     return os.environ.get("DWP_NOTICE_RETRY") or os.path.join(os.path.dirname(ledger_path()), "retry.json")
 
 
-def ledger_done(msg_id):
-    """The ledger row that already put this message on the record, or None. A ledger that exists and
-    cannot be read raises RecordError (NOT CHECKED) and nothing is written: the attempt fails and waits
-    in the retry file until the ledger can be read again."""
+def ledger_rows(msg_id):
+    """Every ledger row for this message, oldest first. A ledger that exists and cannot be read raises
+    RecordError (NOT CHECKED) and nothing is written: the attempt fails and waits in the retry file until
+    the ledger can be read again."""
     p = ledger_path()
     if not os.path.exists(p):
-        return None
+        return []
     try:
         with open(p) as fh:
             lines = fh.read().splitlines()
     except OSError as exc:
         raise RecordError("NOT CHECKED: the DWP notice ledger %s cannot be read (%s)" % (p, exc))
+    rows = []
     for line in lines:
         try:
             row = json.loads(line)
         except ValueError:
             continue
-        if isinstance(row, dict) and row.get("id") == msg_id and row.get("kind") in DONE_KINDS:
-            return row
-    return None
+        if isinstance(row, dict) and row.get("id") == msg_id:
+            rows.append(row)
+    return rows
+
+
+def ledger_done(msg_id):
+    """The ledger row that already put this message on the record, or None. A task row that lists
+    fields that did not stick carries "clearedWhy" once a person has cleared it (`clear`)."""
+    rows = ledger_rows(msg_id)
+    done = next((r for r in rows if r.get("kind") in DONE_KINDS), None)
+    if done and done.get("fieldsNotWritten"):
+        cleared = [r for r in rows if r.get("kind") == "cleared"]
+        if cleared:
+            done = dict(done, clearedWhy=cleared[-1].get("why", ""))
+    return done
 
 
 def ledger_append(row):
@@ -714,6 +733,11 @@ def plan(msg_id, ctx, today=None, now=None):
     if not isinstance(dwp, dict):
         return {"do": "skip", "why": "no DWP reading in the scan cache for this message"}
     done = ledger_done(msg_id)
+    if done and done.get("fieldsNotWritten") and not done.get("clearedWhy"):
+        return {"do": "incomplete", "row": done,
+                "why": ("task %s was raised but some fields did not stick (%s): fix them on the task, then run "
+                        "`python3 scripts/dwp_notice.py clear %s --why \"<what was fixed>\"`"
+                        % (done.get("task"), done.get("fieldsNotWritten"), msg_id))}
     if done:
         return {"do": "already", "row": done}
     today = today or datetime.now(LONDON).date()
@@ -791,6 +815,10 @@ def record(msg_id, ctx, today=None, now=None, budget=None):
 
 def _record(msg_id, ctx, today, now, deadline):
     p = plan(msg_id, ctx, today, now)
+    if p["do"] == "incomplete":
+        # Still a failure on every pass (review round 3): the warning is never worn away by a replay or a
+        # second triage decision; only `clear`, after a person fixed the task, ends it.
+        raise RecordError(p["why"])
     if p["do"] in ("skip", "already"):
         return {"done": p["do"], "why": p.get("why", ""),
                 **({"ledger": p["row"]} if p["do"] == "already" else {})}
@@ -841,9 +869,31 @@ def _record(msg_id, ctx, today, now, deadline):
     if code == 4:
         # Created, but incomplete (exit 4): a failure, said and queued like any other (review round 2). The
         # ledger line is written first, so no replay ever raises a second task; it lists the missing fields.
-        raise RecordError("task %s was raised but some fields did not stick (%s): fix them on the task"
-                          % (task_id, missing))
+        raise RecordError("task %s was raised but some fields did not stick (%s): fix them on the task, then run "
+                          "`python3 scripts/dwp_notice.py clear %s --why \"<what was fixed>\"`"
+                          % (task_id, missing, msg_id))
     return result
+
+
+def clear(msg_id, why):
+    """A person fixed the fields that did not stick on a message's task: say so in the ledger, with what was
+    fixed, and take the message out of the retry file. Refused for a message with nothing to clear."""
+    why = _squash(why)
+    if len(why) < 10:
+        raise RecordError("clear needs --why \"<what was fixed on the task>\", in a sentence")
+    with message_lock(msg_id):
+        done = ledger_done(msg_id)
+        if not done or not done.get("fieldsNotWritten"):
+            raise RecordError("message %s has no task with fields that did not stick, so there is nothing to clear"
+                              % msg_id)
+        if done.get("clearedWhy"):
+            return {"cleared": msg_id, "task": done.get("task"), "already": done["clearedWhy"]}
+        try:
+            ledger_append({"id": msg_id, "kind": "cleared", "task": done.get("task"), "why": why})
+        except OSError as exc:
+            raise RecordError("the ledger could not be written (%s), so nothing was cleared" % exc)
+        clear_retry(msg_id)
+    return {"cleared": msg_id, "task": done.get("task"), "fields": done.get("fieldsNotWritten"), "why": why}
 
 
 def record_from_triage(msg_id, ctx, today=None, now=None):
@@ -961,9 +1011,20 @@ def backfill(dry_run=True, reread=False, today=None):
 
 
 def main(argv):
-    if not argv or argv[0] not in ("backfill", "retry"):
+    if not argv or argv[0] not in ("backfill", "retry", "clear"):
         print(__doc__)
         return 1
+    if argv[0] == "clear":
+        why = argv[argv.index("--why") + 1] if "--why" in argv[:-1] else ""
+        if len(argv) < 2 or argv[1].startswith("--"):
+            print("usage: dwp_notice.py clear <message id> --why \"<what was fixed>\"", file=sys.stderr)
+            return 1
+        try:
+            print(json.dumps(clear(argv[1], why)))
+        except RecordError as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 2
+        return 0
     flags = set(argv[1:])
     allowed = {"--dry-run", "--reread"} if argv[0] == "backfill" else {"--dry-run"}
     unknown = flags - allowed
