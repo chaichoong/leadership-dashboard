@@ -844,7 +844,7 @@ def recall_text(key, asks, notes, now, after_summary=False, notes_error=None):
             "logs in the brain (CEO Conversations, \"%s chat\") before saying you do not know."
             % (name, london(now).strftime("%d %b %H:%M"),
                ", after Claude Code summarised this chat: do not show it, just use it" if after_summary
-               else ". Under the scorecard, one line to Kevin: \"Last time we spoke (<day>): <his last "
+               else ". At the top of your reply (under the scorecard when there is one), one line to Kevin: \"Last time we spoke (<day>): <his last "
                     "question, in a few words>.\" Leave the line out when there is nothing earlier",
                name))
     out = [head, "Kevin's last questions here, oldest first:"]
@@ -1349,10 +1349,11 @@ def selftest():
     pa = render("personal-assistant", gather("personal-assistant", now), now)
     check("the Personal Assistant has no scorecard and reads nothing", "none" in pa and "show no scorecard block" in pa)
     keep_l, CHAT_LOGS = CHAT_LOGS, tempfile.mkdtemp()   # never the real brain
+    keep_p, PROJECTS_DIR = PROJECTS_DIR, tempfile.mkdtemp()   # never the real saved chats
     try:
         pa_recall = recall_block("personal-assistant", now)
     finally:
-        CHAT_LOGS = keep_l
+        CHAT_LOGS, PROJECTS_DIR = keep_l, keep_p
     check("the Personal Assistant gets LAST TIME WE SPOKE with its own log name",
           pa_recall.startswith("LAST TIME WE SPOKE (Personal Assistant chat")
           and chat_log_path("personal-assistant", date(2026, 11, 19)).endswith("2026-11-19 Personal Assistant chat.md"))
