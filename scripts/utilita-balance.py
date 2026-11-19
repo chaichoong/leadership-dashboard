@@ -309,8 +309,9 @@ AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|au
 # message said "the balance was not on the page", and the Robot sign-in line
 # that exists for exactly this case was withheld. Same wording as
 # SIGNIN_TEXT_RE in agent-browser.js, kept in step by the test below.
-# agent-browser.js SIGNIN_TEXT_WINDOW: the page text read, and searched for door words (review round 2 of 1340).
-SIGNIN_TEXT_WINDOW = 4000
+# agent-browser.js SIGNIN_TEXT_WINDOW: how much of the page is searched for door words (review round 2 of 1340).
+# The balance read itself takes more text (--max-text 4000 below); only its first SIGNIN_TEXT_WINDOW is searched.
+SIGNIN_TEXT_WINDOW = 2000
 SIGNIN_TEXT = re.compile(
     r"(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code"
     r"|(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code"
@@ -386,7 +387,7 @@ def read_account(acct, node=None):
         proc = subprocess.Popen(
             [node, os.path.join(REPO, "scripts", "agent-browser.js"), "read",
              "--url", ENERGY_URL, "--profile", acct["profile"],
-             "--wait", "6000", "--max-text", str(SIGNIN_TEXT_WINDOW)],
+             "--wait", "6000", "--max-text", "4000"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True)
         out, err = proc.communicate(timeout=READ_TIMEOUT_S)

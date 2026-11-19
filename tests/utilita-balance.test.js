@@ -255,9 +255,11 @@ print('HEALTHY=' + str(ub.row_alarm(r(34.30, 'More than a week left'), 10)))
             ['https://my.utilita.co.uk/energy', 0, "We'll email you a security code"],
             // CONTROL: a signed-in dashboard that merely carries the words is still signed in.
             ['https://my.utilita.co.uk/energy', 0, 'Your balance is £12.40. Sign out'],
-            // Review round 2 of 1340: the door words past character 2000, as under a long header and cookie notice.
-            // The JS read 4000 and the Python 2000, so the two disagreed here.
+            // Review round 2 of 1340: the door words past the shared window. The JS read 4000 and the Python 2000,
+            // so the two disagreed here; with one window they agree (signed in: the words are past it).
             ['https://my.utilita.co.uk/energy', 0, 'x'.repeat(2500) + '\nEmail me a login code'],
+            // ...and inside it, both read the door.
+            ['https://my.utilita.co.uk/energy', 0, 'x'.repeat(1500) + '\nEmail me a login code'],
         ];
         const py = `
 import importlib.util, json
@@ -270,7 +272,7 @@ for url, pw, bot, text in json.loads(${JSON.stringify(JSON.stringify(urls.map(([
             .trim().split('\n').map(l => l === 'True');
         const theirs = urls.map(([u, pw, t]) => sessionVerdict(u, pw, t, '').signedIn);
         expect(mine).toEqual(theirs);
-        expect(mine).toEqual([true, false, false, false, false, false, false, false, true, false]);
+        expect(mine).toEqual([true, false, false, false, false, false, false, false, true, true, false]);
     });
 
     it('both door checks read the same window of page text (review round 2 of finding 1340)', () => {
@@ -278,8 +280,8 @@ for url, pw, bot, text in json.loads(${JSON.stringify(JSON.stringify(urls.map(([
         const pyw = readFileSync(script, 'utf8').match(/^SIGNIN_TEXT_WINDOW = (\d+)$/m);
         expect(js && pyw).toBeTruthy();
         expect(Number(pyw[1])).toBe(Number(js[1]));
-        // The Python read asks agent-browser.js for exactly that much text.
-        expect(readFileSync(script, 'utf8')).toMatch(/"--max-text", str\(SIGNIN_TEXT_WINDOW\)/);
+        // The session read takes exactly that window (review of the re-ship: nothing pinned it).
+        expect(readFileSync(resolve(root, 'scripts/agent-browser.js'), 'utf8')).toMatch(/const text = await domText\(page, SIGNIN_TEXT_WINDOW\);/);
     });
 
     it('a trimmed accounts list is refused, not reported as a clean run', () => {

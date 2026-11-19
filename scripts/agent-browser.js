@@ -1110,9 +1110,11 @@ const SIGN_OUT_URL_RE = /(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)
 // move. A bare "Sign in" link in a nav bar, and a "Sign out" link, are NOT
 // doors and must stay signed in; that is the control test.
 // How much of the page the passwordless-door words are looked for in. ONE number: the session read takes this much
-// text, and scripts/utilita-balance.py SIGNIN_TEXT_WINDOW must equal it (tests/agent-browser-door-landing.test.js
-// reads both; review round 2 of finding 1340: the JS sliced 4000 while the Python mirror sliced 2000).
-const SIGNIN_TEXT_WINDOW = 4000;
+// text, and scripts/utilita-balance.py SIGNIN_TEXT_WINDOW must equal it (tests/utilita-balance.test.js reads both;
+// review round 2 of finding 1340: the JS sliced 4000 while the Python mirror sliced 2000). 2000, not more: the Gas
+// Care door's words sit 47 characters in, and a wider window reads more of a signed-in feed (an inbox preview saying
+// "log in to view") as a door that no sign-in would ever clear (review of the re-ship, 19 Nov 2026).
+const SIGNIN_TEXT_WINDOW = 2000;
 const SIGNIN_TEXT_RE = new RegExp([
   "(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code",
   "(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code",
