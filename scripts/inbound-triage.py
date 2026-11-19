@@ -64,7 +64,8 @@ USAGE
                                               (scripts/dwp_notice.py): one comment on the one
                                               matching live tenancy, else one RENT CHECK task.
                                               Exit 5 = the decision stands and is logged, but
-                                              the notice is not on the record (said on stderr)
+                                              the notice is not on the record yet: it waits in
+                                              dwp_notice's retry file (said on stderr)
   inbound-triage.py inbox-card [--slot HH:MM] [--dry-run]
                                               ONE approval card listing every
                                               queued "for Kevin to read" email
@@ -536,15 +537,20 @@ def write_scan_cache(messages):
         }
         # A DWP or Universal Credit notice: the tenant it names and what was decided, read off the
         # full body like `deadline`. Every act and note on the message reads it back and puts the
-        # fact on the tenancy record (finding 20261118-agent-dispatch-1353).
-        if dwp_notice.is_dwp_notice(cache[m["id"]]["sender"]):
+        # fact on the tenancy record (finding 20261118-agent-dispatch-1353). The sender is read off the
+        # RAW From header by dwp_notice's own reader, so an address in the display name never counts,
+        # and a message the scan flagged as an automatic reply is left alone (review, 19 Nov 2026).
+        raw_from = (m.get("headers") or {}).get("from", "")
+        if dwp_notice.is_dwp_notice(raw_from) and dwp_notice.is_dwp_notice(cache[m["id"]]["sender"]) \
+                and not m.get("auto_reply"):
             subject = (m.get("headers") or {}).get("subject", "")
             try:
-                cache[m["id"]]["dwp"] = dwp_notice.cache_entry(subject, unquote(m.get("body", "")))
+                cache[m["id"]]["dwp"] = dwp_notice.cache_entry(subject, unquote(m.get("body", "")), raw_from)
             except Exception as exc:  # noqa: BLE001 — the scan never dies on it; the notice becomes a task
                 progress("DWP NOTICE NOT READ for %s (%s): it will be raised as a RENT CHECK task with no name"
                          % (m["id"], str(exc)[:160]))
-                cache[m["id"]]["dwp"] = {"tenant": "", "summary": " ".join(str(subject).split())[:300]}
+                cache[m["id"]]["dwp"] = {"tenant": "", "summary": " ".join(str(subject).split())[:300],
+                                         "from": dwp_notice.bare_email(raw_from)}
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
     (d / "scan-cache.json").write_text(json.dumps(cache))
@@ -1179,8 +1185,10 @@ def cmd_act(msg_id, action, reason, label_num=None, override=None, task_id=None)
 # THE DECISION STANDS, AND A DWP NOTICE STILL REACHES THE TENANCY (finding 20261118-agent-dispatch-1353).
 # Until 19 Nov 2026 a Universal Credit or DWP notice filed as "answered" or archived never reached the
 # tenancy it was about. Every act and note now ends here, AFTER the Gmail move and the digest line, so a
-# record that fails can never block or lose the decision: it is said on stderr and the command exits
-# DWP_RECORD_EXIT. dwp_notice.record is idempotent on the message id, so act-then-note records once.
+# record that fails can never block or lose the decision. The message goes into dwp_notice's retry file
+# before the attempt and leaves it only once the record is made, so a failure is replayed by
+# `dwp_notice.py retry` rather than resting on this exit code; it is also said on stderr, and the command
+# exits DWP_RECORD_EXIT. One record per message: act-then-note records once.
 DWP_RECORD_EXIT = 5
 
 
@@ -1189,9 +1197,9 @@ def record_dwp_notice(msg_id, ctx):
     if not isinstance((ctx or {}).get("dwp"), dict):
         return None, ""
     try:
-        return dwp_notice.record(msg_id, ctx), ""
+        return dwp_notice.record_from_triage(msg_id, ctx), ""
     except Exception as exc:  # noqa: BLE001 — never swallowed: finish_with_dwp says it and exits non-zero
-        return None, (str(exc) or exc.__class__.__name__)[:400]
+        return None, (str(exc) or exc.__class__.__name__)[:500]
 
 
 def finish_with_dwp(out, dwp, problem):
@@ -1202,10 +1210,9 @@ def finish_with_dwp(out, dwp, problem):
         out["dwpProblem"] = problem
     print(json.dumps(out))
     if problem:
-        progress("DWP NOTICE NOT RECORDED for %s: %s. The triage decision stands and is logged, so do not "
-                 "decide the message again; the notice is not on any tenancy record yet. "
-                 "`python3 scripts/dwp_notice.py backfill --dry-run` lists every DWP notice still off the record."
-                 % (out.get("id", ""), problem))
+        progress("DWP NOTICE NOT RECORDED for %s: %s The triage decision stands and is logged, so do not "
+                 "decide the message again; `python3 scripts/dwp_notice.py retry --dry-run` lists every DWP "
+                 "notice waiting to go on the record." % (out.get("id", ""), problem))
         return DWP_RECORD_EXIT
     return 0
 

@@ -7,36 +7,51 @@ the fact in it (a direct payment arrangement started, housing costs referred to 
 never reached the tenancy it was about. Whether it did depended on the agent's view of each message.
 Now the scan reads the tenant and the decision off the FULL body (the one moment it exists) into the
 scan cache, and every triage decision on that message (`note` and `act`, every action) calls
-`record`, which:
+`record_from_triage`, which:
 
   * finds the ONE live tenancy whose linked tenant has that name (surname first, the given name to
     break a tie or to refuse a contradiction) and posts ONE dated comment on it, through the same
     comments endpoint scripts/tenancy-record.py uses; or
-  * when no name was read, or no live tenancy or several match, raises ONE task for the Accounts
+  * when no name was read, two people are named, a name could not be read cleanly, a former tenant
+    shares the name, or no live tenancy or several match, raises ONE task for the Accounts
     Receivable agent through scripts/create-agent-task.py: "RENT CHECK: DWP notice names <name or
     no tenant>, match it to a tenancy". Never a guess.
 
-Idempotent on the Gmail message id through a small ledger, so a second decision on the same message
-(act, then note) or a rescan never comments twice or raises a second task.
+ONE RECORD PER MESSAGE (review of 19 Nov 2026). The ledger is the fast answer; the source of truth is
+the record itself: before a comment the tenancy's comments are read for "Gmail <message id>.", before
+a task the board is read for "DWP NOTICE KEY: <message id>" (every task this raises carries that line),
+and both are read again after a call that failed, because a call can fail after its write landed.
+
+NOTHING FAILS QUIETLY. The message goes into the retry file BEFORE the attempt and leaves it only when
+the record is made, so a failed or killed attempt stays queued. `retry` (and `backfill`) replays it.
 
 USAGE
-  dwp_notice.py backfill --dry-run [--reread]   what a back-fill would do for every DWP message in
-                                                the triage scan cache (reads only)
+  dwp_notice.py retry [--dry-run]               replay every notice in the retry file
+  dwp_notice.py backfill --dry-run [--reread]   what a back-fill would do for every DWP message in the
+                                                retry file and the triage scan cache (reads only)
   dwp_notice.py backfill [--reread]             do it (comments and tasks, ledgered)
     --reread reads the full body from Gmail (read-only) for a message scanned before this step
     existed, whose cache entry has no "dwp" part. Without it such a message is listed, not guessed.
 
-Ledger: ~/knowledge-os/logs/dwp-notice/ledger.jsonl (DWP_NOTICE_LEDGER overrides it). Private, never
-the repo: it names tenancies and Gmail messages.
+Ledger: ~/knowledge-os/logs/dwp-notice/ledger.jsonl (DWP_NOTICE_LEDGER overrides it); retry file
+retry.json beside it (DWP_NOTICE_RETRY overrides it). Private, never the repo: they name tenancies,
+tenants and Gmail messages.
 """
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
+import time
 import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -51,6 +66,13 @@ TASK_SUFFIX = ", match it to a tenancy"
 KEY_MARK = "DWP NOTICE KEY: "
 SUMMARY_MAX = 300
 DONE_KINDS = ("comment", "task")
+# Triage waits on this step, so it is kept short: no new write starts after TRIAGE_BUDGET seconds (the
+# notice is queued for retry instead), each Airtable call gives up after AIRTABLE_TIMEOUT, and the task
+# gate's track-record lookup after TRACK_RECORD_TIMEOUT (it is tried twice).
+TRIAGE_BUDGET = 45
+AIRTABLE_TIMEOUT = 20
+TRACK_RECORD_TIMEOUT = 20
+MSG_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class RecordError(Exception):
@@ -58,12 +80,12 @@ class RecordError(Exception):
 
 
 # ─── who sent it ─────────────────────────────────────────────────────
-UC_SENDER = "donotreply@universal-credit.service.gov.uk"
-DWP_DOMAIN_RE = re.compile(r"^(?:[a-z0-9-]+\.)*dwp\.gov\.uk$")
+DWP_DOMAIN_RE = re.compile(r"^(?:[a-z0-9-]+\.)*(?:dwp\.gov\.uk|universal-credit\.service\.gov\.uk)$")
 
 
 def bare_email(sender):
-    """The address alone, lower case: 'Name <a@b>' or 'a@b'."""
+    """The address alone, lower case, from a raw From header: the LAST <...> when there is one, else the
+    whole header ('Name <a@b>' or 'a@b'). A display name holding an address is never the address."""
     s = str(sender or "").strip()
     if "<" in s:
         s = s[s.rfind("<") + 1:].split(">")[0]
@@ -71,22 +93,20 @@ def bare_email(sender):
 
 
 def is_dwp_notice(sender):
-    """True for the Universal Credit no-reply address and any address at dwp.gov.uk or one of its
-    subdomains. The domain must END there: dwp.gov.uk.example.com is someone else."""
+    """True for any address at dwp.gov.uk or universal-credit.service.gov.uk, or a subdomain of either.
+    The domain must END there: dwp.gov.uk.example.com is someone else."""
     addr = bare_email(sender)
     if addr.count("@") != 1:
         return False
     local, domain = addr.split("@")
-    if not local:
-        return False
-    return addr == UC_SENDER or bool(DWP_DOMAIN_RE.fullmatch(domain))
+    return bool(local) and " " not in addr and bool(DWP_DOMAIN_RE.fullmatch(domain))
 
 
 # ─── what it says ────────────────────────────────────────────────────
 TITLES = {"mr", "mrs", "ms", "miss", "mx", "dr", "master"}
 # Words that end a name: "direct rent payments for Jo Bloggs at 12 Example Road".
 NAME_STOP = {"at", "of", "from", "to", "on", "in", "with", "has", "have", "had", "is", "was", "are", "were",
-             "and", "who", "whose", "for", "will", "would", "can", "starting", "start", "started", "from",
+             "and", "who", "whose", "for", "will", "would", "can", "starting", "start", "started",
              "effective", "until", "please", "regarding", "re", "about", "by", "as", "or", "but", "if", "we",
              "you", "they", "this", "that", "these", "the", "a", "an", "your", "our", "their", "his", "her"}
 # A line or value carrying any of these is not a tenant's name.
@@ -97,12 +117,18 @@ NOT_NAME = {"housing", "costs", "cost", "universal", "credit", "direct", "paymen
             "close", "avenue", "lane", "managed", "apa", "underpayment", "overpayment", "reference",
             "department", "dwp", "work", "pensions", "service", "centre", "jobcentre", "team", "notice",
             "letter", "statement", "approved", "returned", "agreed", "not", "number", "your", "ref"}
+# A date is never a surname (review, 19 Nov 2026): "direct rent payments for March", "Payment reference: May".
+MONTHS_DAYS = {"january", "february", "march", "april", "may", "june", "july", "august", "september",
+               "october", "november", "december", "monday", "tuesday", "wednesday", "thursday", "friday",
+               "saturday", "sunday"}
 # A "Dear" or "Re:" line to us, not about a tenant.
 ADDRESSEE = {"kevin", "brittain", "agile", "lets", "estates", "roy", "lavin", "sir", "madam", "landlord",
              "customer", "colleague", "colleagues", "all", "info", "owner", "manager", "agent", "partner",
              "provider", "housing", "whom"}
+# Words that never make a run of capitals look like a person: "The Property", "Housing Costs", "December".
+NOT_A_PERSON = NOT_NAME | NAME_STOP | MONTHS_DAYS | TITLES
 NAME_WORD_RE = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
-WORD_RE = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
+JOINS = ("and", "&")
 PAYMENT_REF_RE = re.compile(r"payment\s+reference\s*(?:number\s*)?[:\-]\s*(?P<name>[^\n\r]{1,80})", re.I)
 DIRECT_FOR_RE = re.compile(r"direct\s+(?:rent\s+)?payments?\s+for\s+(?P<name>[^\n\r]{1,80})", re.I)
 # The service centre's own emails: "Regarding housing costs request for <name>. This has been referred to our
@@ -124,40 +150,8 @@ def _fold(s):
 
 
 def name_tokens(name):
-    """The words of a person's name, folded, titles dropped: 'Mr J. Bloggs' -> ['j', 'bloggs']."""
-    return [w for w in WORD_RE.findall(_fold(name)) if w not in TITLES]
-
-
-def clean_name(raw, capitalised=False):
-    """The person's name at the start of `raw`, or ''. Reads name words until the first word that is
-    not one (a digit, punctuation, a joining word); refuses anything that reads as a subject, an
-    address or us. `capitalised` (Dear / Re: lines) needs every name word to start with a capital."""
-    words = []
-    for chunk in str(raw or "").split():
-        word = chunk.rstrip(",;:)]!?")
-        ends = word != chunk
-        if word.endswith("."):
-            word = word[:-1]
-            ends = ends or len(word) != 1          # "J." is an initial; "Bloggs." ends the sentence
-        if not NAME_WORD_RE.fullmatch(word) or _fold(word) in NAME_STOP:
-            break                                  # "AB123456C", "Sir/Madam", "at", "12"
-        words.append(word)
-        if ends:
-            break
-        if len(words) > 5:
-            return ""
-    while words and _fold(words[0]).rstrip(".") in TITLES:
-        words = words[1:]
-    if not words or len(words) > 4:
-        return ""
-    folded = [_fold(w) for w in words]
-    if any(f in NOT_NAME or f in ADDRESSEE for f in folded):
-        return ""
-    if capitalised and not all(w[0].isupper() for w in words):
-        return ""
-    if len(words) == 1 and len(words[0]) < 2:
-        return ""
-    return " ".join(words)
+    """The words of a person's name, folded, titles and joins dropped: 'Mr J. Bloggs' -> ['j', 'bloggs']."""
+    return [w for w in NAME_WORD_RE.findall(_fold(name)) if w not in TITLES and w not in JOINS]
 
 
 def surname_last(tokens):
@@ -168,30 +162,123 @@ def surname_last(tokens):
     return list(tokens)
 
 
-def tenant_name(subject, body):
-    """The tenant a notice names, or ''. Read in order: 'Payment reference: <name>', 'direct rent payments
-    for <name>', '<request | application | claim | underpayment ...> for <Name>', then a 'Re:' or 'Dear'
-    line in the body that is not addressed to us. The first one found wins, except that a fuller name
-    with the same surname (the Universal Credit notice gives 'Payment reference: <surname>' and then
-    'direct rent payments for <full name>') is taken over it, because a first name can break a tie."""
-    text = "%s\n%s" % (subject or "", body or "")
-    found = []
-    for rx, src, capitalised in ((PAYMENT_REF_RE, text, False), (DIRECT_FOR_RE, text, False),
-                                 (FOR_NAME_RE, text, True), (RE_LINE_RE, str(body or ""), True),
-                                 (DEAR_RE, str(body or ""), True)):
-        for m in rx.finditer(src):
-            name = clean_name(m.group("name"), capitalised=capitalised)
-            if name:
-                found.append(name)
-                break
-    if not found:
+def _chunk_word(chunk):
+    """(the word in a whitespace chunk, whether it ends the name). 'J.' is an initial; 'Bloggs.' ends."""
+    word = chunk.rstrip(",;:)]!?")
+    ends = word != chunk
+    if word.endswith("."):
+        word = word[:-1]
+        ends = ends or len(word) != 1
+    return word, ends
+
+
+def clean_name(raw, capitalised=False):
+    """The person's name at the start of `raw`, or ''. Reads name words until the first word that is
+    not one (a digit, punctuation, a joining word); refuses anything that reads as a subject, an
+    address, a date or us. `capitalised` (Dear / Re: lines) needs every name word to start with a capital."""
+    words = []
+    for chunk in str(raw or "").split():
+        word, ends = _chunk_word(chunk)
+        if not NAME_WORD_RE.fullmatch(word) or _fold(word) in NAME_STOP:
+            break                                  # "AB123456C", "Sir/Madam", "at", "12"
+        words.append(word)
+        if ends:
+            break
+        if len(words) > 5:
+            return ""
+    while words and _fold(words[0]) in TITLES:
+        words = words[1:]
+    if not words or len(words) > 4:
         return ""
-    first = surname_last(name_tokens(found[0]))
-    for name in found[1:]:
-        fuller = surname_last(name_tokens(name))
-        if len(fuller) > len(first) and fuller[-1] == first[-1]:
-            return name
-    return found[0]
+    folded = [_fold(w) for w in words]
+    if any(f in NOT_NAME or f in ADDRESSEE for f in folded):
+        return ""
+    if surname_last(folded)[-1] in MONTHS_DAYS:
+        return ""
+    if capitalised and not all(w[0].isupper() for w in words):
+        return ""
+    if len(words) == 1 and len(words[0]) < 2:
+        return ""
+    return " ".join(words)
+
+
+def _capital_word(chunk):
+    word, _ = _chunk_word(chunk)
+    return bool(NAME_WORD_RE.fullmatch(word)) and word[0].isupper()
+
+
+def name_run(raw):
+    """The run of capitalised words at the start of `raw`, as a reader would see a name: 'Will Alder',
+    'Jo Alder and Sam Birch'. A capitalised joining word counts only first ('Will Alder'); 'and' or '&'
+    between two capitalised words joins them. Compared with clean_name to catch a name it dropped."""
+    chunks, words, i = str(raw or "").split(), [], 0
+    while i < len(chunks) and len(words) < 8:
+        chunk = chunks[i]
+        nxt = chunks[i + 1] if i + 1 < len(chunks) else ""
+        if chunk.lower() in JOINS and words and _capital_word(nxt):
+            words.append(chunk.lower())
+            i += 1
+            continue
+        word, ends = _chunk_word(chunk)
+        if not (NAME_WORD_RE.fullmatch(word) and word[0].isupper()):
+            break
+        if _fold(word) in NAME_STOP and (words or not _capital_word(nxt)):
+            break                                  # "Jo Alder From 1 May"; a lone "The"
+        words.append(word)
+        i += 1
+        if ends:
+            break
+    return words
+
+
+def _person_like(run):
+    return any(_fold(w) not in NOT_A_PERSON and w not in JOINS for w in run)
+
+
+def read_names(subject, body):
+    """{"tenant", "names", "unsure"}: the one tenant the notice names, every name it carries, and why
+    the robot cannot be sure (then "tenant" is ''). Read from 'Payment reference: <name>', 'direct rent
+    payments for <name>', '<request | application | claim | underpayment ...> for <Name>', and 'Re:' or
+    'Dear' lines in the body not addressed to us; EVERY match, not the first. Unsure when two different
+    people are named, or a name-like run of capitals could not be read cleanly ('Will Alder', 'Jo March',
+    'Jo Alder and Sam Birch'): the reader never falls back to part of a name. Otherwise the fullest name
+    wins, so a first name on one line can break a tie the surname on another cannot."""
+    text = "%s\n%s" % (subject or "", body or "")
+    names, dropped = [], []
+    for rx, src, capitalised, may_be_us in ((PAYMENT_REF_RE, text, False, False), (DIRECT_FOR_RE, text, False, False),
+                                            (FOR_NAME_RE, text, True, False), (RE_LINE_RE, str(body or ""), True, True),
+                                            (DEAR_RE, str(body or ""), True, True)):
+        for m in rx.finditer(src):
+            raw = m.group("name")
+            run = name_run(raw)
+            if may_be_us and any(_fold(w) in ADDRESSEE for w in run):
+                continue                           # "Dear Kevin Brittain", "Dear Sir/Madam"
+            name = clean_name(raw, capitalised=capitalised)
+            seen = name_tokens(" ".join(run))
+            if _person_like(run) and (not name or seen != name_tokens(name)):
+                dropped.append(" ".join(run))
+            if name and name_tokens(name) not in [name_tokens(n) for n in names]:
+                names.append(name)
+    dropped = list(dict.fromkeys(dropped))
+    out = {"tenant": "", "names": names + [d for d in dropped if d not in names], "unsure": ""}
+    if dropped:
+        out["unsure"] = ("the notice names %s, which the robot could not read as one tenant's name"
+                         % " and ".join('"%s"' % d for d in dropped))
+        return out
+    if not names:
+        return out
+    people = [surname_last(name_tokens(n)) for n in names]
+    if len({p[-1] for p in people}) > 1 or any(
+            len(a) > 1 and len(b) > 1 and not _given_agrees(a[0], b[0]) for a in people for b in people):
+        out["unsure"] = "the notice names more than one person (%s)" % ", ".join(names)
+        return out
+    out["tenant"] = max(names, key=lambda n: (len(name_tokens(n)), len(n)))
+    return out
+
+
+def tenant_name(subject, body):
+    """The one tenant a notice names, or '' (none, or not sure which: see read_names)."""
+    return read_names(subject, body)["tenant"]
 
 
 def _squash(s):
@@ -215,12 +302,20 @@ def summary(subject, body):
     return out
 
 
-def cache_entry(subject, body):
-    """The "dwp" part of a scan cache entry: what record() needs, read while the full body exists."""
-    return {"tenant": tenant_name(subject, body), "summary": summary(subject, body)}
+def cache_entry(subject, body, sender=""):
+    """The "dwp" part of a scan cache entry: what record() needs, read while the full body exists.
+    `sender` is the raw From header; its address (bare_email) is kept as "from"."""
+    reading = read_names(subject, body)
+    entry = {"tenant": reading["tenant"], "summary": summary(subject, body)}
+    if sender:
+        entry["from"] = bare_email(sender)
+    if reading["unsure"]:
+        entry["unsure"] = reading["unsure"]
+        entry["names"] = reading["names"]
+    return entry
 
 
-# ─── Airtable, through the modules that already own it ───────────────
+# ─── Airtable ────────────────────────────────────────────────────────
 _mods = {}
 
 
@@ -234,19 +329,92 @@ def _load(name, filename):
 
 
 def _rc():
-    """scripts/rent-check.py, imported the way scripts/tenancy-record.py imports it."""
+    """scripts/rent-check.py, imported the way scripts/tenancy-record.py imports it: its table and field
+    ids, is_live, the floors, the base and the token file."""
     return _load("rent_check_for_dwp_notice", "rent-check.py")
 
 
+def _api(method, path, payload=None, params=None):
+    """One Airtable call, the way rent-check.py's api makes it, with a short timeout because triage waits:
+    a timeout is never retried, a 429 or 5xx once."""
+    rc = _rc()
+    url = "https://api.airtable.com/v0/%s/%s" % (rc.BASE, path)
+    if params:
+        url += "?" + urllib.parse.urlencode(params, doseq=True)
+    data = json.dumps(payload).encode() if payload is not None else None
+    for attempt in (1, 2):
+        req = urllib.request.Request(url, data=data, method=method, headers={
+            "Authorization": "Bearer %s" % rc._pat(), "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=AIRTABLE_TIMEOUT) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if (e.code == 429 or e.code >= 500) and attempt == 1:
+                time.sleep(2)
+                continue
+            # Never echo headers: they carry the token.
+            raise RuntimeError("Airtable %s %s %s: %s" % (method, path.split("?")[0], e.code, e.read().decode()[:300]))
+
+
+def _get_all(table, params):
+    """Every row, paginated like rent-check.py's fetch_all, and a reply with no `records` list is an error,
+    never zero rows (CLAUDE.md, finding 20261104-phase-2-1187)."""
+    out, offset = [], None
+    while True:
+        p = dict(params or {}, returnFieldsByFieldId="true", pageSize=100)
+        if offset:
+            p["offset"] = offset
+        d = _api("GET", table, params=p)
+        if not isinstance((d or {}).get("records"), list):
+            raise RecordError("NOT CHECKED: the %s read came back with no records list" % table)
+        out += d["records"]
+        offset = d.get("offset")
+        if not offset:
+            return out
+
+
 def fetch_all(table, params=None):
-    """Every row, paginated (rent-check.py's fetch_all). Swapped out by the tests."""
-    return _rc().fetch_all(table, params)
+    """Every row of a table (the tenancy and tenant reads). Swapped out by the tests."""
+    return _get_all(table, params)
+
+
+def tenancy_comments(tenancy_id):
+    """Every comment's text on a tenancy, paginated; a reply with no `comments` list is an error."""
+    rc = _rc()
+    texts, offset = [], None
+    while True:
+        params = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        d = _api("GET", "%s/%s/comments" % (rc.T_TENANCIES, tenancy_id), params=params)
+        if not isinstance((d or {}).get("comments"), list):
+            raise RecordError("NOT CHECKED: the comments on tenancy %s came back with no comments list" % tenancy_id)
+        texts += [str(c.get("text") or "") for c in d["comments"]]
+        offset = d.get("offset")
+        if not offset:
+            return texts
+
+
+def comment_posted(tenancy_id, msg_id):
+    """True when the tenancy already carries this message's comment ('... Gmail <message id>.')."""
+    mark = re.compile(r"\bGmail %s\.(?!\w)" % re.escape(msg_id))
+    return any(mark.search(t) for t in tenancy_comments(tenancy_id))
 
 
 def post_comment(tenancy_id, text):
     """One comment on a tenancy: the endpoint scripts/tenancy-record.py's post_comment uses."""
+    return _api("POST", "%s/%s/comments" % (_rc().T_TENANCIES, tenancy_id), {"text": text})
+
+
+def keyed_tasks(msg_id):
+    """The ids of every task, any status, whose Notes carry this message's DWP NOTICE KEY line."""
+    if not MSG_ID_RE.fullmatch(msg_id or ""):
+        raise RecordError("%r is not a Gmail message id, so the board cannot be searched for it" % msg_id)
     rc = _rc()
-    return rc.api("POST", f"{rc.T_TENANCIES}/{tenancy_id}/comments", {"text": text})
+    rows = _get_all(rc.T_TASKS, {"filterByFormula": "FIND('%s%s', {Notes}&'')" % (KEY_MARK, msg_id),
+                                 "fields[]": [rc.TK["notes"]]})
+    mark = re.compile(r"%s%s(?![\w-])" % (re.escape(KEY_MARK), re.escape(msg_id)))
+    return [r["id"] for r in rows if mark.search(str((r.get("fields") or {}).get(rc.TK["notes"]) or ""))]
 
 
 def create_task(fields):
@@ -255,8 +423,17 @@ def create_task(fields):
 
     force=True skips only the word fold, and on purpose: the fold keys "names <one surname>" and
     "names <another>" alike (both `rent check|dwp notice`), so it would put a second tenant's notice
-    inside the first one's task. One task per Gmail message is kept by the ledger instead."""
+    inside the first one's task. One task per Gmail message is kept by the DWP NOTICE KEY line instead.
+    The gate's track-record lookup is given TRACK_RECORD_TIMEOUT a try, not two minutes, because triage
+    waits on it; a slow one says "not built" on the task and the agent can run it again."""
     gate = _load("od_catask_for_dwp_notice", "create-agent-task.py")
+    if hasattr(gate, "track_record_for") and not getattr(gate, "_dwp_bounded", False):
+        build = gate.track_record_for
+
+        def bounded(fields, task_id=None, runner=None):
+            return build(fields, task_id, runner=runner or (lambda c: subprocess.run(
+                c, capture_output=True, text=True, timeout=TRACK_RECORD_TIMEOUT)))
+        gate.track_record_for, gate._dwp_bounded = bounded, True
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         code = gate.cmd_create(fields, force=True)
@@ -270,15 +447,19 @@ def create_task(fields):
     return code, out
 
 
-# ─── the ledger ──────────────────────────────────────────────────────
+# ─── the ledger and the retry file ───────────────────────────────────
 def ledger_path():
     return os.environ.get("DWP_NOTICE_LEDGER") or os.path.expanduser(
         "~/knowledge-os/logs/dwp-notice/ledger.jsonl")
 
 
+def retry_path():
+    return os.environ.get("DWP_NOTICE_RETRY") or os.path.join(os.path.dirname(ledger_path()), "retry.json")
+
+
 def ledger_done(msg_id):
     """The ledger row that already put this message on the record, or None. A ledger that exists and
-    cannot be read raises: without it a second comment cannot be ruled out."""
+    cannot be read raises: the record itself is then the only answer, and it is read instead."""
     p = ledger_path()
     if not os.path.exists(p):
         return None
@@ -286,8 +467,7 @@ def ledger_done(msg_id):
         with open(p) as fh:
             lines = fh.read().splitlines()
     except OSError as exc:
-        raise RecordError("NOT CHECKED: the DWP notice ledger %s cannot be read (%s), so a second "
-                          "comment cannot be ruled out; nothing was written" % (p, exc))
+        raise RecordError("NOT CHECKED: the DWP notice ledger %s cannot be read (%s)" % (p, exc))
     for line in lines:
         try:
             row = json.loads(line)
@@ -305,6 +485,66 @@ def ledger_append(row):
         fh.write(json.dumps(dict(row, at=datetime.now(LONDON).isoformat(timespec="seconds"))) + "\n")
 
 
+def _ledger_quietly(row, out):
+    """Ledger the record; a ledger that cannot be written is said in the result, and costs nothing more:
+    the next attempt finds the comment or the task itself."""
+    try:
+        ledger_append(row)
+    except OSError as exc:
+        out["ledgerProblem"] = "the ledger line could not be written (%s); the record itself is in place" % exc
+    return out
+
+
+@contextlib.contextmanager
+def _retry_locked():
+    """The retry file read and rewritten under an exclusive lock: triage and a retry run may overlap."""
+    p = retry_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            data = {}
+            if os.path.exists(p):
+                try:
+                    with open(p) as fh:
+                        data = json.load(fh)
+                except (OSError, ValueError) as exc:
+                    raise RecordError("NOT CHECKED: the DWP notice retry file %s cannot be read (%s)" % (p, exc))
+                if not isinstance(data, dict):
+                    raise RecordError("NOT CHECKED: the DWP notice retry file %s is not a map of message ids" % p)
+            box = {"data": data, "dirty": False}
+            yield box
+            if box["dirty"]:
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), prefix=".retry-")
+                with os.fdopen(fd, "w") as fh:
+                    json.dump(box["data"], fh)
+                os.replace(tmp, p)      # atomic: a reader never sees a half-written file
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def read_retry():
+    with _retry_locked() as box:
+        return dict(box["data"])
+
+
+def queue_retry(msg_id, ctx, error):
+    """Put (or keep) a message in the retry file, with what went wrong."""
+    now = datetime.now(LONDON).isoformat(timespec="seconds")
+    with _retry_locked() as box:
+        entry = box["data"].get(msg_id) or {"ctx": ctx, "first": now, "attempts": 0}
+        entry.update(ctx=ctx or entry.get("ctx"), error=error, last=now, attempts=int(entry.get("attempts") or 0) + 1)
+        box["data"][msg_id] = entry
+        box["dirty"] = True
+
+
+def clear_retry(msg_id):
+    with _retry_locked() as box:
+        if msg_id in box["data"]:
+            del box["data"][msg_id]
+            box["dirty"] = True
+
+
 # ─── matching ────────────────────────────────────────────────────────
 def _given_agrees(want_given, have_given):
     """A notice's given name against a tenant's: equal, or one is the other's initial."""
@@ -315,7 +555,7 @@ def _given_agrees(want_given, have_given):
     return want_given == have_given
 
 
-def read_live(today):
+def read_tenancies(today):
     """(live tenancies, tenant names by id). Paginated reads; a read that comes back near empty is a
     broken read, never "nobody", so it raises."""
     rc = _rc()
@@ -338,34 +578,44 @@ def read_live(today):
 def match_tenancies(name, live, tenant_names):
     """(the one tenancy it is about or '', the candidates, why). Surname first; a given name on the
     notice must agree with the tenant's: it breaks a tie, and refuses a single match it contradicts.
-    Only a single SURE match is ever returned as the tenancy; everything else is candidates."""
+    A tenant on no live tenancy (a former tenant, an ended tenancy) who fits the notice as well as the
+    live one does makes it unsure: the notice may be about them. Only a single SURE match is returned."""
     rc = _rc()
     want = surname_last(name_tokens(name))
     if not want:
         return "", [], "no tenant name was read from the notice"
     surname, given = want[-1], (want[0] if len(want) > 1 else "")
-    by_surname = {}
+
+    def fits(have):
+        if not have or have[-1] != surname:
+            return False
+        return not given or (len(have) > 1 and _given_agrees(given, have[0]))
+
+    on_live, by_surname = set(), {}
     for t in live:
         for tid in (t.get("fields") or {}).get(rc.TY["tenants"]) or []:
+            on_live.add(tid)
             have = name_tokens(tenant_names.get(tid, ""))
             if have and have[-1] == surname:
                 by_surname.setdefault(t["id"], []).append(have)
     found = sorted(by_surname)
     if not found:
         return "", [], "no live tenancy has a tenant with the surname %s" % surname.title()
-    if not given:
-        if len(found) == 1:
-            return found[0], found, "one live tenancy has a tenant with that surname"
-        return "", found, ("%d live tenancies have a tenant with that surname, and the notice gives no first "
-                           "name to tell them apart" % len(found))
-    agreeing = sorted(tid for tid, names in by_surname.items()
-                      if any(len(n) > 1 and _given_agrees(given, n[0]) for n in names))
-    if len(agreeing) == 1:
-        return agreeing[0], agreeing, "one live tenancy has a tenant with that full name"
-    if agreeing:
-        return "", agreeing, "%d live tenancies have a tenant with that full name" % len(agreeing)
-    return "", found, ("%d live %s a tenant with that surname, but no tenant there has the first name on the "
-                       "notice" % (len(found), "tenancy has" if len(found) == 1 else "tenancies have"))
+    agreeing = sorted(tid for tid, names in by_surname.items() if any(fits(n) for n in names))
+    if not agreeing:
+        return "", found, ("%d live %s a tenant with that surname, but no tenant there has the first name on the "
+                           "notice" % (len(found), "tenancy has" if len(found) == 1 else "tenancies have"))
+    if len(agreeing) > 1:
+        return "", agreeing, ("%d live tenancies have a tenant with that %s%s"
+                              % (len(agreeing), "full name" if given else "surname",
+                                 "" if given else ", and the notice gives no first name to tell them apart"))
+    former = sorted(tid for tid, n in tenant_names.items() if tid not in on_live and fits(name_tokens(n)))
+    if former:
+        return "", agreeing, ("one live tenancy has a tenant with that %s, but %d tenant%s on no live tenancy (a "
+                              "former tenant) %s it too, and the notice may be about them"
+                              % ("full name" if given else "surname", len(former), "" if len(former) == 1 else "s",
+                                 "fits" if len(former) == 1 else "fit"))
+    return agreeing[0], agreeing, "one live tenancy has a tenant with that %s" % ("full name" if given else "surname")
 
 
 # ─── what to do, and doing it ────────────────────────────────────────
@@ -380,6 +630,11 @@ def _received(ctx):
         return "a date the scan did not record"
 
 
+def _sender(ctx):
+    """The sender's real address: the scan's own read of the raw From header when it has one."""
+    return bare_email(((ctx or {}).get("dwp") or {}).get("from") or (ctx or {}).get("sender"))
+
+
 def comment_text(msg_id, ctx, now=None):
     """'<dd Mon yyyy HH:MM>: DWP to info@ (<sender>), <subject>: <summary>. Gmail <message id>.'"""
     subject = _squash(ctx.get("subject")) or "(no subject)"
@@ -387,13 +642,13 @@ def comment_text(msg_id, ctx, now=None):
     if _fold(said).startswith(_fold(subject)):
         said = said[len(subject):].lstrip(" :")
     body = "%s: %s" % (subject, said) if said else subject
-    return "%s: DWP to info@ (%s), %s. Gmail %s." % (_stamp(now), bare_email(ctx.get("sender")) or "unknown sender",
+    return "%s: DWP to info@ (%s), %s. Gmail %s." % (_stamp(now), _sender(ctx) or "unknown sender",
                                                     body.rstrip(". "), msg_id)
 
 
 def task_fields(msg_id, ctx, name, why, candidates, today):
     dwp = ctx.get("dwp") or {}
-    sender = bare_email(ctx.get("sender")) or "unknown sender"
+    sender = _sender(ctx) or "unknown sender"
     lines = [
         "A DWP or Universal Credit notice reached info@ on %s from %s." % (_received(ctx), sender),
         "Subject: %s" % (_squash(ctx.get("subject")) or "(no subject)"),
@@ -421,7 +676,7 @@ def task_fields(msg_id, ctx, name, why, candidates, today):
         "fldR7apBzSp3oxFxz": KEY_MARK + msg_id + "\n[%s — dwp_notice] Raised in code from the triage scan "
                              "(finding 20261118-agent-dispatch-1353), through create-agent-task.py with its word "
                              "fold off: the fold reads two tenants' DWP notices as one matter. One task per Gmail "
-                             "message, kept by the dwp-notice ledger." % _stamp(),   # Notes
+                             "message, kept by the DWP NOTICE KEY line above." % _stamp(),   # Notes
     }
 
 
@@ -430,67 +685,160 @@ def plan(msg_id, ctx, today=None, now=None):
     {"do": "skip", "why"}, {"do": "already", "row"}, {"do": "comment", "tenancy", "text", "why"},
     {"do": "task", "fields", "why"}. Raises RecordError when a read it needs fails."""
     ctx = ctx or {}
-    if not is_dwp_notice(ctx.get("sender")):
-        return {"do": "skip", "why": "not from a DWP or Universal Credit address"}
     dwp = ctx.get("dwp")
+    if not is_dwp_notice(_sender(ctx)) or not is_dwp_notice(ctx.get("sender")):
+        return {"do": "skip", "why": "not from a DWP or Universal Credit address"}
+    if ctx.get("auto_reply"):
+        return {"do": "skip", "why": "the scan flagged it as an automatic reply (%s)" % ctx.get("auto_reply")}
     if not isinstance(dwp, dict):
         return {"do": "skip", "why": "no DWP reading in the scan cache for this message"}
     done = ledger_done(msg_id)
     if done:
         return {"do": "already", "row": done}
     today = today or datetime.now(LONDON).date()
+    if dwp.get("unsure"):
+        label = " or ".join(dwp.get("names") or []) or "no tenant"
+        return {"do": "task", "why": dwp["unsure"], "fields": task_fields(msg_id, ctx, label, dwp["unsure"], [], today)}
     name = clean_name(dwp.get("tenant") or "")
     if not name:
         return {"do": "task", "why": "no tenant name was read from the notice",
                 "fields": task_fields(msg_id, ctx, "", "no tenant name was read from the notice", [], today)}
-    live, tenant_names = read_live(today)
+    live, tenant_names = read_tenancies(today)
     tenancy, candidates, why = match_tenancies(name, live, tenant_names)
     if tenancy:
         return {"do": "comment", "tenancy": tenancy, "text": comment_text(msg_id, ctx, now), "why": why}
     return {"do": "task", "why": why, "fields": task_fields(msg_id, ctx, name, why, candidates, today)}
 
 
-def record(msg_id, ctx, today=None, now=None):
+def _in_time(deadline, before):
+    if deadline is not None and time.monotonic() > deadline:
+        raise RecordError("out of time before %s (triage waits on this step, so it stops at %ds)"
+                          % (before, TRIAGE_BUDGET))
+
+
+def _found_after(check, what):
+    """Read the record again after a failed call: (what the read found, '') or (None, why it could not)."""
+    try:
+        return check(), ""
+    except Exception as exc:  # noqa: BLE001 — named in the error the caller raises
+        return None, "; reading the %s again to see whether it landed also failed (%s)" % (what, str(exc)[:160])
+
+
+def record(msg_id, ctx, today=None, now=None, budget=None):
     """Put one DWP notice on the record: ONE comment on the one matching live tenancy, else ONE task.
-    Returns what was done; raises RecordError when it could not be done."""
+    Returns what was done; raises RecordError when it could not be done. Never twice: the record
+    itself is read before each write and again after a write that failed."""
+    deadline = time.monotonic() + budget if budget else None
     p = plan(msg_id, ctx, today, now)
     if p["do"] in ("skip", "already"):
         return {"done": p["do"], "why": p.get("why", ""),
                 **({"ledger": p["row"]} if p["do"] == "already" else {})}
     if p["do"] == "comment":
+        tenancy = p["tenancy"]
+        row = {"id": msg_id, "kind": "comment", "tenancy": tenancy}
+        _in_time(deadline, "reading the tenancy's comments")
+        if comment_posted(tenancy, msg_id):
+            return _ledger_quietly(dict(row, found=True), {"done": "commented", "tenancy": tenancy, "why": p["why"],
+                                                           "note": "the comment was already on the tenancy"})
+        _in_time(deadline, "posting the comment")
         try:
-            got = post_comment(p["tenancy"], p["text"])
-        except Exception as exc:  # noqa: BLE001 — said to the caller, who exits non-zero
-            raise RecordError("the comment on tenancy %s failed: %s" % (p["tenancy"], str(exc)[:200]))
-        row = {"id": msg_id, "kind": "comment", "tenancy": p["tenancy"], "comment": (got or {}).get("id", "")}
-        try:
-            ledger_append(row)
-        except OSError as exc:
-            raise RecordError("the comment WAS posted on tenancy %s but the ledger write failed (%s): do not "
-                              "re-run this message without checking the tenancy's comments"
-                              % (p["tenancy"], exc))
-        return {"done": "commented", "tenancy": p["tenancy"], "why": p["why"]}
+            got = post_comment(tenancy, p["text"])
+        except Exception as exc:  # noqa: BLE001 — read back, then said to the caller
+            landed, extra = _found_after(lambda: comment_posted(tenancy, msg_id), "tenancy's comments")
+            if landed:
+                return _ledger_quietly(dict(row, found=True), {"done": "commented", "tenancy": tenancy, "why": p["why"],
+                                                               "note": "the post reported an error but it landed"})
+            raise RecordError("the comment on tenancy %s failed: %s%s" % (tenancy, str(exc)[:200], extra))
+        return _ledger_quietly(dict(row, comment=(got or {}).get("id", "")),
+                               {"done": "commented", "tenancy": tenancy, "why": p["why"]})
+    _in_time(deadline, "searching the board for this message's task")
+    existing = keyed_tasks(msg_id)
+    if existing:
+        return _ledger_quietly({"id": msg_id, "kind": "task", "task": existing[0], "found": True},
+                               {"done": "task", "task": existing[0], "why": p["why"],
+                                "note": "a task carrying this message's key was already on the board"})
+    _in_time(deadline, "raising the task")
+    problem = ""
     try:
         code, out = create_task(p["fields"])
-    except Exception as exc:  # noqa: BLE001 — said to the caller, who exits non-zero
-        raise RecordError("the RENT CHECK task could not be raised: %s" % str(exc)[:200])
+    except Exception as exc:  # noqa: BLE001 — read back, then said to the caller
+        code, out, problem = None, {}, str(exc)[:200]
     task_id = str((out or {}).get("taskId") or "")
-    if code in (0, 4) and task_id.startswith("rec"):
-        row = {"id": msg_id, "kind": "task", "task": task_id, "why": p["why"]}
+    if not task_id.startswith("rec"):
+        found, extra = _found_after(lambda: keyed_tasks(msg_id), "board")
+        if found:
+            return _ledger_quietly({"id": msg_id, "kind": "task", "task": found[0], "found": True},
+                                   {"done": "task", "task": found[0], "why": p["why"],
+                                    "note": "the gate reported an error but the task landed"})
+        raise RecordError("the task gate did not raise the RENT CHECK task (%s)%s"
+                          % (problem or "exit %s: %s" % (code, _squash(json.dumps(out))[:200]), extra))
+    result = _ledger_quietly({"id": msg_id, "kind": "task", "task": task_id, "why": p["why"]},
+                             {"done": "task", "task": task_id, "why": p["why"]})
+    if code == 4:
+        result["fieldsProblem"] = "some fields did not stick: %s" % ", ".join((out or {}).get("fieldsNotWritten") or [])
+    return result
+
+
+def record_from_triage(msg_id, ctx, today=None, now=None):
+    """What every triage act and note calls. The message goes in the retry file FIRST, so an attempt that
+    fails, times out or is killed leaves it queued; it comes out only once the record is made."""
+    queued_problem = ""
+    try:
+        queue_retry(msg_id, ctx, "attempt started from triage")
+    except Exception as exc:  # noqa: BLE001 — said with the result or the error
+        queued_problem = "the retry file could not be written (%s)" % str(exc)[:160]
+    try:
+        out = record(msg_id, ctx, today, now, budget=TRIAGE_BUDGET)
+    except Exception as exc:  # noqa: BLE001 — said to the caller, who exits non-zero
+        why = str(exc) or exc.__class__.__name__
         try:
-            ledger_append(row)
-        except OSError as exc:
-            raise RecordError("task %s WAS raised but the ledger write failed (%s): do not re-run this message "
-                              "without checking the board" % (task_id, exc))
-        if code == 4:
-            raise RecordError("task %s was raised but some fields did not stick (%s)"
-                              % (task_id, ", ".join((out or {}).get("fieldsNotWritten") or []) or "see the gate"))
-        return {"done": "task", "task": task_id, "why": p["why"]}
-    raise RecordError("the task gate did not raise the RENT CHECK task (exit %s: %s)"
-                      % (code, _squash(json.dumps(out))[:200]))
+            queue_retry(msg_id, ctx, why[:400])
+        except Exception as qexc:  # noqa: BLE001
+            queued_problem = queued_problem or "the retry file could not be written (%s)" % str(qexc)[:160]
+        if queued_problem:
+            raise RecordError("%s; and %s, so it is NOT queued: run `python3 scripts/dwp_notice.py backfill` once "
+                              "the cause is fixed" % (why, queued_problem))
+        raise RecordError("%s. Queued for `python3 scripts/dwp_notice.py retry`." % why)
+    try:
+        clear_retry(msg_id)
+    except Exception as exc:  # noqa: BLE001
+        out["retryProblem"] = ("the record is made but it could not be taken out of the retry file (%s); a retry "
+                               "will find it on the record and do nothing" % str(exc)[:160])
+    if queued_problem and "retryProblem" not in out:
+        out["retryProblem"] = queued_problem
+    return out
 
 
-# ─── back-fill ───────────────────────────────────────────────────────
+# ─── retry and back-fill ─────────────────────────────────────────────
+def _replay(msg_id, ctx, dry_run, today):
+    """One message, planned (dry run) or recorded; a recorded one leaves the retry file, a failed one stays."""
+    if dry_run:
+        p = plan(msg_id, ctx, today)
+        return {"do": p["do"], "why": p.get("why", ""), "tenancy": p.get("tenancy", ""),
+                "task": (p.get("fields") or {}).get("fldgFjGBw6bTKJFCD", "")}
+    try:
+        out = record(msg_id, ctx, today)
+    except Exception as exc:  # noqa: BLE001 — kept in the retry file and listed
+        queue_retry(msg_id, ctx, (str(exc) or exc.__class__.__name__)[:400])
+        raise RecordError(str(exc) or exc.__class__.__name__)
+    clear_retry(msg_id)
+    return out
+
+
+def retry(dry_run=False, today=None):
+    """Replay every message in the retry file."""
+    rows = []
+    for msg_id, entry in sorted(read_retry().items(), key=lambda kv: str((kv[1] or {}).get("first") or "")):
+        ctx = (entry or {}).get("ctx") or {}
+        row = {"id": msg_id, "sender": _sender(ctx), "subject": ctx.get("subject", ""),
+               "attempts": (entry or {}).get("attempts"), "lastError": (entry or {}).get("error", "")}
+        try:
+            rows.append(dict(row, **_replay(msg_id, ctx, dry_run, today)))
+        except RecordError as exc:
+            rows.append(dict(row, do="error", why=str(exc)))
+    return {"dryRun": dry_run, "queued": len(rows), "rows": rows}
+
+
 def scan_cache_path():
     return Path(os.environ.get("INBOUND_TRIAGE_DIR") or (Path.home() / "knowledge-os/logs/inbound-triage")) \
         / "scan-cache.json"
@@ -513,18 +861,20 @@ def reread_entry(msg_id):
     triage = _load("od_triage_for_dwp_notice", "inbound-triage.py")
     triage._fail_quiet["on"] = True      # its fail() prints JSON to stdout, which is this command's
     got = triage.worker_post("/gmail/get", {"id": msg_id})
-    subject = (got.get("headers") or {}).get("subject", "")
+    headers = got.get("headers") or {}
     unquote = _load("od_catask_for_dwp_notice", "create-agent-task.py").unquoted_body
-    return cache_entry(subject, unquote(got.get("body") or ""))
+    return cache_entry(headers.get("subject", ""), unquote(got.get("body") or ""), headers.get("from", ""))
 
 
 def backfill(dry_run=True, reread=False, today=None):
+    """Every message in the retry file, then every DWP message in the triage scan cache not in it."""
+    queued = read_retry()
+    rows = retry(dry_run, today)["rows"] if queued else []
     cache = read_scan_cache()
-    rows = []
     for msg_id, ctx in sorted(cache.items(), key=lambda kv: (kv[1] or {}).get("internalDate") or 0):
-        if not isinstance(ctx, dict) or not is_dwp_notice(ctx.get("sender")):
+        if msg_id in queued or not isinstance(ctx, dict) or not is_dwp_notice(_sender(ctx)):
             continue
-        row = {"id": msg_id, "sender": bare_email(ctx.get("sender")), "subject": ctx.get("subject", "")}
+        row = {"id": msg_id, "sender": _sender(ctx), "subject": ctx.get("subject", "")}
         if not isinstance(ctx.get("dwp"), dict):
             if not reread:
                 rows.append(dict(row, do="not read", why="scanned before this step existed, so no body is cached; "
@@ -537,28 +887,27 @@ def backfill(dry_run=True, reread=False, today=None):
                                  % str(exc)[:160]))
                 continue
         try:
-            if dry_run:
-                p = plan(msg_id, ctx, today)
-                rows.append(dict(row, do=p["do"], why=p.get("why", ""), tenancy=p.get("tenancy", ""),
-                                 task=(p.get("fields") or {}).get("fldgFjGBw6bTKJFCD", "")))
-            else:
-                rows.append(dict(row, **record(msg_id, ctx, today)))
+            rows.append(dict(row, **_replay(msg_id, ctx, dry_run, today)))
         except RecordError as exc:
             rows.append(dict(row, do="error", why=str(exc)))
     return {"dryRun": dry_run, "dwpMessages": len(rows), "rows": rows}
 
 
 def main(argv):
-    if not argv or argv[0] != "backfill":
+    if not argv or argv[0] not in ("backfill", "retry"):
         print(__doc__)
         return 1
     flags = set(argv[1:])
-    unknown = flags - {"--dry-run", "--reread"}
+    allowed = {"--dry-run", "--reread"} if argv[0] == "backfill" else {"--dry-run"}
+    unknown = flags - allowed
     if unknown:
         print("unknown flag(s): %s" % " ".join(sorted(unknown)), file=sys.stderr)
         return 1
     try:
-        out = backfill(dry_run="--dry-run" in flags, reread="--reread" in flags)
+        if argv[0] == "retry":
+            out = retry(dry_run="--dry-run" in flags)
+        else:
+            out = backfill(dry_run="--dry-run" in flags, reread="--reread" in flags)
     except RecordError as exc:
         print(json.dumps({"error": str(exc)}))
         return 2
