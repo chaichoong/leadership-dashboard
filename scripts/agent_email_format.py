@@ -293,7 +293,13 @@ RENT_ARREARS_STAGE = 4
 # shape (RENT ASK's names a step word, RENT CAP's starts cap:, RENT DETAILS' details:, the proof of residency's
 # residency:), so a card carrying one is a rent chase whatever its name says (review of finding 1355: a RENT
 # ARREARS card's name is typed by hand, and "Rent arrears: ..." must not skip the bank).
-RENT_KEY_RE = re.compile(r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):(\d)")
+# Read ONLY as a line of the card's own, at the start of a line (or after the "[date — agent]" stamp annotate puts in
+# front): the create gate copies a task's dated Notes lines into later tasks' history blocks as "- <date> — agent:
+# RENT CHECK KEY: ...", and a copied key must never make a reply or a repair job a rent chase (review round 2 of
+# finding 1355). The same rule opens the text door (text_card).
+_OWN_LINE = r"^(?:\[[^\]\n]*\][ \t]*)?"
+RENT_KEY_RE = re.compile(_OWN_LINE + r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):(\d)", re.M)
+OWN_KEY_LINE_RE = re.compile(_OWN_LINE + re.escape(TEXT_CARD_MARKS["note"]), re.M)
 
 
 def rent_chase_card(name="", notes="", description=""):
@@ -355,7 +361,7 @@ def text_card(name="", notes="", output="", holders=()):
     """True for a card scripts/send-text.py may text from: a rent lane's own tenant card, by its name or
     its key line, or a reply card that carries a payment plan held by the rent lane's own agent (a tenant's
     reply has neither mark)."""
-    if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or TEXT_CARD_MARKS["note"] in str(notes or ""):
+    if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or OWN_KEY_LINE_RE.search(str(notes or "")):
         return True
     if not any(h in TRIAL_TASK_MARKS for h in holders or ()):
         return False

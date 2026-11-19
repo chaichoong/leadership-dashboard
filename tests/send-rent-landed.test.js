@@ -213,12 +213,17 @@ OLD = (date.today() - timedelta(days=50)).isoformat()
 KEYED = "[19 Nov 2026 — agent] RENT CHECK KEY: %s:%s:4" % (TENANCY, OLD)
 STATE["rent"] = 500.0
 out = {}
-BANK[:] = [{"id": "recLateLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
+# 50 days back, two or three rents have fallen due since the keyed one: all of them are paid here.
+BANK[:] = [{"id": "recLateLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 1500.0}]
 CARD = dict(fields("RENT ARREARS: Unit 9 - 1 Example Road, unpaid after three chases"), **{AF["notes"]: KEYED})
 out["oldText"], out["oldEmail"] = run("text"), run("email")
 for i, nm in enumerate(["Rent arrears: Unit 9 - 1 Example Road", "RENT ARREARS - Unit 9 - 1 Example Road"]):
     CARD = dict(fields(nm), **{AF["notes"]: KEYED})
     out["typed%dText" % i], out["typed%dEmail" % i] = run("text"), run("email")
+# Review round 2: this month's rent paid on time while the arrears stay unpaid is not the arrears paid.
+BANK[:] = [{"id": "recThisMonthAaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
+CARD = dict(fields("RENT ARREARS: Unit 9 - 1 Example Road, unpaid after three chases"), **{AF["notes"]: KEYED})
+out["currentOnly"] = run("text")
 BANK[:] = []
 CARD = dict(fields("Rent arrears: Unit 9 - 1 Example Road"), **{AF["notes"]: KEYED})
 out["typedClear"] = run("text")
@@ -230,18 +235,26 @@ print(json.dumps({"r": {k: [v["refused"], v["sent"], v["reads"]] for k, v in out
       expect([k, r.r[k][1], r.r[k][2]]).toEqual([k, [], ['rent', 'bank']]);
     }
     expect([r.r.typedClear[0], r.r.typedClear[1].length, r.r.typedClear[2]]).toEqual([null, 1, ['rent', 'bank']]);
+    expect([r.r.currentOnly[0], r.r.currentOnly[1].length, r.r.currentOnly[2]]).toEqual([null, 1, ['rent', 'bank']]);
     expect(r.submit).toMatch(/a RENT ARREARS card with no RENT CHECK KEY line.*annotate <this task> --note "RENT CHECK KEY: <tenancy id>:<that rent's due date, YYYY-MM-DD>:4"/);
   });
 
   it('only a rent chase card is read again: another rent lane card and an ordinary email touch no bank', () => {
     const r = py(`
 BANK[:] = [{"id": "recRentLineAaaaaa", "date": (date.today() - timedelta(days=1)).isoformat(), "amount": 500.0}]
-# A chase is known by its name or its key line (review of finding 1355), so the ordinary email carries neither.
-CARD = dict(fields("INBOUND: reply from Sam about the boiler"), **{AF["notes"]: "a note with no key line"})
+# A chase is known by its name or a key line of its OWN. The create gate copies an arrears card's dated key line into
+# later tasks' history blocks; that copy must never make a reply a rent chase (review round 2 of finding 1355).
+COPIED = ("TRACK RECORD: (searched tasks + Gmail for ref ...)\\n- 19 Nov 2026 — agent: RENT CHECK KEY: %s:%s:4 "
+          "(https://airtable.com/appX/tblX/recArrearsCardAaa)" % (TENANCY, OWED))
+CARD = dict(fields("INBOUND: reply from Sam about the boiler"), **{AF["notes"]: COPIED})
 other = run("email")
-print(json.dumps({"other": [other["refused"], len(other["sent"]), other["reads"]],
-                  "state": AD.rent_landed_state("RENT ASK: Unit 9", "RENT CHECK KEY: %s:uc47:1:ask" % TENANCY, "")}))`);
+text = run("text")
+print(json.dumps({"other": [other["refused"], len(other["sent"]), other["reads"]], "text": text["refused"],
+                  "state": AD.rent_landed_state("RENT ASK: Unit 9", "RENT CHECK KEY: %s:uc47:1:ask" % TENANCY, ""),
+                  "copied": AD.rent_landed_state("INBOUND: reply", COPIED, "")}))`);
     expect(r.other).toEqual([null, 1, []]);
+    expect(r.text).toMatch(/is not a rent lane's tenant card/);
     expect(r.state).toEqual({ state: '' });
+    expect(r.copied).toEqual({ state: '' });
   });
 });

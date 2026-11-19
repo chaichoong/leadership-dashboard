@@ -6708,6 +6708,7 @@ def tenant_notice_problem(name, output, task_type, notice):
 RENT_FIELD = "fldDMyfZLFMeONPq8"               # Tenancies: monthly rent (rent-check.py TY["rent"])
 TX_TENANCY_FIELD = "fldPmAMmxwqs4SdPa"         # Transactions: Tenancy link (rent-check.py TX["tenancy"])
 EARLY_RENT_DAYS = 5                            # rent-check.py EARLY_PAY_DAYS
+RENT_TOLERANCE_DAYS = 2                        # rent-check.py TOLERANCE_DAYS: a rent is owed once 2 days past due
 RENT_SLACK = 1.00                              # rent-check.py SHORT_SLACK
 RENT_DUE_DAY_FIELD = "fldhy2U0CQmM2oS4P"       # Tenancies: Due Day of Month (rent-check.py TY["dueDay"])
 
@@ -6764,22 +6765,29 @@ def rent_landed_state(name, notes, description, records=None):
         bank = fetch_bank_lines(since) if records is None else fetch_bank_lines(since, records=records)
     except (Exception, SystemExit) as exc:                   # noqa: BLE001 — refused, never passed
         return {"state": "unchecked", "detail": str(exc)[:120]}
+    owed_rent = rent
     if arrears:
         # An arrears card is sent weeks or months after the rent it chases fell due, so the owed cycle's window has
         # closed by then: every line matched to the tenancy since that due date counts, with no upper bound, or a
-        # payment made today would go unseen (review of finding 1355). Money out nets, as in a cycle.
+        # payment made today would go unseen (review of finding 1355). Money out nets, as in a cycle. It is weighed
+        # against EVERY rent owed since that date (review round 2): the current month paid on time while the
+        # arrears stay unpaid is not the arrears paid.
         lo = (owed - timedelta(days=EARLY_RENT_DAYS)).isoformat()
         cycle = [b for b in bank if tenancy in b["tenancyIds"] and b["date"] >= lo]
+        today, due, rents = datetime.now(LONDON).date(), owed, 0
+        while rents == 0 or (today - due).days >= RENT_TOLERANCE_DAYS:
+            rents, due = rents + 1, rent_next_due(due, due_day)
+        owed_rent = rent * rents
     else:
         cycle = owed_cycle_lines(bank, tenancy, owed, due_day)
     paid = [b for b in cycle if b["amount"] > 0]
     total = sum(b["amount"] for b in cycle)
-    if total < rent - RENT_SLACK:
+    if total < owed_rent - RENT_SLACK:
         return {"state": ""}
     shown = "; ".join(f"{b['date']} £{b['amount']:,.2f} ({b['id']})" for b in paid[:4])
     if arrears:
         detail = (f"£{total:,.2f} has been paid to this tenancy since the rent due {owed.strftime('%d %b %Y')} that this "
-                  f"arrears card chases: {shown}, against rent of £{rent:,.2f}")
+                  f"arrears card chases: {shown}, against £{owed_rent:,.2f} of rent owed since then")
     else:
         detail = (f"the rent for the cycle due {owed.strftime('%d %b %Y')} has arrived since the check ran: "
                   f"{shown}, £{total:,.2f} against rent of £{rent:,.2f}")
