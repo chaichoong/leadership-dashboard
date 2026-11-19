@@ -169,10 +169,14 @@ const readRows = async (page) => {
  * "draft"; the text selectors tried first matched nothing and the run read
  * the ALL view, signed agreements included.
  */
-async function filterToDrafts(page) {
-  const drafts = page.locator('[data-testid="draft"]').or(page.getByText(/^Drafts \(\d+\)$/)).first();
+async function filterToDrafts(page, wait = 9000) {
+  // Visible matches only (19 Nov 2026): the first "Drafts (52)" in the page was
+  // a hidden <option> in the narrow-layout drop-down, so the click timed out
+  // and every --delete refused with "the Drafts filter did not draw".
+  const drafts = page.locator('[data-testid="draft"]').or(page.getByText(/^Drafts \(\d+\)$/))
+    .filter({ visible: true }).first();
   const filtered = await drafts.click({ timeout: 15000 }).then(() => true).catch(() => false);
-  await page.waitForTimeout(9000);
+  await page.waitForTimeout(wait);
   return filtered;
 }
 
@@ -485,4 +489,4 @@ function selftest() {
 
 if (require.main === module) main().catch((e) => die(e.message));
 module.exports = { parsePatterns, matches, whenModified, baseName, planDuplicates,
-                   nextTarget, selectionInPage, deleteDraft, confirmGone, readVisible };
+                   nextTarget, selectionInPage, deleteDraft, confirmGone, readVisible, filterToDrafts };

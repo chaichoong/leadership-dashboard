@@ -209,6 +209,20 @@ describe('adobe-drafts.js delete step (19 Nov 2026 layout)', () => {
     });
   });
 
+  it('clicks the visible Drafts item, not the hidden drop-down copy listed first', async () => {
+    // As measured 19 Nov 2026: a hidden <option>Drafts (52)</option> for the
+    // narrow layout comes before the side panel's item, and .first() took it.
+    const html = `<!doctype html><meta charset="utf-8">
+      <select style="display:none"><option value="0">All (60)</option><option value="1">Drafts (2)</option></select>
+      <ul><li data-testid="draft" class="spectrum-SideNav-item"><a role="link" tabindex="0">Drafts (2)</a></li></ul>
+      <script>window.__clicks = { drafts: 0 };
+        document.querySelector('[data-testid="draft"]').onclick = () => window.__clicks.drafts++;</script>`;
+    await onPage(html, async (page) => {
+      expect(await mod.filterToDrafts(page, 0)).toBe(true);
+      expect(await page.evaluate(() => window.__clicks.drafts)).toBe(1);
+    });
+  });
+
   it('a signed agreement with "Draft" in its name is not read as a draft', async () => {
     const SIGNED = 'Lease_Draft_Jane_Testwood-agreement.pdf';
     await onPage(draftsPage([{ t: SIGNED, status: 'Completed' }, SHORT]), async (page) => {
