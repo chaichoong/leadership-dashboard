@@ -112,7 +112,10 @@ const readVisible = (page) => page.evaluate(() => {
     const dates = lines.filter((l) => /(\d{1,2} [A-Z][a-z]{2} \d{4})|(Today|Yesterday)|(\d{1,2}:\d{2})/.test(l));
     const date = dates.sort((a, b) => b.length - a.length)[0] || '';
     // "Agreement Draft", not "Draft": the old anchored match read every one blank.
-    const status = lines.find((l) => /draft|signed|out for signature|cancelled|expired|completed/i.test(l)) || '';
+    // Never off the name (review, 19 Nov 2026): a signed "Lease_Draft_X" would
+    // read as a draft. Names carry _ . or a cut mark, or are a piece of the title.
+    const status = lines.find((l) => !/[_.\u2026]/.test(l) && !title.includes(l) &&
+      /draft|signed|out for signature|cancelled|expired|completed/i.test(l)) || '';
     out.push({ title, date, status });
   });
   return out;
@@ -159,16 +162,23 @@ const readRows = async (page) => {
   return [...seen.values()].sort((a, b) => a.order - b.order);
 };
 
+/**
+ * Filter to drafts from the side panel; the ?agreement_type=draft address
+ * alone showed the ALL view, signed agreements included.
+ * Measured 11 Sep 2026: the side panel's Drafts item carries data-testid
+ * "draft"; the text selectors tried first matched nothing and the run read
+ * the ALL view, signed agreements included.
+ */
+async function filterToDrafts(page) {
+  const drafts = page.locator('[data-testid="draft"]').or(page.getByText(/^Drafts \(\d+\)$/)).first();
+  const filtered = await drafts.click({ timeout: 15000 }).then(() => true).catch(() => false);
+  await page.waitForTimeout(9000);
+  return filtered;
+}
+
 async function list() {
   return withPage(async (page) => {
-    // Filter to drafts from the side panel; the ?agreement_type=draft address
-    // alone showed the ALL view, signed agreements included.
-    // Measured 11 Sep 2026: the side panel's Drafts item carries data-testid
-    // "draft"; the text selectors tried first matched nothing and the run read
-    // the ALL view, signed agreements included.
-    const drafts = page.locator('[data-testid="draft"]').or(page.getByText(/^Drafts \(\d+\)$/)).first();
-    const filtered = await drafts.click({ timeout: 15000 }).then(() => true).catch(() => false);
-    await page.waitForTimeout(9000);
+    const filtered = await filterToDrafts(page);
     const sort = await page.evaluate(() => {
       const h = [...document.querySelectorAll('[role="columnheader"]')].find((x) => /modified/i.test(x.innerText || ''));
       return h ? (h.getAttribute('aria-sort') || 'unstated') : 'no MODIFIED column found';
@@ -189,35 +199,155 @@ async function list() {
   });
 }
 
+/**
+ * The next row to delete, or null when none is left. Only a draft may go: a
+ * pattern that also fits a signed or sent agreement must never take it.
+ */
+function nextTarget(rows, patterns, done) {
+  const target = rows.find((r) => matches(r.title, patterns) && !done.includes(r.title));
+  if (target && !/draft/i.test(target.status || '')) {
+    die(`"${target.title}" matches but reads "${target.status || 'no status'}", not a draft. Nothing more was deleted.`);
+  }
+  return target || null;
+}
+
+/**
+ * Runs in the page once a row is ticked: which rows are selected, which file
+ * the side panel names, and how many Delete buttons are drawn.
+ */
+function selectionInPage(title) {
+  const titleOf = (el) => [...el.querySelectorAll('[title]')].map((x) => x.getAttribute('title'))
+    .find((v) => v && /\.pdf$|-agreement/i.test(v)) || '';
+  const selected = [...document.querySelectorAll('[role="row"][aria-selected="true"]')].map(titleOf);
+  const shown = (el) => { const b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+  // The same selector as BIN, written out: this runs inside the page.
+  const buttons = [...document.querySelectorAll('[data-test-id="delete-action-button"]')].filter(shown);
+  // The panel names the file without ".pdf". Walk up from its Delete button to
+  // the first box that carries a name outside the list.
+  let panelNames = [];
+  for (let p = buttons[0] && buttons[0].parentElement; p && p !== document.body; p = p.parentElement) {
+    panelNames = [...p.querySelectorAll('[title]')].filter((x) => !x.closest('[role="row"]'))
+      .map((x) => x.getAttribute('title')).filter((v) => v && v !== 'PDF');
+    if (panelNames.length) break;
+  }
+  return { selected, panelNames, deleteButtons: buttons.length, wanted: title };
+}
+
+const BIN = '[data-test-id="delete-action-button"]';
+
+/**
+ * DELETE LIVES IN THE SIDE PANEL, NOT ON THE ROW (measured 19 Nov 2026).
+ * A draft row now carries a Select box, "Request e-signatures" and a star,
+ * and no menu, so the old "last button on the row" was the star. Ticking the
+ * row opens a panel naming the file, with five icon buttons; the bin is
+ * data-test-id="delete-action-button" (tooltip "Delete").
+ *
+ * The row is found by its EXACT title attribute. The old 30-character prefix
+ * fitted two drafts of the same document that day, so it could delete one
+ * and record the other. Nothing is pressed unless exactly one row is ticked,
+ * it is this one, and the panel names it; the row must be gone afterwards.
+ */
+async function deleteDraft(page, title, wait = WAIT) {
+  const rows = page.locator('[role="row"]').filter({ has: page.locator(`[title=${JSON.stringify(title)}]`) });
+  const n = await rows.count();
+  if (n !== 1) die(`${n} rows carry the exact name "${title}", so it was not deleted`);
+  const row = rows.first();
+  await row.scrollIntoViewIfNeeded().catch(() => {});
+  const box = row.getByRole('checkbox', { name: 'Select' });
+  if (!(await box.count())) die(`no Select box on "${title}", so it was not deleted`);
+  await box.check({ timeout: 10000 });
+  await page.waitForTimeout(wait.settle);
+  const sel = await page.evaluate(selectionInPage, title);
+  const bare = title.replace(/\.pdf$/i, '');
+  const why = sel.selected.length !== 1 || sel.selected[0] !== title
+    ? `ticked rows are [${sel.selected.join(', ')}], not just "${title}"`
+    : !sel.panelNames.some((v) => v === bare || v === title)
+      ? `the side panel names [${sel.panelNames.join(', ')}], not "${title}"`
+      : sel.deleteButtons !== 1 ? `${sel.deleteButtons} Delete buttons are drawn, not 1` : '';
+  if (why) {
+    await box.uncheck({ timeout: 5000 }).catch(() => {});
+    die(`${why}. Nothing was deleted.`);
+  }
+  // Only a dialog that appears BECAUSE of this press is its confirm (review,
+  // 19 Nov 2026): the ones already showing are marked first, and a box holding
+  // the bin itself (the side panel) is never one.
+  await page.evaluate(() => document.querySelectorAll('[role="dialog"], [role="alertdialog"]').forEach((d) => {
+    const b = d.getBoundingClientRect();
+    if (b.width > 0 && b.height > 0) d.setAttribute('data-od-before', '1');
+  }));
+  // Only rows that carry a file name count, as readVisible reads them: a column
+  // header row is a row too (re-review, 19 Nov 2026).
+  const named = page.locator('[role="row"]').filter({ has: page.locator('[title$=".pdf" i], [title*="-agreement" i]') });
+  const others = (await named.count()) - 1;
+  await page.locator(BIN).click({ timeout: 10000 });
+  await page.waitForTimeout(wait.menu);
+  const dialog = page.locator('[role="dialog"]:not([data-od-before]):visible, [role="alertdialog"]:not([data-od-before]):visible')
+    .filter({ hasNot: page.locator(BIN) }).last();
+  if (await dialog.count()) {
+    const yes = dialog.getByRole('button', { name: /^(delete|yes|yes, delete)$/i }).last();
+    if (!(await yes.count())) {
+      const said = ((await dialog.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 200);
+      await page.keyboard.press('Escape').catch(() => {});
+      die(`the delete dialog for "${title}" offers no Delete or Yes button (it says: ${said})`);
+    }
+    await yes.click({ timeout: 10000 });
+  }
+  // Gone means gone on two checks running with every other named row still
+  // drawn: a redraw empties the list for a moment and is not a delete.
+  let absent = 0;
+  for (let t = 0; t < 12; t++) {
+    await page.waitForTimeout(wait.act / 2);
+    const here = await rows.count();
+    const drawn = await named.count();
+    absent = !here && drawn >= others ? absent + 1 : 0;
+    if (absent >= 2) return true;
+  }
+  die(`"${title}" is still in the list after Delete was pressed`);
+}
+
+/**
+ * A read must not hold anything the run says it deleted. An empty read after a
+ * delete proves nothing (signed out, error page, a lone row redrawing), so it
+ * stops the run rather than passing it.
+ */
+function confirmGone(deleted, finalTitles) {
+  if (deleted.length && !finalTitles.length) {
+    die(`the list read empty after deleting ${deleted.join(', ')}, so the deletes cannot be confirmed. Run --list.`);
+  }
+  const back = deleted.filter((t) => finalTitles.includes(t));
+  if (back.length) die(`still in the list after the run, so NOT deleted: ${back.join(', ')}`);
+  return true;
+}
+
 async function remove(patterns, dry) {
   return withPage(async (page) => {
     const deleted = [];
     const kept = [];
+    const filtered = await filterToDrafts(page);
+    if (!filtered && !dry) die('the Drafts filter did not draw (signed out?), so nothing was deleted');
     // Re-read every pass: removing a row reflows the list, so an index taken
     // once goes stale and the next delete hits the wrong agreement.
     for (let pass = 0; pass < 60; pass++) {
       const rows = await readRows(page);
-      const target = rows.find((r) => matches(r.title, patterns) && !deleted.includes(r.title));
+      // Every read, not only the last: a refusal later in the run must not
+      // leave an earlier "deleted" line standing uncorrected.
+      if (!dry) confirmGone(deleted, rows.map((r) => r.title));
+      const target = nextTarget(rows, patterns, deleted);
       if (!target) {
         rows.forEach((r) => { if (!kept.includes(r.title)) kept.push(r.title); });
         break;
       }
       if (dry) { deleted.push(target.title); continue; }
-      const row = page.locator('[role="row"]', { hasText: target.title.slice(0, 30) }).first();
-      await row.hover().catch(() => {});
-      await page.waitForTimeout(WAIT.settle);
-      const menu = row.locator('button').last();
-      await menu.click({ timeout: 15000 });
-      await page.waitForTimeout(WAIT.menu);
-      const del = page.locator('[role="menuitem"]:has-text("Delete"), [data-testid*="delete" i]').first();
-      if (!(await del.count())) die(`no Delete option on "${target.title}"`);
-      await del.click();
-      await page.waitForTimeout(WAIT.menu);
-      const confirm = page.locator('button:has-text("Delete"), button:has-text("Yes")').last();
-      if (await confirm.count()) { await confirm.click(); await page.waitForTimeout(WAIT.act); }
+      await deleteDraft(page, target.title);
       deleted.push(target.title);
       console.error(`deleted ${target.title}`);
       await page.waitForTimeout(WAIT.settle);
+    }
+    if (!dry && deleted.length && !kept.length) {
+      // The pass cap ended the loop straight after a delete: read once more.
+      const rows = await readRows(page);
+      confirmGone(deleted, rows.map((r) => r.title));
+      rows.forEach((r) => kept.push(r.title));
     }
     return { deleted, deletedCount: deleted.length, remaining: kept.length, dry: !!dry };
   });
@@ -309,6 +439,24 @@ function selftest() {
     () => !matches('family-hmrc-loa', ['AST_Jane', 'ZZ_TagProbe']));
   check('british-gas-loa-family is left alone too',
     () => !matches('british-gas-loa-family', ['AST_Jane', 'ZZ_TagProbe']));
+  const DRAFTS = [{ title: 'Lease_Jane_Testwood-agreement.pdf', status: 'Agreement Draft' },
+    { title: 'Lease_Jane_Testwood_9_Fake_Road-agreement.pdf', status: 'Agreement Draft' }];
+  check('the next target skips what is already done',
+    () => nextTarget(DRAFTS, ['Lease_Jane_Testwood'], ['Lease_Jane_Testwood-agreement.pdf']).title ===
+      'Lease_Jane_Testwood_9_Fake_Road-agreement.pdf');
+  check('no target is left once every match is done',
+    () => nextTarget(DRAFTS, ['Lease_Jane_Testwood-agreement.pdf'], ['Lease_Jane_Testwood-agreement.pdf']) === null);
+  check('a run that says it deleted something still listed is refused',
+    () => refuses(() => confirmGone(['Lease_Jane_Testwood-agreement.pdf'], ['Lease_Jane_Testwood-agreement.pdf'])));
+  check('an empty read after a delete is refused, not taken as proof',
+    () => refuses(() => confirmGone(['Lease_Jane_Testwood-agreement.pdf'], [])));
+  check('an empty read before any delete is fine',
+    () => confirmGone([], []));
+  check('a run whose deletes are all gone passes',
+    () => confirmGone(['Lease_Jane_Testwood-agreement.pdf'], ['Other-agreement.pdf']));
+  check('a matching agreement that is not a draft is refused, never deleted',
+    () => refuses(() => nextTarget([{ title: 'Lease_Jane_Testwood-agreement.pdf', status: 'Completed' }],
+      ['Lease_Jane_Testwood'], [])));
 
   const NOW = new Date('2026-09-11T03:00:00');
   check('copies with and without a bracket number are one document',
@@ -336,4 +484,5 @@ function selftest() {
 }
 
 if (require.main === module) main().catch((e) => die(e.message));
-module.exports = { parsePatterns, matches, whenModified, baseName, planDuplicates };
+module.exports = { parsePatterns, matches, whenModified, baseName, planDuplicates,
+                   nextTarget, selectionInPage, deleteDraft, confirmGone, readVisible };
