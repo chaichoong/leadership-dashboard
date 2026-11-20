@@ -386,7 +386,7 @@ AGENTS = {
     "reciAJnPnFEbj5FhX": {"name": "AI Marketing (Alex Hormozi)",             "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
     "recpCz18pCLCUf3oJ": {"name": "AI Sales (Jordan Belfort)",               "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
     "recFMVmHmqAOVPAeJ": {"name": "AI Worker — Writer",                      "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
-    "recPVA1CgGyyGcBd9": {"name": "AI Worker — Auditor",                     "agent": "worker-auditor",        "role": "worker"},
+    "recPVA1CgGyyGcBd9": {"name": "AI Worker — Quality Checker",             "agent": "worker-auditor",        "role": "worker"},
     "recQkO6BA4w5zqwZ4": {"name": "AI Worker — Builder",                     "agent": "worker-builder",        "role": "worker"},
     "recbHvWqlQBbunF2F": {"name": "AI Worker — Researcher",                  "agent": "worker-researcher",     "role": "worker"},
     "recqmKBmq8ZGkxVH9": {"name": "AI Worker — Analyst",                     "agent": "worker-analyst",        "role": "worker"},

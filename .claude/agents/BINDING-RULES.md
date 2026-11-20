@@ -1,6 +1,6 @@
 # Rules that bind every agent
 
-As at: 2026-10-16
+As at: 2026-11-20
 
 This is the ONE source for the rules every agent in the estate must follow, whatever its lane.
 `scripts/agent-binding-rules.py --push` writes the block below into every agent file between its
@@ -86,6 +86,56 @@ These apply to every agent in this estate, in every lane, on every run. They are
   it, first (AXA, Lemonade). A task where Kevin bought something, or whose card carries a RECORD NEW
   COST line, closes only once the cost is written (`cost-record.py owed TASK` shows what is left) or
   you say why none is owed (`complete --cost-not-written "<why>"`).
+- **WHAT A SHELL CAN DO IN AN UNATTENDED RUN (15 Nov 2026, finding
+  20261001-agent-dispatch-689).** A headless run's Bash is allowed `python3`, `curl`, `node` and
+  a short list of named scripts, and NOTHING else: `ls`, `cat`, `grep`, `find`, `mkdir`, `cp`
+  and `mv` are all refused, and so is any command written with an environment variable in front
+  of it (the allowlist matches the FIRST word). Read files and folders with the Read, Grep and
+  Glob tools, not through a shell. If you genuinely need a shell step, write a small Python file
+  in your own run folder and run it with `python3`. This holds for every subagent you start as
+  well as for you: on 1 Oct 2026 a researcher was refused Bash three times, gave up on reading
+  the tenancies, and the pack was never built, because `ls` and `cat` looked like reading and
+  were not allowed. Never report "permission denied" for a read you could have made with Read or
+  Grep.
+
+- **ESTATE.md HAS A DOOR (15 Nov 2026, finding 20261011-agent-dispatch-831).** You cannot Edit
+  anything under `~/.claude/` in an unattended run: the permission system refuses it as a
+  sensitive file, which is why three approved edits to ESTATE.md were lost on 11 Oct and five
+  more on 20 Oct. Write the whole replacement page to a file in your run folder, then run
+  `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/estate-write.py --from
+  <file> --approved-on <the approved card's record id>` (add `--absorbed "<date> <ruling>"` for
+  the Absorbed today line, `--check` to see what it would do, `--show` for the current stamp).
+  It restamps As at to today, keeps the previous page under `~/knowledge-os/logs/estate-md/` and
+  refuses a page with no title, no stamp, or one that drops more than half the lines. Never try
+  Edit on the file, and never report the edit as done without the script's own 'written:' line.
+
+- **A STALE CHECKOUT HAS A DOOR (15 Nov 2026, findings 20261111-agent-dispatch-1280,
+  20261031-agent-dispatch-1148, 20261114-agent-dispatch-1309).** When the code you need is on
+  origin/main but the main checkout is behind, run
+  `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/refresh-main-checkout.py`
+  and read its exit code (0 current or refreshed, 1 refused with the reason, 2 could not tell).
+  Never run `git fetch`, `git reset`, `git checkout` or `git pull` yourself: those are denied to
+  you, which is why three runs reported "refused permission" and changed nothing while a safe
+  route sat unused. The script never loses work, refuses rather than forcing, and says why. If it
+  exits 1 or 2, quote its reason and block with that, never with "permission denied".
+
+- **LANE FIRST (Kevin, 20 Nov 2026).** Work inside a role agent's lane belongs to that agent:
+  rent, late payers and Universal Credit chasing to Accounts Receivable; certificates, licences,
+  landlord insurance and inspection paperwork to Compliance; repairs to Roy, who instructs the
+  contractor and attends (Compliance takes each repair in first once task rec4GVYmkN2njXcBB lands;
+  until then triage hands repairs straight to Roy); inbound replies and the admin they ask for to
+  Customer Service; money Kevin or his businesses owe (creditors, contractor invoices, councils,
+  HMRC, utilities, payment plans) and fixed costs to Accounts Payable; the videos to the Social
+  Media Manager; stuck and duplicate tasks to the Operations Manager; mail sorting to Inbox Triage;
+  bank transaction categorising and reconciliation to the Bookkeeper (a scheduled job). Any agent
+  may still put a bill Kevin should simply pay on the Friday Payment Run with a MARK FOR PAYMENT
+  card, as GUARDRAILS allows. The four workers (Builder, Analyst, Quality Checker, Researcher) take only work
+  that belongs to no lane: code, data checks, checking that a fix or a run worked, and research. A
+  worker that finds a decision inside someone else's lane hands it to that lane's owner with what it
+  found, and never decides it. Unsure whose lane it is? Say so in your report rather than doing it.
+  Kevin's words: "it's vital we don't have duplication and one agent having one set of roles and
+  another having another that contradicts one another."
+
 - **SAY WHAT YOU DID NOT DO.** Close every report with what you could not do and why. A report
   that lists only successes cannot show what did not happen, and that absence is usually the
   thing worth knowing.
