@@ -278,11 +278,16 @@ COPIED = ("TRACK RECORD: (searched tasks + Gmail for ref ...)\\n- 19 Nov 2026 â€
 CARD = dict(fields("INBOUND: reply from Sam about the boiler"), **{AF["notes"]: COPIED})
 other = run("email")
 text = run("text")
-print(json.dumps({"other": [other["refused"], len(other["sent"]), other["reads"]], "text": text["refused"],
+print(json.dumps({"other": [other["refused"], len(other["sent"]), other["reads"]],
+                  "text": [text["refused"], len(text["sent"]), text["reads"]],
                   "state": AD.rent_landed_state("RENT ASK: Unit 9", "RENT CHECK KEY: %s:uc47:1:ask" % TENANCY, ""),
                   "copied": AD.rent_landed_state("INBOUND: reply", COPIED, "")}))`);
     expect(r.other).toEqual([null, 1, []]);
-    expect(r.text).toMatch(/is not a rent lane's tenant card/);
+    // The text goes, and reads NO bank (findings 20261118-agent-dispatch-1344 and -1355): the card's own
+    // approved output declares a text, which is what opens the text door, while the key line copied into
+    // its history block makes it no rent chase, so there is no rent cycle to read again. Before 19 Nov 2026
+    // this refused "not a rent lane's tenant card" and two texts Kevin had approved as-is never went.
+    expect(r.text).toEqual([null, 1, []]);
     expect(r.state).toEqual({ state: '' });
     expect(r.copied).toEqual({ state: '' });
   });

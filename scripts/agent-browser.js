@@ -1201,7 +1201,12 @@ const SIGNIN_FORM_RE = new RegExp([
   "request a (?:login|log-?in|sign-?in) code",
 ].join('|'), 'i');
 function signedOutMarker(text = '', site) {
-  const body = String(text || '');
+  // ONE WINDOW (review round 2 of finding 1340, kept through the 20 Nov 2026 merge of PR 986). The door
+  // reader and utilita-balance.py's signed_in() both read the first SIGNIN_TEXT_WINDOW characters, and
+  // tests/utilita-balance.test.js holds the two to the same answer. Reading the WHOLE body here made this
+  // reader say "signed out" where the Python said "signed in" for door words past the window, which is the
+  // exact drift that ruling settled.
+  const body = String(text || '').slice(0, SIGNIN_TEXT_WINDOW);
   const entry = (site && site.entry) || {};
   const marks = Array.isArray(entry.signedOutText) ? entry.signedOutText : [];
   for (const m of marks) {
