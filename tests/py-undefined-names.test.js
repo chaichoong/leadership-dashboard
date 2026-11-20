@@ -23,6 +23,8 @@ const CHECK = resolve(ROOT, 'tests/helpers/py_undefined_names.py');
 // ["INTRO_LOCAL"]; the repaired file reports [].
 const ESTATE_SCRIPTS = [
   'scripts/content-engine/render.py',
+  // 20 Nov 2026: the build lane (an approved Build card gets built), run by the hand-back runs and the build slot
+  'scripts/build-lane.py',
   // 13 Nov 2026: the clause a slot's "run OK" line carries, called from slot-postrun.sh
   'scripts/slot-tally.py',
   // 18 Nov 2026: the WhatsApp lookup slot-postrun.sh runs outside claude (finding 20261011-agent-dispatch-834)

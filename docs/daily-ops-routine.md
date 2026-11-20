@@ -80,6 +80,7 @@ report. It should take minutes.
          phase 3  calendar     monthly / weekly / quarterly, behind a date check
          phase 4  fix          drain findings → ONE pull request
          phase 5  report       loop health → ONE Slack DM
+         phase 6  build        ONE approved Build card → its own pull request (20 Nov 2026)
 
 09:00  inbound-triage    slot  ┐  (the lock serialises these two)
 09:00  task-manager      slot  ┘  board pass; field hygiene at 09:00 only
@@ -219,8 +220,8 @@ The version-controlled original of these instructions is docs/daily-ops-routine.
 ## Rules that hold for the whole run
 
 - **Run every phase, in order, even if an earlier one failed.** Record the failure and continue.
-- **Run phases 2 and 4 as subagents** using the Agent tool. Ask each to return at most ten lines: what it did, what it found, what it could not do.
-- **Only phase 4 may change code**, and only through a pull request. Phases 1, 2, 3 and 5 are read-only with respect to the repo: no edits, no `git add`, no commit, no push, no branch, no PR.
+- **Run phases 2, 4 and 6 as subagents** using the Agent tool. Ask each to return at most ten lines: what it did, what it found, what it could not do.
+- **Only phases 4 and 6 may change code**, and only through a pull request. Phases 1, 2, 3 and 5 are read-only with respect to the repo: no edits, no `git add`, no commit, no push, no branch, no PR.
 - **When a phase finds something needing a code change**, it files a finding:
   `python3 scripts/findings.py add --routine <phase> --severity <level> --title "..." --where "..." --detail "..." --fix "..." --touches-code`
   The queue now dedupes: a repeat of something already open is folded in as a recurrence and returns the ORIGINAL id, so do not worry about filing a duplicate. Each routine is capped at 15 open findings; past that the add is REFUSED with the names of its own oldest three to close first, and the refused finding is kept in the overflow log rather than lost. Critical and high are never refused.
@@ -448,6 +449,7 @@ bottom before anything else: those findings hold robots' tasks behind TOOL walls
 not reproduce (reject it), is NOT CODE (say so in the report, with the tasks it blocks), or the
 time budget ends. If the first line reads `BLOCKING: NOT CHECKED`, work the rest in order and
 put that line in the report. Copy the BLOCKED BUT NOT IN THE QUEUE section into the report.
+The APPROVED BUILDS section near its end is phase 6's: never claim one of those here.
 
 Keep claiming while the 90-minute budget and the 08:20 ceiling allow and open findings remain.
 "Neither cap bound" is not a reason to stop: it means take the next one.
@@ -566,3 +568,23 @@ rm -f ~/knowledge-os/logs/daily-ops-progress.json
 
 If the delete is refused, say so on the report rather than retrying: tomorrow's run ignores a
 progress file from an earlier date anyway.
+
+## Phase 6 — Build (one approved build, after the report)
+
+Kevin, 20 Nov 2026: approving a Build card must build it ("If approving does not cause the thing
+to happen, the loop is decorative"). Until then an approved build waited in the fault queue, which
+the fixer never reached (10 open that day, the oldest approved on 30 Sep). He chose "Own slot": ONE
+approved build a morning, AFTER the report is written, up to **60 minutes**, only on days one
+waits. Phase 4 keeps its own 90 minutes and never takes a build.
+
+- First `python3 scripts/build-lane.py next`. NOTHING TO BUILD means skip the subagent: the phase
+  costs nothing on a day with no approved build. IN PROGRESS means another run holds a build: skip.
+- Otherwise run ONE subagent with this prompt: "Follow the BUILD SLOT section of
+  ~/.claude/scheduled-tasks/queue-fixer/SKILL.md, from the repo at
+  /Users/kevinbrittain/Projects/leadership-dashboard. Do not take the queue lock. Return at most
+  ten lines: the build taken (task and finding), the PR, and how it ended (merged, MERGE card
+  raised, gate red, out of time, cannot build as approved, or nothing to build)."
+- The report is already written, so APPEND the subagent's lines to today's report file under
+  `## Phase 6 - Build`. Never rewrite the file.
+- A run stopped part way (a usage limit, a crash) leaves the build claimed; the claim goes stale
+  and tomorrow's slot resumes the build from its branch first. Nothing is lost.

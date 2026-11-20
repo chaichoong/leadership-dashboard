@@ -17,6 +17,8 @@ Usage
     findings.py reopen <id> [--force] | findings.py reopen --stale
     findings.py list --stale
     findings.py worklist [--limit N] [--json]   # the fixer's order: what blocks tasks first
+    findings.py add ... --build-task <rec id>   # an approved Build card (scripts/build-lane.py)
+    findings.py build-tag <id> --task <rec id>  # adopt an existing finding into the build lane
     findings.py close <id> --outcome fixed --evidence <sha> --note "..."
     findings.py close <id> --outcome pending --pr <n> --note "..."
     findings.py close <id> --outcome rejected|deferred --note "..." [--until YYYY-MM-DD]
@@ -115,6 +117,16 @@ TASKED = "tasked"
 # an open PR is still owed, so the repeat stays `duplicate` until it lands.
 FINAL_STATES = ("fixed", "rejected", "deferred", TASKED)
 TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+
+# ─── AN APPROVED BUILD IS NOT A FAULT (Kevin, 20 Nov 2026) ───────────
+#
+# Approving a Build card built nothing. Each carry-out filed a finding here and
+# kept the task open, and the fault fixer, which closed 2 faults that day with
+# 391 open, never reached one: 10 approved builds were open, the oldest from
+# 30 Sep, one ranked 347th of 378. A finding that carries `build_task` (the
+# approved Build task's rec id) is the BUILD LANE's: `worklist` lists it under
+# APPROVED BUILDS, never in the fault sections, and the build slot (daily-ops
+# phase 6, scripts/build-lane.py next) takes one a morning on its own time.
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 AIRTABLE_BASE = "appnqjDpqDniH3IRl"
 TASKS_TABLE = "tblqB8b22hKBL4PF1"
@@ -360,6 +372,8 @@ def current_state(today=None):
             continue
         if rec.get("op") == "add":
             state[fid] = dict(rec, status="open")
+            if rec.get("build_task"):
+                state[fid]["build_at"] = rec.get("ts")
         elif fid in state:
             if rec.get("op") in ("close", "land", "reopen"):
                 # A decision on the finding itself ends any merge: closing a
@@ -373,6 +387,11 @@ def current_state(today=None):
             elif rec.get("op") == "undupe":
                 state[fid].pop("duplicate_of", None)
                 state[fid]["undupe_note"] = rec.get("note")
+            elif rec.get("op") == "build":
+                # An existing finding adopted into the build lane (`build-tag`): it now carries
+                # the approved Build task it builds, and joins the lane at this moment.
+                state[fid]["build_task"] = rec.get("task")
+                state[fid]["build_at"] = rec.get("ts")
             elif rec.get("op") == "retag":
                 # The filer's guess at code / not code corrected by a reader.
                 # The Defects card splits on it, so a wrong flag is a wrong card.
@@ -792,6 +811,9 @@ def file_finding(state, f, cap=True):
         # A stop finding from merge-approved.py (14 Nov 2026): it holds that PR's MERGE card, so
         # `worklist` ranks it by the tasks walled on the findings that PR carries.
         rec["holds_merge_pr"] = f["holds_merge_pr"]
+    if f.get("build_task"):
+        # An approved Build card (20 Nov 2026): the build lane's, never the fault fixer's.
+        rec["build_task"] = f["build_task"]
     # Rule 2: not the same defect, but the same file. Carried on the record so
     # the fixer sees the cluster in `list` instead of meeting six ids one at a
     # time and treating each as a small separate thing.
@@ -818,8 +840,49 @@ def cmd_add(a):
          "fix": a.fix, "severity": a.severity, "touches_code": a.touches_code, "agent": agent}
     if getattr(a, "holds_merge_pr", None):
         f["holds_merge_pr"] = a.holds_merge_pr
+    if getattr(a, "build_task", None):
+        if not TASK_ID_RE.match(a.build_task):
+            print("ERROR: --build-task must be a task's rec id, not %r." % a.build_task, file=sys.stderr)
+            return 2
+        f["build_task"] = a.build_task
     rc, _ = file_finding(current_state(), f)
     return rc
+
+
+def cmd_build_tag(a):
+    """Adopt an existing finding into the build lane: it carries an approved Build task's plan
+    (20 Nov 2026). The 10 builds approved before the lane existed each had one already."""
+    if not TASK_ID_RE.match(a.task or ""):
+        print("ERROR: --task must be a task's rec id, not %r." % a.task, file=sys.stderr)
+        return 2
+    state = current_state()
+    r = state.get(a.id)
+    if r is None:
+        print("ERROR: %s is not a finding in the queue." % a.id, file=sys.stderr)
+        return 2
+    if r.get("duplicate_root"):
+        print("ERROR: %s is a repeat of %s: tag the finding that survives it." % (a.id, r["duplicate_root"]),
+              file=sys.stderr)
+        return 2
+    have = r.get("build_task")
+    if have == a.task:
+        print(a.id)
+        print("ALREADY in the build lane for %s." % a.task, file=sys.stderr)
+        return 0
+    if have:
+        print("ERROR: %s already builds task %s; one finding builds one task." % (a.id, have), file=sys.stderr)
+        return 2
+    if r.get("status") not in OPEN_STATES and r.get("status") != "deferred":
+        print("ERROR: %s is %s. Only an open, claimed, pending or deferred finding joins the build lane; "
+              "file a new one with `add --build-task`." % (a.id, r.get("status")), file=sys.stderr)
+        return 2
+    append({"op": "build", "id": a.id, "ts": iso(), "task": a.task, "by": a.by or ""})
+    if r.get("status") == "deferred":
+        # A deferral was the fault fixer's park; a build Kevin approved is never parked there.
+        append({"op": "reopen", "id": a.id, "ts": iso(),
+                "note": "Joined the build lane for approved task %s" % a.task})
+    print(a.id)
+    return 0
 
 
 def overflow_rows():
@@ -1068,6 +1131,9 @@ def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
                     held["undated"] = True
                 else:
                     held["days"].append(days)
+            if target is not None and target.get("build_task") and fixer_open(target, now):
+                # An approved build's own wall: the build slot's, listed under APPROVED BUILDS.
+                continue
             if target is not None and fixer_open(target, now):
                 row = blocking.setdefault(target["id"], {"tasks": set(), "days": [], "walls": set(),
                                                          "words": [], "undated": False})
@@ -1131,11 +1197,16 @@ def build_worklist(state, blockers, limit=WORKLIST_LIMIT, now=None):
             **({"holdsMergePr": row["holdsMergePr"], "heldFindings": row["heldFindings"]}
                if row.get("holdsMergePr") else {}),
         })
-    rest = [r for r in state.values() if fixer_open(r, now) and r["id"] not in blocking]
+    builds = [r for r in state.values()
+              if r.get("build_task") and fixer_open(r, now) and not r.get("duplicate_root")]
+    builds.sort(key=lambda r: (r.get("build_at") or r.get("ts") or "", r["id"]))
+    rest = [r for r in state.values()
+            if fixer_open(r, now) and r["id"] not in blocking and not r.get("build_task")]
     rest.sort(key=lambda r: (sev(r), r.get("ts") or ""))
     room = max(0, limit - len(block_rows))
     blocked_out = sorted(not_in_queue.items(), key=lambda kv: (-len(kv[1]["tasks"]), kv[0]))
     return {
+        "builds": builds,
         "blocking": block_rows,
         "rest": rest[:room], "restTotal": len(rest), "restOmitted": max(0, len(rest) - room),
         "notInQueue": [{"finding": k, "status": v["status"], "tasksBlocked": len(v["tasks"]),
@@ -1164,6 +1235,9 @@ def cmd_worklist(a):
             "notChecked": why or None,
             "blockersReadAt": (blockers or {}).get("readAt"),
             "limit": a.limit,
+            "builds": [{"finding": r["id"], "task": r.get("build_task"), "status": r.get("status"),
+                        "joinedAt": r.get("build_at") or r.get("ts"), "title": r.get("title")}
+                       for r in w["builds"]],
             "blocking": [dict(b, finding=b["finding"]["id"], record=b["finding"],
                               severity=b["finding"].get("severity"),
                               touchesCode=b["finding"].get("touches_code"))
@@ -1206,6 +1280,14 @@ def cmd_worklist(a):
         w["restTotal"], (", %d left out by --limit %d" % (w["restOmitted"], a.limit)) if w["restOmitted"] else ""))
     for r in w["rest"]:
         print_row(r, state)
+    # Last, so the first line stays BLOCKING (the fixer skill reads it): approved builds are not the
+    # fault fixer's to take, only to see.
+    print("")
+    print("APPROVED BUILDS: %d build(s) Kevin approved wait for the build slot (daily-ops phase 6), "
+          "which takes ONE a morning: `python3 scripts/build-lane.py next`. Never claim one in the "
+          "fault fix." % len(w["builds"]))
+    for r in w["builds"]:
+        print("  %s  task %s  %s  %s" % (r["id"], r.get("build_task"), r.get("status"), (r.get("title") or "")[:90]))
     if w["notInQueue"]:
         print("")
         print("BLOCKED BUT NOT IN THE QUEUE: %d finding(s) named on TOOL walls the fixer cannot take."
@@ -1814,7 +1896,16 @@ def main(argv=None):
     sp.add_argument("--holds-merge-pr", type=int, default=None,
                     help="a stop finding that holds this PR's MERGE card (merge-approved.py): the "
                          "worklist ranks it by the tasks walled on that PR's pending findings")
+    sp.add_argument("--build-task", default="",
+                    help="an approved Build task's rec id: the finding is the build lane's "
+                         "(scripts/build-lane.py), never the fault fixer's")
     sp.set_defaults(fn=cmd_add)
+
+    sp = sub.add_parser("build-tag", help="adopt an existing finding into the build lane")
+    sp.add_argument("id")
+    sp.add_argument("--task", required=True, help="the approved Build task's rec id")
+    sp.add_argument("--by", default="")
+    sp.set_defaults(fn=cmd_build_tag)
 
     sp = sub.add_parser("dupe", help="merge a repeat into the finding that survives it")
     sp.add_argument("id")
