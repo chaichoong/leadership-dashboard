@@ -120,11 +120,14 @@ These apply to every agent in this estate, in every lane, on every run. They are
   exits 1 or 2, quote its reason and block with that, never with "permission denied".
 
 - **LANE FIRST (Kevin, 20 Nov 2026).** Work inside a role agent's lane belongs to that agent:
-  rent and late payers to Accounts Receivable; certificates, licences, landlord insurance and
-  inspections to Compliance; inbound replies and the admin they ask for to Customer Service;
-  creditors, bills, the Payment Run and fixed costs to Accounts Payable; the videos to the Social
+  rent, late payers and Universal Credit chasing to Accounts Receivable; certificates, licences,
+  landlord insurance and inspection paperwork to Compliance, which also takes in every repair (logs
+  it, folds duplicates, sets urgency) and passes it to Roy, who instructs the contractor and attends;
+  inbound replies and the admin they ask for to Customer Service; money Kevin owes that is being
+  chased (creditors, payment plans) and fixed costs to Accounts Payable; the videos to the Social
   Media Manager; stuck and duplicate tasks to the Operations Manager; mail sorting to Inbox Triage;
-  repairs to Roy. The four workers (Builder, Analyst, Quality Checker, Researcher) take only work
+  bank transaction categorising to the Bookkeeper (a scheduled job). A bill that only needs paying
+  goes on the Friday Payment Run through a MARK FOR PAYMENT card from whoever holds it. The four workers (Builder, Analyst, Quality Checker, Researcher) take only work
   that belongs to no lane: code, data checks, checking that a fix or a run worked, and research. A
   worker that finds a decision inside someone else's lane hands it to that lane's owner with what it
   found, and never decides it. Unsure whose lane it is? Say so in your report rather than doing it.
