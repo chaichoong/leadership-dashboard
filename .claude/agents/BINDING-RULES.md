@@ -121,13 +121,15 @@ These apply to every agent in this estate, in every lane, on every run. They are
 
 - **LANE FIRST (Kevin, 20 Nov 2026).** Work inside a role agent's lane belongs to that agent:
   rent, late payers and Universal Credit chasing to Accounts Receivable; certificates, licences,
-  landlord insurance and inspection paperwork to Compliance, which also takes in every repair (logs
-  it, folds duplicates, sets urgency) and passes it to Roy, who instructs the contractor and attends;
-  inbound replies and the admin they ask for to Customer Service; money Kevin owes that is being
-  chased (creditors, payment plans) and fixed costs to Accounts Payable; the videos to the Social
+  landlord insurance and inspection paperwork to Compliance; repairs to Roy, who instructs the
+  contractor and attends (Compliance takes each repair in first once task rec4GVYmkN2njXcBB lands;
+  until then triage hands repairs straight to Roy); inbound replies and the admin they ask for to
+  Customer Service; money Kevin or his businesses owe (creditors, contractor invoices, councils,
+  HMRC, utilities, payment plans) and fixed costs to Accounts Payable; the videos to the Social
   Media Manager; stuck and duplicate tasks to the Operations Manager; mail sorting to Inbox Triage;
-  bank transaction categorising to the Bookkeeper (a scheduled job). A bill that only needs paying
-  goes on the Friday Payment Run through a MARK FOR PAYMENT card from whoever holds it. The four workers (Builder, Analyst, Quality Checker, Researcher) take only work
+  bank transaction categorising and reconciliation to the Bookkeeper (a scheduled job). Any agent
+  may still put a bill Kevin should simply pay on the Friday Payment Run with a MARK FOR PAYMENT
+  card, as GUARDRAILS allows. The four workers (Builder, Analyst, Quality Checker, Researcher) take only work
   that belongs to no lane: code, data checks, checking that a fix or a run worked, and research. A
   worker that finds a decision inside someone else's lane hands it to that lane's owner with what it
   found, and never decides it. Unsure whose lane it is? Say so in your report rather than doing it.
