@@ -420,7 +420,24 @@ print(json.dumps({"fresh": [fresh[0], fresh[1], fresh[2]["buildsQueued"]], "late
     expect(r.fresh[1]).toMatch(/1 build you approved waits in the build lane/);
     expect(r.fresh[2]).toBe(1);
     expect(r.late[0]).toBe('Failed');
-    expect(r.late[1]).toMatch(/waited 14 days or more: the morning build slot is not keeping up/);
+    expect(r.late[1]).toMatch(/waited 14 days or more in the build lane: the morning build slot is not keeping up/);
+  });
+
+  it('a build approved weeks before the lane is late only by its days IN the lane', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'build-lane-late-'));
+    const qf = join(dir, 'q.jsonl');
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    writeFileSync(qf, line({ op: 'add', id: 'f-970', ts: '2026-10-17T00:00:00Z', routine: 'agent-dispatch', severity: 'critical', title: 't', where: 'w' })
+      + line({ op: 'build', id: 'f-970', ts: now, task: 'recMExrqAfKbwC1FJ', by: 'build-lane' }));
+    const r = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('es', ${JSON.stringify(resolve(ROOT, 'scripts/estate-status.py'))})
+es = importlib.util.module_from_spec(spec); spec.loader.exec_module(es)
+w = {"task": "recMExrqAfKbwC1FJ", "kind": "TOOL", "subject": "approved build", "days": 34.2, "toolState": "no-fixer", "findingStatus": "open", "finding": "f-970"}
+s = es.blockers_summary({"openTasksRead": True, "open": [w], "stale": [w]})
+print(json.dumps([s[0], s[1]]))`], { encoding: 'utf8', env: { ...process.env, FINDINGS_FILE: qf } }));
+    expect(r[0]).toBe('Worked');
+    expect(r[1]).not.toMatch(/not keeping up/);
   });
 
   it('one unreadable task never stops the day: TAKE still shows, the other is UNREAD, no NOT CHECKED line', () => {

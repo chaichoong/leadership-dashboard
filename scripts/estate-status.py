@@ -741,6 +741,19 @@ def tool_state(w):
     return w.get("toolState") or ("no-fixer" if w.get("findingStatus") == "deferred" else "fixer")
 
 
+def build_lane_days(w, now=None):
+    """Days a waiting build has been in the build lane: from the moment its finding joined the lane
+    (findings.py build_at), which is what the morning slot controls. A build approved weeks before the
+    lane existed carries its wall's older date, and counting from that would blame the slot for a wait
+    it never had (20 Nov 2026). When the queue cannot say, the wall's own age is used."""
+    try:
+        r = findings_rules.current_state().get((w.get("finding") or "").strip()) or {}
+        joined = datetime.strptime(str(r.get("build_at") or ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, OSError, TypeError):
+        return w.get("days")
+    return ((now or datetime.now(timezone.utc)) - joined).total_seconds() / 86400
+
+
 def blockers_summary(r):
     """(status, detail, payload) from the sweep's JSON. Plain words only."""
     walls = r.get("open") or []
@@ -759,7 +772,7 @@ def blockers_summary(r):
     # like any other wall (review, 20 Nov 2026).
     builds = [w for w in walls if findings_rules.queued_build_wall(w)]
     walls = [w for w in walls if w not in builds]
-    late_builds = [w for w in builds if w.get("days") is None or w["days"] >= BUILD_LATE_DAYS]
+    late_builds = [w for w in builds if build_lane_days(w) is None or build_lane_days(w) >= BUILD_LATE_DAYS]
     stale = [w for w in stale if not findings_rules.queued_build_wall(w)] + late_builds
     signin = sorted({w["subject"] for w in walls if w["kind"] == "SIGN-IN"})
     sites = sorted({w["subject"] for w in walls if w["kind"] == "SITE"})
@@ -860,7 +873,7 @@ def blockers_summary(r):
         detail += (" %s you approved wait%s in the build lane, one built each morning."
                    % (_plural(len(builds), "build"), "s" if len(builds) == 1 else ""))
     if late_builds:
-        detail += (" %s waited %d days or more: the morning build slot is not keeping up."
+        detail += (" %s waited %d days or more in the build lane: the morning build slot is not keeping up."
                    % (_plural(len(late_builds), "approved build"), BUILD_LATE_DAYS))
     stale_walls = [w for w in stale if w not in late_builds]
     if stale_walls:
