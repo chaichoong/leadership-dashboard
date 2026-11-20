@@ -117,6 +117,23 @@ TASKED = "tasked"
 # an open PR is still owed, so the repeat stays `duplicate` until it lands.
 FINAL_STATES = ("fixed", "rejected", "deferred", TASKED)
 TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+# The wall scripts/build-lane.py records on an approved Build card, and the blocker-sweep states in
+# which that wall is a build waiting its turn rather than one that is stuck (review, 20 Nov 2026).
+BUILD_WALL_SUBJECT = "approved build"
+BUILD_QUEUED_STATES = ("fixer", "unclaimed", "claimed")
+
+
+def queued_build_wall(row):
+    """True for a blocker-sweep row that is an approved build waiting its turn in the build lane:
+    the Estate status and the AI team health count it on its own, never as a stuck robot or a code
+    fault. A build wall on a PR, a MERGE card, a rejection or an unreadable state is NOT queued and
+    is shown like any other wall. A protected name in the task's own title can make the sweep say
+    "no-fixer" for a build that is simply open, so that counts as queued too."""
+    row = row or {}
+    if row.get("kind") != "TOOL" or row.get("subject") != BUILD_WALL_SUBJECT:
+        return False
+    state = row.get("toolState") or ""
+    return state in BUILD_QUEUED_STATES or (state == "no-fixer" and row.get("findingStatus") == "open")
 
 # ─── AN APPROVED BUILD IS NOT A FAULT (Kevin, 20 Nov 2026) ───────────
 #

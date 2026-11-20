@@ -372,8 +372,9 @@ approved build a morning, AFTER the report is written, up to **60 minutes**, onl
 waits. Phase 4 keeps its own 90 minutes and never takes a build.
 
 - First `python3 scripts/build-lane.py next`. `NOTHING TO BUILD` with no `PR WAITING` line means skip
-  the subagent: the phase costs nothing on a day with no approved build. `NOT CHECKED` means the
-  tasks could not be read: put that line on the BROKEN line and skip. Anything else (TAKE, PR
+  the subagent: the phase costs nothing on a day with no approved build. A first line `NOT CHECKED:`
+  means no task could be read: put that line on the BROKEN line and skip. An `UNREAD` line is one
+  task; it never skips the phase. Anything else (TAKE, PR
   WAITING, IN PROGRESS) runs the subagent.
 - Otherwise run ONE subagent with this prompt: "Follow the BUILD SLOT section of
   ~/.claude/scheduled-tasks/queue-fixer/SKILL.md, from the repo at

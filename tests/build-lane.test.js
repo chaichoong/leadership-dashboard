@@ -307,11 +307,12 @@ print(json.dumps({"res": run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="
     const r = lane(`
 task("recBuildAaaaaaaaa", hard=True)
 task("recBuildBaaaaaaaa", approved="2026-11-19T00:00:00.000Z")
-out = bl.plan_next(state(), lambda i: bl.view(bl.read_task(i)), on_origin=lambda b: b.endswith("recbuildbaaaaaaaa"))
+out = bl.plan_next(state(), lambda i: bl.view(bl.read_task(i)), on_origin=lambda b: "recbuildbaaaaaaaa" in b)
 print(json.dumps(out))`, q);
     expect(r.take.task).toBe('recBuildBaaaaaaaa');
     expect(r.take.resume).toBe(true);
-    expect(r.take.branch).toBe('feature/build-recbuildbaaaaaaaa');
+    // the finding's own number is in the branch, so a re-approved build never resumes an old branch
+    expect(r.take.branch).toBe('feature/build-recbuildbaaaaaaaa-b');
   });
 
   it('says NOT CHECKED, never "nothing to build", when no task could be read; a deleted task is dropped', () => {
@@ -321,12 +322,20 @@ def bad(i):
 bl.read_task = bad
 res = run(bl.cmd_next, json=False)
 def gone(i):
+    if i == "recBuildBaaaaaaaa": raise RuntimeError("Airtable GET /tbl/recX -> HTTP 404: NOT_FOUND")
+    return bl.view(_read(i))
+task("recBuildAaaaaaaaa")
+one_gone = bl.plan_next(state(), gone, on_origin=lambda b: False)
+def all_gone(i):
     raise RuntimeError("Airtable GET /tbl/recX -> HTTP 404: NOT_FOUND")
-out = bl.plan_next(state(), lambda i: bl.view(gone(i)), on_origin=lambda b: False)
-print(json.dumps({"text": res["out"], "drop": out["drop"]}))`, q);
+every_gone = bl.plan_next(state(), all_gone, on_origin=lambda b: False)
+print(json.dumps({"text": res["out"], "drop": one_gone["drop"], "everyDrop": every_gone["drop"],
+                  "everyUnread": len(every_gone["unread"])}))`, q);
     expect(r.text).toMatch(/^NOT CHECKED: 2 approved build\(s\) wait/);
     expect(r.text).not.toMatch(/NOTHING TO BUILD/);
-    expect(r.drop.map(d => d.why)).toEqual(['the task no longer exists', 'the task no longer exists']);
+    expect(r.drop.map(d => d.task)).toEqual(['recBuildBaaaaaaaa']);   // others read fine: it was deleted
+    expect(r.everyDrop).toEqual([]);                                  // every one 404s: the table is wrong
+    expect(r.everyUnread).toBe(2);
   });
 
   it('a built PR that has not merged is listed for the slot to check first', () => {
@@ -411,4 +420,63 @@ print(json.dumps({"fresh": [fresh[0], fresh[1], fresh[2]["buildsQueued"]], "late
     expect(r.late[0]).toBe('Failed');
     expect(r.late[1]).toMatch(/waited 14 days or more: the morning build slot is not keeping up/);
   });
+
+  it('one unreadable task never stops the day: TAKE still shows, the other is UNREAD, no NOT CHECKED line', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa")
+def rd(i):
+    if i == "recBuildBaaaaaaaa": raise RuntimeError("Airtable GET -> HTTP 503")
+    return _read(i)
+bl.read_task = rd
+bl.branch_on_origin = lambda b: False
+print(json.dumps({"text": run(bl.cmd_next, json=False)["out"]}))`, q);
+    expect(r.text).toMatch(/^TAKE: b-A/);
+    expect(r.text).toMatch(/\nUNREAD b-B \(task recBuildBaaaaaaaa\)/);
+    expect(r.text).not.toMatch(/NOT CHECKED/);
+  });
+
+  it('minor edits: a plain (not bold) closing line on a long plan still gets the note above it', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa", outcome="Approved with minor edits")
+TASKS["recBuildAaaaaaaaa"]["fields"][AF["approvalFeedback"]] = "Run it at 17:00 on Thursdays " * 12
+TASKS["recBuildAaaaaaaaa"]["fields"][AF["agentOutput"]] = ("A long plan line. " * 40) + "\\n\\nCarrying this out will involve: building it."
+seen = {}
+def _d(args):
+    CALLS.append(list(args))
+    if args[0] == "revise": seen["text"] = open(args[3]).read()
+    return 0, "{}", ""
+bl.dispatch_cli = _d
+res = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="")
+print(json.dumps({"res": res, "tail": seen.get("text", "").rstrip().split("\\n")[-1]}))`);
+    expect(r.res.err).toBeNull();
+    expect(r.tail).toBe('Carrying this out will involve: building it.');
+  });
+
+  it('the AI team health counts no waiting build as a code fault; a build on a MERGE card still shows', () => {
+    const r = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json
+def load(n, f):
+    spec = importlib.util.spec_from_file_location(n, f); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+ah = load('ah', ${JSON.stringify(resolve(ROOT, 'scripts/ai_team_health.py'))})
+es = load('es', ${JSON.stringify(resolve(ROOT, 'scripts/estate-status.py'))})
+queued = {"task": "recQ", "kind": "TOOL", "subject": "approved build", "finding": "b-1", "toolState": "unclaimed", "findingStatus": "open", "days": 5}
+merge = {"task": "recM", "kind": "TOOL", "subject": "approved build", "finding": "b-2", "toolState": "merge-card", "findingStatus": "pending", "days": 5, "mergeCard": {"pr": 77}}
+fault = {"task": "recF", "kind": "TOOL", "subject": "uploader", "finding": "f-1", "toolState": "unclaimed", "days": 1}
+groups = ah.fault_groups({"open": [queued, merge, fault]})
+summ = es.blockers_summary({"openTasksRead": True, "open": [queued, merge], "stale": [queued, merge]})
+print(json.dumps({"groups": sorted(groups), "detail": summ[1], "queued": summ[2]["buildsQueued"]}))`], { encoding: 'utf8' }));
+    expect(r.groups).toEqual(['b-2', 'f-1']);
+    expect(r.detail).toMatch(/waiting on a merge card in your approval queue \(PR #77\)/);
+    expect(r.queued).toBe(1);
+  });
+
+  it('one wall name everywhere: build-lane, findings and the task clock agree', () => {
+    const r = lane(`
+import importlib.util as u
+spec = u.spec_from_file_location("tm", ${JSON.stringify(resolve(ROOT, 'scripts/task-manager.py'))})
+tm = u.module_from_spec(spec); spec.loader.exec_module(tm)
+print(json.dumps({"names": [bl.WALL_SUBJECT, bl.findings.BUILD_WALL_SUBJECT, tm.BUILD_WALL_SUBJECT]}))`);
+    expect(new Set(r.names).size).toBe(1);
+  });
 });
+

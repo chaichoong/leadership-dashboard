@@ -297,7 +297,8 @@ BUILDS, and this slot never takes a fault. Do not take the queue lock.
 1. `python3 scripts/build-lane.py next` and read every line:
    - `PR WAITING`: a build already in a pull request that has not merged. Step 2 first.
    - `IN PROGRESS`: another run holds a build. Do step 2 only, then stop.
-   - `NOT CHECKED`: the tasks could not be read. Report the line word for word and stop.
+   - `NOT CHECKED:` (the first line): no task could be read. Report it word for word and stop. An
+     `UNREAD` line names one task that could not be read; it never stops the slot.
    - `DROP`: the task was closed, deleted or is no longer approved. Close that finding as the line says.
    - `TAKE`: the one build to take, with its `workspace` and `branch` names. Use exactly those names
      (worktree.sh takes lowercase topics only). `RESUME` means a morning before pushed its branch.
@@ -311,6 +312,9 @@ BUILDS, and this slot never takes a fault. Do not take the queue lock.
 4. Workspace. If `.claude/worktrees/<workspace>` already exists (a build stopped part way), work in it
    and run `git fetch origin`. Otherwise `./scripts/worktree.sh new <workspace> feature`, and for a
    RESUME, inside the new workspace: `git fetch origin <branch> && git reset --keep FETCH_HEAD`.
+   `RESUME NOT CHECKED` means git could not reach origin: check by hand with `git ls-remote --heads
+   origin <branch>` before starting fresh. A push rejected because the branch already exists means
+   an earlier morning's work is there: fetch it, reset onto it, and carry on from it.
 5. `python3 scripts/build-lane.py brief <taskid>` prints the plan Kevin approved (with his edit when
    he approved with one; it is already written into the plan). Build exactly that plan, following
    /build-feature phases 3, 4 and 8 (`.claude/skills/build-feature/SKILL.md` and its references):
