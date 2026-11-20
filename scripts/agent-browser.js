@@ -1139,6 +1139,36 @@ function onSigninPage(url, passwordFields, text = '', title = '', site) {
 //     a landing on that loginUrl's host and path: the site sent the robot back to its door.
 // `site` is { entry, start }: the allowlist entry and the address the check began on.
 const SIGN_OUT_URL_RE = /(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)/i;
+// A PASSWORDLESS DOOR IS STILL A DOOR (finding 20261117-agent-dispatch-1340).
+// portal.gascaresolutions.co.uk asks for an email address and emails a login
+// code back: no password box, an ordinary address, no /login in the path. Every
+// test above read "not a door", so `session` returned signedIn true while the
+// page WAS the sign-in form, and on 17 Nov 2026 at 07:31 the wall-clearing
+// check wrote BLOCKER CLEARED on a task whose sign-in had never happened. The
+// robot then met the same wall again, which is the loop the SIGN-IN wall exists
+// to stop.
+//
+// Read from the page's own words, not site by site: a one-time code by email is
+// now an ordinary way to sign in, and the next site to use one would repeat
+// this. The phrases are deliberately narrow — each one only makes sense on a
+// door — because the cost of a false "signed out" is one sign-in prompt, and
+// the cost of a false "signed in" is a cleared wall and a task that cannot
+// move. A bare "Sign in" link in a nav bar, and a "Sign out" link, are NOT
+// doors and must stay signed in; that is the control test.
+// How much of the page the passwordless-door words are looked for in. ONE number: the session read takes this much
+// text, and scripts/utilita-balance.py SIGNIN_TEXT_WINDOW must equal it (tests/utilita-balance.test.js reads both;
+// review round 2 of finding 1340: the JS sliced 4000 while the Python mirror sliced 2000). 2000, not more: the Gas
+// Care door's words sit 47 characters in, and a wider window reads more of a signed-in feed (an inbox preview saying
+// "log in to view") as a door that no sign-in would ever clear (review of the re-ship, 19 Nov 2026).
+const SIGNIN_TEXT_WINDOW = 2000;
+const SIGNIN_TEXT_RE = new RegExp([
+  "(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code",
+  "(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code",
+  "we(?:'|’)?ll (?:e-?mail|send) you a (?:login|log-?in|one-?time|security|verification) code",
+  "enter the (?:login |security |verification )?code we (?:e-?mailed|sent|have sent)",
+  "sign in to (?:view|continue|access|your account)",
+  "log in to (?:view|continue|access|your account)",
+].join("|"), "i");
 function hostAndPath(u) {
   try {
     const x = new URL(/^[a-z][a-z0-9+.-]*:/i.test(String(u)) ? String(u) : 'https://' + String(u));
@@ -1183,9 +1213,21 @@ function signedOutMarker(text = '', site) {
 function sessionVerdict(url, passwordFields, text = '', title = '', site) {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
-  const door = doorLanding(url, site);
+  let door = doorLanding(url, site);
+  // The passwordless door (finding 20261117-agent-dispatch-1340). It is a door,
+  // so it rides on atDoor and onSigninPage reads it as the sign-in page — a
+  // signed-out verdict the Robot sign-in app will act on, which is the point:
+  // the old answer was "signed in", and nothing acted on that at all.
+  if (!door && SIGNIN_TEXT_RE.test(String(text || '').slice(0, SIGNIN_TEXT_WINDOW))) {
+    door = 'a sign-in form that emails a login code (no password box)';
+  }
+  // TWO READERS, ONE VERDICT (merge of PR 986 and finding 1340). signedOutMarker reads the site's own
+  // annotated wording (signedOutText) and SIGNIN_FORM_RE; the door check above reads SIGNIN_TEXT_RE over
+  // the head of the page. Either is enough: the default is signed OUT, because a false "in" clears a wall
+  // on a door that is shut, so the union is the safe side and neither reader is dropped for the other.
   const signedOut = signedOutMarker(text, site);
-  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url) || !!door || !!signedOut;
+  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url)
+                 || !!door || !!signedOut;
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
   const botCheck = isBotCheck(text, title);
   return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck,
@@ -4753,7 +4795,10 @@ async function main() {
       await settleBotCheck(page);
       const url = page.url();
       const passwordFields = await passwordFieldCount(page);
-      const text = await domText(page, 600);
+      // SIGNIN_TEXT_WINDOW, not 600 (finding 20261117-agent-dispatch-1340): the
+      // words that give a passwordless door away sit under the site's own header
+      // and cookie notice. isBotCheck reads its own first 2000 of this.
+      const text = await domText(page, SIGNIN_TEXT_WINDOW);
       const title = await page.title();
       const doors = { entry, start };
       const verdict = sessionVerdict(url, passwordFields, text, title, doors);

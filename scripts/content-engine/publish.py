@@ -838,10 +838,11 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
         pod["status"] = "reviewed"; return "Spotify episode filled to the Review step (test mode, not published)"
     status, snippet = spotify.verify_published(title)
     if status == "missing":
-        # Publish was pressed and its proof appeared (run_plan returns only then), but the list check reads the first page
-        # only, and Untitled drafts had filled it: 2070 went live at 20:20 on 24 Sep 2026 and was recorded "missing", so
-        # nothing asked for its link again. Processing: sync reads the public page for the link, as for any new episode.
-        status, snippet = "processing", "not on the list's first page after a confirmed Publish (%s)" % snippet
+        # Publish was pressed and its proof appeared (run_plan returns only then), so 'missing' here is Spotify lagging, not
+        # absence: 2070 went live at 20:20 on 24 Sep 2026 and was recorded "missing", so nothing asked for its link again.
+        # (The check read the plain list's first page until 19 Nov 2026; it reads the title search now.) Processing: sync
+        # reads the public page for the link, as for any new episode.
+        status, snippet = "processing", "not found by the title search after a confirmed Publish (%s)" % snippet
     pod["status"] = status; pod["list_snippet"] = snippet
     link = spotify.public_link(title) if status == "published" else ""
     if link: pod["link"] = link

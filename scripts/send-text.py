@@ -53,16 +53,17 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import approval_evidence_problem  # noqa: E402
-from agent_email_format import (PROPERTY_SENDER, TASK_TENANCIES, TENANCIES_TABLE, TRIAL_STAMP,  # noqa: E402
-                                EmailFormatError, parse_text, rent_chase_card, rent_chase_check_name,
-                                tenancies_to_note, tenancy_comment, text_card, trial_problem)
+from agent_email_format import (AGENT_RENT_LATE_PREFIX, PROPERTY_SENDER, TASK_TENANCIES,  # noqa: E402
+                                TENANCIES_TABLE, TRIAL_STAMP, EmailFormatError, parse_text,
+                                rent_chase_card, tenancies_to_note, tenancy_comment, text_card,
+                                trial_problem)
 
 BASE_ID, TASKS, TENANTS = "appnqjDpqDniH3IRl", "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh"
 AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
     "name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "approvalOutcome": "fldrHBSr6qoUfaKuZ",
     "agentOutput": "fldzswp8fx6PqpLQ5", "taskType": "fldZ2moDV2041Sobc", "notes": "fldR7apBzSp3oxFxz",
     "sentForApprovalBy": "fld30Yw8SWYVp049g", "approvedAt": "fldr4Mvf2RzKvhZhi", "teamMember": "flduCtmQGpOA4eWaj",
-    "tenants": "fld6ZcfEogJmeQj2c",
+    "tenants": "fld6ZcfEogJmeQj2c", "description": "fldRGhBQViKZKtkQ6",
 }
 TENANT_PHONE = "fldraHUkWfqo4olLF"          # Tenants: Contact Number
 TENANCY_TENANTS = "fld1i5bDoHL3B6rUf"       # Tenancies: the tenants on the tenancy (agent-dispatch.py TENANCY_TENANTS)
@@ -231,7 +232,7 @@ def load_card(task_id, dry_run):
         sys.exit(f"REFUSED: task {task_id}: the TEXT TO number is not a UK mobile.")
     if number not in tenant_numbers(f):
         sys.exit(f"REFUSED: task {task_id}: the TEXT TO number is not the Contact Number of a tenant linked to the task.")
-    return f, number, message, trial, outcome
+    return f, number, message, trial, outcome, rec.get("createdTime", "")
 
 
 def cmd_send(args):
@@ -250,18 +251,21 @@ def _cmd_send(args):
     if not on and not args.dry_run:
         sys.exit("REFUSED: text sending is switched off. It is switched on only at the cut-over, by Kevin's decision "
                  f"({SWITCH}).")
-    f, number, message, trial, outcome = load_card(args.task, args.dry_run)
+    f, number, message, trial, outcome, created = load_card(args.task, args.dry_run)
     # The bank is read again at the send (Kevin, 16 Nov 2026): send-email.py's rent_landed_refusal, the one
     # reading the email and the card share, so the text and the email on one card can never disagree. Every
     # chase of a rent cycle is read, under whichever name its lane writes (RENT ARREARS is the same matter
     # as RENT LATE, finding 20261118-agent-dispatch-1355), so a rename can never skip a money check. A card
     # that chases no rent has no rent cycle to read: that is said as NOT APPLICABLE, never as a check passed.
     se = send_email_module()
+    # rent_landed_refusal reads the key line as well as the name (agent_email_format.rent_chase_card), so a
+    # chase named by hand is read too, and it is asked here only when there IS a rent cycle: a card that
+    # chases none is reported NOT APPLICABLE, never as a check that passed.
+    name = f.get(AF["name"], "")
     rent_landed, rent_check = "", "NOT APPLICABLE: this card chases no rent, so there is no rent cycle to read again"
-    if rent_chase_card(f.get(AF["name"], ""), str(f.get(AF["notes"]) or "")):
-        checked = dict(f)
-        checked[AF["name"]] = rent_chase_check_name(f.get(AF["name"], ""))
-        rent_landed = se.rent_landed_refusal(args.task, checked[AF["name"]], checked)
+    if rent_chase_card(name, str(f.get(AF["notes"]) or ""), str(f.get(AF["description"]) or "")) \
+            or name.startswith(AGENT_RENT_LATE_PREFIX):
+        rent_landed = se.rent_landed_refusal(args.task, name, f, created)
         rent_check = rent_landed or "CHECKED: the rent for the owed cycle has not arrived since the card was made"
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task, "switchedOn": on, "trial": trial or None,

@@ -95,6 +95,10 @@ const ESTATE_SCRIPTS = [
   'scripts/rent_form_plan.py',
   'scripts/send-text.py',
   'scripts/tenancy-record.py',
+  // 19 Nov 2026: a DWP notice reaches the tenancy record in code, called from every triage act and note
+  // (finding 20261118-agent-dispatch-1353)
+  'scripts/dwp_notice.py',
+  'scripts/inbound-triage.py',
   'scripts/cost-record.py',
   'scripts/rent_signed_check.py',
   'scripts/rent_roy_email.py',
