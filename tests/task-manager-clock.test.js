@@ -255,6 +255,15 @@ describe('TOOL walls: past 3 days with the finding unclaimed, the finding goes c
     expect(r.patches[0].fields[TF.notes]).toMatch(/raised to critical/);
     expect(r.patches[0].fields[TF.hard]).toBeUndefined();
   });
+  it('an approved build waiting its turn in the build lane is left alone: no critical, no note (20 Nov 2026)', () => {
+    const t = task('recT9', { name: 'BUILD: a weekly report', notes: wall('TOOL', 'approved build', daysAgo(6), ' [finding 20261120-build-lane-1]'),
+      extra: { 'Team Member': [AGENT] } });
+    const r = clock({ walls: [{ task: 'recT9', kind: 'TOOL', subject: 'approved build', finding: '20261120-build-lane-1', findingStatus: 'open' }],
+      tasks: [t], runs: { 'findings.py': [0, '{"changed": true}'] } });
+    expect(r.calls).toHaveLength(0);
+    expect(r.patches).toHaveLength(0);
+    expect(dec(r, 'recT9').why).toMatch(/approved build waiting its turn/);
+  });
   it('the next slot: already critical and noted, so nothing is written', () => {
     const first = clock({ walls: [row('recT1', 'open')], tasks: [tool('recT1', daysAgo(4))],
       runs: { 'findings.py': [0, '{"changed": true}'] } });

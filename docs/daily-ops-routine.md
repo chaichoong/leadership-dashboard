@@ -577,8 +577,10 @@ the fixer never reached (10 open that day, the oldest approved on 30 Sep). He ch
 approved build a morning, AFTER the report is written, up to **60 minutes**, only on days one
 waits. Phase 4 keeps its own 90 minutes and never takes a build.
 
-- First `python3 scripts/build-lane.py next`. NOTHING TO BUILD means skip the subagent: the phase
-  costs nothing on a day with no approved build. IN PROGRESS means another run holds a build: skip.
+- First `python3 scripts/build-lane.py next`. `NOTHING TO BUILD` with no `PR WAITING` line means skip
+  the subagent: the phase costs nothing on a day with no approved build. `NOT CHECKED` means the
+  tasks could not be read: put that line on the BROKEN line and skip. Anything else (TAKE, PR
+  WAITING, IN PROGRESS) runs the subagent.
 - Otherwise run ONE subagent with this prompt: "Follow the BUILD SLOT section of
   ~/.claude/scheduled-tasks/queue-fixer/SKILL.md, from the repo at
   /Users/kevinbrittain/Projects/leadership-dashboard. Do not take the queue lock. Return at most

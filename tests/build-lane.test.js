@@ -196,7 +196,10 @@ describe('next: one build at a time, deadline first, then the oldest approval', 
 task("recBuildAaaaaaaaa", approved="2026-10-01T00:00:00.000Z")
 task("recBuildBaaaaaaaa", approved="2026-11-18T00:00:00.000Z", hard=True)
 task("recBuildCaaaaaaaa", status="Completed")
-out = bl.plan_next(state(), lambda i: bl.view(bl.read_task(i)))
+def rd(i):
+    if i == "recBuildDaaaaaaaa": raise RuntimeError("Airtable GET -> HTTP 503: try later")
+    return bl.view(bl.read_task(i))
+out = bl.plan_next(state(), rd, on_origin=lambda b: False)
 print(json.dumps(out))`, q);
     expect(r.take.task).toBe('recBuildBaaaaaaaa');
     expect(r.queue.map(x => x.task)).toEqual(['recBuildBaaaaaaaa', 'recBuildAaaaaaaaa']);
@@ -209,7 +212,7 @@ print(json.dumps(out))`, q);
     const claimed = q + line({ op: 'claim', id: 'b-C', ts: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), by: 'build-slot' });
     const r = lane(`
 for x in "ABCD": task("recBuild%saaaaaaaa" % x)
-print(json.dumps(bl.plan_next(state(), lambda i: bl.view(bl.read_task(i)))))`, claimed);
+print(json.dumps(bl.plan_next(state(), lambda i: bl.view(bl.read_task(i)), on_origin=lambda b: False)))`, claimed);
     expect(r.take).toBeNull();
     expect(r.inProgress.map(x => x.finding)).toEqual(['b-C']);
   });
@@ -266,5 +269,146 @@ describe('the skills that run the lane say so', () => {
   });
   it('the lane script exists where the skills call it', () => {
     expect(existsSync(LANE)).toBe(true);
+  });
+});
+
+describe('the independent review of 20 Nov 2026: each finding pinned', () => {
+  it('two cards with the same name are two builds, each on its own finding', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa", name="BUILD: weekly report")
+task("recBuildBaaaaaaaa", name="BUILD: weekly report")
+a = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="")
+b = run(bl.cmd_request, task="recBuildBaaaaaaaa", finding="")
+print(json.dumps({"a": a, "b": b, "lane": lane_rows()}))`);
+    expect(r.a.err).toBeNull();
+    expect(r.b.err).toBeNull();
+    expect(r.lane.map(x => x.task).sort()).toEqual(['recBuildAaaaaaaaa', 'recBuildBaaaaaaaa']);
+    expect(new Set(r.lane.map(x => x.id)).size).toBe(2);
+  });
+
+  it('a Cancelled card is never built', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa", status="Cancelled")
+print(json.dumps({"res": run(bl.cmd_request, task="recBuildAaaaaaaaa", finding=""), "lane": lane_rows()}))`);
+    expect(r.res.err).toMatch(/it is Cancelled/);
+    expect(r.lane).toEqual([]);
+  });
+
+  it('the workspace name is lowercase (worktree.sh refuses capitals) and the branch matches it', () => {
+    const r = lane(`print(json.dumps({"ws": bl.workspace("recDPkv36UXe8QDD9")}))`);
+    expect(r.ws).toEqual(['build-recdpkv36uxe8qdd9', 'feature/build-recdpkv36uxe8qdd9']);
+    expect(r.ws[0]).toMatch(/^[a-z0-9][a-z0-9-]*$/);   // scripts/worktree.sh's own topic rule
+  });
+
+  const q = ['A', 'B'].map((x, n) => line({ op: 'add', id: `b-${x}`, ts: `2026-11-1${n}T00:00:00Z`, routine: 'build-lane',
+    severity: 'high', title: `Approved build ${x}`, where: `task ${x}`, touches_code: true, build_task: `recBuild${x}aaaaaaaa` })).join('');
+
+  it('a build stopped part way (its branch on origin) is resumed before anything new, deadline or not', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa", hard=True)
+task("recBuildBaaaaaaaa", approved="2026-11-19T00:00:00.000Z")
+out = bl.plan_next(state(), lambda i: bl.view(bl.read_task(i)), on_origin=lambda b: b.endswith("recbuildbaaaaaaaa"))
+print(json.dumps(out))`, q);
+    expect(r.take.task).toBe('recBuildBaaaaaaaa');
+    expect(r.take.resume).toBe(true);
+    expect(r.take.branch).toBe('feature/build-recbuildbaaaaaaaa');
+  });
+
+  it('says NOT CHECKED, never "nothing to build", when no task could be read; a deleted task is dropped', () => {
+    const r = lane(`
+def bad(i):
+    raise RuntimeError("Airtable GET -> HTTP 401: expired")
+bl.read_task = bad
+res = run(bl.cmd_next, json=False)
+def gone(i):
+    raise RuntimeError("Airtable GET /tbl/recX -> HTTP 404: NOT_FOUND")
+out = bl.plan_next(state(), lambda i: bl.view(gone(i)), on_origin=lambda b: False)
+print(json.dumps({"text": res["out"], "drop": out["drop"]}))`, q);
+    expect(r.text).toMatch(/^NOT CHECKED: 2 approved build\(s\) wait/);
+    expect(r.text).not.toMatch(/NOTHING TO BUILD/);
+    expect(r.drop.map(d => d.why)).toEqual(['the task no longer exists', 'the task no longer exists']);
+  });
+
+  it('a built PR that has not merged is listed for the slot to check first', () => {
+    const waiting = q + line({ op: 'close', id: 'b-A', ts: '2026-11-20T08:00:00Z', outcome: 'pending', pr: '1010' });
+    const r = lane(`
+task("recBuildBaaaaaaaa")
+bl.branch_on_origin = lambda b: False
+res = run(bl.cmd_next, json=False)
+print(json.dumps({"text": res["out"]}))`, waiting);
+    expect(r.text).toMatch(/PR WAITING: b-A \(task recBuildAaaaaaaaa\) is built; PR #1010 has not merged/);
+    expect(r.text).toMatch(/^TAKE: b-B/);
+  });
+
+  it('"Approved with minor edits": his note is written into the plan before the closing line, so the build can close', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa", outcome="Approved with minor edits")
+TASKS["recBuildAaaaaaaaa"]["fields"][AF["approvalFeedback"]] = "Use Friday, not Thursday"
+TASKS["recBuildAaaaaaaaa"]["fields"][AF["agentOutput"]] = "Plan line\\n\\n**Carrying this out will involve:** building it."
+seen = {}
+def _d(args):
+    CALLS.append(list(args))
+    if args[0] == "revise": seen["text"] = open(args[3]).read()
+    return 0, "{}", ""
+bl.dispatch_cli = _d
+res = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="")
+print(json.dumps({"res": res, "text": seen.get("text"), "calls": [c[0] for c in CALLS]}))`);
+    expect(r.res.err).toBeNull();
+    expect(r.calls).toEqual(['revise', 'block']);
+    expect(r.text).toMatch(/Plan line\n\nKEVIN'S EDIT \(the build slot builds it in\): Use Friday, not Thursday\n\n\*\*Carrying this out will involve:\*\* building it\.\n$/);
+  });
+
+  it('the finding names no protected file, so a waiting build never reads as "no fixer can reach it"', () => {
+    const r = lane(`
+task("recBuildAaaaaaaaa", name="BUILD: a weekly report")
+run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="")
+f = [x for x in state().values() if x.get("build_task")][0]
+text = " ".join(str(f.get(k) or "") for k in ("title", "where", "detail", "proposed_fix"))
+print(json.dumps({"hit": m.merge_card.protected_named(text)}))`);
+    expect(r.hit).toBeFalsy();
+  });
+
+  it('adopting a finding the fault fixer claimed reopens it; a second finding for a queued build is merged in', () => {
+    const qq = line({ op: 'add', id: 'f-old', ts: '2026-11-16T00:00:00Z', routine: 'agent-dispatch', severity: 'high',
+      title: 'Build approved: the thing', where: 'scripts/x.py', touches_code: true })
+      + line({ op: 'claim', id: 'f-old', ts: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), by: 'queue-fixer' })
+      + line({ op: 'add', id: 'f-dup', ts: '2026-11-17T00:00:00Z', routine: 'agent-dispatch', severity: 'medium',
+        title: 'Approved build again: the thing', where: 'scripts/x.py', touches_code: true });
+    const r = lane(`
+task("recBuildAaaaaaaaa")
+a = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="f-old")
+b = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="f-dup")
+s = state()
+print(json.dumps({"a": a, "b": b, "old": s["f-old"].get("status"), "dup": s["f-dup"].get("duplicate_of")}))`, qq);
+    expect(r.a.err).toBeNull();
+    expect(r.b.err).toBeNull();
+    expect(r.old).toBe('open');
+    expect(r.dup).toBe('f-old');
+  });
+
+  it('a build is never merged into a fault', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'build-lane-dupe-'));
+    const qf = join(dir, 'q.jsonl');
+    writeFileSync(qf, line({ op: 'add', id: 'b-1', ts: '2026-11-19T00:00:00Z', routine: 'build-lane', severity: 'high', title: 'Approved build', where: 'task', build_task: 'recBuildAaaaaaaaa' })
+      + line({ op: 'add', id: 'f-1', ts: '2026-11-19T00:00:00Z', routine: 'agent-dispatch', severity: 'high', title: 'a fault', where: 'task' }));
+    let status = 0;
+    try { execFileSync('python3', [FINDINGS, 'dupe', 'b-1', '--of', 'f-1'], { encoding: 'utf8', env: { ...process.env, FINDINGS_FILE: qf }, stdio: 'pipe' }); } catch (e) { status = e.status; }
+    expect(status).toBe(2);
+  });
+
+  it('a queued build is not a stuck robot: the status row stays green until it has waited 14 days', () => {
+    const r = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('es', ${JSON.stringify(resolve(ROOT, 'scripts/estate-status.py'))})
+es = importlib.util.module_from_spec(spec); spec.loader.exec_module(es)
+w = lambda d: {"task": "recT%d" % d, "kind": "TOOL", "subject": "approved build", "days": d, "toolState": "unclaimed", "finding": "b"}
+fresh = es.blockers_summary({"openTasksRead": True, "open": [w(5)], "stale": [w(5)]})
+late = es.blockers_summary({"openTasksRead": True, "open": [w(15)], "stale": [w(15)]})
+print(json.dumps({"fresh": [fresh[0], fresh[1], fresh[2]["buildsQueued"]], "late": [late[0], late[1]]}))`], { encoding: 'utf8' }));
+    expect(r.fresh[0]).toBe('Worked');
+    expect(r.fresh[1]).toMatch(/1 build you approved waits in the build lane/);
+    expect(r.fresh[2]).toBe(1);
+    expect(r.late[0]).toBe('Failed');
+    expect(r.late[1]).toMatch(/waited 14 days or more: the morning build slot is not keeping up/);
   });
 });

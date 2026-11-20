@@ -877,8 +877,9 @@ def cmd_build_tag(a):
               "file a new one with `add --build-task`." % (a.id, r.get("status")), file=sys.stderr)
         return 2
     append({"op": "build", "id": a.id, "ts": iso(), "task": a.task, "by": a.by or ""})
-    if r.get("status") == "deferred":
-        # A deferral was the fault fixer's park; a build Kevin approved is never parked there.
+    if r.get("status") == "deferred" or (r.get("status") == "claimed" and r.get("claimed_by") != "build-slot"):
+        # A deferral was the fault fixer's park, and a fault fixer's claim would read as a build in
+        # progress for 12 hours and hold the lane (review, 20 Nov 2026): the build slot takes it fresh.
         append({"op": "reopen", "id": a.id, "ts": iso(),
                 "note": "Joined the build lane for approved task %s" % a.task})
     print(a.id)
@@ -1328,6 +1329,12 @@ def cmd_dupe(a):
         print("REFUSED: %s is %s. A problem seen again after its finding closed is a recurrence: "
               "reopen that one (`reopen %s --force`) instead of merging into it."
               % (root, state[root].get("status"), root), file=sys.stderr)
+        return 2
+    if me.get("build_task") and state[root].get("build_task") != me.get("build_task"):
+        # An approved build merged into a fault would leave the build lane and its task would never
+        # close (review, 20 Nov 2026). A build is merged only into a finding that builds the same task.
+        print("REFUSED: %s is the approved build of task %s; %s is not. A build is merged only into the "
+              "finding that builds the same task." % (a.id, me["build_task"], root), file=sys.stderr)
         return 2
     pa, pb = code_paths(me.get("where")), code_paths(state[root].get("where"))
     if pa and pb and not (pa & pb) and not a.force:
