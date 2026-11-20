@@ -300,16 +300,40 @@ def parse_energy(text):
 # A sign-out address is a door too (agent-browser.js SIGN_OUT_URL_RE, 7 Oct 2026).
 AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|auth)(?:/|\?|$)"
                      r"|(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)", re.I)
+# A PASSWORDLESS DOOR IS STILL A DOOR (finding 20261117-agent-dispatch-1340,
+# round 2; the reviewer found this mirror still deciding without it). The
+# comment above names the "email-first login step" as the very thing that broke
+# this, and signed_in() then read only the URL, the password count and the bot
+# check — never the page text it already has in hand. So a Utilita door that
+# asks for an email address and sends a code read as a signed-in dashboard, the
+# message said "the balance was not on the page", and the Robot sign-in line
+# that exists for exactly this case was withheld. Same wording as
+# SIGNIN_TEXT_RE in agent-browser.js, kept in step by the test below.
+# agent-browser.js SIGNIN_TEXT_WINDOW: how much of the page is searched for door words (review round 2 of 1340).
+# The balance read itself takes more text (--max-text 4000 below); only its first SIGNIN_TEXT_WINDOW is searched.
+SIGNIN_TEXT_WINDOW = 2000
+SIGNIN_TEXT = re.compile(
+    r"(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code"
+    r"|(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code"
+    r"|we(?:'|’)?ll (?:e-?mail|send) you a (?:login|log-?in|one-?time|security|verification) code"
+    r"|enter the (?:login |security |verification )?code we (?:e-?mailed|sent|have sent)"
+    r"|sign in to (?:view|continue|access|your account)"
+    r"|log in to (?:view|continue|access|your account)", re.I)
 
 
 BOT_CHECK_PROBLEM = ("BOT CHECK: Utilita showed the robot a \"verify you are human\" page, so no "
                      "balance was read. A sign-in will not fix it; the next hourly read tries again")
 
 
-def signed_in(url, password_fields, bot_check=False):
+def signed_in(url, password_fields, bot_check=False, text=""):
     # bot_check: agent-browser.js's own isBotCheck on the page (25 Sep 2026);
     # a "verify you are human" page is never a signed-in dashboard.
+    # text: the page's own words, read the same way agent-browser.js reads them
+    # (finding 20261117-agent-dispatch-1340). Only the first SIGNIN_TEXT_WINDOW
+    # characters, the same window as there (a drift test reads both).
     if bot_check or password_fields is None or int(password_fields) != 0:
+        return False
+    if SIGNIN_TEXT.search(str(text or "")[:SIGNIN_TEXT_WINDOW]):
         return False
     return not AT_DOOR.search(url or "")
 
@@ -401,7 +425,8 @@ def read_account(acct, node=None):
         row["problem"] = "the browser returned something unreadable"
         return row
 
-    row["signedIn"] = signed_in(data.get("url") or "", data.get("passwordFields"), bool(data.get("botCheck")))
+    row["signedIn"] = signed_in(data.get("url") or "", data.get("passwordFields"),
+                                bool(data.get("botCheck")), data.get("text") or "")
     if data.get("botCheck"):
         # Not a lapsed login: a sign-in would not help, so the message must not ask for one.
         row["problem"] = BOT_CHECK_PROBLEM

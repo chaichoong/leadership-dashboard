@@ -278,7 +278,34 @@ def clean_email_body(body):
 # Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
 # their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
 # RENT CAP (lane C, 5 Oct 2026): the benefit-cap email to a tenant is the lane's own tenant card too.
-TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "), "note": "RENT CHECK KEY: "}
+# RENT ARREARS (finding 1355, 19 Nov 2026): raised once the rent check's three chase stages are spent and
+# the rent is still unpaid. It chases owed rent like RENT LATE, so it is in RENT_CHASE_PREFIXES below too.
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ARREARS: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "),
+                   "note": "RENT CHECK KEY: "}
+# The cards that chase rent a tenant owes. The bank is read again for each, at submit and at the send (Kevin,
+# 16 Nov 2026), through agent-dispatch.py rent_landed_state, so each must carry the line
+# "RENT CHECK KEY: <tenancy id>:<due date of the rent chased, YYYY-MM-DD>:<stage>". The rent check writes it on
+# every RENT LATE card; a RENT ARREARS card carries it with stage 4 (one past the check's three chase stages).
+# A chase card with no key is refused at the send, never sent unchecked (review of PR 981).
+RENT_CHASE_PREFIXES = ("RENT LATE: ", "RENT ARREARS: ")
+RENT_ARREARS_STAGE = 4
+# The key line of a rent chase: tenancy, the due date of the rent chased, the stage. No other lane's key has this
+# shape (RENT ASK's names a step word, RENT CAP's starts cap:, RENT DETAILS' details:, the proof of residency's
+# residency:), so a card carrying one is a rent chase whatever its name says (review of finding 1355: a RENT
+# ARREARS card's name is typed by hand, and "Rent arrears: ..." must not skip the bank).
+# Read ONLY as a line of the card's own, at the start of a line (or after the "[date — agent]" stamp annotate puts in
+# front): the create gate copies a task's dated Notes lines into later tasks' history blocks as "- <date> — agent:
+# RENT CHECK KEY: ...", and a copied key must never make a reply or a repair job a rent chase (review round 2 of
+# finding 1355). The same rule opens the text door (text_card).
+_OWN_LINE = r"^(?:\[[^\]\n]*\][ \t]*)?"
+RENT_KEY_RE = re.compile(_OWN_LINE + r"RENT CHECK KEY:\s*(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}):(\d)", re.M)
+OWN_KEY_LINE_RE = re.compile(_OWN_LINE + re.escape(TEXT_CARD_MARKS["note"]), re.M)
+
+
+def rent_chase_card(name="", notes="", description=""):
+    """True for a card that chases owed rent: by its name, or by a rent chase key line in its Notes or Description."""
+    return (str(name or "").startswith(RENT_CHASE_PREFIXES)
+            or bool(RENT_KEY_RE.search(f"{notes or ''}\n{description or ''}")))
 
 
 def parse_plan(output):
@@ -334,7 +361,7 @@ def text_card(name="", notes="", output="", holders=()):
     """True for a card scripts/send-text.py may text from: a rent lane's own tenant card, by its name or
     its key line, or a reply card that carries a payment plan held by the rent lane's own agent (a tenant's
     reply has neither mark)."""
-    if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or TEXT_CARD_MARKS["note"] in str(notes or ""):
+    if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or OWN_KEY_LINE_RE.search(str(notes or "")):
         return True
     if not any(h in TRIAL_TASK_MARKS for h in holders or ()):
         return False
@@ -2000,3 +2027,42 @@ def validate_submission_any(output, task_name=None, task_id=None):
     if bad:
         raise EmailFormatError("%s %s." % (bad, AS_RECEIVED_WAY))
     return parsed
+
+
+# A LETTING AGENT'S NIL STATEMENT (finding 1354, 19 Nov 2026). The letting agent's statement for a month shows no
+# payout for an agent-managed rent, so nothing was due to us on that due date. `tenancy-record.py nil-statement` writes
+# it as a dated comment on the tenancy in exactly this shape, and the rent check (rent-check.py) and the AGENT RENT LATE
+# send (agent-dispatch.py agent_rent_landed_state) read it back through nil_statement_dates. Only a comment that BEGINS
+# with the door's own stamp and sentence counts (review of the first draft: a plain comment quoting the marker was read
+# as a nil month, skipping every check the door makes). A withdrawal, written by the same door, takes a date back out;
+# the newest of the two wins.
+NIL_STATEMENT_SENTENCE = "the letting agent's statement shows no payout for the rent due that day"
+NIL_WITHDRAWN_SENTENCE = "the nil statement recorded for that rent is withdrawn"
+_NIL_STAMP = r"\d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}: "
+NIL_STATEMENT_RE = re.compile(_NIL_STAMP + r"NIL STATEMENT (\d{4}-\d{2}-\d{2}): " + re.escape(NIL_STATEMENT_SENTENCE))
+NIL_WITHDRAWN_RE = re.compile(_NIL_STAMP + r"NIL STATEMENT WITHDRAWN (\d{4}-\d{2}-\d{2}): "
+                              + re.escape(NIL_WITHDRAWN_SENTENCE))
+# The marker itself, anywhere: refused in free text (a plain comment, the evidence) so only the door writes it.
+NIL_MARK_RE = re.compile(r"NIL STATEMENT (?:WITHDRAWN )?\d{4}-\d{2}-\d{2}", re.I)
+
+
+def nil_statement_dates(comments):
+    """The due dates (date objects) a tenancy's comments record as nil statements, withdrawals applied in the order the
+    comments were made. `comments` are Airtable comment dicts ({"text", "createdTime"})."""
+    events = []
+    for c in comments or []:
+        text = str((c or {}).get("text") or "")
+        made, taken = NIL_STATEMENT_RE.match(text), NIL_WITHDRAWN_RE.match(text)
+        if made or taken:
+            events.append((str((c or {}).get("createdTime") or ""), bool(made), (made or taken).group(1)))
+    out = set()
+    for _at, made, day in sorted(events):
+        try:
+            d = datetime.strptime(day, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if made:
+            out.add(d)
+        else:
+            out.discard(d)
+    return out

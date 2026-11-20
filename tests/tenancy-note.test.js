@@ -42,6 +42,9 @@ LOOKUPS, PATCHES, RENT_READS = [], [], []
 def api(method, url, payload=None):
     if method == "PATCH":
         PATCHES.append(json.dumps(payload))
+    if method == "GET" and "/comments?" in url:
+        # The letting agent's nil statements, read at an AGENT RENT LATE send (finding 1354): none here.
+        return {"comments": []}
     if url.endswith("/comments"):
         if a.get("commentFails") and (a["commentFails"] is True or len(comments) >= a["commentFails"]):
             if a.get("failAsExit"):
