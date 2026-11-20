@@ -197,6 +197,30 @@ def findings_ts(value):
     return _ts(value) if value else None
 
 
+def finding_belongs(task_id, notes, rec):
+    """True when finding REC is this task's: its own words name the task id, or the task's Notes name
+    the finding (the wall or the note an earlier carry-out wrote). Anything else is refused, so a
+    mistyped --finding never pulls a real fault out of the fault queue (review, 20 Nov 2026)."""
+    if not rec:
+        return False
+    if rec.get("build_task") and rec["build_task"] != task_id:
+        return False
+    words = " ".join(str(rec.get(k) or "") for k in ("title", "where", "detail", "proposed_fix", "close_note"))
+    words += " ".join(str(x.get("note") or "") + str(x.get("fix") or "") for x in rec.get("recurrences") or [])
+    return task_id in words or str(rec.get("id") or "-") in str(notes or "")
+
+
+def tasks_table_readable():
+    """True when one row of the Tasks table reads: the control that tells a deleted task (a 404 while
+    the table answers) from a wrong table or base (everything 404s)."""
+    try:
+        m = ad()
+        m.query_records(m.TASKS, max_records=1)
+        return True
+    except Exception:  # noqa: BLE001 — unreadable means "cannot tell", never "deleted"
+        return False
+
+
 def request_problem(t, builds):
     """(reuse finding id or '', refusal or '') from the task and its builds so far."""
     for r in builds:
@@ -257,6 +281,9 @@ def cmd_request(a):
     reuse, refusal = request_problem(t, task_builds(state, a.task))
     if refusal:
         sys.exit(f"ERROR: {a.task}: {refusal}")
+    if a.finding and not finding_belongs(a.task, t.get("notes"), state.get(a.finding)):
+        sys.exit(f"ERROR: finding {a.finding} is not this task's build: its words do not name {a.task} and "
+                 "the task's Notes do not name it. Leave --finding off and one is filed.")
     fid = reuse
     if reuse and a.finding and a.finding != reuse:
         # The build already has its finding: the one named is the same build filed again, so it is
@@ -316,7 +343,7 @@ def cmd_request(a):
 
 # ─── WHAT THE SLOT TAKES ─────────────────────────────────────────────
 
-def plan_next(state, reader, now=None, on_origin=None):
+def plan_next(state, reader, now=None, on_origin=None, table_ok=None):
     """The slot's pick. READER(task id) gives the task view or raises; ON_ORIGIN(branch) says whether
     a build stopped part way pushed its branch (None: could not tell). Returns a dict: take (one row
     or None), inProgress, prWaiting (built, its PR not merged yet: the slot checks these first),
@@ -350,6 +377,8 @@ def plan_next(state, reader, now=None, on_origin=None):
                      "joinedAt": r.get("build_at") or r.get("ts") or "", "topic": topic, "branch": branch})
     # A 404 means the task was deleted only when other tasks in the same pass read fine: if every one
     # 404s, the table or base is wrong, and dropping them all would send every build back (review).
+    if gone and not read_ok:
+        read_ok = (table_ok or tasks_table_readable)()
     for g in gone:
         if read_ok:
             drop.append({"finding": g["finding"], "task": g["task"], "why": "the task no longer exists"})

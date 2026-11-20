@@ -117,7 +117,7 @@ print(json.dumps({"out": out, "lane": lane_rows(), "calls": CALLS}))`);
 
   it('adopts the finding an older carry-out filed, and a fault-fixer deferral comes back open', () => {
     const q = line({ op: 'add', id: '20261116-agent-dispatch-1331', ts: '2026-11-16T16:35:51Z', routine: 'agent-dispatch',
-      severity: 'medium', title: 'Build approved twice: eBay search', where: 'scripts/ebay-search.py', touches_code: true })
+      severity: 'medium', title: 'Build approved twice: eBay search (task recDPkv36UXe8QDD9)', where: 'scripts/ebay-search.py', touches_code: true })
       + line({ op: 'close', id: '20261116-agent-dispatch-1331', ts: '2026-11-17T07:00:00Z', outcome: 'deferred', note: 'too big' });
     const r = lane(`
 task("recDPkv36UXe8QDD9")
@@ -328,14 +328,16 @@ task("recBuildAaaaaaaaa")
 one_gone = bl.plan_next(state(), gone, on_origin=lambda b: False)
 def all_gone(i):
     raise RuntimeError("Airtable GET /tbl/recX -> HTTP 404: NOT_FOUND")
-every_gone = bl.plan_next(state(), all_gone, on_origin=lambda b: False)
+every_gone = bl.plan_next(state(), all_gone, on_origin=lambda b: False, table_ok=lambda: False)
+alone_gone = bl.plan_next(state(), all_gone, on_origin=lambda b: False, table_ok=lambda: True)
 print(json.dumps({"text": res["out"], "drop": one_gone["drop"], "everyDrop": every_gone["drop"],
-                  "everyUnread": len(every_gone["unread"])}))`, q);
+                  "everyUnread": len(every_gone["unread"]), "aloneDrop": len(alone_gone["drop"])}))`, q);
     expect(r.text).toMatch(/^NOT CHECKED: 2 approved build\(s\) wait/);
     expect(r.text).not.toMatch(/NOTHING TO BUILD/);
     expect(r.drop.map(d => d.task)).toEqual(['recBuildBaaaaaaaa']);   // others read fine: it was deleted
     expect(r.everyDrop).toEqual([]);                                  // every one 404s: the table is wrong
     expect(r.everyUnread).toBe(2);
+    expect(r.aloneDrop).toBe(2);                                      // the table answers: they were deleted
   });
 
   it('a built PR that has not merged is listed for the slot to check first', () => {
@@ -379,10 +381,10 @@ print(json.dumps({"hit": m.merge_card.protected_named(text)}))`);
 
   it('adopting a finding the fault fixer claimed reopens it; a second finding for a queued build is merged in', () => {
     const qq = line({ op: 'add', id: 'f-old', ts: '2026-11-16T00:00:00Z', routine: 'agent-dispatch', severity: 'high',
-      title: 'Build approved: the thing', where: 'scripts/x.py', touches_code: true })
+      title: 'Build approved: the thing (task recBuildAaaaaaaaa)', where: 'scripts/x.py', touches_code: true })
       + line({ op: 'claim', id: 'f-old', ts: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), by: 'queue-fixer' })
       + line({ op: 'add', id: 'f-dup', ts: '2026-11-17T00:00:00Z', routine: 'agent-dispatch', severity: 'medium',
-        title: 'Approved build again: the thing', where: 'scripts/x.py', touches_code: true });
+        title: 'Approved build again: the thing (task recBuildAaaaaaaaa)', where: 'scripts/x.py', touches_code: true });
     const r = lane(`
 task("recBuildAaaaaaaaa")
 a = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="f-old")
@@ -477,6 +479,21 @@ spec = u.spec_from_file_location("tm", ${JSON.stringify(resolve(ROOT, 'scripts/t
 tm = u.module_from_spec(spec); spec.loader.exec_module(tm)
 print(json.dumps({"names": [bl.WALL_SUBJECT, bl.findings.BUILD_WALL_SUBJECT, tm.BUILD_WALL_SUBJECT]}))`);
     expect(new Set(r.names).size).toBe(1);
+  });
+
+  it('request --finding refuses a finding that is not this task\'s, so a mistyped id never pulls a fault out', () => {
+    const qq = line({ op: 'add', id: 'f-other', ts: '2026-11-16T00:00:00Z', routine: 'agent-dispatch', severity: 'high',
+      title: 'Uploader times out', where: 'scripts/up.py', touches_code: true })
+      + line({ op: 'add', id: 'f-named', ts: '2026-11-16T00:00:00Z', routine: 'agent-dispatch', severity: 'high',
+        title: 'Agent blocked: a build', where: 'x', touches_code: true });
+    const r = lane(`
+task("recBuildAaaaaaaaa", notes="[16 Nov 2026] BLOCKER OPEN (TOOL a build): ... [finding f-named]")
+bad = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="f-other")
+good = run(bl.cmd_request, task="recBuildAaaaaaaaa", finding="f-named")
+print(json.dumps({"bad": bad, "good": good, "lane": lane_rows()}))`, qq);
+    expect(r.bad.err).toMatch(/finding f-other is not this task's build/);
+    expect(r.good.err).toBeNull();
+    expect(r.lane).toEqual([{ id: 'f-named', task: 'recBuildAaaaaaaaa', status: 'open' }]);
   });
 });
 
