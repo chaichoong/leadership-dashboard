@@ -133,6 +133,12 @@ These apply to every agent in this estate, in every lane, on every run. They are
   that belongs to no lane: code, data checks, checking that a fix or a run worked, and research. A
   worker that finds a decision inside someone else's lane hands it to that lane's owner with what it
   found, and never decides it. Unsure whose lane it is? Say so in your report rather than doing it.
+  The other way round: a role agent that needs work no lane owns (code, a data check, checking that
+  a fix worked, research) hands it to the worker as a task, `python3 scripts/create-agent-task.py
+  create --owner worker-builder` (or `worker-analyst`, `worker-auditor`, `worker-researcher`), and
+  the dispatcher runs that worker on its next run. Inside a scheduled run you cannot start another
+  agent yourself, because you are already running as a subagent; in a chat with Kevin you can pull
+  a worker in with the Agent tool. The role agent keeps the decision; the worker brings back facts.
   Kevin's words: "it's vital we don't have duplication and one agent having one set of roles and
   another having another that contradicts one another."
 
