@@ -108,7 +108,9 @@ const { execFileSync } = require('child_process');
 const REPO = path.resolve(__dirname, '..');
 // AGENT_BROWSER_PROFILE_ROOT points a test at a throwaway folder, never the robot's own profiles.
 const PROFILE_ROOT = process.env.AGENT_BROWSER_PROFILE_ROOT || path.join(os.homedir(), '.config', 'od', 'agent-browser');
-const LEDGER = path.join(os.homedir(), 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
+// AGENT_BROWSER_LEDGER points a test at its own run log. Without it the sign tests wrote 3,244 fake
+// recTESTTESTTEST01 lines into the robot's real log between 16 Oct and 20 Nov 2026 (approved build reccj3pG3wrbc7whU).
+const LEDGER = process.env.AGENT_BROWSER_LEDGER || path.join(os.homedir(), 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
 // Overridable so a test can prove the per-host merge against its own file
 // instead of whatever ~/.config holds on this Mac.
 const SITES_FILE = process.env.AGENT_BROWSER_SITES_FILE || path.join(PROFILE_ROOT, 'sites.json');

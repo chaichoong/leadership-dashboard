@@ -9,8 +9,8 @@
 // tab, the signature box's aria-label, the footer Submit's "All required fields complete").
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync, statSync, readdirSync } from 'fs';
+import { tmpdir, homedir } from 'os';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -24,6 +24,8 @@ const require_ = createRequire(import.meta.url);
 
 const DIR = mkdtempSync(join(tmpdir(), 'sign-for-kevin-'));
 const LEDGER = join(DIR, 'signed.jsonl');
+// The robot's run log for this file (its `ledger()` lines), so a test never writes the real one.
+const RUN_LOG = join(DIR, 'runs.jsonl');
 const ID = 'CBJCHBCAABAAv-itJ-OopqgnZeh0r-YrhKg53Y8-Vglm';
 const OTHER_ID = 'CBJCHBCAABAAzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
 const NAME = 'AST_Test_Tenant_1_Example_Street';
@@ -361,6 +363,8 @@ const OUTCOME = join(DIR, 'outcome.py');
 
 beforeAll(async () => {
   process.env.SIGN_FOR_KEVIN_LEDGER = LEDGER;
+  // Before the module loads: it reads the run log's path once, at load (approved build reccj3pG3wrbc7whU).
+  process.env.AGENT_BROWSER_LEDGER = RUN_LOG;
   process.env.AGENT_UPLOAD_DIR = DIR;
   process.env.AGENT_SIGN_LIST_MS = '200';
   process.env.AGENT_SIGN_SETTLE_MS = '100';
@@ -589,6 +593,34 @@ describe('the robot signs the approved agreement, and only it', () => {
       rmSync(LEDGER, { force: true });
       await expect(check('Completed')).rejects.toThrow(/no unproved Submit is on record/);
     } finally { rmSync(LEDGER, { force: true }); }
+  });
+
+  // The robot's real run log never takes a test's line (approved build reccj3pG3wrbc7whU, 20 Nov 2026). Until then the
+  // two tests above wrote 3,244 fake recTESTTESTTEST01 lines into ~/knowledge-os/logs/agent-browser/runs.jsonl, about
+  // 30 to 170 a day, on every test run and merge gate. Only what lands after this test starts is read, so a real robot
+  // line written at the same moment cannot fail it; the control is that the line does reach this file's own log.
+  it('a sign check writes its run-log line to the test\'s own log, never the robot\'s real one', async () => {
+    const REAL = join(homedir(), 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
+    const GUARD = 'recTESTLOGGUARD01';
+    const from = existsSync(REAL) ? statSync(REAL).size : 0;
+    const realSince = () => (existsSync(REAL) ? readFileSync(REAL).subarray(from).toString('utf8') : '');
+    const own = () => (existsSync(RUN_LOG) ? readFileSync(RUN_LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+    rmSync(RUN_LOG, { force: true });
+    try {
+      writeFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: GUARD, agreementId: ID }) + '\n');
+      const r = await withFake(adobe({ agreements: { [ID]: { name: NAME, status: 'Completed' } } }), (page) => ab.runSignCheck(page, GUARD, CARD_JS, null));
+      expect(r.signed).toBe(true);
+      expect(realSince()).not.toContain(GUARD);
+      expect(own()).toEqual([expect.objectContaining({ cmd: 'sign-check', task: GUARD, agreementId: ID, signed: true })]);
+    } finally { rmSync(LEDGER, { force: true }); rmSync(RUN_LOG, { force: true }); }
+  });
+
+  it('every test file that runs the robot\'s sign or sign check in-process gives it its own run log', () => {
+    const TESTS = resolve(ROOT, 'tests');
+    const runners = readdirSync(TESTS).filter((f) => f.endsWith('.test.js'))
+      .filter((f) => /\.runSign(?:Check)?\(/.test(readFileSync(join(TESTS, f), 'utf8')));
+    expect(runners).toContain('sign-for-kevin.test.js');                  // control: the scan finds the known one
+    expect(runners.filter((f) => !/process\.env\.AGENT_BROWSER_LEDGER\s*=/.test(readFileSync(join(TESTS, f), 'utf8')))).toEqual([]);
   });
 
   it('the copy fetched from the task must be the one fingerprinted when Kevin was shown it', () => {
