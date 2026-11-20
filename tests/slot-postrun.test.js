@@ -491,7 +491,10 @@ print(json.dumps({"who": a[a.index("--who") + 1], "args": a[2:], "serving": os.e
     expect(existsSync(join(wa, 'requests', qname))).toBe(false);
     const res = JSON.parse(readFileSync(join(wa, 'results', qname), 'utf8'));
     expect(res.who).toBe('Pat Example');
-    expect(res.args).toEqual(['--who', 'Pat Example', '--days', '60', '--limit', '40']);
+    // NO --limit when the request named none (finding 20261119-agent-dispatch-1367). This line used to
+    // force 40, so the newest-40 cap came back on the queued path, which is the path a robot uses: a
+    // 60-day ask on a busy chat returned a few days and said nothing about the rest.
+    expect(res.args).toEqual(['--who', 'Pat Example', '--days', '60']);
     expect(res.serving).toBe('1');          // the refusal of the post-run's own read is final, never re-queued
     expect(res.claudecode).toBe(false);
 
@@ -502,6 +505,17 @@ print(json.dumps({"who": a[a.index("--who") + 1], "args": a[2:], "serving": os.e
     expect(ans.chats[0].messages[0].text).toBe('Boiler fixed');
     expect(ans.readOutsideClaude).toMatch(/^\d{4}-\d\d-\d\dT/);
     expect(sh('python3', [REAL_SWEEP, 'lookup', '--who', 'Pat Example', '--task', 'recTEST0000000009'], { env: waEnv() }).status).toBe(3);
+  });
+
+  it('a cap the request DID ask for is still passed on (finding 20261119-agent-dispatch-1367)', () => {
+    withStub();
+    request('capped', 'Pat Example');
+    // The same request, with a limit of its own: it must survive to the lookup.
+    writeFileSync(join(wa, 'requests', 'capped.json'), JSON.stringify({ who: 'Pat Example', days: 14, limit: 25 }));
+    const r = postrun();
+    expect(r.status).toBe(0);
+    const res = JSON.parse(readFileSync(join(wa, 'results', 'capped.json'), 'utf8'));
+    expect(res.args).toEqual(['--who', 'Pat Example', '--days', '14', '--limit', '25']);
   });
 
   it('a lookup that fails outside claude is a loud answer, and never fails the slot', () => {
