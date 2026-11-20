@@ -160,10 +160,10 @@ describe('the routine shrank, and stayed in sync with its source of truth', () =
     expect(skill.split('---\n\n')[1]).toBe(body);
   });
 
-  it('has five phases, not nine', () => {
+  it('has six phases, not nine (phase 6, one approved build after the report: Kevin, 20 Nov 2026)', () => {
     const skill = read('.claude/scheduled-tasks/daily-ops/SKILL.md');
     const phases = [...skill.matchAll(/^## Phase (\d+) — /gm)].map((m) => m[1]);
-    expect(phases).toEqual(['1', '2', '3', '4', '5']);
+    expect(phases).toEqual(['1', '2', '3', '4', '5', '6']);
   });
 
   it('no longer runs the sweeps that became scripts or slots', () => {

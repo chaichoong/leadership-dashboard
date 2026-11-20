@@ -51,6 +51,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import signin_hold  # noqa: E402
+import findings as findings_rules  # noqa: E402  queued_build_wall, the one test of a waiting build
 LOGS = os.path.expanduser("~/knowledge-os/logs")
 STATUS_LOG = os.path.join(LOGS, "job-status.jsonl")
 QUEUE_LOG = os.path.join(LOGS, "queue", "queue-events.jsonl")
@@ -713,6 +714,9 @@ def _plural(n, word):
 # protected file and no MERGE card exists yet, no finding was filed, or Kevin rejected the card.
 WALLS_CAP = 80
 NO_FIXER_STATES = ("no-fixer", "no-finding", "deferred", "merge-rejected", "merge-closed")
+# How long an approved build may wait its turn in the build lane before the row says the morning
+# build slot is not keeping up (20 Nov 2026).
+BUILD_LATE_DAYS = 14
 # WHO clears each of those states, in plain words (finding 20261008-auditor-797). Until
 # 22 Oct 2026 the no-fixer and unclaimed sentences named nobody at all, while
 # OWNER_NAMED_RE matched "Kevin" elsewhere in the same Detail, so the row counted as
@@ -749,6 +753,14 @@ def blockers_summary(r):
     if not r.get("openTasksRead"):
         return ("Failed", "The blocker check could not read the task board, so it cannot say what is blocked.",
                 {"open": [], "controlFailed": True})
+    # An approved build waiting its turn in the build lane (20 Nov 2026) is not a robot stuck: one is
+    # built each morning, so it is counted on its own and is late only past BUILD_LATE_DAYS.
+    # Only a build WAITING its turn leaves the list: one on a PR, a MERGE card or a rejection is shown
+    # like any other wall (review, 20 Nov 2026).
+    builds = [w for w in walls if findings_rules.queued_build_wall(w)]
+    walls = [w for w in walls if w not in builds]
+    late_builds = [w for w in builds if w.get("days") is None or w["days"] >= BUILD_LATE_DAYS]
+    stale = [w for w in stale if not findings_rules.queued_build_wall(w)] + late_builds
     signin = sorted({w["subject"] for w in walls if w["kind"] == "SIGN-IN"})
     sites = sorted({w["subject"] for w in walls if w["kind"] == "SITE"})
     kevin = [w for w in walls if w["kind"] == "KEVIN"]
@@ -844,8 +856,15 @@ def blockers_summary(r):
         detail += " %s waiting on a fix parked to a date; it comes back by itself." % _plural(len(dated), "task")
     if fixing:
         detail += " %s waiting on the daily robot fix." % _plural(len(fixing), "task")
-    if stale:
-        detail += " %s blocked 3 days or more." % _plural(len(stale), "task")
+    if builds:
+        detail += (" %s you approved wait%s in the build lane, one built each morning."
+                   % (_plural(len(builds), "build"), "s" if len(builds) == 1 else ""))
+    if late_builds:
+        detail += (" %s waited %d days or more: the morning build slot is not keeping up."
+                   % (_plural(len(late_builds), "approved build"), BUILD_LATE_DAYS))
+    stale_walls = [w for w in stale if w not in late_builds]
+    if stale_walls:
+        detail += " %s blocked 3 days or more." % _plural(len(stale_walls), "task")
     if closed:
         detail += " %s CLOSED while still blocked in the last 14 days: %s." % (
             _plural(len(closed), "task"), "; ".join(c["name"][:60] for c in closed[:3]))
@@ -878,7 +897,7 @@ def blockers_summary(r):
     for w in walls:
         kinds[w.get("kind")] = kinds.get(w.get("kind"), 0) + 1
     # openCount and byKind cover every wall: "open" is capped at WALLS_CAP for the page.
-    return status, detail, {"open": slim, "openCount": len(walls), "byKind": kinds,
+    return status, detail, {"open": slim, "openCount": len(walls), "byKind": kinds, "buildsQueued": len(builds),
                             "stale": len(stale), "closedWhileBlocked": closed[:10],
                             "woken": len(r.get("woken") or []),
                             "noFixer": len(build), "unclaimed": len(unclaimed), "openPr": len(open_pr),

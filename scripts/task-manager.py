@@ -1621,6 +1621,8 @@ def cmd_publish():
 # field id and made only while the same wall still stands. It writes
 # clock.json (verify reads it) and clock.md (the report's Clock section).
 CLOCK_DAYS = {"SIGN-IN": 1, "TOOL": 3, "KEVIN": 3}
+# The wall build-lane.py request records on an approved Build card (scripts/build-lane.py WALL_SUBJECT).
+BUILD_WALL_SUBJECT = "approved build"
 ROY_CLOCK_DAYS = 7
 # Reminder emails to Roy per slot, oldest hand-off first (session lead, 7 Oct 2026). A dry run that
 # day found 38 of his 52 tasks past the clock; even ten a slot is 30 emails a day to one person,
@@ -1721,6 +1723,13 @@ def wall_decision(row, f, now, d, findings_error="", resolve=None):
     out["days"] = round(days, 1) if days is not None else None
     if out["clock"] is None:
         out["why"] = "a %s wall has no clock: Kevin's Add a new site clears it" % kind
+        return out
+    if kind == "TOOL" and b.get("subject") == BUILD_WALL_SUBJECT:
+        # An approved build waits its turn in the build lane (20 Nov 2026): one is built each
+        # morning, so a queue of ten waits up to ten days by design. Raising its finding to
+        # critical moves nothing (the lane does not read severity) and the note would say the
+        # fault fixer takes it, which it never does.
+        out["why"] = "an approved build waiting its turn in the build lane"
         return out
     if days is not None and days < out["clock"]:
         return out

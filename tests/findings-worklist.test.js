@@ -193,7 +193,8 @@ describe('findings worklist: what blocks work comes first', () => {
     blockers([wall('t1', 'f1', 2.5)]);
     const before = readFileSync(store, 'utf8');
     const j = json();
-    expect(Object.keys(j).sort()).toEqual(['blockersFile', 'blockersReadAt', 'blocking', 'blockingChecked',
+    // 'builds' (20 Nov 2026): the approved builds the build slot takes, never the fault fixer.
+    expect(Object.keys(j).sort()).toEqual(['blockersFile', 'blockersReadAt', 'blocking', 'blockingChecked', 'builds',
       'limit', 'notChecked', 'notInQueue', 'rest', 'restOmitted', 'restTotal']);
     expect(j.blockingChecked).toBe(true);
     expect(j.notChecked).toBe(null);

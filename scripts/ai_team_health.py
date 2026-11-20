@@ -1353,6 +1353,14 @@ def read_finding_roots(path=None):
     return roots, None
 
 
+def waiting_walls(blockers):
+    """The sweep's walls minus approved builds waiting their turn in the build lane (20 Nov 2026):
+    one is built each morning, so a queue of them is not a stuck robot or a code fault. The test is
+    findings.py's queued_build_wall, the one the Estate status uses."""
+    rules = _load("findings_build_rules", "findings.py")
+    return [w for w in blockers.get("open") or [] if not rules.queued_build_wall(w)]
+
+
 def fault_groups(blockers, roots=None):
     """Code faults that hold blocked tasks, each ONE thing to fix however many tasks wait on it
     (Kevin, 14 Nov 2026). Only a TOOL wall that names a finding is grouped; a merged repeat goes
@@ -1360,7 +1368,7 @@ def fault_groups(blockers, roots=None):
     findings makes each of them one thing (each needs its own fix); the task itself adds nothing on
     top. Returns {finding: [task ids in wall order]}, biggest first."""
     groups = {}
-    for w in blockers.get("open") or []:
+    for w in waiting_walls(blockers):
         if (w.get("kind") or "") != "TOOL":
             continue
         fid, tid = (w.get("finding") or "").strip(), w.get("task")
@@ -1384,7 +1392,7 @@ def facts_bottlenecks(blockers, clock_days, now, fresh=(), roots=None, roots_err
     read_at = _aware(blockers.get("readAt"))
     extra_days = (now - read_at).total_seconds() / 86400 if read_at else 0.0
     past, kinds, blocked, seen = [], {}, [], set()
-    for w in blockers.get("open") or []:
+    for w in waiting_walls(blockers):
         kind = w.get("kind") or "?"
         kinds[kind] = kinds.get(kind, 0) + 1
         tid = w.get("task")
