@@ -14,7 +14,7 @@
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-10-06T05:10:08Z",
+  "generatedAt": "2026-11-21T06:10:12Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "",
   "agentAllowlistSize": 15,
@@ -22,9 +22,9 @@ var MCP_TOOLS = {
     "total": 41,
     "verified": 28,
     "declared": 13,
-    "kevin": 21,
+    "kevin": 22,
     "agents": 0,
-    "needsAuth": 20
+    "needsAuth": 19
   },
   "groups": [
     {
@@ -95,8 +95,8 @@ var MCP_TOOLS = {
         {
           "name": "Make",
           "what": "Make.com automations. Never authorised, so nothing uses it.",
-          "auth": "needs-auth",
-          "kevin": false,
+          "auth": "authorised",
+          "kevin": true,
           "agents": false,
           "source": "verified",
           "scope": ""
@@ -257,7 +257,7 @@ var MCP_TOOLS = {
     {
       "key": "plugins",
       "title": "Plugin bundles",
-      "blurb": "12 bundles are installed (agents-md, anthropic-skills, cc-plugin-plugin-authoring, cowork-plugin-management, cowork-plugin-management, customer-support, data, finance, legal, operations, productivity, telemetry). Every connector inside them is unauthorised, so none of them does anything today. Either authorise the ones you want or remove the bundles.",
+      "blurb": "35 bundles are installed (adobe-sign-field-setup, agents-md, airtable-cost-creator, airtable-cost-updater, airtable-tenancy-creator, airtable-tenant-creator, airtable-tenant-onboarding, anthropic-skills, approvals-band, cash-flow-forecast, cc-plugin-easel, cc-plugin-plugin-authoring, cc-plugin-privacy, commercial-loan-agreement-generator, contractor-job-creator, cowork-plugin-management, cowork-plugin-management, customer-support, data, evernote-pdf-processor, finance, gmail-respond-manager, gmail-to-airtable-inbound, legal, llm-council, meeting-manager, operations, productivity, schedule-of-works, similarweb-analytics, skill-creator-from-manus, telemetry, transaction-reconciler, uc47-form-automation, video-generator). Every connector inside them is unauthorised, so none of them does anything today. Either authorise the ones you want or remove the bundles.",
       "tools": [
         {
           "name": "atlassian",
