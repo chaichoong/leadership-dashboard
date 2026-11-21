@@ -290,6 +290,19 @@ const BUILTIN_SITES = {
                                   note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
   'ebay.co.uk':                 { label: 'eBay UK', login: false,
                                   note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
+  // eBay's DEVELOPER site (approved build recDPkv36UXe8QDD9, 21 Nov 2026). eBay blocks the robot on
+  // the shop, so the sourcing search reads it through the Browse API, whose two keys live on
+  // developer.ebay.com/my/keys. `session --site developer.ebay.com` reported signedIn TRUE off the
+  // public home page on 13, 16, 17 and 18 Nov while /my/keys redirected to /signin with a password
+  // box: Kevin tapped Sign in six times for nothing, and the 14 Nov keep-alive cleared a SIGN-IN
+  // wall on the strength of that false true. So the check begins on the account page (checkUrl) and
+  // must SEE the account before it says signed in (signedInText), rather than inferring it from the
+  // absence of a password box on a marketing page.
+  'developer.ebay.com':         { label: 'eBay developer (API keys)', login: true,
+                                  loginUrl: 'https://developer.ebay.com/signin',
+                                  checkUrl: 'https://developer.ebay.com/my/keys',
+                                  signedInText: ['Application Keys', 'Application Keysets'],
+                                  note: 'Holds the App ID and Cert ID for scripts/ebay-search.py. Read-only: the robot never rotates a key and never copies the Cert ID (GUARDRAILS, never automated).' },
   'vinted.co.uk':               { label: 'Vinted UK', login: false,
                                   note: 'Sourcing (11 Nov 2026): the robot reads listings and prices. No sign-in, no messages, no buying.' },
   'screwfix.com':               { label: 'Screwfix', login: false,
@@ -1117,6 +1130,10 @@ const SIGN_OUT_URL_RE = /(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)
 // Care door's words sit 47 characters in, and a wider window reads more of a signed-in feed (an inbox preview saying
 // "log in to view") as a door that no sign-in would ever clear (review of the re-ship, 19 Nov 2026).
 const SIGNIN_TEXT_WINDOW = 2000;
+// How much of the page a `signedInText` proof is looked for in. Wider than the door window on
+// purpose: a door gives itself away in its first words, while the thing that proves an account
+// page ("Application Keys") sits below a header, a nav and a cookie notice.
+const PROOF_TEXT_WINDOW = 20000;
 const SIGNIN_TEXT_RE = new RegExp([
   "(?:e-?mail|send|text) me a (?:login|log-?in|sign-?in|one-?time|security|access|verification) code",
   "(?:request|get) a (?:login|log-?in|sign-?in|one-?time|security) code",
@@ -1141,6 +1158,20 @@ function doorLanding(url, site) {
   if (login && site && site.start && hostAndPath(site.start) !== login && here === login) return "the site's own sign-in page";
   return '';
 }
+// PROOF, NOT THE ABSENCE OF A PASSWORD BOX (finding 20261116-agent-dispatch-1331, 18 Nov 2026).
+// Every test above answers "is this a door?", so a page that is neither a door nor the account
+// reads as signed in: developer.ebay.com's public home page did, four days running, while
+// /my/keys redirected to /signin. A site whose entry carries `signedInText` must SHOW one of
+// those phrases before the verdict is signed in. It is not treated as a door: a page that proves
+// nothing is not a sign-in form, and claiming it was one would have the Robot sign-in app record
+// a sign-in that never happened. The phrases are matched case-insensitively on the page's text.
+function signedInProof(entry, text) {
+  const want = (entry && Array.isArray(entry.signedInText)) ? entry.signedInText.filter(Boolean) : [];
+  if (!want.length) return '';
+  const hay = String(text || '').toLowerCase();
+  return want.some(w => hay.includes(String(w).toLowerCase())) ? ''
+    : `the page did not show the account (looked for ${want.map(w => JSON.stringify(w)).join(' or ')})`;
+}
 function sessionVerdict(url, passwordFields, text = '', title = '', site) {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
@@ -1155,8 +1186,10 @@ function sessionVerdict(url, passwordFields, text = '', title = '', site) {
   const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url) || !!door;
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
   const botCheck = isBotCheck(text, title);
-  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck,
-           ...(door ? { door } : {}) };
+  const unproven = botCheck ? '' : signedInProof(site && site.entry, text);
+  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck && !unproven,
+           atDoor, atOneLogin, botCheck,
+           ...(door ? { door } : {}), ...(unproven ? { unproven } : {}) };
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────────
@@ -4657,10 +4690,15 @@ async function main() {
       const text = await domText(page, SIGNIN_TEXT_WINDOW);
       const title = await page.title();
       const doors = { entry, start };
-      const verdict = sessionVerdict(url, passwordFields, text, title, doors);
+      // A site that must SHOW its account page needs more than the door window: "Application Keys"
+      // sits under eBay's own header and cookie notice, well past 2000 characters.
+      const proofText = Array.isArray(entry.signedInText) && entry.signedInText.length
+        ? await domText(page, PROOF_TEXT_WINDOW) : text;
+      const verdict = sessionVerdict(url, passwordFields, proofText, title, doors);
       const png = await shoot(page, shot);
       return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png,
-               signinPage: onSigninPage(url, passwordFields, text, title, doors), ...(verdict.door ? { door: verdict.door } : {}) };
+               signinPage: onSigninPage(url, passwordFields, text, title, doors), ...(verdict.door ? { door: verdict.door } : {}),
+               ...(verdict.unproven ? { unproven: verdict.unproven } : {}) };
     });
     // The verdict on the ledger is the one AFTER the robot's own refresh, when the site has one.
     const res = await withSelfRefresh(entry, path.join(PROFILE_ROOT, profile || 'default'), walkOnce, plainRefresh,
@@ -5142,7 +5180,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, secretValueReason, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, secretValueReason, assertApproved, padelApproval, padelMembersProblem, SECRET_NAME_RE, loadSites, sessionVerdict, signedInProof, PROOF_TEXT_WINDOW,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile, retiredSite, retiredRefusal, retiredSites, withRetiredRules, retiredResolverRules,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,

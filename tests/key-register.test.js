@@ -469,7 +469,10 @@ os.remove(kr.LAST_CHECK)
 broken = kr.status_row(NOW)
 print(json.dumps([blocked["status"], blocked["detail"][:28], broken["status"], broken["detail"]]))`);
     expect(out[0]).toBe('Failed');                      // Failed, so the red pass gives it to the Builder
-    expect(out[1]).toBe('No key could be tested: 5 ke');   // "5 keys: 0 tested and working"
+    // "7 keys: 0 tested and working". 5 until 21 Nov 2026, when the two awaited eBay rows joined the
+    // register: they are listed before their files exist so "+ Replace a key" can offer them, and
+    // they count as keys the estate needs, shown amber ("waiting for Kevin's one paste") until he does.
+    expect(out[1]).toBe('No key could be tested: 7 ke');
     expect(out[2]).toBe('Failed');
     expect(out[3]).toMatch(/^The key check could not run: ValueError: .* is not a register/);
   });

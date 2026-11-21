@@ -36,6 +36,8 @@ const ESTATE_SCRIPTS = [
   'scripts/ai_team_health.py',
   'scripts/session_handbacks.py',
   'scripts/key-register.py',
+  // 21 Nov 2026: the sourcing search through eBay's Browse API (approved build recDPkv36UXe8QDD9)
+  'scripts/ebay-search.py',
   'scripts/approval_evidence.py',
   'scripts/adobe_sign_link.py',
   'scripts/calendar-write.py',

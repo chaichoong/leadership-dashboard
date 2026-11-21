@@ -146,6 +146,18 @@ CATALOGUE = {
                               "purpose": "Runpreneur donations for the map", "renew": "a new restricted key in Stripe, pasted into Replace a key"},
     "strava_client_secret": {"service": "Strava", "kind": "key", "test": "",
                              "purpose": "the Strava app's own secret", "renew": "only if Strava resets the app"},
+    # eBay (approved build recDPkv36UXe8QDD9, 21 Nov 2026). eBay blocks the robot browser and the page
+    # fetch route, so the sourcing search reads it through eBay's Browse API (scripts/ebay-search.py),
+    # which needs an App ID and a Cert ID. Both rows are "awaited": the register lists them before
+    # either file exists, because Kevin's one paste is what creates the file, and "+ Replace a key"
+    # only offers a key the register already holds. On 18 Nov 2026 he was sent to that box with no
+    # eBay row in it and had nowhere to paste.
+    "ebay_app_id": {"service": "eBay", "kind": "key", "test": "ebay", "awaited": True,
+                    "purpose": "the eBay App ID (client id) for the sourcing search, scripts/ebay-search.py",
+                    "renew": "the App ID is public: the robot reads it off developer.ebay.com/my/keys and pastes it into Replace a key"},
+    "ebay_cert_id": {"service": "eBay", "kind": "key", "test": "ebay", "awaited": True,
+                     "purpose": "the eBay Cert ID (client secret) for the sourcing search, scripts/ebay-search.py",
+                     "renew": "Kevin copies the Cert ID on developer.ebay.com/my/keys, then pastes it into Replace a key"},
     "ticketmaster_api_key": {"service": "Ticketmaster", "kind": "key", "test": "ticketmaster",
                              "purpose": "the UK gigs list", "renew": "a new key on developer.ticketmaster.com, pasted into Replace a key"},
     "youtube_oauth_client.json": {"service": "YouTube", "kind": "key", "test": "", "json": True,
@@ -180,6 +192,10 @@ CATALOGUE = {
     "property_manager_passcode_kevin": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Kevin's passcode for Roy's page"},
     "property_manager_passcode_roy": {"service": "property-manager Worker", "kind": "passcode", "test": "", "purpose": "Roy's passcode for his page"},
 }
+# A key the register lists before its file exists, so "+ Replace a key" can offer it: Kevin's paste
+# is what creates the file. Amber until he pastes, never red: only he can clear it, and a red row
+# raises a Builder task nobody can act on.
+AWAITED = tuple(n for n, d in CATALOGUE.items() if d.get("awaited"))
 IDS = ("ghl_location_id", "ghl_location_id_od", "ghl_location_id_runpreneur", "ghl_user_id_kevin",
        "pingen_client_id", "pingen_org_id", "strava_client_id")
 # Files that are settings, not keys. Anything not named here or in the catalogue is "unknown" and
@@ -425,11 +441,22 @@ def key_files(config_dir=CONFIG_DIR):
                   if os.path.isfile(os.path.join(config_dir, n)) and not n.startswith(".") and n not in SKIP_FILES)
 
 
+def awaiting_paste(row, config_dir=CONFIG_DIR):
+    """True while an awaited key is still waiting for Kevin's one paste: no file, never replaced."""
+    if not row.get("awaited") or row.get("replacedAt"):
+        return False
+    f = row.get("file")
+    return not (f and os.path.exists(os.path.join(config_dir, f)))
+
+
 def seed(found=None, config_dir=CONFIG_DIR, reg_path=REGISTER, with_readers=True):
     """Additive: a row's own notes, end date and anything written by hand survive; facts are refreshed."""
     reg = load_register(reg_path)
     keys = reg["keys"]
-    for name in key_files(config_dir):
+    # An AWAITED key is seeded whether or not its file is there: without a row, "+ Replace a key"
+    # cannot offer it and Kevin has nowhere to paste (18 Nov 2026, task recDPkv36UXe8QDD9).
+    present = key_files(config_dir)
+    for name in list(present) + [n for n in AWAITED if n not in present]:
         row = keys.setdefault(name, {})
         d = describe(name)
         # The catalogue in this file describes a key. A row marked "manual": true, or a file the
@@ -473,7 +500,7 @@ def seed(found=None, config_dir=CONFIG_DIR, reg_path=REGISTER, with_readers=True
         reg["discoveredAt"] = iso(now_utc())
         reg["discoveryErrors"] = found["errors"]
     gone = [n for n, r in keys.items() if r.get("file") and not os.path.exists(os.path.join(config_dir, r["file"]))
-            and r.get("kind") not in ("id", "setting")]
+            and r.get("kind") not in ("id", "setting") and not awaiting_paste(r, config_dir)]
     for n in gone:
         keys[n]["missingSince"] = keys[n].get("missingSince") or iso(now_utc())
     save_register(reg, reg_path)
@@ -567,6 +594,29 @@ def t_ticketmaster(v, row):
     return _ok(s, b)
 
 
+def t_ebay(v, row):
+    """Asks eBay for an application token with the App ID and Cert ID pair: it reads and changes nothing.
+
+    The two keys arrive one at a time, and the first cannot be tested on its own. That is
+    "untestable", not a failure: a replace writes it and says so, and the check calls it grey.
+    """
+    import base64
+    pair = "ebay_cert_id" if row.get("file") == "ebay_app_id" else "ebay_app_id"
+    try:
+        other = read_value(os.path.join(CONFIG_DIR, pair))
+    except OSError:
+        return {"result": "untestable", "said": "the other half of the eBay pair (%s) is not there yet" % pair}
+    if not other:
+        return {"result": "untestable", "said": "the other half of the eBay pair (%s) is empty" % pair}
+    app_id, cert_id = (v, other) if row.get("file") == "ebay_app_id" else (other, v)
+    basic = base64.b64encode(("%s:%s" % (app_id, cert_id)).encode()).decode()
+    data = urllib.parse.urlencode({"grant_type": "client_credentials",
+                                   "scope": "https://api.ebay.com/oauth/api_scope"}).encode()
+    s, _, b = _http("https://api.ebay.com/identity/v1/oauth2/token",
+                    {"Authorization": "Basic " + basic, "Content-Type": "application/x-www-form-urlencoded"}, data, "POST")
+    return _ok(s, b)
+
+
 def t_pingen(v, row):
     try:
         cid = read_value(os.path.join(CONFIG_DIR, "pingen_client_id"))
@@ -643,7 +693,8 @@ def t_padel_admin(v, row):
 EXPIRY_TESTS = ("github", "cloudflare")    # these read the key's own end date, so an "ok" without one clears it
 TESTS = {"airtable": t_airtable, "github": t_github, "cloudflare": t_cloudflare, "gemini": t_gemini,
          "homeassistant": t_homeassistant, "stripe": t_stripe, "ticketmaster": t_ticketmaster, "pingen": t_pingen,
-         "youtube": t_youtube, "gdrive": t_gdrive, "padel-robot": t_padel_robot, "padel-admin": t_padel_admin}
+         "youtube": t_youtube, "gdrive": t_gdrive, "padel-robot": t_padel_robot, "padel-admin": t_padel_admin,
+         "ebay": t_ebay}
 
 
 def test_value(row, value):
@@ -667,6 +718,9 @@ def judge_row(name, row, now, config_dir=CONFIG_DIR):
         return out
     if kind == "unknown":
         out.update(status="amber", said="nobody has described this file: say what it is in the key register")
+        return out
+    if awaiting_paste(row, config_dir):
+        out.update(status="amber", said="waiting for Kevin's one paste: open Replace a key, pick %s and paste it" % name)
         return out
     path = os.path.join(config_dir, row["file"]) if row.get("file") else None
     notes = []
@@ -948,7 +1002,9 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
         print("REFUSED: the pasted text is empty, too short or has spaces in it. Nothing changed.")
         return 2
     res = test_value(row, value)
-    if res is not None and res["result"] != "ok":
+    # "untestable" is not a failure: the service cannot judge this value on its own yet (the eBay
+    # App ID arrives before its Cert ID). It is written, and the line below says it was not tested.
+    if res is not None and res["result"] not in ("ok", "untestable"):
         print("REFUSED: the new key did not work (%s). Nothing was changed: the old key is still in place." % res["said"])
         return 3
     done, failed = [], []
@@ -961,7 +1017,7 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
     after = None
     if row.get("file") and res is not None:
         after = test_value(row, read_value(os.path.join(config_dir, row["file"])))
-        if after and after["result"] != "ok":
+        if after and after["result"] not in ("ok", "untestable"):
             failed.append("the key file did not pass its test again (%s)" % after["said"])
     stamp = iso(now_utc())
     row["changed"], row["replacedAt"] = stamp, stamp
@@ -973,7 +1029,9 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
     with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"at": stamp, "key": name, "tested": row["lastReplace"]["tested"],
                              "reached": done, "failed": failed}) + "\n")
-    print("%s: %s." % (name, "the new key works" if res else "the new value is in place (no safe test for this key)"))
+    print("%s: %s." % (name, "the new key works" if res and res["result"] == "ok" else
+                       ("the new value is in place, not tested yet: %s" % res["said"]) if res else
+                       "the new value is in place (no safe test for this key)"))
     print("Reached %d place%s: %s." % (len(done), "" if len(done) == 1 else "s", "; ".join(done) or "none"))
     if failed:
         print("NOT REACHED (%d): %s." % (len(failed), "; ".join(failed)))
@@ -1037,6 +1095,15 @@ def selftest():
     copies, own = copy_rows({"workers": {"w1": ["AIRTABLE_PAT", "ANTHROPIC_API_KEY", "FROM_EMAIL"]}, "github": ["AIRTABLE_PAT"], "errors": []})
     assert len(copies["airtable_pat"]) == 2 and own["worker:ANTHROPIC_API_KEY"]["kind"] == "worker-only"; checks += 1
     assert own["worker:FROM_EMAIL"]["kind"] == "setting"; checks += 1
+    # The eBay pair (21 Nov 2026): both rows are awaited, so Replace a key offers them before the
+    # files exist, and an awaited row with no value yet is amber, never red.
+    assert set(AWAITED) >= {"ebay_app_id", "ebay_cert_id"}; checks += 1
+    assert describe("ebay_cert_id")["test"] == "ebay" and "ebay" in TESTS; checks += 1
+    assert awaiting_paste({"awaited": True, "file": "ebay_cert_id"}, "/nowhere-at-all"); checks += 1
+    assert not awaiting_paste({"awaited": True, "file": "ebay_cert_id", "replacedAt": "2026-11-21T00:00:00Z"}, "/nowhere-at-all"); checks += 1
+    assert not awaiting_paste({"file": "airtable_pat"}, "/nowhere-at-all"); checks += 1
+    assert judge_row("ebay_cert_id", {"kind": "key", "file": "ebay_cert_id", "awaited": True, "test": "ebay"},
+                     now_utc(), "/nowhere-at-all")["status"] == "amber"; checks += 1
     return {"checks": checks, "failed": []}
 
 
