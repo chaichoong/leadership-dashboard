@@ -1057,6 +1057,44 @@ function persistSessionCookies(dir, ttlMs) {
 // it, so it is its own verdict: botCheck.
 const BOT_CHECK_TITLE_RE = /^\s*just a moment/i;
 const BOT_CHECK_TEXT_RE = /verify you are (?:a )?human|performing security verification|checking if the site connection is secure|checking your browser before accessing|make sure you(?:'|’)re not a robot|press (?:&|and) hold to confirm/i;
+// A headless real Chrome announces "HeadlessChrome" in its user agent, and some
+// sites read that as a robot and refuse the request outright. Proved with curl
+// from this Mac on 19 Nov 2026 (finding 20261116-agent-dispatch-1333):
+// TopCashback's CloudFront answered 200 to a normal Chrome user agent and 403
+// "ERROR Request blocked" to the byte-identical request carrying
+// "HeadlessChrome", on the homepage and on the RightSure landing page alike, so
+// the whole TopCashback -> RightSure insurance route died at step 3 for days and
+// two tasks waited on it. Not rate limiting and not the IP.
+//
+// The same string with "HeadlessChrome" read as plain "Chrome", or '' when there
+// is nothing to change (a headed run, an unreadable agent). Never a pinned
+// version string: youtube_studio.py hardcodes one and it goes stale, and a
+// Chrome version that no longer exists is its own fingerprint.
+function plainUA(ua) {
+  const s = String(ua || '');
+  return s.includes('HeadlessChrome') ? s.replace(/HeadlessChrome/g, 'Chrome') : '';
+}
+
+// Put that agent on the context, header first. The HEADER is what a CDN reads,
+// and it is set on the CONTEXT so every page this run opens later carries it
+// too — a per-page override would cover only the page in hand. navigator's own
+// copy is patched in the same breath so a site's script and the request it
+// makes can never disagree. Returns the agent it set, or '' when it changed
+// nothing. A failure is never fatal: the step still runs, as it did before.
+async function dropHeadlessUA(ctx, page) {
+  let ua = '';
+  try { ua = await page.evaluate(() => navigator.userAgent); } catch (e) { return ''; }
+  const plain = plainUA(ua);
+  if (!plain) return '';
+  try { await ctx.setExtraHTTPHeaders({ 'User-Agent': plain }); } catch (e) { return ''; }
+  try {
+    await ctx.addInitScript((v) => {
+      Object.defineProperty(navigator, 'userAgent', { get: () => v });
+    }, plain);
+  } catch (e) { /* the header is the part that matters */ }
+  return plain;
+}
+
 function isBotCheck(text = '', title = '') {
   return BOT_CHECK_TITLE_RE.test(String(title || '')) || BOT_CHECK_TEXT_RE.test(String(text || '').slice(0, 2000));
 }
@@ -1436,6 +1474,9 @@ async function withPage(profile, headed, fn) {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
     const page = ctx.pages()[0] || await ctx.newPage();
+    // Before the step navigates anywhere: a headless run must not announce
+    // itself as HeadlessChrome (see plainUA above).
+    await dropHeadlessUA(ctx, page);
     // A step that met a retired host says so in plain words, never as a closed page or net::ERR_.
     // Only a FAILURE is put down to a retired host (a retired page that loaded and was closed, or a
     // navigation that met the block), and then that wins over the raw error it caused. A run whose
@@ -5146,7 +5187,7 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile, retiredSite, retiredRefusal, retiredSites, withRetiredRules, retiredResolverRules,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, DOWNLOAD_DIR, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, plainUA, dropHeadlessUA, lastKeptCount: () => lastKept, onSigninPage,
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
                    doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
