@@ -33,15 +33,16 @@ describe('content-engine approval card', () => {
     expect(qa.failed).toEqual([]);   // the output gate (10 Sep 2026): no card until the files prove themselves
     expect(out.failed).toEqual([]);
     expect(out.checks).toBeGreaterThanOrEqual(14);
-    // 120 SECONDS, NOT 30 (finding 20261121-queue-fixer-1405). This case shells out to two
-    // python selftests, and measured on the Mac mini at rest on 21 Nov 2026 they take 7.2s
-    // (approval.py) and 25.9s (qa.py): 33.1s of work against a 30s budget, so it failed
-    // whenever the machine was anything but unusually fast. On 21 Nov that one timeout turned
-    // the merge gate red on PR 986, on PR 987 and on a local npm test, and "1 test failed"
-    // with nothing else wrong is what left the whole fixer queue off main for a morning.
-    // The budget is raised HERE and not in vitest.config.js on purpose: a long default would
-    // hide a genuinely hung test everywhere else. Cutting qa.py's 26-second selftest is its
-    // own job; when that lands, bring this back to about double the measured time.
+    // 120 SECONDS, NOT THE 30s DEFAULT (finding 20261121-queue-fixer-1405). These cases shell
+    // out to a script's own selftest, and qa.py's and approval.py's build real media with
+    // ffmpeg, so their wall time scales with how busy the machine is. Measured on the Mac mini
+    // on 21 Nov 2026: 5.6s and 6.6s with nothing else running, but 25.9s and 7.2s while a full
+    // gate was running beside them, which is 33s against vitest.config.js's 30s default. So
+    // the budget held at rest and broke under exactly the load a merge gate creates, and on
+    // 21 Nov it turned the gate red on PRs 986, 987 and 1005 and left the whole fixer queue off
+    // main for a morning. The budget is raised per case, never in vitest.config.js: a long
+    // global default would hide a genuinely hung test everywhere else. The deeper cause is
+    // real media encoding inside a parallel suite, and cutting it is its own job.
   }, 120000);
 
   it('is a role agent the dispatcher knows, never handed work by the CEO pass, so submit and lessons both work', () => {
