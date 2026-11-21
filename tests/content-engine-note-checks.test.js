@@ -515,6 +515,16 @@ describe('the three scripts still pass their own selftests', () => {
     it(s, () => {
       const out = execFileSync('python3', [s, 'selftest'], { encoding: 'utf8', cwd: CE }).trim().split('\n');
       expect(JSON.parse(out[out.length - 1]).failed).toEqual([]);
-    });
+    // 120 SECONDS, NOT THE 30s DEFAULT (finding 20261121-queue-fixer-1405). These cases shell
+    // out to a script's own selftest, and qa.py's and approval.py's build real media with
+    // ffmpeg, so their wall time scales with how busy the machine is. Measured on the Mac mini
+    // on 21 Nov 2026: 5.6s and 6.6s with nothing else running, but 25.9s and 7.2s while a full
+    // gate was running beside them, which is 33s against vitest.config.js's 30s default. So
+    // the budget held at rest and broke under exactly the load a merge gate creates, and on
+    // 21 Nov it turned the gate red on PRs 986, 987 and 1005 and left the whole fixer queue off
+    // main for a morning. The budget is raised per case, never in vitest.config.js: a long
+    // global default would hide a genuinely hung test everywhere else. The deeper cause is
+    // real media encoding inside a parallel suite, and cutting it is its own job.
+    }, 120000);
   }
 });
