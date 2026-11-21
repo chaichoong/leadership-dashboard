@@ -33,7 +33,16 @@ describe('content-engine approval card', () => {
     expect(qa.failed).toEqual([]);   // the output gate (10 Sep 2026): no card until the files prove themselves
     expect(out.failed).toEqual([]);
     expect(out.checks).toBeGreaterThanOrEqual(14);
-  }, 30000);
+    // 120 SECONDS, NOT 30 (finding 20261121-queue-fixer-1405). This case shells out to two
+    // python selftests, and measured on the Mac mini at rest on 21 Nov 2026 they take 7.2s
+    // (approval.py) and 25.9s (qa.py): 33.1s of work against a 30s budget, so it failed
+    // whenever the machine was anything but unusually fast. On 21 Nov that one timeout turned
+    // the merge gate red on PR 986, on PR 987 and on a local npm test, and "1 test failed"
+    // with nothing else wrong is what left the whole fixer queue off main for a morning.
+    // The budget is raised HERE and not in vitest.config.js on purpose: a long default would
+    // hide a genuinely hung test everywhere else. Cutting qa.py's 26-second selftest is its
+    // own job; when that lands, bring this back to about double the measured time.
+  }, 120000);
 
   it('is a role agent the dispatcher knows, never handed work by the CEO pass, so submit and lessons both work', () => {
     const r = py(`
