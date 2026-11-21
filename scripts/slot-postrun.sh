@@ -164,9 +164,14 @@ for n in names:
             with open(os.path.join(reqs, n)) as fh: loaded = json.load(fh)
             if not isinstance(loaded, dict): raise ValueError("not a JSON object")
             req = loaded
-            who, days, limit = str(req["who"]).strip(), str(int(req.get("days") or 60)), str(int(req.get("limit") or 40))
-            r = subprocess.run([sys.executable, sweep, "lookup", "--who", who, "--days", days, "--limit", limit],
-                               capture_output=True, text=True, timeout=60, env=env)
+            who, days = str(req["who"]).strip(), str(int(req.get("days") or 60))
+            # --limit ONLY when the request asked for one (finding 20261119-agent-dispatch-1367). This line
+            # used to force 40 on every request that named none, so the newest-40 cap the lookup dropped
+            # came straight back on the queued path, which is the path a robot actually uses.
+            cap = req.get("limit")
+            args = [sys.executable, sweep, "lookup", "--who", who, "--days", days]
+            if cap not in (None, ""): args += ["--limit", str(int(cap))]
+            r = subprocess.run(args, capture_output=True, text=True, timeout=60, env=env)
             try: out = json.loads(r.stdout)
             except ValueError: out = {"error": "the lookup outside claude printed no JSON (rc=%s)" % r.returncode, "stderr": r.stderr[-500:]}
         except Exception as ex:                               # noqa: BLE001

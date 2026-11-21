@@ -414,6 +414,20 @@ def selftest():
 LOOKUP_MAX_CHATS = 3
 LOOKUP_MAX_MESSAGES = 100
 LOOKUP_MAX_DAYS = 365
+# A PHOTO IS A MESSAGE (finding 20261119-agent-dispatch-1367). Until 20 Nov 2026 lookup dropped every
+# row with no ZTEXT, so a photo, voice note or document was invisible: an agent asked to check a photo a
+# tenant sent could only answer "nothing was said", which is the silent-zero this estate refuses. And the
+# window was a newest-N cap per chat (40), so in a busy chat --days 60 silently returned a few days.
+# Now: media rows come back with their type, date and local file path, and the window is the DAYS asked
+# for. LOOKUP_MAX_ROWS is a safety ceiling per chat, and hitting it is REPORTED (`truncated`), never quiet.
+LOOKUP_MAX_ROWS = 2000
+# ZWAMEDIAITEM.ZMEDIALOCALPATH is relative to the same group container the database sits in, so the file
+# is found beside it rather than at a second guessed location.
+MEDIA_ROOT = os.environ.get("WHATSAPP_MEDIA_ROOT") or os.path.dirname(DB_PATH)
+# ZWAMESSAGE.ZMESSAGETYPE, as WhatsApp on macOS writes it. The NUMBER is always reported beside the name,
+# because a name this map has wrong would otherwise hide the row; an unknown type reads "type <n>".
+MEDIA_TYPE_NAMES = {1: "image", 2: "video", 3: "audio", 4: "contact", 5: "location", 6: "call",
+                    7: "link", 8: "document", 10: "system", 11: "sticker", 14: "deleted", 15: "sticker"}
 
 # A LOOKUP THE AGENT CANNOT MAKE IS QUEUED, NOT LOST (finding 20261011-agent-dispatch-834).
 # macOS Full Disk Access belongs to the job's own /usr/bin/python3, never to the claude binary,
@@ -429,8 +443,12 @@ TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 def lookup_key(task, who, days, limit):
     """The file name for one ask: a hash of the task and the EXACT who, days and limit (review of PR 983: a
-    letters-only slug merged "Zoë" with "Zo" and turned every non-Latin name into "unnamed")."""
-    return hashlib.sha256(json.dumps([task, who, int(days), int(limit)]).encode("utf-8")).hexdigest()[:32] + ".json"
+    letters-only slug merged "Zoë" with "Zo" and turned every non-Latin name into "unnamed").
+
+    No limit (the default since 20 Nov 2026: the window is the days asked for) keys as null, which is its
+    own ask and never the same file as --limit 40."""
+    cap = None if limit in (None, "") else int(limit)
+    return hashlib.sha256(json.dumps([task, who, int(days), cap]).encode("utf-8")).hexdigest()[:32] + ".json"
 
 
 def _read_json(path):
@@ -519,7 +537,26 @@ def lookup_digits(who):
     return d
 
 
-def lookup(who, days=60, limit=40, task=None):
+def table_columns(conn, table):
+    """The column names of a table, or an empty set when the table is not there. A database without
+    ZWAMEDIAITEM (an older WhatsApp, or a test's own) must read as "media NOT CHECKED", never crash and
+    never quietly return text only."""
+    try:
+        return {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    except sqlite3.DatabaseError:
+        return set()
+
+
+def media_type_name(msg_type):
+    """A plain word for ZMESSAGETYPE, with the raw number always kept beside it by the caller."""
+    try:
+        n = int(msg_type)
+    except (TypeError, ValueError):
+        return "unknown"
+    return MEDIA_TYPE_NAMES.get(n, f"type {n}")
+
+
+def lookup(who, days=60, limit=None, task=None):
     who = " ".join(str(who or "").split())
     digits = lookup_digits(who)
     by_number = len(digits) >= 7
@@ -527,7 +564,9 @@ def lookup(who, days=60, limit=40, task=None):
         print(json.dumps({"error": "lookup needs a contact name (3+ letters) or a phone number"}))
         return 2
     days = max(1, min(int(days), LOOKUP_MAX_DAYS))
-    limit = max(1, min(int(limit), LOOKUP_MAX_MESSAGES))
+    # The window is the DAYS asked for. --limit is an optional cap the caller may still ask for; with
+    # none, the whole window is read up to LOOKUP_MAX_ROWS, and a ceiling that bites is reported.
+    limit = None if limit in (None, "") else max(1, min(int(limit), LOOKUP_MAX_MESSAGES))
     try:
         conn = open_db()
         sessions = conn.execute("SELECT Z_PK AS pk, ZCONTACTJID AS jid, ZPARTNERNAME AS name FROM ZWACHATSESSION").fetchall()
@@ -557,32 +596,80 @@ def lookup(who, days=60, limit=40, task=None):
                           "matches": [c["name"] for c in chats][:10]}))
         return 2
     since = now_apple_ts() - days * 86400
-    out = []
+    # What this database can tell us, asked once. A column or table that is not there is NOT CHECKED in
+    # the output, so an agent reading the answer can tell "no media" from "media could not be read".
+    msg_cols = table_columns(conn, "ZWAMESSAGE")
+    media_cols = table_columns(conn, "ZWAMEDIAITEM")
+    has_type = "ZMESSAGETYPE" in msg_cols
+    media_path_col = next((col for col in ("ZMEDIALOCALPATH", "ZMEDIAURL") if col in media_cols), "")
+    has_media = bool(media_path_col) and "ZMESSAGE" in media_cols
+    media_read = "read" if has_media else (
+        "NOT CHECKED: this database has no ZWAMEDIAITEM table, so no media file path could be read"
+        if not media_cols else
+        f"NOT CHECKED: ZWAMEDIAITEM has no usable path column (found: {sorted(media_cols)[:8]})")
+    type_read = "read" if has_type else "NOT CHECKED: ZWAMESSAGE has no ZMESSAGETYPE column"
+    select = ["m.ZTEXT AS text", "m.ZISFROMME AS from_me", "m.ZMESSAGEDATE AS date",
+              "gm.ZCONTACTNAME AS member_name", "gm.ZMEMBERJID AS member_jid",
+              "s.ZCONTACTJID AS chat_jid", "s.ZPARTNERNAME AS chat_name",
+              ("m.ZMESSAGETYPE AS msg_type" if has_type else "NULL AS msg_type"),
+              (f"mi.{media_path_col} AS media_path" if has_media else "NULL AS media_path")]
+    joins = "LEFT JOIN ZWAMEDIAITEM mi ON mi.ZMESSAGE = m.Z_PK" if has_media else ""
+    out, truncated = [], []
     for c in chats:
+        # One more row than the ceiling, so a ceiling that bit is KNOWN rather than guessed at.
+        cap = min(limit or LOOKUP_MAX_ROWS, LOOKUP_MAX_ROWS)
         rows = conn.execute(
-            """
-            SELECT m.ZTEXT AS text, m.ZISFROMME AS from_me, m.ZMESSAGEDATE AS date,
-                   gm.ZCONTACTNAME AS member_name, gm.ZMEMBERJID AS member_jid,
-                   s.ZCONTACTJID AS chat_jid, s.ZPARTNERNAME AS chat_name
+            f"""
+            SELECT {", ".join(select)}
             FROM ZWAMESSAGE m
             JOIN ZWACHATSESSION s ON s.Z_PK = m.ZCHATSESSION
             LEFT JOIN ZWAGROUPMEMBER gm ON gm.Z_PK = m.ZGROUPMEMBER
+            {joins}
             WHERE m.ZCHATSESSION = ? AND m.ZMESSAGEDATE >= ?
             ORDER BY m.ZMESSAGEDATE DESC LIMIT ?
-            """, (c["pk"], since, limit)).fetchall()
-        msgs = []
+            """, (c["pk"], since, cap + 1)).fetchall()
+        if len(rows) > cap:
+            rows = rows[:cap]
+            oldest = apple_ts_to_iso(rows[-1]["date"]) if rows else ""
+            truncated.append({"chat": c["name"], "rowsRead": cap,
+                              "coveredBackTo": oldest,
+                              "why": f"more than {cap} messages in the {days}-day window; ask for fewer days "
+                                     "or a narrower contact. This is NOT the whole window."})
+        msgs, media_count = [], 0
         for r in reversed(rows):
-            if not r["text"]:
-                continue
             if r["from_me"]:
                 frm = "kevin"
             else:
                 jid, name = sender_identity(r)
                 frm = name or jid
-            msgs.append({"from": frm, "at": apple_ts_to_iso(r["date"]), "text": r["text"][:1000]})
-        out.append({"chat": c["name"], "jid": c["jid"], "group": jid_is_group(c["jid"]), "messages": msgs})
+            text = r["text"] or ""
+            row = {"from": frm, "at": apple_ts_to_iso(r["date"])}
+            if text:
+                row["text"] = text[:1000]
+            # A row with no text is a photo, voice note, document or system event, never nothing.
+            if not text or (has_type and r["msg_type"] not in (None, TEXT_MESSAGE_TYPE)):
+                if not text and not has_type and not has_media:
+                    # Nothing to say what it was: reported as unreadable, never dropped.
+                    row["media"] = {"type": None, "typeName": "unknown", "path": None,
+                                    "note": "a message with no text, and this database says nothing about "
+                                            "its kind: " + type_read}
+                else:
+                    path = r["media_path"] or ""
+                    full = os.path.expanduser(os.path.join(MEDIA_ROOT, path)) if path and not os.path.isabs(path) else path
+                    row["media"] = {"type": r["msg_type"], "typeName": media_type_name(r["msg_type"]),
+                                    "path": full or None,
+                                    "onDisk": bool(full) and os.path.exists(full),
+                                    **({} if has_media else {"note": media_read})}
+                media_count += 1
+            msgs.append(row)
+        out.append({"chat": c["name"], "jid": c["jid"], "group": jid_is_group(c["jid"]),
+                    "messages": msgs, "mediaMessages": media_count})
     print(json.dumps({"who": who, "days": days, "chatsSearched": len(sessions), "chats": out,
-                      "note": "read-only; nothing was sent, drafted or marked"}, indent=1))
+                      "limit": limit, "rowCeiling": LOOKUP_MAX_ROWS,
+                      "truncated": truncated or None, "mediaRead": media_read, "typeRead": type_read,
+                      "note": "read-only; nothing was sent, drafted or marked. A media path is the file on "
+                              "this Mac: the post-run step copies a named one into the task folder."},
+                     indent=1))
     return 0
 
 
@@ -617,7 +704,9 @@ def main(argv):
         if not who:
             print("lookup requires --who <contact name or phone number>", file=sys.stderr)
             return 2
-        return lookup(who, opt("--days", "60"), opt("--limit", "40"), opt("--task"))
+        # No --limit by default: the window is --days (finding 20261119-agent-dispatch-1367). A newest-40
+        # cap made a busy chat return a few days of a 60-day ask and said nothing about it.
+        return lookup(who, opt("--days", "60"), opt("--limit"), opt("--task"))
     print(f"unknown command {cmd}", file=sys.stderr)
     return 2
 
