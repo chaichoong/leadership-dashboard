@@ -4997,9 +4997,22 @@ def build_queue(args=None):
         if woke:
             t["wokeByChange"] = woke
     for t in combined:
-        t["kind"] = ("carry_out" if t["outcome"] in APPROVED
+        # AN APPROVAL THE DISPATCHER ITSELF ARCHIVED STILL DECIDES (finding
+        # 20261119-agent-dispatch-1379). `decided` carries out a DECIDE: card by
+        # clearing Approval Outcome and Approved At and leaving Kevin's verdict in
+        # the Agent Output's own DECIDED line. So on 19 Nov 2026 the 13:00 slot read
+        # the GitHub Support request he had approved as-is at 10:00 as `new` work,
+        # handed it the prepare-only brief that forbids sending, and the approved
+        # request was not filed; nothing said so. decided_card_verdict is the same
+        # reader `complete` already trusts to close such a task, so the two can
+        # never disagree about who approved what. A LIVE verdict always wins: a
+        # newer Rejected or Changes requested is read first and the archive ignored.
+        archived = decided_card_verdict(t) if not t["outcome"] else ""
+        t["kind"] = ("carry_out" if t["outcome"] in APPROVED or archived in APPROVED
                      else "redo" if t["outcome"] == "Changes requested"
                      else "new")
+        if archived in APPROVED:
+            t["archivedVerdict"] = archived
         # A previous run recorded intent to carry this out and never marked it
         # done: the action MAY already have happened. The dispatcher must make
         # the agent VERIFY (sent items, records) before executing anything.
@@ -8792,6 +8805,49 @@ def due_move_problem(fields, new_due, today, quote):
     return ""
 
 
+# A DEADLINE FIX TASK'S APPROVAL COULD MOVE NOTHING (finding 20261119-agent-dispatch-1376).
+# On 19 Nov 2026 at 10:00 Kevin approved, as-is, moving recKxJ5OQBTWVsphC's due date to
+# 2026-12-02. `due` reads only his words in the TARGET card's own newest feedback, and his
+# approval sat on the DEADLINE FIX task that raised the card, so the move was refused (exit
+# 2, nothing written), the approved note was appended to the target by hand and the date was
+# left as it was. No route existed for one card's approval to move another card's date.
+#
+# The route is the shape every other record-changing door already uses: the card Kevin read
+# names the record and the value it sets, in ONE line, and his AS-IS approval of that card is
+# the authority. An approval with edits is not: an edit can change the very date in the line.
+DEADLINE_FIX_LINE_RE = re.compile(r"^DEADLINE FIX: (rec[A-Za-z0-9]{14}) Due Date = (\d{4}-\d{2}-\d{2})\s*$", re.M)
+
+
+def deadline_fix_problem(rec, target, new_due):
+    """'' when this card of Kevin's authorises moving `target`'s due date to new_due, else why not.
+
+    `rec` is the approving task's raw record (createdTime is part of the approval evidence)."""
+    fields = rec.get("fields", {}) or {}
+    t = task_view(rec)
+    lines = DEADLINE_FIX_LINE_RE.findall(str(t["agentOutput"] or ""))
+    if not lines:
+        return ("its card carries no 'DEADLINE FIX: <task id> Due Date = YYYY-MM-DD' line, so nothing "
+                "Kevin approved names a date to set")
+    if len(lines) > 1:
+        return (f"its card carries {len(lines)} DEADLINE FIX lines: one card sets one date, so raise "
+                "one card per task whose date moves")
+    said_target, said_date = lines[0]
+    if said_target != target:
+        return f"its card sets the date on {said_target}, not {target}"
+    if said_date != new_due.isoformat():
+        return f"its card sets {said_target} to {said_date}, not {new_due.isoformat()}"
+    if t["outcome"] == "Approved with minor edits":
+        return ("the approval came WITH EDITS, so the date he meant may not be the date on the card. "
+                "Read his note and raise a new card with the date he gave")
+    if t["outcome"] != "Approved as-is":
+        return f"it is not approved as-is (Approval Outcome: {t['outcome'] or 'not set'})"
+    evidence = approval_evidence_problem(fields, rec.get("createdTime") or "")
+    if evidence:
+        return evidence
+    if t["approverEmail"] and t["approverEmail"].lower() != KEVIN_AIRTABLE_EMAIL:
+        return f"it was put in {t['approverEmail']}'s queue: only Kevin moves his own deadlines"
+    return ""
+
 def restore_park_problem(t, today_iso):
     """(date, '') when Kevin's own park on this task stands and may be put back, else ('', why not).
 
@@ -8861,19 +8917,46 @@ def cmd_due(args):
     why = " ".join(str(args.why or "").split())
     if len(why) < 10:
         sys.exit("ERROR: --why needs Kevin's words or the reason, in a sentence")
+    approved_on = str(getattr(args, "approved_on", "") or "").strip()
+    if not approved_on and not args.quote:
+        sys.exit("ERROR: a due date moves on Kevin's word: pass --quote (his words on THIS task) or "
+                 "--approved-on <task id> (the card he approved that names this task and date)")
     t = get_task(args.task)
     fields = t.get("fields", {}) or {}
     today = datetime.now(LONDON).date()
-    problem = due_move_problem(fields, new_due, today, args.quote)
-    if problem:
-        print(json.dumps({"refused": args.task, "why": problem}))
-        return 2
+    card = None
+    if approved_on:
+        if approved_on == args.task:
+            sys.exit("ERROR: --approved-on names this same task; his words on it go in --quote")
+        card = get_task(approved_on)
+        problem = deadline_fix_problem(card, args.task, new_due)
+        if problem:
+            print(json.dumps({"refused": args.task, "approvedOn": approved_on, "why": problem}))
+            return 2
+        # The target's own gates still hold: never a past date, never a closed task, never a card
+        # waiting in his queue or one a robot holds In Progress. Only the WORDS check is answered
+        # by the approved card instead.
+        problem = due_move_problem(fields, new_due, today, args.quote or "") or ""
+        if problem and not problem.startswith("--quote"):
+            print(json.dumps({"refused": args.task, "approvedOn": approved_on, "why": problem}))
+            return 2
+    else:
+        problem = due_move_problem(fields, new_due, today, args.quote)
+        if problem:
+            print(json.dumps({"refused": args.task, "why": problem}))
+            return 2
     old = fields.get(AF["dueDate"]) or "blank"
     status = "Upcoming" if new_due > today else "Today"
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-    quoted = " ".join(str(args.quote).split())
-    note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
-            f"(Kevin: \"{quoted}\")")
+    if approved_on:
+        said = task_view(card)
+        note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
+                f"(Kevin approved as-is on {str(said['approvedAt'] or '')[:10] or 'the card'}: "
+                f"{approved_on} \"{' '.join(str(said['name'] or '').split())}\")")
+    else:
+        quoted = " ".join(str(args.quote).split())
+        note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
+                f"(Kevin: \"{quoted}\")")
     patch_task(args.task, {
         AF["dueDate"]: new_due.isoformat(),
         AF["status"]: status,
@@ -8882,7 +8965,10 @@ def cmd_due(args):
     check = get_task(args.task).get("fields", {}) or {}
     if str(check.get(AF["dueDate"]) or "") != new_due.isoformat():
         sys.exit(f"ERROR: {args.task} reads due {check.get(AF['dueDate'])!r} after writing {new_due.isoformat()}")
-    print(json.dumps({"due": args.task, "from": old, "to": new_due.isoformat(), "status": status}))
+    out = {"due": args.task, "from": old, "to": new_due.isoformat(), "status": status}
+    if approved_on:
+        out["approvedOn"] = approved_on
+    print(json.dumps(out))
     return 0
 
 
@@ -17065,7 +17151,10 @@ def main():
     du.add_argument("task")
     du.add_argument("date", help="YYYY-MM-DD, today or later")
     du.add_argument("--why", required=True, help="the reason, in a sentence")
-    du.add_argument("--quote", required=True, help="Kevin's own words from his feedback on the task, verbatim")
+    du.add_argument("--quote", help="Kevin's own words from his feedback on the task, verbatim")
+    du.add_argument("--approved-on", dest="approved_on",
+                    help="instead of --quote: the task id of the card Kevin approved AS-IS whose own "
+                         "'DEADLINE FIX: <task id> Due Date = YYYY-MM-DD' line names this task and date")
 
     rp = sub.add_parser("restore-park",
                         help="put back Kevin's own park (an agent-dispatch 'Parked until' line) that a fold undid")
