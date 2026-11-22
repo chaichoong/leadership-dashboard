@@ -137,6 +137,22 @@ describe('monday-restart: readings and guard rails', () => {
     expect(code).toMatch(/if label in started_at_login:\s*\n\s*continue/);
   });
 
+  // mac-nudge.py words the reminder as "repair it first" while a launchd file is broken.
+  it('reaches Kevin on every red skip and every restart that did not happen', () => {
+    const raises = code.match(/nudge raise restart/g) || [];
+    expect(raises).toHaveLength(3);
+    const overdue = code.slice(code.indexOf('skip_week () {'), code.indexOf('vm_back_on () {'));
+    expect(overdue).toMatch(/OVERDUE_UPTIME[\s\S]*?code=1[\s\S]*?fi\s*\n\s*\[ "\$code" -eq 1 \] && nudge raise restart "\$why"\s*\n\s*say "SKIPPED/);
+    expect(code).toMatch(/say "RESTART FAILED[^\n]*\n\s*nudge raise restart/);
+    expect(code).toMatch(/say "RESTART BLOCKED[^\n]*\n\s*nudge raise restart/);
+  });
+
+  // Review, 22 Nov 2026: a clear at login could take 4 minutes and delay the catch-up.
+  it('never clears a reminder itself, and a dry run touches nothing', () => {
+    expect(code).not.toMatch(/nudge clear/);
+    expect(code).toMatch(/nudge \(\) \{\s*\n\s*\[ "\$DRY_RUN" -eq 1 \] && return 0/);
+  });
+
   it('only lets a dry run pretend to be another day or time', () => {
     expect(code).toMatch(/if \[ "\$DRY_RUN" -eq 1 \]; then\s*\n\s*DOW_NOW=\$\{MONDAY_RESTART_DOW/);
     expect(code.match(/MONDAY_RESTART_(DOW|HM)/g)).toHaveLength(2);
