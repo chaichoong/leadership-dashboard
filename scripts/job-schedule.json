@@ -352,7 +352,14 @@
   "maxLateMinutes": 120,
   "mode": "wrapped",
   "queued": false,
-  "note": "reaps preview servers and test browsers that outlived their session. Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up"
+  "note": "reaps preview servers and test browsers that outlived their session, and since 22 Nov 2026 turns red when memory runs low or one program passes 4 GB (fseventsd reached 14.4 GB and froze the Mac that morning). Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up"
+ },
+ "monday-restart": {
+  "cron": "25 7 * * 1",
+  "maxLateMinutes": 30,
+  "mode": "wrapped",
+  "queued": false,
+  "note": "Kevin, 22 Nov 2026: a planned weekly restart, to clear slow leaks like the fseventsd one that froze the Mac that morning. Some weeks skip (on the last 8 Mondays the quiet-period rule alone allowed 4), so the hourly memory alarm in mac-guard is the backstop, and two weeks without a restart turns this job red. Starts at Monday 07:25 and restarts once daily-ops and every running job have finished, because FileVault holds every job until Kevin types his password and he is at the Mac by 08:00-08:30 on Mondays. The same launchd job runs at login (RunAtLoad) and re-runs the jobs whose time fell while the Mac waited. Skips on a broken launchd file, someone using the Mac, or work still running at 08:45. OUTSIDE the queue on purpose: it must not wait behind the routines it would restart."
  },
  "magic-battery": {
   "cron": "25 * * * *",

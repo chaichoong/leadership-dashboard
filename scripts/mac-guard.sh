@@ -190,10 +190,82 @@ else
   say "  SKIP        secret-copy-guard.py not in $HERE_DIR"
 fi
 
-say "mac-guard done: $KILLED reaped, $SKIPPED left alone"
+# ---------------------------------------------------------------------------
+# 5. Memory alarm (22 Nov 2026). The Mac froze that morning. fseventsd, the
+#    macOS file-change tracker, had grown from under 0.4 GB on 18 Nov to
+#    14.4 GB of 24 GB (shutdown-stall spindump). This guard never looked at
+#    memory, so it ran clean every hour while the Mac filled up. It now reads:
+#      - the share of memory still free (kern.memorystatus_level), and
+#      - the three biggest processes from `top`. Its MEM column counts
+#        compressed memory and root daemons. `ps` RSS leaves compressed memory
+#        out, which is exactly where a slow leak hides.
+#    Either crossing its limit turns the job red, with the reason as the last
+#    line of the run. It reads and reports. It never kills anything (rule 1).
+# ---------------------------------------------------------------------------
+FREE_FLOOR_PCT=15     # below this the Mac squashes and swaps instead of working
+PROC_LIMIT_MB=4096    # one process past 4 GB on a 24 GB Mac is a leak
+VM_LIMIT_MB=9216      # the Home Assistant VM holds about 6.6 GB by design
 
-# A live credential sitting outside ~/.config/od is the one thing here worth a
-# red job: the exposure is off it, but only Kevin can rotate the value, so the
-# run must not read as clean until he has.
+gb_text () { awk -v m="$1" 'BEGIN{printf "%.1f GB", m/1024}'; }
+
+# top's MEM value ("6609M", "14G", "895M+", "512K") as whole megabytes.
+# Prints nothing and fails on anything it cannot read.
+to_mb () {
+  echo "$1" | awk '{
+    v=$1; sub(/[+-]$/, "", v); u=substr(v, length(v)); n=substr(v, 1, length(v)-1)
+    if (n !~ /^[0-9]+(\.[0-9]+)?$/) exit 1
+    if (u=="G") printf "%d\n", n*1024
+    else if (u=="M") printf "%d\n", n
+    else if (u=="K") printf "%d\n", n/1024
+    else if (u=="B") printf "%d\n", n/1048576
+    else exit 1 }' | grep -E '^[0-9]+$'
+}
+
+# $1 = percent of memory free, $2 = top rows, biggest first, as "MEM COMMAND".
+# Prints one MEMORY line. On a breach, sets MEM_ALARM_TEXT and returns 1.
+memory_verdict () {
+  local free="$1" rows="$2" alarm="" biggest="" mem name mb limit
+  while read -r mem name; do
+    [ -z "$mem" ] && continue
+    mb=$(to_mb "$mem") || continue
+    biggest="${biggest:+$biggest, }$name $(gb_text "$mb")"
+    limit=$PROC_LIMIT_MB
+    case "$name" in VBoxHeadless*) limit=$VM_LIMIT_MB ;; esac
+    if [ -z "$alarm" ] && [ "$mb" -gt "$limit" ]; then
+      alarm="$name is using $(gb_text "$mb"), over its $(gb_text "$limit") limit. One program that size is a leak (fseventsd reached 14.4 GB and froze the Mac on 22 Nov 2026)"
+    fi
+  done <<< "$rows"
+  if ! [[ "$free" =~ ^[0-9]+$ ]]; then
+    free=""
+  fi
+  if [ -z "$free" ] && [ -z "$biggest" ]; then
+    say "  SKIP        memory: could not read it, leaving alone"
+    return 0
+  fi
+  say "  MEMORY      ${free:-unknown}% free. Biggest: ${biggest:-unknown}"
+  if [ -z "$alarm" ] && [ -n "$free" ] && [ "$free" -lt "$FREE_FLOOR_PCT" ]; then
+    alarm="only ${free}% of memory is free (the alarm is below ${FREE_FLOOR_PCT}%). Biggest: ${biggest:-unknown}"
+  fi
+  [ -z "$alarm" ] && return 0
+  MEM_ALARM_TEXT="MEMORY ALARM: $alarm. Restart the Mac today, or it will slow to a crawl."
+  return 1
+}
+
+MEM_ALARM_TEXT=""
+FREE_NOW=$(sysctl -n kern.memorystatus_level 2>/dev/null || true)
+TOP_NOW=$(top -l 1 -o mem -n 3 -stats mem,command 2>/dev/null | awk 'seen && NF {print} /^MEM/ {seen=1}')
+memory_verdict "$FREE_NOW" "$TOP_NOW" || true
+
+say "mac-guard done: $KILLED reaped, $SKIPPED left alone"
+# Last on purpose: the job log keeps only the final 600 characters of a run.
+[ -n "$MEM_ALARM_TEXT" ] && say "$MEM_ALARM_TEXT"
+
+# A dry run reports and changes nothing, so it always exits 0.
+[ "$DRY_RUN" -eq 1 ] && exit 0
+# A live credential sitting outside ~/.config/od is worth a red job: the
+# exposure is off it, but only Kevin can rotate the value, so the run must not
+# read as clean until he has.
 [ "$SECRET_COPIES" -eq 1 ] && exit 1
+# A memory breach is the other: left alone it ends in a frozen Mac.
+[ -n "$MEM_ALARM_TEXT" ] && exit 1
 exit 0

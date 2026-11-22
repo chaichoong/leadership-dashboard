@@ -174,3 +174,79 @@ describe('mac-guard: dry run changes nothing', () => {
     expect(elapsed, `dry run took ${elapsed}ms`).toBeLessThan(10_000);
   });
 });
+
+// The Mac froze on 22 Nov 2026: fseventsd, a macOS service, reached 14.4 GB of 24 GB
+// (shutdown-stall spindump) while this guard ran clean every hour, because it never
+// looked at memory. These cases are the real readings from that week.
+describe('mac-guard: memory alarm', () => {
+  const pick = (re) => src.match(re)[0];
+  const harness = (free, rows) => `
+    say () { echo "$@"; }
+    ${pick(/^FREE_FLOOR_PCT=\d+/m)}
+    ${pick(/^PROC_LIMIT_MB=\d+/m)}
+    ${pick(/^VM_LIMIT_MB=\d+/m)}
+    ${pick(/gb_text \(\) \{[^\n]*\}/)}
+    ${pick(/to_mb \(\) \{[\s\S]*?\n\}/)}
+    ${pick(/memory_verdict \(\) \{[\s\S]*?\n\}/)}
+    MEM_ALARM_TEXT=""
+    memory_verdict "$1" "$2"; echo "RC=$?"; echo "ALARM=$MEM_ALARM_TEXT"
+  `;
+  const verdict = (free, rows) =>
+    execFileSync('bash', ['-c', harness(), 'h', free, rows], { encoding: 'utf8' });
+  const toMb = (v) =>
+    execFileSync('bash', ['-c', `${pick(/to_mb \(\) \{[\s\S]*?\n\}/)}\n to_mb "$1" || echo FAIL`, 'h', v], {
+      encoding: 'utf8',
+    }).trim();
+
+  it("reads every size top prints, and refuses what it cannot read", () => {
+    expect(toMb('6609M')).toBe('6609');
+    expect(toMb('14G')).toBe('14336');
+    expect(toMb('1.5G')).toBe('1536');
+    expect(toMb('895M+')).toBe('895');
+    expect(toMb('2048K')).toBe('2');
+    expect(toMb('abc')).toBe('FAIL');
+    expect(toMb('')).toBe('FAIL');
+  });
+
+  it('names fseventsd at the size that froze the Mac', () => {
+    const out = verdict('9', '14G  fseventsd\n420M WindowServer\n155M 2.1.286');
+    expect(out).toContain('RC=1');
+    expect(out).toMatch(/ALARM=MEMORY ALARM: fseventsd is using 14\.0 GB, over its 4\.0 GB limit/);
+    expect(out).toContain('Restart the Mac today');
+  });
+
+  it('names the Messages leak seen on 19 Nov', () => {
+    const out = verdict('30', '12G Messages\n6609M VBoxHeadless\n895M Google Chrome He');
+    expect(out).toMatch(/ALARM=MEMORY ALARM: Messages is using 12\.0 GB/);
+  });
+
+  it('stays quiet on a normal evening and still prints the reading', () => {
+    const out = verdict('52', '6609M VBoxHeadless\n895M  Google Chrome He\n691M  Claude Helper (R');
+    expect(out).toContain('RC=0');
+    expect(out).toContain('ALARM=\n');
+    expect(out).toContain('MEMORY      52% free. Biggest: VBoxHeadless 6.5 GB, Google Chrome He 0.9 GB');
+  });
+
+  it('gives the Home Assistant VM its own, higher limit', () => {
+    expect(verdict('40', '7G VBoxHeadless')).toContain('RC=0');
+    expect(verdict('40', '10G VBoxHeadless')).toMatch(/ALARM=MEMORY ALARM: VBoxHeadless is using 10\.0 GB, over its 9\.0 GB limit/);
+  });
+
+  it('alarms when free memory runs low even with no single big program', () => {
+    const out = verdict('9', '2G Google Chrome He\n1G node\n900M claude');
+    expect(out).toContain('RC=1');
+    expect(out).toMatch(/ALARM=MEMORY ALARM: only 9% of memory is free \(the alarm is below 15%\)/);
+  });
+
+  it('never turns red on a reading it could not take', () => {
+    const out = verdict('', '');
+    expect(out).toContain('RC=0');
+    expect(out).toContain('could not read it');
+  });
+
+  it('reports only: the memory step kills nothing, and a dry run still exits 0', () => {
+    const block = code.slice(code.indexOf('memory_verdict () {'), code.indexOf('mac-guard done'));
+    expect(block).not.toMatch(/\bkill\b/);
+    expect(code).toMatch(/\[ "\$DRY_RUN" -eq 1 \] && exit 0[\s\S]*\[ -n "\$MEM_ALARM_TEXT" \] && exit 1/);
+  });
+});
