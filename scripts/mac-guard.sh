@@ -242,6 +242,7 @@ memory_verdict () {
     say "  SKIP        memory: could not read it, leaving alone"
     return 0
   fi
+  [ -n "$free" ] && [ -n "$biggest" ] && MEM_READ=1
   say "  MEMORY      ${free:-unknown}% free. Biggest: ${biggest:-unknown}"
   if [ -z "$alarm" ] && [ -n "$free" ] && [ "$free" -lt "$FREE_FLOOR_PCT" ]; then
     alarm="only ${free}% of memory is free (the alarm is below ${FREE_FLOOR_PCT}%). Biggest: ${biggest:-unknown}"
@@ -252,9 +253,45 @@ memory_verdict () {
 }
 
 MEM_ALARM_TEXT=""
-FREE_NOW=$(sysctl -n kern.memorystatus_level 2>/dev/null || true)
-TOP_NOW=$(top -l 1 -o mem -n 3 -stats mem,command 2>/dev/null | awk 'seen && NF {print} /^MEM/ {seen=1}')
+MEM_READ=0
+NUDGE_FAILED=0
+# Tests set these two, so a real run in a test cannot go red on this Mac's memory.
+FREE_NOW=${MAC_GUARD_FREE_PCT-$(sysctl -n kern.memorystatus_level 2>/dev/null || true)}
+TOP_NOW=${MAC_GUARD_TOP-$(top -l 1 -o mem -n 3 -stats mem,command 2>/dev/null | awk 'seen && NF {print} /^MEM/ {seen=1}')}
 memory_verdict "$FREE_NOW" "$TOP_NOW" || true
+
+# A red job reaches nobody on its own, so the alarm goes on Kevin's phone. It
+# clears only when BOTH readings worked: "could not read it" is not "healthy".
+send_nudge () {
+  local out rc
+  if [ ! -f "$HERE_DIR/mac-nudge.py" ]; then
+    say "  SKIP        mac-nudge.py not in $HERE_DIR"
+    return 0
+  fi
+  out=$(python3 "$HERE_DIR/mac-nudge.py" "$@" 2>&1); rc=$?
+  [ -n "$out" ] && say "  NUDGE       $out"
+  [ "$rc" -ne 0 ] && NUDGE_FAILED=1
+  return 0
+}
+if [ "$DRY_RUN" -eq 0 ]; then
+  if [ -n "$MEM_ALARM_TEXT" ]; then
+    send_nudge raise memory "$MEM_ALARM_TEXT"
+  elif [ "$MEM_READ" -eq 1 ]; then
+    send_nudge clear memory
+  fi
+  # A restart in the last 2 days, by the Monday job or by Kevin, settles any
+  # reminder to do one. Here rather than at login, so it cannot delay the catch-up
+  # and a failed clear is tried again next hour. Otherwise a reminder he ticked off
+  # without restarting comes back the next day, not next Monday.
+  BOOT_S=$(sysctl -n kern.boottime 2>/dev/null | sed -nE 's/^\{ sec = ([0-9]+),.*/\1/p')
+  if [[ "$BOOT_S" =~ ^[0-9]+$ ]]; then
+    if [ $(( $(date +%s) - BOOT_S )) -lt 172800 ]; then
+      send_nudge clear restart
+    else
+      send_nudge again restart
+    fi
+  fi
+fi
 
 say "mac-guard done: $KILLED reaped, $SKIPPED left alone"
 # Last on purpose: the job log keeps only the final 600 characters of a run.
@@ -268,4 +305,6 @@ say "mac-guard done: $KILLED reaped, $SKIPPED left alone"
 [ "$SECRET_COPIES" -eq 1 ] && exit 1
 # A memory breach is the other: left alone it ends in a frozen Mac.
 [ -n "$MEM_ALARM_TEXT" ] && exit 1
+# An alarm that could not reach Kevin, or a reminder that could not be cleared.
+[ "$NUDGE_FAILED" -eq 1 ] && exit 1
 exit 0

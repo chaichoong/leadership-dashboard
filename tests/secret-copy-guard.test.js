@@ -214,9 +214,12 @@ describe('mac-guard: a credential copy makes the hourly run red', () => {
     );
     return dir;
   };
+  // Real runs of the guard, so they must not go red on whatever this Mac's memory is doing.
+  const healthyMemory = { MAC_GUARD_FREE_PCT: '50', MAC_GUARD_TOP: '1000M node' };
+  let extraEnv = {};
   const runGuard = (dir, ...args) => {
     try {
-      return { code: 0, out: execFileSync('bash', [join(dir, 'mac-guard.sh'), ...args], { encoding: 'utf8' }) };
+      return { code: 0, out: execFileSync('bash', [join(dir, 'mac-guard.sh'), ...args], { encoding: 'utf8', env: { ...process.env, ...healthyMemory, ...extraEnv } }) };
     } catch (e) {
       return { code: e.status, out: (e.stdout || '') + (e.stderr || '') };
     }
@@ -272,6 +275,18 @@ describe('mac-guard: a credential copy makes the hourly run red', () => {
   it('still exits 0 when the guard is clean, so reaping alone never alarms', () => {
     const r = runGuard(mk(0));
     expect(r.code).toBe(0);
+  });
+
+  // The whole alarm, end to end, on a real run: red, with the reason as the last line. The
+  // sandbox has no mac-nudge.py, so it cannot reach the real Reminders app.
+  it('goes red with the reason last on a memory breach, and never reaches Reminders here', () => {
+    const dir = mk(0);
+    extraEnv = { MAC_GUARD_FREE_PCT: '30', MAC_GUARD_TOP: '14G fseventsd\n420M WindowServer' };
+    const r = runGuard(dir);
+    extraEnv = {};
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('mac-nudge.py not in');
+    expect(r.out.trim().split('\n').pop()).toMatch(/^MEMORY ALARM: fseventsd is using 14\.0 GB/);
   });
 
   it('exits 0, and says so, when the guard script is missing entirely', () => {

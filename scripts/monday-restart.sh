@@ -203,6 +203,20 @@ sys.exit(1 if failed else 0)
 PY
 }
 
+# Put a restart only Kevin can do on his phone (mac-nudge.py). A failed nudge is
+# logged and never stops the script, which may be midway through a restart.
+nudge () {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  local out rc
+  out=$(python3 "$HERE_DIR/mac-nudge.py" "$@" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    say "  NUDGE FAILED ($rc) $out"
+  elif [ -n "$out" ]; then
+    say "  NUDGE       $out"
+  fi
+  return 0
+}
+
 # Say why this week is skipped, and stop. A restart skipped for two weeks running
 # turns red, because a quiet skip is how a leak gets its time back.
 skip_week () {
@@ -212,6 +226,7 @@ skip_week () {
     code=1
     why="$why. The Mac has been on for $(( up / 86400 )) days and is overdue a restart"
   fi
+  [ "$code" -eq 1 ] && nudge raise restart "$why"
   say "SKIPPED: $why"
   [ "$DRY_RUN" -eq 1 ] && exit 0
   exit "$code"
@@ -263,6 +278,7 @@ do_restart () {
     rm -f "$STATE"
     vm_back_on "$vm_was_on"
     say "RESTART FAILED: macOS refused the restart command. Home Assistant is back on."
+    nudge raise restart "macOS refused this week's restart command. Restart the Mac when you sit down."
     exit 1
   fi
   # A restart stops this script within minutes, and the slowest seen took 8.8
@@ -274,6 +290,7 @@ do_restart () {
   rm -f "$STATE"
   vm_back_on "$vm_was_on"
   say "RESTART BLOCKED: the Mac did not restart, probably because an app asked to save something. Home Assistant is $(vm_state). Restart the Mac when you sit down."
+  nudge raise restart "This week's restart did not happen, probably because an app asked to save something. Restart the Mac when you sit down."
   exit 1
 }
 

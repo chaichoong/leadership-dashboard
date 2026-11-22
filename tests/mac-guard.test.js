@@ -244,6 +244,24 @@ describe('mac-guard: memory alarm', () => {
     expect(out).toContain('could not read it');
   });
 
+  // A red job reaches nobody: Slack alerts were retired on 1 Sep and the digest on 15 Nov.
+  it('puts the alarm on the phone, and only clears on a reading that worked', () => {
+    expect(code).toMatch(/if \[ "\$DRY_RUN" -eq 0 \]; then\s*\n\s*if \[ -n "\$MEM_ALARM_TEXT" \]; then\s*\n\s*send_nudge raise memory "\$MEM_ALARM_TEXT"\s*\n\s*elif \[ "\$MEM_READ" -eq 1 \]; then\s*\n\s*send_nudge clear memory/);
+    expect(code).toMatch(/\[ "\$NUDGE_FAILED" -eq 1 \] && exit 1/);
+  });
+
+  // Review, 22 Nov 2026: one failed reading must not tick off a live alarm.
+  it('counts a reading as good only when both numbers came back', () => {
+    const readFlag = (free, rows) => execFileSync('bash', ['-c', `${harness()}\n`.replace('echo "RC=$?"', 'echo "READ=$MEM_READ"').replace('MEM_ALARM_TEXT=""', 'MEM_ALARM_TEXT=""; MEM_READ=0'), 'h', free, rows], { encoding: 'utf8' });
+    expect(readFlag('52', '6609M VBoxHeadless')).toContain('READ=1');
+    expect(readFlag('', '6609M VBoxHeadless')).toContain('READ=0');
+    expect(readFlag('52', '')).toContain('READ=0');
+  });
+
+  it('settles a restart reminder hourly after any recent restart, never at a dry run', () => {
+    expect(code).toMatch(/if \[ "\$DRY_RUN" -eq 0 \]; then[\s\S]*?-lt 172800 \]; then\s*\n\s*send_nudge clear restart\s*\n\s*else\s*\n\s*send_nudge again restart/);
+  });
+
   it('reports only: the memory step kills nothing, and a dry run still exits 0', () => {
     const block = code.slice(code.indexOf('memory_verdict () {'), code.indexOf('mac-guard done'));
     expect(block).not.toMatch(/\bkill\b/);
