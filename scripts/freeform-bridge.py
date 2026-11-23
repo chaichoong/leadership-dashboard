@@ -87,14 +87,16 @@ TILE = 1800            # readable parts are cut to this size...
 TILE_OVERLAP = 120     # ...overlapping, so a word on a cut line is whole in one of them
 MAX_TILES = 36         # a 9,000-pixel board cuts into at most 6 x 6
 MARGIN = 30
-# The picture check (calibrated on 34 real boards, 23 Nov 2026: 21 agree closely,
-# 12 broadly, 1 known-imperfect drawing fails; drawings with the ink removed or
+# The picture check (calibrated on 34 real boards, 23 Nov 2026: 20 agree closely,
+# 13 broadly, 1 known-imperfect drawing fails; drawings with the ink removed or
 # half removed never agree closely).
 CELLS, CELL_PX = 24, 8  # both pictures are compared on a 24 x 24 grid of 8-pixel cells
 AGREE_AT = 0.90         # fine detail and shading must both correlate this well to "match"
 COVER_AT = 0.85         # ...and this share of inked cells must be inked in the other picture
 GAP_CELLS = 4           # ...and no joined-up patch this big may be in one picture only
-BLOCK_CELLS = 3         # ...nor a solid square this many cells a side, whatever sits beside it
+FINE = 48               # ...nor, on a grid twice as fine, a square BLOCK cells a side that is
+BLOCK = 4               #    solid in one picture and clear in the other, whatever sits beside it
+SOLID_FROM = 12.0       # a fine cell this far from white (of 255) is solid; under INKED_MEAN it is clear
 WRONG_BELOW = 0.60      # under this on detail, shading or cover, the drawing is plainly wrong
 SHAPE_AGREE, SHAPE_WRONG = 0.90, 0.70   # how alike the two inked outlines are in proportion
 INK_FROM = 15           # a pixel this far from white (of 255) is part of the drawing
@@ -723,12 +725,13 @@ def bounds(board, without_lines=False):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def render(board, without_lines=False):
+def render(board, without_lines=False, max_side=MAX_SIDE):
     """The whole board as one picture. Returns (image, pixels per board point).
 
     without_lines=True leaves out the straight lines made with the line tool,
     for check_picture's second look. That drawing is only ever compared, never
-    filed."""
+    filed, so it is drawn small (max_side): at full size it doubled the memory
+    a big board takes (review 7, finding 3)."""
     Image, ImageDraw, _ = _pil()
     box = bounds(board, without_lines)
     if box is None:
@@ -736,7 +739,7 @@ def render(board, without_lines=False):
             return Image.new("RGB", (2 * MARGIN + 2, 2 * MARGIN + 2), "white"), SCALE
         raise BridgeError("nothing on this board has a place to draw")
     x0, y0, x1, y1 = box
-    scale = min(SCALE, (MAX_SIDE - 2 * MARGIN) / max(x1 - x0, y1 - y0, 1.0))
+    scale = min(SCALE, (max_side - 2 * MARGIN) / max(x1 - x0, y1 - y0, 1.0))
     W, H = int((x1 - x0) * scale) + 2 * MARGIN, int((y1 - y0) * scale) + 2 * MARGIN
     im = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(im)
@@ -881,8 +884,8 @@ def inked_area(im):
 
 
 def picture_features(area, flat_x=False, flat_y=False):
-    """(darkness per cell, fine detail per cell) of an inked area, laid on a
-    CELLS x CELLS grid. "Darkness" is a cell's mean; "fine detail" is how much
+    """(darkness per cell, fine detail per cell, plain darkness on a FINE x FINE
+    grid) of an inked area. The first two are laid on a CELLS x CELLS grid. "Darkness" is a cell's mean; "fine detail" is how much
     it varies inside the cell, which is what pen strokes and words add and a
     flat filled shape does not. Both are measured on the plain distance from
     white, so ink shows on a dark fill as well as on a pale one, and then
@@ -908,7 +911,7 @@ def picture_features(area, flat_x=False, flat_y=False):
             st = ImageStat.Stat(grid.crop((x * CELL_PX, y * CELL_PX, (x + 1) * CELL_PX, (y + 1) * CELL_PX)))
             means.append(_stretch(st.mean[0]))
             detail.append(_stretch(2 * st.stddev[0]))
-    return means, detail
+    return means, detail, list(grid.resize((FINE, FINE), Image.BOX).getdata())
 
 
 def _stretch(v):
@@ -981,16 +984,23 @@ def _largest_gap(mask, other):
     return best
 
 
-def _solid_block(mask, other, n):
-    """True when some n x n square of cells is all set in `mask` and all clear
-    in `other`. _largest_gap lets a cell off when `other` has ink BESIDE it, so
-    a pen line may fall either side of a cell edge; in a tight cluster the ink
-    beside a missing sticky is its neighbours', and that let the whole sticky
-    off (review 6, finding 2). A square this size is no pen line."""
-    for y in range(CELLS - n + 1):
-        for x in range(CELLS - n + 1):
-            if all(mask[(y + j) * CELLS + x + i] and not other[(y + j) * CELLS + x + i]
-                   for j in range(n) for i in range(n)):
+def _solid_block(a, b):
+    """True when some BLOCK x BLOCK square of the fine grid is solid in `a` and
+    clear in `b`. _largest_gap lets a cell off when the other picture has ink
+    BESIDE it, so a pen line may fall either side of a cell edge; in a tight
+    cluster the ink beside a missing sticky note is its neighbours', and that
+    let the whole note off (review 6, finding 2). A square of the coarse grid
+    only caught it when the note happened to sit square on the cells (review 7,
+    finding 1), so this one is half the size on a grid twice as fine: anything
+    3 coarse cells across (an eighth of the board) holds one wherever it sits.
+    "Solid" and "clear" are set well apart, so ink that is merely drawn lighter
+    in one picture is neither."""
+    solid = [v >= SOLID_FROM for v in a]
+    clear = [v < INKED_MEAN for v in b]
+    for y in range(FINE - BLOCK + 1):
+        for x in range(FINE - BLOCK + 1):
+            if all(solid[(y + j) * FINE + x + i] and clear[(y + j) * FINE + x + i]
+                   for j in range(BLOCK) for i in range(BLOCK)):
                 return True
     return False
 
@@ -1021,6 +1031,8 @@ def preview_match(im, preview_path):
     Fine detail is scored separately so missing ink shows wherever it sits.
 
     What this cannot see, at 400 pixels:
+      - a whole item missing when it is under about an eighth of the board
+        across and packed in among others.
       - WHICH words a sticky note holds. Typed words are copied from the board's
         data, not judged by the picture.
       - pen marks that are a small part of a big board. On 4 of Kevin's 25 real
@@ -1053,7 +1065,7 @@ def preview_match(im, preview_path):
     shape = _same_shape(ours.size, theirs.size)
     flat_x = min(ours.size[0], theirs.size[0]) < NARROW
     flat_y = min(ours.size[1], theirs.size[1]) < NARROW
-    (om, od), (tm, td) = picture_features(ours, flat_x, flat_y), picture_features(theirs, flat_x, flat_y)
+    (om, od, of), (tm, td, tf) = picture_features(ours, flat_x, flat_y), picture_features(theirs, flat_x, flat_y)
     wide = not (flat_x or flat_y)
     detail, shade = _corr(od, td, wide), _corr(om, tm, wide)
     dark_at, busy_at = _stretch(INKED_MEAN), _stretch(INKED_DETAIL)
@@ -1061,7 +1073,7 @@ def preview_match(im, preview_path):
     ours_on, theirs_on = inked(om, od), inked(tm, td)
     found, extra = _covered(theirs_on, ours_on), _covered(ours_on, theirs_on)
     gap = max(_largest_gap(theirs_on, ours_on), _largest_gap(ours_on, theirs_on))
-    block = _solid_block(theirs_on, ours_on, BLOCK_CELLS) or _solid_block(ours_on, theirs_on, BLOCK_CELLS)
+    block = wide and (_solid_block(tf, of) or _solid_block(of, tf))
     why = (f"fine detail {detail:.2f}, shading {shade:.2f}, outline {shape:.2f}, "
            f"their ink found in ours {found:.2f}, our ink found in theirs {extra:.2f}, "
            f"largest patch in one picture only {gap} of {CELLS * CELLS} cells"
@@ -1290,7 +1302,7 @@ def check_picture(im, preview, floor, without_lines=None):
         out["why"] = "Freeform has no preview of this board on this Mac"
         return out
     verdict, score, why = preview_match(im, preview)
-    if verdict != "agrees" and without_lines is not None:
+    if verdict in ("differs", "differs_some") and without_lines is not None:
         # Freeform's small preview does not hold a thin straight line on a big
         # board. On one of Kevin's boards (23 Nov 2026) its slanted lines show as
         # faint dots and its level and upright ones not at all, though the board's
@@ -1303,6 +1315,11 @@ def check_picture(im, preview, floor, without_lines=None):
         rank = {"agrees": 3, "differs_some": 2, None: 1, "differs": 0}
         v2, s2, w2 = preview_match(without_lines(), preview)
         if rank[v2] > rank[verdict]:
+            if v2 is None:
+                # Not "both pictures are blank": the filed picture shows the lines
+                # (review 7, finding 2).
+                w2 = ("Freeform's preview is blank and the board holds only straight lines, "
+                      "which its small preview may not show")
             verdict, score, why, out["lines_left_out"] = v2, s2, w2, True
     if verdict is None:
         out["why"] = why
@@ -1376,7 +1393,8 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
     im, _ = render(board)
     has_lines = any(it.get("line") for it in board["items"])
     check = check_picture(im, find_preview(previews, b["id"]), floor,
-                          (lambda: render(board, without_lines=True)[0]) if has_lines else None)
+                          (lambda: render(board, without_lines=True, max_side=OVERVIEW_SIDE)[0])
+                          if has_lines else None)
     preview = check["preview"]
     whole = shrunk(im, OVERVIEW_SIDE)
     parts = tiles(im)

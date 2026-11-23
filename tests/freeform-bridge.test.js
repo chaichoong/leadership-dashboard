@@ -418,20 +418,27 @@ result = {"turned": drawn(30.0), "flat": drawn(0.0), "coloured": drawn(30.0, edg
     expect(r.coloured).toMatchObject({ right_end_up: true, mirror: false });
   });
 
-  it('a whole sticky note missing from a tight cluster is caught, whatever sits beside it (review 6, finding 2)', () => {
+  it('a whole sticky note missing from a tight cluster is caught wherever it sits on the grid (reviews 6 and 7)', () => {
     const r = py(`
 A = "A" * 32
-def board(gap, drop=None):
+def board(gap, far, drop=None):
     notes = [{"text": f"note {i}", "at": (gap * (i % 3), gap * (i // 3))} for i in range(9) if i != drop]
-    notes += [{"text": "far", "at": at} for at in ((1400, 0), (0, 1400), (1400, 1400), (1400, 700), (700, 1400))]
+    notes += [{"text": "far", "at": at} for at in ((far, 0), (0, far), (far, far), (far, far // 2), (far // 2, far))]
     return {"id": A, "name": "Cluster", "stickies": notes}
-result = {"same": [judge(board(g), board(g)) for g in (205, 210, 230)],
-          "middle_gone": [judge(board(g), board(g, 4)) for g in (205, 210, 230)],
-          "middle_added": judge(board(210, 4), board(210))}
+out = {"same": [], "one_gone": [], "one_added": []}
+# The far notes set how big the board is, and so where the cluster falls on the
+# grid. At 1300 a first fix missed the middle note; at 1400 it missed five of nine.
+for far in (1200, 1300, 1400, 1600):
+    for gap in (205, 230):
+        out["same"].append(judge(board(gap, far), board(gap, far)))
+        out["one_gone"] += [judge(board(gap, far), board(gap, far, d)) for d in range(9)]
+        out["one_added"].append(judge(board(gap, far, 4), board(gap, far)))
+result = out
 `);
-    expect(r.same).toEqual(['agrees', 'agrees', 'agrees']);
-    expect(r.middle_gone).not.toContain('agrees');
-    expect(r.middle_added).not.toBe('agrees');
+    expect(r.same).toEqual(Array(8).fill('agrees'));
+    expect(r.one_gone).toHaveLength(72);
+    expect(r.one_gone).not.toContain('agrees');
+    expect(r.one_added).not.toContain('agrees');
   });
 
   it('a thin straight line that Freeform\'s preview does not hold never turns a right drawing red (review 6, finding 1)', () => {
@@ -466,6 +473,23 @@ edit(divided); preview_for(memo)
 code, out = bridge()
 text = next(note(f) for f in inbox() if f.endswith(".md"))
 result["run"] = [code, "1 straight line(s)" in text, "left out of this check" in text, "DOES NOT MATCH" in text]
+# A board of lines only, with a blank preview: the note must not say our picture is blank.
+for f in inbox(): os.remove(os.path.join(INBOX, f))
+edit(only)
+Image.new("RGBA", (400, 300), (255, 255, 255, 0)).save(fb.find_preview(PREVIEWS, A), "PNG")
+code, out = bridge()
+text = next(note(f) for f in inbox() if f.endswith(".md"))
+result["lines_only_run"] = [code, "2 straight line(s)" in text, "holds only straight lines" in text, "both pictures are blank" in text]
+# The second drawing is only compared, so it is drawn small; and it is not drawn at all
+# when there is no preview to compare it with.
+big = {"id": A, "name": "Big", "stickies": [{"text": "a", "at": (0, 0)}, {"text": "b", "at": (6000, 6000)}], "boxes": [line((0, 300), 6000)]}
+v = os.path.join(D, "v"); con = fb.connect(fx.build(v, [big]))
+bb = fb.read_board(con, A, os.path.join(v, "Boards", "Assets"))
+calls = []
+bad = os.path.join(D, "not-a-picture"); open(bad, "w").write("x")
+fb.check_picture(fb.render(bb, max_side=600)[0], bad, 0, lambda: calls.append(1))
+result["second_drawing"] = [max(fb.render(bb)[0].size) > 9000 - 100,
+                            max(fb.render(bb, without_lines=True, max_side=fb.OVERVIEW_SIDE)[0].size) <= fb.OVERVIEW_SIDE, calls]
 `);
     // The full drawing, lines and all, plainly differs from a preview without them...
     expect(r.divider_not_shown).toEqual(['differs', 'match', true]);
@@ -477,6 +501,8 @@ result["run"] = [code, "1 straight line(s)" in text, "left out of this check" in
     // The second look forgives the lines and nothing else.
     expect(r.note_gone_too[1]).toBe('mismatch');
     expect(r.run).toEqual([0, true, true, false]);
+    expect(r.lines_only_run).toEqual([0, true, true, false]);
+    expect(r.second_drawing).toEqual([true, true, []]);
   });
 
   it('a text box left empty or holding only spaces is not drawn as a line (review 6, finding 3)', () => {
