@@ -10,7 +10,8 @@ A board spec is a dict:
      "stickies": [{"text": str, "at": (x, y), "rgb": (r, g, b)}],
      "boxes":    [{"text": str, "at": (x, y), "size": (w, h), "fill": rgb|None, "edge": rgb|None}],
      "strokes":  [{"at": (x, y), "pts": [(x, y), ...], "rgb": (r, g, b), "width": w}],
-     "lines":    [(sticky index, sticky index)]}
+     "lines":    [(sticky index, sticky index)],
+     "pictures": [{"at": (x, y), "size": (w, h), "name": str}]}   # see asset_path() for its file
 """
 import os
 import sqlite3
@@ -190,6 +191,13 @@ def put_board(con, spec):
              HEADER + fld(1, 2, fld(4, 2, b"")))
         con.execute("insert into freehand_drawing_buckets (board_indentifier, bucket_index, bucket_data) values (?,?,?)",
                     (bid, 0, bucket(drawing, spec["strokes"])))
+    for i, pic in enumerate(spec.get("pictures", [])):
+        uid = uuid.uuid5(uuid.NAMESPACE_OID, f"{spec['id']}pic{i}").hex.upper()
+        asset = uuid.uuid5(uuid.NAMESPACE_OID, f"{spec['id']}asset{i}").hex.upper()
+        con.execute("insert or replace into assets (asset_uuid, extension) values (?, ?)", (bytes.fromhex(asset), "png"))
+        item(uid, root, 5, common(uid, root, pic["at"], pic["size"]),
+             HEADER + fld(1, 2, fld(4, 2, fld(2, 2, fld(1, 2, pic.get("name", "photo.png").encode())))) +
+             table([uuid.uuid4().hex.upper(), asset], ["a"]))
     for i, n in enumerate(spec.get("unknown_items", [])):
         uid = uuid.uuid5(uuid.NAMESPACE_OID, f"{spec['id']}odd{i}").hex.upper()
         item(uid, root, n, common(uid, root, (400, 400), (50, 50)), HEADER + fld(1, 2, fld(4, 2, b"")))
@@ -222,3 +230,9 @@ def sample(bid="A" * 32, name="Garden plan", note="Buy six fence posts"):
             "lines": [(0, 1)],
             "strokes": [{"at": (0, 320), "pts": zigzag(), "rgb": (0.0, 0.0, 0.8), "width": 1.5},
                         {"at": (220, 320), "pts": zigzag(8), "rgb": (0.0, 0.0, 0.0), "width": 1.0}]}
+
+
+def asset_path(folder, board_id, index=0):
+    """Where the bridge will look for picture `index` of a board built in `folder`."""
+    u = uuid.uuid5(uuid.NAMESPACE_OID, f"{board_id}asset{index}").hex.upper()
+    return os.path.join(folder, "Boards", "Assets", f"{u[:8]}-{u[8:12]}-{u[12:16]}-{u[16:20]}-{u[20:]}.png")

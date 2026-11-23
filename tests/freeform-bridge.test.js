@@ -280,6 +280,63 @@ result = {"none_code": none_code, "none_out": none_out, "none_note": none_note, 
     expect(r.files.join()).not.toContain('(2) - Freeform preview');
   });
 
+  it('agreement is never thrown away for timing; timing only sorts a disagreement (review 2, findings 1 and 2)', () => {
+    const r = py(`
+spec = fx.sample()
+p = db([spec]); con = fb.connect(p)
+im, _ = fb.render(fb.read_board(con, spec["id"], os.path.join(D, "Boards", "Assets")))
+preview_for(spec)
+good = os.path.join(PREVIEWS, os.listdir(PREVIEWS)[0])
+t = os.path.getmtime(good)
+kinds = {"agrees_after": fb.check_picture(im, good, t - 10)["kind"],
+         "agrees_before": fb.check_picture(im, good, t + 10)["kind"]}
+preview_for(spec, wrong=True)
+t = os.path.getmtime(good)
+kinds["differs_after"] = fb.check_picture(im, good, t - 10)["kind"]
+before = fb.check_picture(im, good, t + 10)
+kinds["differs_before"] = before["kind"]
+kinds["none"] = fb.check_picture(im, None, 0)["kind"]
+result = {"kinds": kinds, "before_preview": before["preview"]}
+`);
+    expect(r.kinds).toEqual({ agrees_after: 'match', agrees_before: 'match_old', differs_after: 'mismatch',
+                              differs_before: 'unchecked', none: 'unchecked' });
+    expect(r.before_preview).toBe(null);
+  });
+
+  it('a preview from before the change that still agrees is filed as layout-only, not as a full match', () => {
+    const r = py(`
+db([fx.sample()])
+preview_for(fx.sample())                       # drawn before the baseline: shows the old board
+time.sleep(1.1)
+bridge("--baseline")
+edit(fx.sample(note="Buy seven fence posts"))  # one word differs: too small to see at preview size
+code, out = bridge()
+result = {"code": code, "note": note("Garden plan (Freeform board).md"), "files": inbox()}
+`);
+    expect(r.code).toBe(0);
+    expect(r.note).toContain('Freeform drew that preview before this change reached the Mac');
+    expect(r.note).toContain('not the newest marks');
+    expect(r.files).toContain('Garden plan (Freeform board) - Freeform preview.png');
+  });
+
+  it('three filings in a row with no preview check turn the run red: the control must not go quiet', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+codes = []
+for i in range(3):
+    edit(fx.sample(note="Change %d" % i))
+    codes.append(bridge()[0])
+out = bridge()[1]
+spec = fx.sample(note="Checked at last"); edit(spec); preview_for(spec)
+healed, _ = bridge()
+result = {"codes": codes, "healed": healed, "streak": json.load(open(STATE))["unchecked_streak"]}
+`);
+    expect(r.codes).toEqual([0, 0, 1]);
+    expect(r.healed).toBe(0);
+    expect(r.streak).toBe(0);
+  });
+
   it('a text box with a border and no fill is not painted solid (the 22 Nov 2026 black box)', () => {
     const r = py(`
 frame = {"id": "A" * 32, "name": "Framed",
@@ -451,7 +508,8 @@ result = {"code": code, "out": out, "note": note("Garden plan (Freeform board) (
           "count": len(inbox())}
 `);
     expect(r.code).toBe(0);
-    expect(r.note).toContain('NOTHING. Kevin has cleared this board');
+    expect(r.note).toContain('NOTHING is on the board now. Either Kevin cleared it, or its ink has not reached this Mac yet');
+    expect(r.note).toContain('Keep everything in the brain note');
     expect(r.note).toContain('Freeform board id: ' + 'A'.repeat(32));
     expect(r.again).toBe(0);
     expect(r.count).toBe(4);
@@ -513,6 +571,137 @@ result = {"parts": len(parts), "cap": fb.MAX_TILES, "small": len(small), "blank"
     expect(r.labels).toBe(36);
     expect(r.small).toBe(0);
     expect(r.blank).toBe(0);
+  });
+
+  it('a board with only unplaceable ink is filed once with a warning, then goes quiet (review 2, finding 5)', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+ink = {"id": "D" * 32, "name": "Ink only", "strokes": [{"at": (0, 0), "pts": fx.zigzag(5)}]}
+edit(ink)
+con = sqlite3.connect(os.path.join(D, "Boards", "boards.db"))
+con.execute("delete from board_items where item_type = 10 and board_identifier = ?", (bytes.fromhex("D" * 32),))
+con.commit(); con.close()
+codes = [bridge()[0], bridge()[0], bridge()[0]]
+result = {"codes": codes, "note": note("Ink only (Freeform board).md"), "files": inbox()}
+`);
+    expect(r.codes).toEqual([1, 0, 0]);
+    expect(r.note).toContain('1 PEN STROKE(S) COULD NOT BE READ and nothing else is on the board');
+    expect(r.files).toEqual(['Ink only (Freeform board).md']);
+  });
+
+  it('a picture that is missing or too big to decode is drawn as a box and the note says so (review 2, findings 3 and 10)', () => {
+    const r = py(`
+from PIL import Image
+db([fx.sample()])
+bridge("--baseline")
+spec = dict(fx.sample("C" * 32, "With photo"), pictures=[{"at": (600, 0), "size": (200, 150)}])
+edit(spec)
+missing_code, _ = bridge()
+missing_note = note("With photo (Freeform board).md")
+Image.new("RGB", (400, 300), (200, 30, 30)).save(fx.asset_path(D, "C" * 32))
+spec = dict(spec, name="With photo two"); edit(spec)
+bridge()
+drawn_note = note("With photo two (Freeform board).md")
+fb.PICTURE_PIXELS = 1000                       # the same file, now over the size limit
+spec = dict(spec, name="With photo three"); edit(spec)
+bridge()
+result = {"missing_code": missing_code, "missing": missing_note, "drawn": drawn_note,
+          "too_big": note("With photo three (Freeform board).md")}
+`);
+    expect(r.missing_code).toBe(0);
+    expect(r.missing).toContain('1 picture(s) on the board could not be drawn');
+    expect(r.drawn).not.toContain('could not be drawn');
+    expect(r.too_big).toContain('1 picture(s) on the board could not be drawn');
+  });
+
+  it('numbers that are not numbers: a bad colour is dropped, a bad pen point fails that board (review 2, finding 6)', () => {
+    const r = py(`
+nan = float("nan")
+db([fx.sample()])
+bridge("--baseline")
+spec = fx.sample(note="Changed")
+spec["stickies"][0]["rgb"] = (nan, 0.5, 0.5)
+edit(spec); preview_for(fx.sample(note="Changed"))
+colour_code, colour_out = bridge()
+spec = fx.sample("B" * 32, "Bad ink"); spec["strokes"][0]["pts"][3] = (nan, 1.0)
+edit(spec)
+ink_code, ink_out = bridge()
+result = {"colour_code": colour_code, "colour_out": colour_out, "ink_code": ink_code, "ink_out": ink_out}
+`);
+    expect(r.colour_out).toContain('1 new or changed board(s) filed');
+    expect(r.colour_out).not.toContain('could not file');
+    expect(r.ink_code).toBe(1);
+    expect(r.ink_out).toContain('would not decode');
+  });
+
+  it('a record nested past the limit is refused by the decoder itself (review 2: the limit had no test)', () => {
+    const r = py(`
+deep = b"\\x08\\x01"
+for _ in range(200):                           # deeper than MAX_DEPTH, far inside Python's own limit
+    deep = fx.fld(2, 2, deep)
+errors = {}
+for name, call in (("walk", lambda: fb.walk(deep, [])), ("strings", lambda: fb.mergeable_strings(deep)),
+                   ("plain", lambda: fb._plain_strings(deep))):
+    try:
+        call(); errors[name] = None
+    except ValueError as e:
+        errors[name] = str(e)
+shallow = b"\\x08\\x01"
+for _ in range(30):
+    shallow = fx.fld(2, 2, shallow)
+fb.walk(shallow, [])
+result = errors
+`);
+    expect(r).toEqual({ walk: 'record nested too deep', strings: 'record nested too deep', plain: 'record nested too deep' });
+  });
+
+  it('a state file that cannot be saved takes the note back out and stops, with no traceback (review 2, finding 7)', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+spec = fx.sample(note="Changed"); edit(spec); preview_for(spec)
+real = fb.save_state
+def refuse(path, state): raise OSError(28, "No space left on device")
+fb.save_state = refuse
+code, out = bridge()
+left = inbox()
+fb.save_state = real
+retry, _ = bridge()
+result = {"code": code, "out": out, "left": left, "retry": retry, "notes": [f for f in inbox() if f.endswith(".md")]}
+`);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('state file could not be saved');
+    expect(r.left).toEqual([]);
+    expect(r.retry).toBe(0);
+    expect(r.notes).toEqual(['Garden plan (Freeform board).md']);
+  });
+
+  it('a database that errors part-way is an ERROR line, not a traceback (review 2, finding 8)', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+con = sqlite3.connect(os.path.join(D, "Boards", "boards.db")); con.execute("drop table freehand_drawing_buckets"); con.commit(); con.close()
+code, out = bridge()
+listed, list_out = bridge("--list")
+result = {"code": code, "out": out, "listed": listed, "list_out": list_out}
+`);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("ERROR: Freeform's database could not be read");
+    expect(r.listed).toBe(1);
+    expect(r.list_out).toContain("ERROR: Freeform's database could not be read");
+  });
+
+  it('a board too big for the tile cap is shrunk and cut again, never trimmed (review 2: halving had no test)', () => {
+    const r = py(`
+from PIL import Image
+fb.TILE, fb.TILE_OVERLAP, fb.MAX_TILES, fb.OVERVIEW_SIDE = 300, 20, 4, 200
+parts = fb.tiles(Image.new("RGB", (1000, 1000), "black"))
+covered = sum(p.size[0] * p.size[1] for _, p in parts)
+result = {"parts": len(parts), "sizes": sorted(set(p.size for _, p in parts))}
+`);
+    expect(r.parts).toBe(4);
+    expect(r.sizes.length).toBeGreaterThan(0);
   });
 
   it('a board that will not decode is skipped loudly and the others still file', () => {
@@ -578,14 +767,43 @@ n = [0]
 def settles(db):
     n[0] += 1; return min(n[0], 20)      # changes for 20 reads (100 s), then holds still
 fb._snapshot = settles
-waited, changed_at = fb.sync("x", sleep=nap)
-result = {"waited": waited, "changed": changed_at > 0, "opened": len(opened), "killed": killed}
+waited, arrivals, any_change = fb.sync("x", sleep=nap)
+result = {"waited": waited, "changed": any_change, "opened": len(opened), "killed": killed}
 `);
     expect(r.waited).toBeGreaterThanOrEqual(130);   // about 95 s of change + 40 s of quiet
     expect(r.waited).toBeLessThan(200);
     expect(r.changed).toBe(true);
     expect(r.opened).toBe(0);
     expect(r.killed).toEqual([]);
+  });
+
+  it('a database quiet from the start is still given 90 seconds for iCloud to begin (review S2)', () => {
+    const r = py(harness.replace('RUNNING_AT_START', 'False') + `
+fb._snapshot = lambda db: ({}, 0)
+waited, arrivals, any_change = fb.sync("x", sleep=nap)
+result = {"waited": waited, "any": any_change, "arrivals": arrivals}
+`);
+    expect(r.waited).toBeGreaterThanOrEqual(90);
+    expect(r.waited).toBeLessThan(110);
+    expect(r.any).toBe(false);
+    expect(r.arrivals).toEqual({});
+  });
+
+  it('records when each board\'s own data arrived, not when the database last moved (review 2, finding 1)', () => {
+    const r = py(harness.replace('RUNNING_AT_START', 'False') + `
+n = [0]
+def snap(db):
+    n[0] += 1
+    a = (1,) if n[0] < 4 else (2,)        # board A changes at the 4th read
+    b = (1,) if n[0] < 10 else (2,)       # board B changes at the 10th, 30 s later
+    return ({"A": a, "B": b}, 0)
+fb._snapshot = snap
+waited, arrivals, any_change = fb.sync("x", sleep=nap)
+result = {"gap": arrivals["B"] - arrivals["A"], "any": any_change, "boards": sorted(arrivals)}
+`);
+    expect(r.boards).toEqual(['A', 'B']);
+    expect(r.gap).toBe(30);
+    expect(r.any).toBe(true);
   });
 
   it('an unreadable database is never mistaken for a quiet one', () => {

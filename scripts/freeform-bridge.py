@@ -87,6 +87,7 @@ TILE_OVERLAP = 120     # ...overlapping, so a word on a cut line is whole in one
 MAX_TILES = 36         # a 9,000-pixel board cuts into at most 6 x 6
 MARGIN = 30
 MATCH_AT = 0.60        # preview match score at or above this counts as a match
+PICTURE_PIXELS = 60_000_000   # a pasted picture bigger than this is drawn as a box (180 MB decoded)
 TEXT_PT = 12.0         # text size for text boxes, in board points
 STICKY_PT = 20.0       # largest text size tried on a sticky note
 FONTS = ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/SFNS.ttf",
@@ -211,7 +212,9 @@ def _as_vec(v):
 
 def _as_float(v):
     x = _single(v, 15, 5)
-    return None if x is None else _f32(x)
+    if x is None or not _finite(_f32(x)):
+        return None
+    return _f32(x)
 
 
 def _as_int(v):
@@ -575,7 +578,11 @@ def _pil():
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
         raise BridgeError("the Pillow library is missing for this python; nothing can be drawn")
-    Image.MAX_IMAGE_PIXELS = 150_000_000    # a pasted picture bigger than this is drawn as a box
+    # Pillow's own size guard is switched off: it also fires on pictures this
+    # script makes itself (a 9,000-pixel board, even a line of text), and it only
+    # refuses a file at twice its figure. render() checks each pasted picture's
+    # size against PICTURE_PIXELS before decoding it, which is exact.
+    Image.MAX_IMAGE_PIXELS = None
     return Image, ImageDraw, ImageFont
 
 
@@ -687,6 +694,8 @@ def render(board):
         for p in it["asset"] or []:
             try:
                 with Image.open(p) as src:
+                    if src.size[0] * src.size[1] > PICTURE_PIXELS:
+                        continue                        # too big to decode on this Mac
                     src.draft("RGB", (w, h))            # JPEGs decode small from the start
                     src.thumbnail((max(w, 64) * 2, max(h, 64) * 2))
                     im.paste(src.convert("RGB").resize((w, h)), (int(r[0]), int(r[1])))
@@ -695,6 +704,8 @@ def render(board):
             except Exception:
                 continue
         if not pasted:
+            if it["type"] == T_IMAGE:
+                board["undrawn_pictures"] = board.get("undrawn_pictures", 0) + 1
             d.rectangle(r, outline=(120, 120, 120), width=2)
             label = it["file"] or ("picture" if it["type"] == T_IMAGE else "file")
             _draw_text(d, (r[0] + 6, r[1] + 6), label[:60], (90, 90, 90), _font(11 * scale))
@@ -913,12 +924,12 @@ def reading_order(items):
     return sorted(items, key=lambda it: (round(it["at"][1] / 60.0), it["at"][0]))
 
 
-def note_text(b, board, stem, pictures, words, match, first_time):
+def note_text(b, board, stem, pictures, words, check, first_time):
     """The markdown for one board. `pictures` is [(file name, label)], the whole
     board first; `words` maps a file name to its machine-read words."""
     items = board["items"]
     count = lambda t: sum(1 for it in items if it["type"] == t)
-    score, reason = match
+    kind, score, reason = check["kind"], check["score"], check["why"]
     out = [f"# {b['name']} (Freeform board)", "",
            f"_From Freeform on Kevin's iPhone, by iCloud. Board last changed {when(b['changed'])}. "
            f"Read from the synced board on this Mac on {date.today().strftime('%-d %b %Y')}._", "",
@@ -937,15 +948,22 @@ def note_text(b, board, stem, pictures, words, match, first_time):
     if board.get("lost_strokes"):
         out.append(f"- {board['lost_strokes']} PEN STROKE(S) COULD NOT BE READ and are missing from "
                    f"the picture. Open the board in Freeform to see them.")
-    if score is None:
-        out.append(f"- Picture check: NOT CHECKED. {reason}. Treat the picture as unconfirmed.")
-    elif score >= MATCH_AT:
+    if board.get("undrawn_pictures"):
+        out.append(f"- {board['undrawn_pictures']} picture(s) on the board could not be drawn and "
+                   f"show as empty grey boxes. Open the board in Freeform to see them.")
+    if kind == "match":
         out.append(f"- Picture check: the redrawn board matches Freeform's own preview "
                    f"(score {score:.2f}: {reason}).")
-    else:
+    elif kind == "match_old":
+        out.append(f"- Picture check: the redrawn board matches Freeform's own preview (score "
+                   f"{score:.2f}: {reason}), but Freeform drew that preview before this change "
+                   f"reached the Mac. It confirms the board's layout, not the newest marks.")
+    elif kind == "mismatch":
         out.append(f"- Picture check: THE REDRAWN BOARD DOES NOT MATCH FREEFORM'S OWN PREVIEW "
                    f"(score {score:.2f}: {reason}). Trust the Freeform preview and the typed "
                    f"text, not the redrawn picture, and open the board in Freeform before acting.")
+    else:
+        out.append(f"- Picture check: NOT CHECKED. {reason}. Treat the picture as unconfirmed.")
     out.append("")
     stickies = [it for it in reading_order(items) if it["type"] == T_STICKY and it["text"]]
     boxes = [it for it in reading_order(items) if it["type"] == T_TEXT and it["text"]]
@@ -993,29 +1011,90 @@ def has_content(board):
     return bool(board["strokes"]) or any(it["type"] != T_DRAWING for it in board["items"])
 
 
+def check_picture(im, preview, floor):
+    """Our drawing against Freeform's own preview of the board.
+
+    `floor` is the latest moment (Unix time) at which this Mac is KNOWN to have
+    still held the board as it was: the last run that saw it unchanged, or the
+    moment this run watched its new data arrive. A preview drawn after the floor
+    may show the new board; one drawn before it certainly shows the old one.
+
+    Returns {"kind", "score", "why", "preview"}; kind is one of
+      match      agrees with a preview drawn after the floor
+      match_old  agrees with a preview drawn before it: the layout is confirmed,
+                 the newest marks are not (the note says exactly that)
+      mismatch   disagrees with a preview drawn after the floor: the run goes red
+      unchecked  no usable preview, or disagrees with a preview from before the
+                 floor (a picture of the old board is SUPPOSED to differ)
+    Timing decides only which kind of "disagrees" it is. Agreement is never thrown
+    away for timing: an earlier rule did that and the control stopped running
+    whenever another board synced a few seconds later (review, 23 Nov 2026)."""
+    out = {"kind": "unchecked", "score": None, "why": "", "preview": None}
+    if not preview:
+        out["why"] = "Freeform has no preview of this board on this Mac"
+        return out
+    score, why = preview_match(im, preview)
+    if score is None:
+        out["why"] = why
+        return out
+    after = os.path.getmtime(preview) > floor
+    out.update(score=score, why=why, preview=preview)
+    if score >= MATCH_AT:
+        out["kind"] = "match" if after else "match_old"
+    elif after:
+        out["kind"] = "mismatch"
+    else:
+        out.update(kind="unchecked", preview=None,
+                   why="Freeform has not redrawn its preview since this board changed")
+    return out
+
+
+def plain_note(inbox, b, first_time, lines):
+    """A note with no pictures, for a board there is nothing to draw of."""
+    stem = free_stem(inbox, b["name"], 0)
+    path = os.path.join(inbox, stem + ".md")
+    with open(path, "w") as f:
+        f.write(f"# {b['name']} (Freeform board)\n\n_From Freeform on Kevin's iPhone, by iCloud. Read "
+                f"from the synced board on this Mac on {date.today().strftime('%-d %b %Y')}._\n\n"
+                f"Freeform board id: {b['id']}\n\n" +
+                ("_This is the first time this board has been filed._" if first_time else
+                 "_This board was filed before and has changed. Update the brain note that carries "
+                 "this board id; do not make a second note._") +
+                "\n\n## What is on the board\n\n" + "\n".join("- " + l for l in lines) + "\n")
+    return stem, path
+
+
 def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, ocr_bin=OCR_BIN,
-                 preview_after=0.0):
-    """File one board into `inbox`. Returns (stem, pictures written, match, strokes
-    lost), or None for an empty board.
+                 floor=0.0):
+    """File one board into `inbox`. Returns None for a board with nothing on it
+    that was never filed, else {"stem", "pictures", "check", "lost", "written"}.
     Everything is built in a scratch folder first; on any failure nothing is left
     in the inbox, so the board is tried again next run."""
     Image, _, _ = _pil()
     board = read_board(con, b["id"], assets_dir)
+    unchecked = {"kind": "unchecked", "score": None, "why": "there is no picture to check", "preview": None}
     if not has_content(board):
         if board["lost_strokes"]:
-            raise BridgeError(f"{board['lost_strokes']} pen stroke(s) on this board could not be "
-                              f"placed and nothing else is on it")
-        return None
+            # Ink we cannot place and nothing else: say so ONCE and record the
+            # board. Raising here made it fail every night for ever.
+            stem, path = plain_note(inbox, b, first_time, [
+                f"{board['lost_strokes']} PEN STROKE(S) COULD NOT BE READ and nothing else is on "
+                f"the board, so there is no picture. Open the board in Freeform to see it."])
+            return {"stem": stem, "pictures": 0, "check": unchecked, "lost": board["lost_strokes"],
+                    "written": [path]}
+        if first_time:
+            return None
+        # Filed before, shows nothing now. That is either Kevin clearing it or its
+        # ink not having reached this Mac yet, and the data cannot say which.
+        stem, path = plain_note(inbox, b, first_time, [
+            "NOTHING is on the board now. Either Kevin cleared it, or its ink has not reached this "
+            "Mac yet (it is filed again if ink arrives). Keep everything in the brain note and add "
+            "one dated line saying the board read as empty."])
+        return {"stem": stem, "pictures": 0, "check": unchecked, "lost": 0, "written": [path],
+                "emptied": True}
     im, _ = render(board)
-    preview = find_preview(previews, b["id"])
-    if preview and os.path.getmtime(preview) <= preview_after:
-        # `preview_after` is when this bridge last saw the board as it WAS. A
-        # preview drawn before then shows the old board: comparing would cry wolf.
-        # (Judged on our own clock, not the board's edit time: an edit made on the
-        # phone at noon can reach this Mac at night, after a preview drawn at dusk.)
-        match, preview = (None, "Freeform has not redrawn its preview since this board changed"), None
-    else:
-        match = preview_match(im, preview)
+    check = check_picture(im, find_preview(previews, b["id"]), floor)
+    preview = check["preview"]
     whole = shrunk(im, OVERVIEW_SIDE)
     parts = tiles(im)
     scratch = tempfile.mkdtemp(prefix="freeform-")
@@ -1032,7 +1111,7 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
         words = {names[i]: read[os.path.join(scratch, local[i][0])]
                  for i in range(len(local)) if os.path.join(scratch, local[i][0]) in read}
         pictures = [(names[i], local[i][1]) for i in range(len(local))]
-        text = note_text(b, board, stem, pictures, words, match, first_time)
+        text = note_text(b, board, stem, pictures, words, check, first_time)
         if preview:
             text += (f"\n## Freeform's own preview\n\n_Apple's small picture of the whole board, "
                      f"kept as the check on the redrawn pictures above._\n\n"
@@ -1050,28 +1129,20 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             with open(written[-1], "w") as f:
                 f.write(text)
         except BaseException:
-            for w in written:
-                try:
-                    os.remove(w)
-                except OSError:
-                    pass
+            _remove(written)
             raise
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    return stem, len(local), match, board["lost_strokes"]
+    return {"stem": stem, "pictures": len(local), "check": check, "lost": board["lost_strokes"],
+            "written": written}
 
 
-def emptied_note(inbox, b):
-    """A board the brain already holds has been wiped: say so, or the brain keeps
-    the old content as if it still stood."""
-    stem = free_stem(inbox, b["name"], 0)
-    with open(os.path.join(inbox, stem + ".md"), "w") as f:
-        f.write(f"# {b['name']} (Freeform board)\n\n_From Freeform on Kevin's iPhone, by iCloud. Read "
-                f"from the synced board on this Mac on {date.today().strftime('%-d %b %Y')}._\n\n"
-                f"Freeform board id: {b['id']}\n\n_This board was filed before and has changed. Update "
-                f"the brain note that carries this board id; do not make a second note._\n\n"
-                f"## What is on the board\n\n- NOTHING. Kevin has cleared this board. Keep the brain "
-                f"note, and add a dated line saying the board was emptied.\n")
+def _remove(paths):
+    for w in paths:
+        try:
+            os.remove(w)
+        except OSError:
+            pass
 
 
 def _epoch(iso):
@@ -1116,18 +1187,35 @@ def _freeform_pids():
 
 
 def _snapshot(db):
+    """A cheap picture of the database: for every board, how many items and
+    stroke buckets it has, their newest row and their total size, plus when the
+    write-ahead log last moved. None when the database will not read."""
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
         try:
-            snap = (con.execute("select count(*), max(rowid) from boards").fetchone(),
-                    con.execute("select count(*), max(rowid) from board_items").fetchone(),
-                    con.execute("select count(*), max(rowid) from freehand_drawing_buckets").fetchone())
+            per = {}
+            for bid, n, size, tomb in con.execute(
+                    "select hex(board_identifier), 1, length(data), tombstoned from boards"):
+                per[bid] = [(n, size, tomb)]
+            for sql in ("select hex(board_identifier), count(*), max(rowid), "
+                        "sum(length(common_data)) + sum(length(specific_data)) from board_items group by 1",
+                        "select hex(board_indentifier), count(*), max(rowid), sum(length(bucket_data)) "
+                        "from freehand_drawing_buckets group by 1"):
+                for row in con.execute(sql):
+                    per.setdefault(row[0], []).append(tuple(row[1:]))
         finally:
             con.close()
     except sqlite3.Error:
         return None
     wal = db + "-wal"
-    return snap, (os.path.getmtime(wal) if os.path.exists(wal) else 0)
+    return {k: tuple(v) for k, v in per.items()}, (os.path.getmtime(wal) if os.path.exists(wal) else 0)
+
+
+def _boards_changed(a, b):
+    """Ids of the boards that differ between two snapshots."""
+    if not (isinstance(a, tuple) and isinstance(b, tuple) and isinstance(a[0], dict) and isinstance(b[0], dict)):
+        return set()
+    return {k for k in set(a[0]) | set(b[0]) if a[0].get(k) != b[0].get(k)}
 
 
 def sync(db, min_wait=90, quiet=40, max_wait=600, sleep=time.sleep):
@@ -1135,8 +1223,8 @@ def sync(db, min_wait=90, quiet=40, max_wait=600, sleep=time.sleep):
     database has been quiet for `quiet` seconds, then close Freeform again if this
     run opened it. Freeform is opened with `open`, never an Apple Event: an Apple
     Event from a night job raises a permission pop-up nobody can see (the 18 Nov
-    2026 Reminders freeze). Returns (seconds waited, when the database last
-    changed during the wait as Unix time, or 0.0 when it never did).
+    2026 Reminders freeze). Returns (seconds waited, {board id: Unix time its data
+    was last seen arriving during the wait}, whether anything changed at all).
 
     Nothing here can prove iCloud delivered: a quiet database is also what a sync
     that never started looks like. So a quiet night is reported as "nothing
@@ -1150,16 +1238,17 @@ def sync(db, min_wait=90, quiet=40, max_wait=600, sleep=time.sleep):
             raise BridgeError("Freeform would not open: " + (r.stderr.strip() or f"exit {r.returncode}"))
     start = time.time()
     first = _snapshot(db)
-    last, still_since, changed_at = first, start, 0.0
+    last, still_since, arrivals, any_change = first, start, {}, False
     try:
         while True:
             sleep(5)
             now = time.time()
             snap = _snapshot(db)
             if snap != last:
+                for bid in _boards_changed(last, snap):
+                    arrivals[bid] = now
                 last, still_since = snap, now
-                if snap != first:
-                    changed_at = now
+                any_change = any_change or snap != first
             if now - start >= min_wait and snap is not None and now - still_since >= quiet:
                 break
             if now - start >= max_wait:
@@ -1174,17 +1263,20 @@ def sync(db, min_wait=90, quiet=40, max_wait=600, sleep=time.sleep):
                     os.kill(pid, signal.SIGTERM)
                 except OSError:
                     pass
-    return int(time.time() - start), changed_at
+    return int(time.time() - start), arrivals, any_change
 
 
 # ───────────────────────── the run ─────────────────────────
 
+UNCHECKED_LIMIT = 3     # this many filings in a row with no preview check turns the job red
+
+
 def run(args):
-    arrived_at = 0.0
+    arrivals = {}
     if not args.no_sync:
-        waited, arrived_at = sync(args.db)
+        waited, arrivals, any_change = sync(args.db)
         print(f"Freeform was open for {waited} s. " +
-              ("New board data arrived from iCloud." if arrived_at else "Nothing arrived from iCloud."))
+              ("New board data arrived from iCloud." if any_change else "Nothing arrived from iCloud."))
     con = connect(args.db)
     boards = list_boards(con)
     if not boards:
@@ -1205,7 +1297,7 @@ def run(args):
         if state is not None and not args.force:
             raise BridgeError(f"a state file already exists at {args.state}. A second baseline would "
                               f"hide every board changed since the first. Pass --force to mean it.")
-        state = {"version": 1, "baseline_at": now, "last_run_at": now, "boards": {
+        state = {"version": 1, "baseline_at": now, "boards": {
             b["id"]: {"fingerprint": b["fingerprint"], "filed_at": None, "seen_at": now} for b in boards}}
         save_state(args.state, state)
         print(f"Baseline: {len(boards)} existing board(s) recorded. None filed. "
@@ -1220,53 +1312,58 @@ def run(args):
         # builds a local look-alike, the notes land nowhere and are marked filed.
         raise BridgeError(f"the brain inbox is not there ({args.inbox}). Google Drive is not "
                           f"mounted, so nothing was filed and nothing was recorded.")
-    filed = failed = unmatched = unchecked = partial = 0
-    # A preview can vouch for a changed board only if Freeform drew it AFTER the
-    # change reached this Mac: later than the last run (which still saw the old
-    # board) and, when this run watched data arrive, later than that arrival
-    # (less one 5-second poll). Anything older shows the board as it was.
-    fresh_after = max(_epoch(state.get("last_run_at")), arrived_at - 6 if arrived_at else 0.0)
+    filed = failed = unmatched = partial = checked = unchecked = 0
     for b in boards:
         known = state["boards"].get(b["id"])
         if known and known.get("fingerprint") == b["fingerprint"]:
+            known["seen_at"] = now          # still as recorded: the floor for its next change
             continue
+        # The latest moment this Mac is known to have held the board as it WAS.
+        floor = max(_epoch(known.get("seen_at")) if known else 0.0,
+                    arrivals[b["id"]] - 6 if b["id"] in arrivals else 0.0)   # 6 s: one poll, and a bit
         first_time = not (known and known.get("filed_at"))
         try:
             done = export_board(con, b, args.inbox, args.previews, assets_dir, first_time,
-                                do_ocr=not args.no_ocr, ocr_bin=args.ocr_bin,
-                                preview_after=max(fresh_after, _epoch(known.get("seen_at")) if known else 0.0))
-            if done is None and not first_time:
-                emptied_note(args.inbox, b)
+                                do_ocr=not args.no_ocr, ocr_bin=args.ocr_bin, floor=floor)
         except Exception as e:
             failed += 1
             # The title and the full error go to the log only (the wrapper filters
             # "Skipped:" from stdout): a title is free text and could trip the job
-            # runner's failure markers.
+            # runner's failure markers. A failed board keeps its old state entry,
+            # floor included, so the retry judges its preview on the same terms.
             print(f"Skipped: {b['name']} ({e})")
             print(f"ERROR: could not file a Freeform board: "
                   f"{e if isinstance(e, BridgeError) else type(e).__name__}")
             continue
         entry = {"fingerprint": b["fingerprint"], "seen_at": now,
                  "filed_at": known.get("filed_at") if known else None}
-        if done is None:                      # an empty board: remember it, file no pictures
-            state["boards"][b["id"]] = entry
-            save_state(args.state, state)
-            if not first_time:
-                filed += 1
-                print(f"Exported: {b['name']} is now empty")
-            continue
-        stem, n_pictures, (score, _), lost = done
-        partial += 1 if lost else 0
-        entry["filed_at"] = now
+        if done is not None:
+            entry["filed_at"] = now
         state["boards"][b["id"]] = entry
-        save_state(args.state, state)       # after every board: a later failure must not lose it
+        try:
+            save_state(args.state, state)   # after every board: a later failure must not lose it
+        except OSError as e:
+            # The note is in the inbox and the state cannot record it. Take the
+            # note back out, or tomorrow files the same board a second time.
+            _remove(done["written"] if done else [])
+            raise BridgeError(f"the Freeform state file could not be saved ({e}). The board just "
+                              f"filed was taken back out of the inbox; nothing further was done.")
+        if done is None:                      # an empty board never filed: remembered, nothing to say
+            continue
         filed += 1
-        if score is None:
-            unchecked += 1
-        elif score < MATCH_AT:
+        partial += 1 if done["lost"] else 0
+        kind = done["check"]["kind"]
+        if kind == "mismatch":
             unmatched += 1
-        print(f"Exported: {stem}.md (+{n_pictures} picture(s))")
-    state["last_run_at"] = now
+        if done["pictures"]:
+            if kind == "unchecked":
+                unchecked += 1
+            else:
+                checked += 1
+        print(f"Exported: {done['stem']}.md (+{done['pictures']} picture(s))")
+    # The check on the check: a preview comparison that never runs is no control.
+    streak = 0 if checked else int(state.get("unchecked_streak", 0)) + unchecked
+    state["unchecked_streak"] = streak
     save_state(args.state, state)
     newest = max(b["changed"] for b in boards)
     print(f"Done. {len(boards)} board(s) seen, newest change {when(newest)}. "
@@ -1274,6 +1371,10 @@ def run(args):
     if unchecked:
         print(f"WARNING: {unchecked} filed board(s) had no current Freeform preview to check the "
               f"picture against. Each note says NOT CHECKED.")
+    if streak >= UNCHECKED_LIMIT:
+        print(f"ERROR: the last {streak} Freeform boards filed had no preview to check the picture "
+              f"against, so the picture check is not running. Freeform may have stopped drawing "
+              f"previews when opened hidden.")
     if unmatched:
         print(f"ERROR: {unmatched} filed board(s) do not match Freeform's own preview. Each note "
               f"says so. Open the board in Freeform to check it.")
@@ -1282,7 +1383,7 @@ def run(args):
               f"note says how many.")
     if failed:
         print(f"ERROR: {failed} board(s) could not be filed. They stay queued for the next run.")
-    return 1 if failed or unmatched or partial else 0
+    return 1 if failed or unmatched or partial or streak >= UNCHECKED_LIMIT else 0
 
 
 def main(argv=None):
@@ -1303,7 +1404,13 @@ def main(argv=None):
         return run(args)
     except BridgeError as e:
         print(f"ERROR: {e}")
-        return 1
+    except sqlite3.Error as e:
+        print(f"ERROR: Freeform's database could not be read ({type(e).__name__}: {e}). Nothing was filed.")
+    except OSError as e:
+        print(f"ERROR: a file could not be read or written ({type(e).__name__}: {e.strerror or e}).")
+    except subprocess.TimeoutExpired:
+        print("ERROR: Freeform did not answer in time. Nothing was filed.")
+    return 1
 
 
 if __name__ == "__main__":
