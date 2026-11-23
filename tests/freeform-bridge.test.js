@@ -418,6 +418,86 @@ result = {"turned": drawn(30.0), "flat": drawn(0.0), "coloured": drawn(30.0, edg
     expect(r.coloured).toMatchObject({ right_end_up: true, mirror: false });
   });
 
+  it('a whole sticky note missing from a tight cluster is caught, whatever sits beside it (review 6, finding 2)', () => {
+    const r = py(`
+A = "A" * 32
+def board(gap, drop=None):
+    notes = [{"text": f"note {i}", "at": (gap * (i % 3), gap * (i // 3))} for i in range(9) if i != drop]
+    notes += [{"text": "far", "at": at} for at in ((1400, 0), (0, 1400), (1400, 1400), (1400, 700), (700, 1400))]
+    return {"id": A, "name": "Cluster", "stickies": notes}
+result = {"same": [judge(board(g), board(g)) for g in (205, 210, 230)],
+          "middle_gone": [judge(board(g), board(g, 4)) for g in (205, 210, 230)],
+          "middle_added": judge(board(210, 4), board(210))}
+`);
+    expect(r.same).toEqual(['agrees', 'agrees', 'agrees']);
+    expect(r.middle_gone).not.toContain('agrees');
+    expect(r.middle_added).not.toBe('agrees');
+  });
+
+  it('a thin straight line that Freeform\'s preview does not hold never turns a right drawing red (review 6, finding 1)', () => {
+    const r = py(`
+from PIL import Image
+A = "A" * 32
+line = lambda at, length, angle=0.0: {"text": None, "at": at, "size": (length, 0), "fill": None, "edge": None, "angle": angle}
+memo = {"id": A, "name": "Note", "stickies": [{"text": "Call the roofer", "at": (0, 0)}]}
+divided = dict(memo, boxes=[line((0, 260), 600)])
+framed = dict(memo, boxes=[line((-50, -50), 300), line((-50, 250), 300), line((-200, 100), 300, 90.0), line((100, 100), 300, 90.0)])
+only = {"id": A, "name": "Lines", "boxes": [line((0, 0), 400), line((0, 80), 400)]}
+def check(shown, board):
+    """The check on the drawing of \`board\` when Freeform's preview shows \`shown\` (None: a blank preview)."""
+    if shown is None:
+        pv = os.path.join(PREVIEWS, f"board_{A[:8]}-{A[8:12]}-{A[12:16]}-{A[16:20]}-{A[20:]}#_large_2.0_light")
+        Image.new("RGBA", (400, 300), (255, 255, 255, 0)).save(pv, "PNG")
+    else:
+        preview_for(shown)
+        pv = fb.find_preview(PREVIEWS, A)
+    v = os.path.join(D, "v"); con = fb.connect(fx.build(v, [board]))
+    b = fb.read_board(con, A, os.path.join(v, "Boards", "Assets"))
+    im, _ = fb.render(b)
+    c = fb.check_picture(im, pv, os.path.getmtime(pv) - 10, lambda: fb.render(b, without_lines=True)[0])
+    return [fb.preview_match(im, pv)[0], c["kind"], c["lines_left_out"]]
+result = {"divider_not_shown": check(memo, divided), "frame_not_shown": check(memo, framed),
+          "lines_only_blank_preview": check(None, only),
+          "divider_shown": check(divided, divided),
+          "note_gone_too": check(memo, dict(divided, stickies=[{"text": "x", "at": (900, 900)}]))}
+# End to end: the run files the board, says the lines were left out of the check, and is not red.
+db([fx.sample()]); bridge("--baseline")
+edit(divided); preview_for(memo)
+code, out = bridge()
+text = next(note(f) for f in inbox() if f.endswith(".md"))
+result["run"] = [code, "1 straight line(s)" in text, "left out of this check" in text, "DOES NOT MATCH" in text]
+`);
+    // The full drawing, lines and all, plainly differs from a preview without them...
+    expect(r.divider_not_shown).toEqual(['differs', 'match', true]);
+    expect(r.frame_not_shown).toEqual(['differs', 'match', true]);
+    // ...and a board of lines only, against a blank preview, is "not checked", not a mismatch.
+    expect(r.lines_only_blank_preview).toEqual(['differs', 'unchecked', true]);
+    // A preview that does show the line is matched on the full drawing: no second look.
+    expect(r.divider_shown).toEqual(['agrees', 'match', false]);
+    // The second look forgives the lines and nothing else.
+    expect(r.note_gone_too[1]).toBe('mismatch');
+    expect(r.run).toEqual([0, true, true, false]);
+  });
+
+  it('a text box left empty or holding only spaces is not drawn as a line (review 6, finding 3)', () => {
+    const r = py(`
+A = "A" * 32
+def is_line(box):
+    spec = {"id": A, "name": "B", "stickies": [{"text": "x", "at": (0, 300)}], "boxes": [dict({"at": (0, 0), "fill": None, "edge": None}, **box)]}
+    v = os.path.join(D, "v"); con = fb.connect(fx.build(v, [spec]))
+    it = next(i for i in fb.read_board(con, A, os.path.join(v, "Boards", "Assets"))["items"] if i["type"] == fb.T_TEXT)
+    return bool(it.get("line"))
+result = {"line": is_line({"text": None, "size": (300, 0)}),
+          "upright_line": is_line({"text": None, "size": (0, 300)}),
+          "emptied_text_box": is_line({"text": None, "size": (300, 0), "auto_height": True}),
+          "box_of_spaces": is_line({"text": "   ", "size": (300, 0)}),
+          "box_of_spaces_auto": is_line({"text": "   ", "size": (300, 0), "auto_height": True}),
+          "text_box": is_line({"text": "hello", "size": (300, 0), "auto_height": True})}
+`);
+    expect(r).toEqual({ line: true, upright_line: true, emptied_text_box: false, box_of_spaces: false,
+                        box_of_spaces_auto: false, text_box: false });
+  });
+
   it('a see-through preview is read on white, and a dark-mode preview is not used at all', () => {
     const r = py(`
 from PIL import Image

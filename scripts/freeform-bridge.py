@@ -87,13 +87,14 @@ TILE = 1800            # readable parts are cut to this size...
 TILE_OVERLAP = 120     # ...overlapping, so a word on a cut line is whole in one of them
 MAX_TILES = 36         # a 9,000-pixel board cuts into at most 6 x 6
 MARGIN = 30
-# The picture check (calibrated on 34 real boards, 23 Nov 2026: 19 agree closely,
-# 14 broadly, 1 known-imperfect drawing fails; drawings with the ink removed or
+# The picture check (calibrated on 34 real boards, 23 Nov 2026: 21 agree closely,
+# 12 broadly, 1 known-imperfect drawing fails; drawings with the ink removed or
 # half removed never agree closely).
 CELLS, CELL_PX = 24, 8  # both pictures are compared on a 24 x 24 grid of 8-pixel cells
 AGREE_AT = 0.90         # fine detail and shading must both correlate this well to "match"
 COVER_AT = 0.85         # ...and this share of inked cells must be inked in the other picture
 GAP_CELLS = 4           # ...and no joined-up patch this big may be in one picture only
+BLOCK_CELLS = 3         # ...nor a solid square this many cells a side, whatever sits beside it
 WRONG_BELOW = 0.60      # under this on detail, shading or cover, the drawing is plainly wrong
 SHAPE_AGREE, SHAPE_WRONG = 0.90, 0.70   # how alike the two inked outlines are in proportion
 INK_FROM = 15           # a pixel this far from white (of 255) is part of the drawing
@@ -425,7 +426,8 @@ def read_board(con, bid, assets_dir):
                 it["text"] = next((t for t in texts if t.strip()), "").strip()
             if kind in (T_TEXT, T_STICKY):
                 it["rgb"], it["edge"] = _fill_and_edge(sobjects)
-                if kind == T_TEXT and not it["text"] and min(it["size"]) <= 0 < max(it["size"]):
+                if kind == T_TEXT and not it["text"] and _zero_side_is_set(it) \
+                        and all(len(t) <= 1 for t in texts):
                     # A shape with length and no thickness is a straight line drawn
                     # with the line tool. 461 of them on Kevin's boards were being
                     # left out of the drawing until the picture check looked for a
@@ -499,6 +501,21 @@ def read_board(con, bid, assets_dir):
         if it["type"] not in KNOWN_TYPES:
             unknown[it["type"]] = unknown.get(it["type"], 0) + 1
     return {"items": out_items, "strokes": live, "unknown": unknown, "lost_strokes": lost}
+
+
+def _zero_side_is_set(it):
+    """True for a shape with one side zero, the other not, and the zero side
+    STORED as zero. A text box that sizes itself also holds a width and no
+    height, but its height is marked as not set (its second flag is 0, where a
+    line's is 2: all 461 lines and all 38 such text boxes on Kevin's boards, 23
+    Nov 2026). Without this, an emptied text box was drawn as a black line
+    (review 6, finding 3). The caller also refuses a record holding more than
+    the one placeholder character a line's record holds: a box of spaces."""
+    (w, h), flags = it["size"], it["flags"]
+    if not min(w, h) <= 0 < max(w, h):
+        return False
+    side = 1 if h <= 0 else 0
+    return len(flags) > side and bool(flags[side])
 
 
 def _members(v):
@@ -669,12 +686,14 @@ def line_ends(it):
             for dx, dy in ((-w / 2.0, -h / 2.0), (w / 2.0, h / 2.0))]
 
 
-def bounds(board):
+def bounds(board, without_lines=False):
     xs, ys = [], []
     for it in board["items"]:
         x, y = it["at"]
         w, h = it["size"]
         if it.get("line"):
+            if without_lines:
+                continue
             for ex, ey in line_ends(it):
                 xs.append(ex)
                 ys.append(ey)
@@ -704,11 +723,17 @@ def bounds(board):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def render(board):
-    """The whole board as one picture. Returns (image, pixels per board point)."""
+def render(board, without_lines=False):
+    """The whole board as one picture. Returns (image, pixels per board point).
+
+    without_lines=True leaves out the straight lines made with the line tool,
+    for check_picture's second look. That drawing is only ever compared, never
+    filed."""
     Image, ImageDraw, _ = _pil()
-    box = bounds(board)
+    box = bounds(board, without_lines)
     if box is None:
+        if without_lines:
+            return Image.new("RGB", (2 * MARGIN + 2, 2 * MARGIN + 2), "white"), SCALE
         raise BridgeError("nothing on this board has a place to draw")
     x0, y0, x1, y1 = box
     scale = min(SCALE, (MAX_SIDE - 2 * MARGIN) / max(x1 - x0, y1 - y0, 1.0))
@@ -744,7 +769,7 @@ def render(board):
             except Exception:
                 continue
         if not pasted:
-            if it["type"] == T_IMAGE:
+            if it["type"] == T_IMAGE and not without_lines:
                 board["undrawn_pictures"] = board.get("undrawn_pictures", 0) + 1
             d.rectangle(r, outline=(120, 120, 120), width=2)
             label = it["file"] or ("picture" if it["type"] == T_IMAGE else "file")
@@ -760,7 +785,7 @@ def render(board):
             d.rectangle(rect(it), fill=_colour(it["rgb"]) if it["rgb"] else None,
                         outline=_colour(it["edge"]) if it["edge"] else None, width=max(1, int(round(scale))))
     for it in board["items"]:                       # straight lines, and connector lines
-        if it.get("line"):
+        if it.get("line") and not without_lines:
             d.line([px(*e) for e in line_ends(it)], fill=_colour(it["line"]), width=max(1, int(round(scale))))
         if it["type"] != T_LINE:
             continue
@@ -956,6 +981,20 @@ def _largest_gap(mask, other):
     return best
 
 
+def _solid_block(mask, other, n):
+    """True when some n x n square of cells is all set in `mask` and all clear
+    in `other`. _largest_gap lets a cell off when `other` has ink BESIDE it, so
+    a pen line may fall either side of a cell edge; in a tight cluster the ink
+    beside a missing sticky is its neighbours', and that let the whole sticky
+    off (review 6, finding 2). A square this size is no pen line."""
+    for y in range(CELLS - n + 1):
+        for x in range(CELLS - n + 1):
+            if all(mask[(y + j) * CELLS + x + i] and not other[(y + j) * CELLS + x + i]
+                   for j in range(n) for i in range(n)):
+                return True
+    return False
+
+
 def _same_shape(a, b, slack=2):
     """How alike two inked outlines are in proportion, 0 to 1. Each side is
     allowed `slack` pixels either way: on a board a few pixels tall, one pixel
@@ -989,10 +1028,8 @@ def preview_match(im, preview_path):
         "agrees" (23 Nov 2026): those marks are under a pixel in the preview.
         The guard for ink is the count from the decode: a stroke that will not
         read is counted in the note and turns the run red.
-    And one thing Freeform's preview leaves out: on one of Kevin's boards it
-    shows the slanted lines made with the line tool and none of the level or
-    upright ones, which the board's data holds. Our drawing shows them all, so
-    such a board comes back "differs_some" (23 Nov 2026)."""
+    Freeform's preview also shows thin straight lines faintly or not at all on
+    a big board; check_picture allows for that, not this function."""
     Image, _, _ = _pil()
     if not preview_path or not os.path.exists(preview_path):
         return None, None, "Freeform has no preview of this board on this Mac"
@@ -1024,14 +1061,16 @@ def preview_match(im, preview_path):
     ours_on, theirs_on = inked(om, od), inked(tm, td)
     found, extra = _covered(theirs_on, ours_on), _covered(ours_on, theirs_on)
     gap = max(_largest_gap(theirs_on, ours_on), _largest_gap(ours_on, theirs_on))
+    block = _solid_block(theirs_on, ours_on, BLOCK_CELLS) or _solid_block(ours_on, theirs_on, BLOCK_CELLS)
     why = (f"fine detail {detail:.2f}, shading {shade:.2f}, outline {shape:.2f}, "
            f"their ink found in ours {found:.2f}, our ink found in theirs {extra:.2f}, "
-           f"largest patch in one picture only {gap} of {CELLS * CELLS} cells")
+           f"largest patch in one picture only {gap} of {CELLS * CELLS} cells"
+           + (", and a solid block is in one picture only" if block else ""))
     score = max(0.0, min(detail, shade)) * shape
     if min(detail, shade) < WRONG_BELOW or shape < SHAPE_WRONG or min(found, extra) < WRONG_BELOW:
         return "differs", score, why
     if (min(detail, shade) >= AGREE_AT and shape >= SHAPE_AGREE and min(found, extra) >= COVER_AT
-            and gap < GAP_CELLS):
+            and gap < GAP_CELLS and not block):
         return "agrees", score, why
     return "differs_some", score, why
 
@@ -1136,6 +1175,7 @@ def note_text(b, board, stem, pictures, words, check, first_time):
     items = board["items"]
     count = lambda t: sum(1 for it in items if it["type"] == t)
     kind, score, reason = check["kind"], check["score"], check["why"]
+    straight = sum(1 for it in items if it.get("line"))
     out = [f"# {b['name']} (Freeform board)", "",
            f"_From Freeform on Kevin's iPhone, by iCloud. Board last changed {when(b['changed'])}. "
            f"Read from the synced board on this Mac on {date.today().strftime('%-d %b %Y')}._", "",
@@ -1145,8 +1185,8 @@ def note_text(b, board, stem, pictures, words, check, first_time):
             "this board id; do not make a second note._"), "",
            "## What is on the board", "",
            f"- {len(board['strokes'])} pen stroke(s) in {count(T_DRAWING)} drawing(s)",
-           f"- {count(T_STICKY)} sticky note(s), {count(T_TEXT)} text box(es) or shape(s), "
-           f"{count(T_LINE)} connector line(s)",
+           f"- {count(T_STICKY)} sticky note(s), {count(T_TEXT) - straight} text box(es) or shape(s), "
+           f"{straight} straight line(s), {count(T_LINE)} connector line(s)",
            f"- {count(T_IMAGE)} picture(s), {count(T_FILE)} attached file(s) or link(s)"]
     for t, n in sorted(board["unknown"].items()):
         out.append(f"- {n} item(s) of a kind this bridge cannot draw (Freeform type {t}). "
@@ -1160,6 +1200,9 @@ def note_text(b, board, stem, pictures, words, check, first_time):
     old = ("" if check.get("fresh") else
            " Freeform drew that preview before this change reached the Mac, so it speaks for "
            "the board's layout, not for the newest marks.")
+    if check.get("lines_left_out"):
+        old += (" The straight lines made with the line tool were left out of this check: "
+                "Freeform's small preview shows them faintly or not at all on a big board.")
     if kind == "match":
         out.append(f"- Picture check: the redrawn board matches Freeform's own preview "
                    f"({reason}). That preview is small: it vouches for the layout and where the "
@@ -1221,7 +1264,7 @@ def has_content(board):
     return bool(board["strokes"]) or any(it["type"] != T_DRAWING for it in board["items"])
 
 
-def check_picture(im, preview, floor):
+def check_picture(im, preview, floor, without_lines=None):
     """Our drawing against Freeform's own preview, and whether that preview can
     have been drawn from the board as it is now.
 
@@ -1236,13 +1279,31 @@ def check_picture(im, preview, floor):
       mismatch   plainly differs from a FRESH preview: the run goes red.
       unchecked  no usable preview, or plainly differs from an old one (a picture
                  of the old board is SUPPOSED to differ from the new one).
+    `without_lines` is a function giving the drawing with the straight lines
+    left out, for a board that has any; "lines_left_out" says the verdict came
+    from that second look.
     Agreement is never thrown away for timing; timing only decides whether a
     plain disagreement is our fault."""
-    out = {"kind": "unchecked", "fresh": False, "score": None, "why": "", "preview": None}
+    out = {"kind": "unchecked", "fresh": False, "score": None, "why": "", "preview": None,
+           "lines_left_out": False}
     if not preview:
         out["why"] = "Freeform has no preview of this board on this Mac"
         return out
     verdict, score, why = preview_match(im, preview)
+    if verdict != "agrees" and without_lines is not None:
+        # Freeform's small preview does not hold a thin straight line on a big
+        # board. On one of Kevin's boards (23 Nov 2026) its slanted lines show as
+        # faint dots and its level and upright ones not at all, though the board's
+        # data holds them; on a small board all of them show. The filed drawing
+        # always shows them, so a board with a divider under a note read as a
+        # different picture and went red (review 6, finding 1). A board with such
+        # lines is judged a second time on a drawing without them, and the better
+        # verdict stands. "Nothing to compare" beats "differs": a board of lines
+        # only can have a blank preview.
+        rank = {"agrees": 3, "differs_some": 2, None: 1, "differs": 0}
+        v2, s2, w2 = preview_match(without_lines(), preview)
+        if rank[v2] > rank[verdict]:
+            verdict, score, why, out["lines_left_out"] = v2, s2, w2, True
     if verdict is None:
         out["why"] = why
         return out
@@ -1313,7 +1374,9 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             "one dated line saying the board read as empty."])
         return {"stem": stem, "pictures": 0, "check": unchecked, "lost": 0, "written": [path]}
     im, _ = render(board)
-    check = check_picture(im, find_preview(previews, b["id"]), floor)
+    has_lines = any(it.get("line") for it in board["items"])
+    check = check_picture(im, find_preview(previews, b["id"]), floor,
+                          (lambda: render(board, without_lines=True)[0]) if has_lines else None)
     preview = check["preview"]
     whole = shrunk(im, OVERVIEW_SIDE)
     parts = tiles(im)
