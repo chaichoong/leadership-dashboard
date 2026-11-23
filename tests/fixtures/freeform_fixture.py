@@ -8,7 +8,8 @@ against the same structure it meets in production.
 A board spec is a dict:
     {"id": 32 hex chars, "name": str, "tombstoned": 0/1, "changed": apple seconds,
      "stickies": [{"text": str, "at": (x, y), "rgb": (r, g, b)}],
-     "boxes":    [{"text": str, "at": (x, y), "size": (w, h), "fill": rgb|None, "edge": rgb|None}],
+     "boxes":    [{"text": str, "at": (x, y), "size": (w, h), "fill": rgb|None, "edge": rgb|None,
+                   "angle": degrees}],   # size (length, 0) with no text is a straight line
      "strokes":  [{"at": (x, y), "pts": [(x, y), ...], "rgb": (r, g, b), "width": w}],
      "lines":    [(sticky index, sticky index)],
      "pictures": [{"at": (x, y), "size": (w, h), "name": str}]}   # see asset_path() for its file
@@ -75,8 +76,8 @@ def table(uuids, strings=()):
                b"".join(fld(2, 2, s.encode()) for s in strings))
 
 
-def geometry(pos, size):
-    return v_struct([v_vec(*pos), v_vec(*size), v_float(0.0), v_int(2), v_int(2), v_int(0), v_int(0)])
+def geometry(pos, size, angle=0.0):
+    return v_struct([v_vec(*pos), v_vec(*size), v_float(angle), v_int(2), v_int(2), v_int(0), v_int(0)])
 
 
 def colour(rgb):
@@ -96,9 +97,9 @@ def text_value(text):
     return fld(5, 2, fld(1, 2, text.encode()) + fld(3, 2, fld(1, 2, fld(1, 0, 1)) + fld(4, 2, b"\x01")))
 
 
-def common(self_id, parent_id, pos, size):
+def common(self_id, parent_id, pos, size, angle=0.0):
     uuids = [uuid.uuid4().hex.upper(), self_id, uuid.uuid4().hex.upper(), parent_id]
-    obj = fld(4, 2, fld(2, 2, v_struct([v_key(3), geometry(pos, size)])))
+    obj = fld(4, 2, fld(2, 2, v_struct([v_key(3), geometry(pos, size, angle)])))
     return HEADER + fld(1, 2, obj) + table(uuids, ["a", "b"])
 
 
@@ -180,7 +181,7 @@ def put_board(con, spec):
              shape_specific(st["text"], st.get("rgb", (1.0, 0.9, 0.4)), None))
     for i, bx in enumerate(spec.get("boxes", [])):
         uid = uuid.uuid5(uuid.NAMESPACE_OID, f"{spec['id']}box{i}").hex.upper()
-        item(uid, root, 3, common(uid, root, bx["at"], bx.get("size", (0, 0))),
+        item(uid, root, 3, common(uid, root, bx["at"], bx.get("size", (0, 0)), bx.get("angle", 0.0)),
              shape_specific(bx.get("text"), bx.get("fill"), bx.get("edge")))
     for i, (a, b) in enumerate(spec.get("lines", [])):
         uid = uuid.uuid5(uuid.NAMESPACE_OID, f"{spec['id']}line{i}").hex.upper()

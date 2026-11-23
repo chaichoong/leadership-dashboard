@@ -355,6 +355,69 @@ result = {"line": judge(line, line), "tall": judge(tall, tall), "line_turned": j
     expect(r.tall_cut_short).toBe('differs');
   });
 
+  it('one whole sticky note missing from a busy board is not a clean match (review 5, finding 1)', () => {
+    const r = py(`
+A = "A" * 32
+def grid(n, drop=None, extra=False):
+    notes = [{"text": f"note {i}", "at": (300 * (i % n), 300 * (i // n))} for i in range(n * n) if i != drop]
+    if extra:
+        notes.append({"text": "one more", "at": (300 * n, 300 * (n // 2))})
+    return {"id": A, "name": "Grid", "stickies": notes}
+out = {"same": [judge(grid(n), grid(n)) for n in (4, 5, 6)], "one_missing": [], "one_too_many": judge(grid(4), grid(4, extra=True))}
+for n, drop in ((4, 5), (4, 0), (5, 12), (5, 24), (6, 14), (6, 5)):
+    out["one_missing"].append(judge(grid(n), grid(n, drop)))
+result = out
+`);
+    expect(r.same).toEqual(['agrees', 'agrees', 'agrees']);
+    expect(r.one_missing).not.toContain('agrees');
+    expect(r.one_too_many).not.toBe('agrees');
+  });
+
+  it('a drawing that came out blank against a preview with something in it is a mismatch, not "not checked" (review 5, finding 2)', () => {
+    const r = py(`
+A = "A" * 32
+box = lambda fill: {"id": A, "name": "Box", "boxes": [{"text": None, "at": (0, 0), "size": (300, 200), "fill": fill, "edge": None}]}
+dark, pale = box((0.1, 0.1, 0.1)), box((1.0, 1.0, 0.6))     # the pale one is too near white to count as drawn
+def both(theirs, ours):
+    preview_for(theirs)
+    pv = fb.find_preview(PREVIEWS, A)
+    v = os.path.join(D, "v"); con = fb.connect(fx.build(v, [ours]))
+    im, _ = fb.render(fb.read_board(con, A, os.path.join(v, "Boards", "Assets")))
+    t = os.path.getmtime(pv)
+    return [fb.preview_match(im, pv)[0], fb.check_picture(im, pv, t - 10)["kind"], fb.check_picture(im, pv, t + 10)["kind"]]
+result = {"ours_blank": both(dark, pale), "theirs_blank": both(pale, dark), "both_blank": both(pale, pale)}
+`);
+    expect(r.ours_blank).toEqual(['differs', 'mismatch', 'unchecked']);
+    expect(r.theirs_blank).toEqual(['differs', 'mismatch', 'unchecked']);
+    expect(r.both_blank).toEqual([null, 'unchecked', 'unchecked']);
+  });
+
+  it('a straight line made with the line tool is drawn, turned the way Freeform turns it', () => {
+    const r = py(`
+import math
+A = "A" * 32
+def drawn(angle, edge=None):
+    spec = {"id": A, "name": "Line", "boxes": [{"text": None, "at": (100, 100), "size": (200, 0), "fill": None, "edge": edge, "angle": angle}]}
+    v = os.path.join(D, "v"); con = fb.connect(fx.build(v, [spec]))
+    board = fb.read_board(con, A, os.path.join(v, "Boards", "Assets"))
+    im, scale = fb.render(board)
+    x0, y0, x1, y1 = fb.bounds(board)
+    def ink(x, y):                                           # darkest pixel within 2 of a board point
+        px, py = int((x - x0) * scale + fb.MARGIN), int((y - y0) * scale + fb.MARGIN)
+        return min(sum(im.getpixel((min(max(px + i, 0), im.size[0] - 1), min(max(py + j, 0), im.size[1] - 1))))
+                   for i in range(-2, 3) for j in range(-2, 3)) < 300
+    up, across = 90 * math.sin(math.radians(30)), 90 * math.cos(math.radians(30))
+    return {"content": fb.has_content(board), "size": [round(x1 - x0), round(y1 - y0)],
+            "right_end_up": ink(200 + across, 100 - up), "left_end_down": ink(200 - across, 100 + up),
+            "mirror": ink(200 + across, 100 + up), "level": ink(200 + 90, 100)}
+result = {"turned": drawn(30.0), "flat": drawn(0.0), "coloured": drawn(30.0, edge=(0.8, 0.1, 0.1))}
+`);
+    // Turned 30 degrees anticlockwise about its middle: 200 long, so 173 across and 100 up.
+    expect(r.turned).toEqual({ content: true, size: [173, 100], right_end_up: true, left_end_down: true, mirror: false, level: false });
+    expect(r.flat).toMatchObject({ size: [200, 0], level: true, right_end_up: false });
+    expect(r.coloured).toMatchObject({ right_end_up: true, mirror: false });
+  });
+
   it('a see-through preview is read on white, and a dark-mode preview is not used at all', () => {
     const r = py(`
 from PIL import Image

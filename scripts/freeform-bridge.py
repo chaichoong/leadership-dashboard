@@ -46,6 +46,7 @@ next run tries it again.
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -86,12 +87,13 @@ TILE = 1800            # readable parts are cut to this size...
 TILE_OVERLAP = 120     # ...overlapping, so a word on a cut line is whole in one of them
 MAX_TILES = 36         # a 9,000-pixel board cuts into at most 6 x 6
 MARGIN = 30
-# The picture check (calibrated on 34 real boards, 23 Nov 2026: 22 agree closely,
-# 10 broadly, 2 known-imperfect drawings fail; drawings with the ink removed or
+# The picture check (calibrated on 34 real boards, 23 Nov 2026: 19 agree closely,
+# 14 broadly, 1 known-imperfect drawing fails; drawings with the ink removed or
 # half removed never agree closely).
 CELLS, CELL_PX = 24, 8  # both pictures are compared on a 24 x 24 grid of 8-pixel cells
 AGREE_AT = 0.90         # fine detail and shading must both correlate this well to "match"
 COVER_AT = 0.85         # ...and this share of inked cells must be inked in the other picture
+GAP_CELLS = 4           # ...and no joined-up patch this big may be in one picture only
 WRONG_BELOW = 0.60      # under this on detail, shading or cover, the drawing is plainly wrong
 SHAPE_AGREE, SHAPE_WRONG = 0.90, 0.70   # how alike the two inked outlines are in proportion
 INK_FROM = 15           # a pixel this far from white (of 255) is part of the drawing
@@ -423,7 +425,14 @@ def read_board(con, bid, assets_dir):
                 it["text"] = next((t for t in texts if t.strip()), "").strip()
             if kind in (T_TEXT, T_STICKY):
                 it["rgb"], it["edge"] = _fill_and_edge(sobjects)
-                if kind == T_TEXT and not it["text"] and not it["rgb"] and not it["edge"] \
+                if kind == T_TEXT and not it["text"] and min(it["size"]) <= 0 < max(it["size"]):
+                    # A shape with length and no thickness is a straight line drawn
+                    # with the line tool. 461 of them on Kevin's boards were being
+                    # left out of the drawing until the picture check looked for a
+                    # whole thing missing (23 Nov 2026).
+                    c = _first(sev, "rgb")
+                    it["line"] = it["edge"] or (c[1] if c else (0.0, 0.0, 0.0))
+                elif kind == T_TEXT and not it["text"] and not it["rgb"] and not it["edge"] \
                         and min(it["size"]) > 0:
                     # A plain shape with nothing set keeps Freeform's default look,
                     # which draws its outline (the frames on one of the first boards read).
@@ -647,11 +656,29 @@ def _colour(rgb, fallback=(0, 0, 0)):
     return tuple(max(0, min(255, int(round(c * 255)))) for c in rgb)
 
 
+def line_ends(it):
+    """The two ends of a straight-line shape, in board points. Its record holds
+    a length, no thickness, and an angle in degrees: the line is turned through
+    it about its own middle, anticlockwise as you look at the board. Both were
+    settled against Freeform's own previews of four of Kevin's boards (23 Nov
+    2026): turned the other way, or about its corner, the lines missed."""
+    (x, y), (w, h) = it["at"], it["size"]
+    t = -math.radians(it["angle"])
+    cx, cy = x + w / 2.0, y + h / 2.0
+    return [(cx + dx * math.cos(t) - dy * math.sin(t), cy + dx * math.sin(t) + dy * math.cos(t))
+            for dx, dy in ((-w / 2.0, -h / 2.0), (w / 2.0, h / 2.0))]
+
+
 def bounds(board):
     xs, ys = [], []
     for it in board["items"]:
         x, y = it["at"]
         w, h = it["size"]
+        if it.get("line"):
+            for ex, ey in line_ends(it):
+                xs.append(ex)
+                ys.append(ey)
+            continue
         if it["type"] == T_TEXT and it["text"] and (w <= 0 or h <= 0):
             # A text box that sizes itself stores no size (or a width alone, and
             # wraps to it). Estimate the rest from the words, at Freeform's
@@ -732,7 +759,9 @@ def render(board):
             # shape from Freeform's preview of it (23 Nov 2026).
             d.rectangle(rect(it), fill=_colour(it["rgb"]) if it["rgb"] else None,
                         outline=_colour(it["edge"]) if it["edge"] else None, width=max(1, int(round(scale))))
-    for it in board["items"]:                       # connector lines
+    for it in board["items"]:                       # straight lines, and connector lines
+        if it.get("line"):
+            d.line([px(*e) for e in line_ends(it)], fill=_colour(it["line"]), width=max(1, int(round(scale))))
         if it["type"] != T_LINE:
             continue
         ends = [by_id[e] for e in it["ends"] if e in by_id]
@@ -900,6 +929,33 @@ def _covered(mask, other):
     return hits / total if total else 1.0
 
 
+def _largest_gap(mask, other):
+    """The biggest joined-up patch of cells set in `mask` that `other` has
+    nothing in or beside. A share of the whole board (_covered) forgives a
+    patch like this on a busy board: one sticky note missing out of sixteen
+    left 94% of the ink "found" and passed as a clean match (review 5,
+    finding 1). A patch is one whole thing missing, whatever else agrees."""
+    def near(i):
+        y, x = divmod(i, CELLS)
+        return any(0 <= y + dy < CELLS and 0 <= x + dx < CELLS and other[(y + dy) * CELLS + x + dx]
+                   for dy in (-1, 0, 1) for dx in (-1, 0, 1))
+    bare = {i for i, on in enumerate(mask) if on and not near(i)}
+    best = 0
+    while bare:
+        todo, size = [bare.pop()], 0
+        while todo:
+            y, x = divmod(todo.pop(), CELLS)
+            size += 1
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    j = (y + dy) * CELLS + x + dx
+                    if 0 <= y + dy < CELLS and 0 <= x + dx < CELLS and j in bare:
+                        bare.remove(j)
+                        todo.append(j)
+        best = max(best, size)
+    return best
+
+
 def _same_shape(a, b, slack=2):
     """How alike two inked outlines are in proportion, 0 to 1. Each side is
     allowed `slack` pixels either way: on a board a few pixels tall, one pixel
@@ -916,7 +972,8 @@ def preview_match(im, preview_path):
     """Our drawing against Freeform's own preview of the same board.
 
     Returns (verdict, score, plain reason). The verdict is
-      "agrees"        fine detail, shading, cover and outline all agree closely
+      "agrees"        fine detail, shading, cover and outline all agree closely,
+                      and no whole patch is in one picture only
       "differs_some"  the layout agrees but the detail does not, somewhere
       "differs"       plainly not the same picture
       None            nothing to compare (no preview, unreadable, or blank)
@@ -931,7 +988,11 @@ def preview_match(im, preview_path):
         boards with ink, taking out half the pen strokes left the verdict at
         "agrees" (23 Nov 2026): those marks are under a pixel in the preview.
         The guard for ink is the count from the decode: a stroke that will not
-        read is counted in the note and turns the run red."""
+        read is counted in the note and turns the run red.
+    And one thing Freeform's preview leaves out: on one of Kevin's boards it
+    shows the slanted lines made with the line tool and none of the level or
+    upright ones, which the board's data holds. Our drawing shows them all, so
+    such a board comes back "differs_some" (23 Nov 2026)."""
     Image, _, _ = _pil()
     if not preview_path or not os.path.exists(preview_path):
         return None, None, "Freeform has no preview of this board on this Mac"
@@ -944,8 +1005,14 @@ def preview_match(im, preview_path):
     # so its drawn area, not its paper, comes out the size of theirs.
     side = max(theirs_im.size) * max(im.size) / float(max(1, max(im.size) - 2 * MARGIN))
     ours, theirs = inked_area(shrunk(im, side)), inked_area(theirs_im)
+    if theirs is None and ours is None:
+        return None, None, "both pictures are blank"
     if theirs is None or ours is None:
-        return None, None, "one of the two pictures is blank"
+        # Not "nothing to compare": a drawing that came out empty against a
+        # preview with something in it is the plainest mismatch there is
+        # (review 5, finding 2).
+        return "differs", 0.0, ("our drawing is blank and Freeform's preview is not" if ours is None
+                                else "Freeform's preview is blank and our drawing is not")
     shape = _same_shape(ours.size, theirs.size)
     flat_x = min(ours.size[0], theirs.size[0]) < NARROW
     flat_y = min(ours.size[1], theirs.size[1]) < NARROW
@@ -956,12 +1023,15 @@ def preview_match(im, preview_path):
     inked = lambda m, d: [a > dark_at or b > busy_at for a, b in zip(m, d)]
     ours_on, theirs_on = inked(om, od), inked(tm, td)
     found, extra = _covered(theirs_on, ours_on), _covered(ours_on, theirs_on)
+    gap = max(_largest_gap(theirs_on, ours_on), _largest_gap(ours_on, theirs_on))
     why = (f"fine detail {detail:.2f}, shading {shade:.2f}, outline {shape:.2f}, "
-           f"their ink found in ours {found:.2f}, our ink found in theirs {extra:.2f}")
+           f"their ink found in ours {found:.2f}, our ink found in theirs {extra:.2f}, "
+           f"largest patch in one picture only {gap} of {CELLS * CELLS} cells")
     score = max(0.0, min(detail, shade)) * shape
     if min(detail, shade) < WRONG_BELOW or shape < SHAPE_WRONG or min(found, extra) < WRONG_BELOW:
         return "differs", score, why
-    if min(detail, shade) >= AGREE_AT and shape >= SHAPE_AGREE and min(found, extra) >= COVER_AT:
+    if (min(detail, shade) >= AGREE_AT and shape >= SHAPE_AGREE and min(found, extra) >= COVER_AT
+            and gap < GAP_CELLS):
         return "agrees", score, why
     return "differs_some", score, why
 
