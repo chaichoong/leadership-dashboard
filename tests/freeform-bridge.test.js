@@ -257,7 +257,59 @@ result = {"code": code, "out": out, "note": note("Garden plan (Freeform board).m
     expect(r.again).toBe(0);
   });
 
-  it('with no preview, or one drawn before the change arrived, the note says NOT CHECKED', () => {
+  it('a drawing with its handwriting missing never passes, wherever the ink sits (review 3, finding 1)', () => {
+    const r = py(`
+import random
+random.seed(7)
+def scribble(n, x0, y0, w, h):
+    out = []
+    for i in range(n):
+        x, y = x0 + random.random() * w, y0 + random.random() * h
+        out.append({"at": (x, y), "pts": fx.zigzag(6, 9.0, 14.0), "width": 1.2})
+    return out
+def verdict(full, ours):
+    preview_for(full)
+    p = fx.build(os.path.join(D, "v"), [ours]); con = fb.connect(p)
+    im, _ = fb.render(fb.read_board(con, ours["id"], os.path.join(D, "v", "Boards", "Assets")))
+    return fb.preview_match(im, os.path.join(PREVIEWS, os.listdir(PREVIEWS)[0]))[0]
+box = {"text": None, "at": (0, 0), "size": (600, 400), "fill": (0.2, 0.4, 0.8), "edge": None}
+inside = {"id": "A" * 32, "name": "Box", "boxes": [box], "drawing_at": (0, 0), "strokes": scribble(30, 40, 40, 480, 300)}
+ink = {"id": "A" * 32, "name": "Ink", "drawing_at": (0, 0), "strokes": scribble(60, 0, 0, 700, 400)}
+half = dict(ink, strokes=[s for s in ink["strokes"] if s["at"][1] < 200] + [ink["strokes"][0]])
+moved = dict(ink, strokes=[dict(s, at=(700 - s["at"][0], s["at"][1])) for s in ink["strokes"]])
+result = {"same": verdict(inside, inside), "ink_gone_from_box": verdict(inside, dict(inside, strokes=inside["strokes"][:1])),
+          "ink_same": verdict(ink, ink), "half_the_ink": verdict(ink, half), "ink_mirrored": verdict(ink, moved)}
+`);
+    expect(r.same).toBe('agrees');
+    expect(r.ink_same).toBe('agrees');
+    expect(r.ink_gone_from_box).not.toBe('agrees');
+    expect(r.half_the_ink).toBe('differs');
+    expect(r.ink_mirrored).not.toBe('agrees');
+  });
+
+  it('agreement is never thrown away for timing; timing only sorts a plain disagreement', () => {
+    const r = py(`
+spec = fx.sample()
+p = db([spec]); con = fb.connect(p)
+im, _ = fb.render(fb.read_board(con, spec["id"], os.path.join(D, "Boards", "Assets")))
+preview_for(spec)
+good = os.path.join(PREVIEWS, os.listdir(PREVIEWS)[0])
+t = os.path.getmtime(good)
+pick = lambda c: [c["kind"], c["fresh"], c["preview"] is not None]
+out = {"agrees_after": pick(fb.check_picture(im, good, t - 10)), "agrees_before": pick(fb.check_picture(im, good, t + 10))}
+preview_for(spec, wrong=True)
+t = os.path.getmtime(good)
+out["differs_after"] = pick(fb.check_picture(im, good, t - 10))
+out["differs_before"] = pick(fb.check_picture(im, good, t + 10))
+out["none"] = pick(fb.check_picture(im, None, 0))
+result = out
+`);
+    expect(r).toEqual({ agrees_after: ['match', true, true], agrees_before: ['match', false, true],
+                        differs_after: ['mismatch', true, true], differs_before: ['unchecked', false, false],
+                        none: ['unchecked', false, false] });
+  });
+
+  it('with no preview, or a wrong one drawn before the change, the note says NOT CHECKED', () => {
     const r = py(`
 db([fx.sample()])
 bridge("--baseline")
@@ -273,37 +325,14 @@ result = {"none_code": none_code, "none_out": none_out, "none_note": none_note, 
           "stale_note": note("Garden plan (Freeform board) (2).md"), "files": inbox()}
 `);
     expect(r.none_code).toBe(0);
-    expect(r.none_out).toContain('WARNING: 1 filed board(s) had no current Freeform preview');
+    expect(r.none_out).toContain('WARNING: 1 filed board(s) had no preview drawn since the change');
     expect(r.none_note).toContain('Picture check: NOT CHECKED');
     expect(r.stale_code).toBe(0);
     expect(r.stale_note).toContain('has not redrawn its preview since this board changed');
     expect(r.files.join()).not.toContain('(2) - Freeform preview');
   });
 
-  it('agreement is never thrown away for timing; timing only sorts a disagreement (review 2, findings 1 and 2)', () => {
-    const r = py(`
-spec = fx.sample()
-p = db([spec]); con = fb.connect(p)
-im, _ = fb.render(fb.read_board(con, spec["id"], os.path.join(D, "Boards", "Assets")))
-preview_for(spec)
-good = os.path.join(PREVIEWS, os.listdir(PREVIEWS)[0])
-t = os.path.getmtime(good)
-kinds = {"agrees_after": fb.check_picture(im, good, t - 10)["kind"],
-         "agrees_before": fb.check_picture(im, good, t + 10)["kind"]}
-preview_for(spec, wrong=True)
-t = os.path.getmtime(good)
-kinds["differs_after"] = fb.check_picture(im, good, t - 10)["kind"]
-before = fb.check_picture(im, good, t + 10)
-kinds["differs_before"] = before["kind"]
-kinds["none"] = fb.check_picture(im, None, 0)["kind"]
-result = {"kinds": kinds, "before_preview": before["preview"]}
-`);
-    expect(r.kinds).toEqual({ agrees_after: 'match', agrees_before: 'match_old', differs_after: 'mismatch',
-                              differs_before: 'unchecked', none: 'unchecked' });
-    expect(r.before_preview).toBe(null);
-  });
-
-  it('a preview from before the change that still agrees is filed as layout-only, not as a full match', () => {
+  it('an old preview that still agrees is filed as speaking for the layout only', () => {
     const r = py(`
 db([fx.sample()])
 preview_for(fx.sample())                       # drawn before the baseline: shows the old board
@@ -311,30 +340,71 @@ time.sleep(1.1)
 bridge("--baseline")
 edit(fx.sample(note="Buy seven fence posts"))  # one word differs: too small to see at preview size
 code, out = bridge()
-result = {"code": code, "note": note("Garden plan (Freeform board).md"), "files": inbox()}
+result = {"code": code, "out": out, "note": note("Garden plan (Freeform board).md"), "files": inbox()}
 `);
     expect(r.code).toBe(0);
     expect(r.note).toContain('Freeform drew that preview before this change reached the Mac');
-    expect(r.note).toContain('not the newest marks');
+    expect(r.note).toContain('not for the newest marks');
+    expect(r.out).toContain('WARNING: 1 filed board(s) had no preview drawn since the change');
     expect(r.files).toContain('Garden plan (Freeform board) - Freeform preview.png');
   });
 
-  it('three filings in a row with no preview check turn the run red: the control must not go quiet', () => {
+  it('each board is judged on when ITS data arrived, and one not seen arriving trusts no preview', () => {
+    const r = py(`
+a, b = fx.sample("A" * 32, "Board A"), fx.sample("B" * 32, "Board B")
+db([a, b])
+bridge("--baseline")
+a2, b2 = fx.sample("A" * 32, "Board A", note="A changed"), fx.sample("B" * 32, "Board B", note="B changed")
+edit(a2); edit(b2); preview_for(a2); preview_for(b2)
+drawn = max(os.path.getmtime(os.path.join(PREVIEWS, f)) for f in os.listdir(PREVIEWS))
+# A's data arrived before the previews were drawn; B's arrived 30 s after them.
+fake = {"waited": 100, "arrivals": {"A" * 32: drawn - 20, "B" * 32: drawn + 30}, "ended": drawn + 80, "opened": True}
+fb.sync = lambda db: fake
+argv = ["--db", os.path.join(D, "Boards", "boards.db"), "--state", STATE, "--inbox", INBOX,
+        "--previews", PREVIEWS, "--ocr-bin", OCR]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    code = fb.main(argv)
+c2 = fx.sample("C" * 32, "Board C"); edit(c2); preview_for(c2)
+fake["arrivals"] = {}                           # C changed, and no arrival was seen for it
+buf2 = io.StringIO()
+with contextlib.redirect_stdout(buf2):
+    fb.main(argv)
+old = "before this change reached the Mac"
+result = {"code": code, "out": buf.getvalue(), "a_old": old in note("Board A (Freeform board).md"),
+          "b_old": old in note("Board B (Freeform board).md"), "c_old": old in note("Board C (Freeform board).md")}
+`);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('New board data arrived from iCloud');
+    expect(r.a_old).toBe(false);     // drawn after A arrived: a fresh check
+    expect(r.b_old).toBe(true);      // drawn before B arrived: layout only
+    expect(r.c_old).toBe(true);      // arrival never seen: no preview is trusted as fresh
+  });
+
+  it('three filings in a row with no fresh check turn the run red, once per filing night, and a fresh check heals it', () => {
     const r = py(`
 db([fx.sample()])
+preview_for(fx.sample())
+for f in os.listdir(PREVIEWS):
+    os.utime(os.path.join(PREVIEWS, f), (time.time() - 86400, time.time() - 86400))
 bridge("--baseline")
 codes = []
-for i in range(3):
+for i in range(3):                             # an OLD preview that still agrees is not a fresh check
     edit(fx.sample(note="Change %d" % i))
     codes.append(bridge()[0])
-out = bridge()[1]
+idle, idle_out = bridge()                      # nothing filed tonight: not red again
+streak = json.load(open(STATE))["unchecked_streak"]
 spec = fx.sample(note="Checked at last"); edit(spec); preview_for(spec)
 healed, _ = bridge()
-result = {"codes": codes, "healed": healed, "streak": json.load(open(STATE))["unchecked_streak"]}
+result = {"codes": codes, "idle": idle, "idle_out": idle_out, "streak": streak, "healed": healed,
+          "after": json.load(open(STATE))["unchecked_streak"]}
 `);
     expect(r.codes).toEqual([0, 0, 1]);
+    expect(r.idle).toBe(0);
+    expect(r.idle_out).not.toContain('ERROR');
+    expect(r.streak).toBe(3);
     expect(r.healed).toBe(0);
-    expect(r.streak).toBe(0);
+    expect(r.after).toBe(0);
   });
 
   it('a text box with a border and no fill is not painted solid (the 22 Nov 2026 black box)', () => {
@@ -697,17 +767,73 @@ result = {"code": code, "out": out, "listed": listed, "list_out": list_out}
 from PIL import Image
 fb.TILE, fb.TILE_OVERLAP, fb.MAX_TILES, fb.OVERVIEW_SIDE = 300, 20, 4, 200
 parts = fb.tiles(Image.new("RGB", (1000, 1000), "black"))
-covered = sum(p.size[0] * p.size[1] for _, p in parts)
-result = {"parts": len(parts), "sizes": sorted(set(p.size for _, p in parts))}
+result = {"parts": len(parts), "labels": sorted(l for l, _ in parts)}
 `);
+    // A 1000-pixel picture cuts 4 x 4 at this tile size. Four parts labelled 2 x 2 means it
+    // was halved and cut again; four parts of a 4 x 4 grid would mean twelve were thrown away.
     expect(r.parts).toBe(4);
-    expect(r.sizes.length).toBeGreaterThan(0);
+    expect(r.labels).toEqual(['row 1 of 2, column 1 of 2', 'row 1 of 2, column 2 of 2',
+                              'row 2 of 2, column 1 of 2', 'row 2 of 2, column 2 of 2']);
+  });
+
+  it('a state file of the wrong shape is refused with an ERROR, not a traceback (review 3, finding 9)', () => {
+    const r = py(`
+db([fx.sample()])
+outs = []
+for bad in ("[]", '{"boards": []}', '{"boards": {"x": 1}}', '{"boards": {}, "unchecked_streak": "many"}'):
+    open(STATE, "w").write(bad)
+    outs.append(bridge())
+open(STATE, "w").write('{"boards": {}, "unchecked_streak": null}')
+ok, ok_out = bridge("--no-ocr")
+result = {"codes": [c for c, _ in outs], "all_say": all("will not read" in o for _, o in outs), "null_streak": ok}
+`);
+    expect(r.codes).toEqual([1, 1, 1, 1]);
+    expect(r.all_say).toBe(true);
+    expect(r.null_streak).toBe(0);
+  });
+
+  it('a note with no pictures is written whole or not at all (review 3, finding 6)', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+spec = fx.sample(note="Changed"); edit(spec); preview_for(spec)
+bridge()
+edit({"id": "A" * 32, "name": "Garden plan"})    # cleared: the next note is a plain one
+real = fb.os.replace
+def refuse(a, b):
+    if a.endswith(".part"): raise OSError(5, "Input/output error")
+    return real(a, b)
+fb.os.replace = refuse
+before = inbox()
+code, out = bridge()
+left = inbox()
+fb.os.replace = real
+retry, _ = bridge()
+result = {"code": code, "same": left == before, "retry": retry, "added": [f for f in inbox() if f not in before]}
+`);
+    expect(r.code).toBe(1);
+    expect(r.same).toBe(true);
+    expect(r.retry).toBe(0);
+    expect(r.added).toEqual(['Garden plan (Freeform board) (2).md']);
+  });
+
+  it('an unchanged board has its last-seen time moved on each run', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+first = json.load(open(STATE))["boards"]["A" * 32]["seen_at"]
+time.sleep(1.2)
+bridge()
+result = {"moved": json.load(open(STATE))["boards"]["A" * 32]["seen_at"] > first}
+`);
+    expect(r.moved).toBe(true);
   });
 
   it('a board that will not decode is skipped loudly and the others still file', () => {
     const r = py(`
 db([fx.sample(), fx.sample("B" * 32, "Good board")])
 bridge("--baseline")
+before = json.load(open(STATE))["boards"]["A" * 32]["fingerprint"]
 good = fx.sample("B" * 32, "Good board", note="Changed")
 edit(good); preview_for(good)
 edit(fx.sample(note="Changed too"))
@@ -717,8 +843,10 @@ con.execute("update freehand_drawing_buckets set bucket_data = x'637264740600000
 con.commit(); con.close()
 code, out = bridge()
 state = json.load(open(STATE))
-result = {"code": code, "out": out, "inbox": inbox(), "bad_filed": state["boards"]["A" * 32]["filed_at"]}
+result = {"code": code, "out": out, "inbox": inbox(), "bad_filed": state["boards"]["A" * 32]["filed_at"],
+          "kept": state["boards"]["A" * 32]["fingerprint"] == before}
 `);
+    expect(r.kept).toBe(true);     // a failed board keeps its old entry, so the next run tries it again
     expect(r.code).toBe(1);
     expect(r.out).toContain('would not decode');
     expect(r.inbox).toContain('Good board (Freeform board).md');
@@ -742,18 +870,20 @@ def fake_run(cmd, **kw):
     opened.append(cmd); running[0] = True; return R()
 fb.subprocess.run = fake_run
 fb.os.kill = lambda pid, sig: killed.append(pid)
+def trying():
+    try:
+        return fb.sync("x", sleep=nap), None
+    except fb.BridgeError as e:
+        return None, str(e)
 `;
 
   it('gives up loudly when the database never goes quiet, and still closes Freeform', () => {
     const r = py(harness.replace('RUNNING_AT_START', 'False') + `
 n = [0]
 def changing(db):
-    n[0] += 1; return n[0]
+    n[0] += 1; return {"A": (n[0],)}
 fb._snapshot = changing
-try:
-    fb.sync("x", sleep=nap); err = None
-except fb.BridgeError as e:
-    err = str(e)
+got, err = trying()
 result = {"err": err, "opened": len(opened), "killed": killed}
 `);
     expect(r.err).toContain('still changing after 600 seconds');
@@ -765,54 +895,68 @@ result = {"err": err, "opened": len(opened), "killed": killed}
     const r = py(harness.replace('RUNNING_AT_START', 'True') + `
 n = [0]
 def settles(db):
-    n[0] += 1; return min(n[0], 20)      # changes for 20 reads (100 s), then holds still
+    n[0] += 1; return {"A": (min(n[0], 20),)}     # changes for 20 reads, then holds still
 fb._snapshot = settles
-waited, arrivals, any_change = fb.sync("x", sleep=nap)
-result = {"waited": waited, "changed": any_change, "opened": len(opened), "killed": killed}
+got, err = trying()
+result = {"waited": got["waited"], "arrived": sorted(got["arrivals"]), "opened_app": got["opened"],
+          "opened": len(opened), "killed": killed}
 `);
     expect(r.waited).toBeGreaterThanOrEqual(130);   // about 95 s of change + 40 s of quiet
     expect(r.waited).toBeLessThan(200);
-    expect(r.changed).toBe(true);
+    expect(r.arrived).toEqual(['A']);
+    expect(r.opened_app).toBe(false);
     expect(r.opened).toBe(0);
     expect(r.killed).toEqual([]);
   });
 
-  it('a database quiet from the start is still given 90 seconds for iCloud to begin (review S2)', () => {
+  it('a database quiet from the start is still given 90 seconds for iCloud to begin', () => {
     const r = py(harness.replace('RUNNING_AT_START', 'False') + `
-fb._snapshot = lambda db: ({}, 0)
-waited, arrivals, any_change = fb.sync("x", sleep=nap)
-result = {"waited": waited, "any": any_change, "arrivals": arrivals}
+fb._snapshot = lambda db: {"A": (1,)}
+got, err = trying()
+result = {"waited": got["waited"], "arrivals": got["arrivals"], "ended": got["ended"] >= 1090}
 `);
     expect(r.waited).toBeGreaterThanOrEqual(90);
     expect(r.waited).toBeLessThan(110);
-    expect(r.any).toBe(false);
     expect(r.arrivals).toEqual({});
+    expect(r.ended).toBe(true);
   });
 
-  it('records when each board\'s own data arrived, not when the database last moved (review 2, finding 1)', () => {
+  it('records when each board\'s own data arrived, including a board seen for the first time', () => {
     const r = py(harness.replace('RUNNING_AT_START', 'False') + `
 n = [0]
 def snap(db):
     n[0] += 1
-    a = (1,) if n[0] < 4 else (2,)        # board A changes at the 4th read
-    b = (1,) if n[0] < 10 else (2,)       # board B changes at the 10th, 30 s later
-    return ({"A": a, "B": b}, 0)
+    out = {"A": (1,) if n[0] < 4 else (2,)}      # board A changes at the 4th read
+    if n[0] >= 10:
+        out["B"] = (1,)                          # board B appears at the 10th, 30 s later
+    return out
 fb._snapshot = snap
-waited, arrivals, any_change = fb.sync("x", sleep=nap)
-result = {"gap": arrivals["B"] - arrivals["A"], "any": any_change, "boards": sorted(arrivals)}
+got, err = trying()
+result = {"gap": got["arrivals"]["B"] - got["arrivals"]["A"], "boards": sorted(got["arrivals"])}
 `);
     expect(r.boards).toEqual(['A', 'B']);
     expect(r.gap).toBe(30);
-    expect(r.any).toBe(true);
+  });
+
+  it('one unreadable read mid-wait does not lose the arrival of a board that changed across it (review 3, finding 8)', () => {
+    const r = py(harness.replace('RUNNING_AT_START', 'False') + `
+n = [0]
+def snap(db):
+    n[0] += 1
+    if n[0] == 5: return None
+    return {"A": (1,) if n[0] < 5 else (2,)}
+fb._snapshot = snap
+got, err = trying()
+result = {"boards": sorted(got["arrivals"]), "err": err}
+`);
+    expect(r.err).toBe(null);
+    expect(r.boards).toEqual(['A']);
   });
 
   it('an unreadable database is never mistaken for a quiet one', () => {
     const r = py(harness.replace('RUNNING_AT_START', 'False') + `
 fb._snapshot = lambda db: None
-try:
-    fb.sync("x", sleep=nap); err = None
-except fb.BridgeError as e:
-    err = str(e)
+got, err = trying()
 result = {"err": err}
 `);
     expect(r.err).toContain('still changing after 600 seconds');
