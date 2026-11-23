@@ -375,6 +375,18 @@ result = {"see_through": seen, "dark_only": fb.find_preview(PREVIEWS, spec["id"]
     expect(r.dark_only).toBe(null);
   });
 
+  it('a shape\'s border is drawn one board point wide, so it survives being shrunk to preview size', () => {
+    const r = py(`
+spec = {"id": "A" * 32, "name": "Framed", "boxes": [{"text": None, "at": (0, 0), "size": (300, 200), "fill": None, "edge": (0.0, 0.0, 0.0)}]}
+p = db([spec]); con = fb.connect(p)
+im, scale = fb.render(fb.read_board(con, spec["id"], os.path.join(D, "Boards", "Assets")))
+row = [im.getpixel((fb.MARGIN + 100, y))[0] for y in range(fb.MARGIN - 4, fb.MARGIN + 12)]
+result = {"scale": scale, "border_rows": sum(1 for v in row if v < 128)}
+`);
+    expect(r.scale).toBe(2);
+    expect(r.border_rows).toBe(2);
+  });
+
   it('agreement is never thrown away for timing; timing only sorts a plain disagreement', () => {
     const r = py(`
 spec = fx.sample()

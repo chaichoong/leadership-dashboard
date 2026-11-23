@@ -726,8 +726,12 @@ def render(board):
         if it["type"] == T_STICKY:
             d.rectangle(rect(it), fill=_colour(it["rgb"], (255, 229, 120)))
         elif it["type"] == T_TEXT and (it["rgb"] or it["edge"]) and min(it["size"]) > 0:
+            # The border is one board point wide, so `scale` pixels. Drawn one pixel
+            # wide whatever the scale, it vanished when the picture was shrunk to
+            # the preview's size, and a board framed by a box read as a different
+            # shape from Freeform's preview of it (23 Nov 2026).
             d.rectangle(rect(it), fill=_colour(it["rgb"]) if it["rgb"] else None,
-                        outline=_colour(it["edge"]) if it["edge"] else None, width=1)
+                        outline=_colour(it["edge"]) if it["edge"] else None, width=max(1, int(round(scale))))
     for it in board["items"]:                       # connector lines
         if it["type"] != T_LINE:
             continue
