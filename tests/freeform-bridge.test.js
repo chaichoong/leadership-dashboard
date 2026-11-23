@@ -480,16 +480,30 @@ Image.new("RGBA", (400, 300), (255, 255, 255, 0)).save(fb.find_preview(PREVIEWS,
 code, out = bridge()
 text = next(note(f) for f in inbox() if f.endswith(".md"))
 result["lines_only_run"] = [code, "2 straight line(s)" in text, "holds only straight lines" in text, "both pictures are blank" in text]
-# The second drawing is only compared, so it is drawn small; and it is not drawn at all
-# when there is no preview to compare it with.
-big = {"id": A, "name": "Big", "stickies": [{"text": "a", "at": (0, 0)}, {"text": "b", "at": (6000, 6000)}], "boxes": [line((0, 300), 6000)]}
-v = os.path.join(D, "v"); con = fb.connect(fx.build(v, [big]))
-bb = fb.read_board(con, A, os.path.join(v, "Boards", "Assets"))
+# With no preview to compare with, the second drawing is not made at all.
 calls = []
 bad = os.path.join(D, "not-a-picture"); open(bad, "w").write("x")
-fb.check_picture(fb.render(bb, max_side=600)[0], bad, 0, lambda: calls.append(1))
-result["second_drawing"] = [max(fb.render(bb)[0].size) > 9000 - 100,
-                            max(fb.render(bb, without_lines=True, max_side=fb.OVERVIEW_SIDE)[0].size) <= fb.OVERVIEW_SIDE, calls]
+fb.check_picture(fb.render(fb.read_board(fb.connect(os.path.join(D, "Boards", "boards.db")), A, ""))[0], bad, 0, lambda: calls.append(1))
+result["no_preview_no_second_drawing"] = calls
+# A BIG board, end to end. Its second drawing must be the same weight as the first:
+# drawn smaller, its pen strokes and borders came out heavier (nothing is drawn under
+# a pixel wide) and right drawings went red (review 8).
+import random
+result["big"] = []
+for seed in (0, 9):
+    rnd = random.Random(seed); S = 6000
+    st = [{"text": "note", "at": (rnd.randint(0, S), rnd.randint(0, S))} for _ in range(rnd.randint(1, 6))]
+    bx = [{"text": None, "at": (rnd.randint(0, S), rnd.randint(0, S)), "size": (rnd.randint(200, 900), rnd.randint(200, 900)),
+           "fill": None, "edge": (0, 0, 0)} for _ in range(rnd.randint(1, 5))]
+    sk = [{"at": (rnd.randint(0, S), rnd.randint(0, S)), "pts": fx.zigzag(rnd.randint(4, 30), 14.0, 22.0), "width": rnd.choice([0.8, 1.0, 1.5])}
+          for _ in range(rnd.randint(10, 40))]
+    base = {"id": A, "name": "Big", "drawing_at": (0, 0), "stickies": st, "boxes": bx, "strokes": sk}
+    lined = dict(base, boxes=bx + [line((0, rnd.randint(0, S)), S), line((rnd.randint(0, S), 0), S, 90.0)])
+    for f in inbox(): os.remove(os.path.join(INBOX, f))
+    edit(lined); preview_for(base)
+    code, out = bridge()
+    text = next(note(f) for f in inbox() if f.endswith(".md"))
+    result["big"].append([code, "matches Freeform's own preview" in text, "left out of this check" in text])
 `);
     // The full drawing, lines and all, plainly differs from a preview without them...
     expect(r.divider_not_shown).toEqual(['differs', 'match', true]);
@@ -502,7 +516,8 @@ result["second_drawing"] = [max(fb.render(bb)[0].size) > 9000 - 100,
     expect(r.note_gone_too[1]).toBe('mismatch');
     expect(r.run).toEqual([0, true, true, false]);
     expect(r.lines_only_run).toEqual([0, true, true, false]);
-    expect(r.second_drawing).toEqual([true, true, []]);
+    expect(r.no_preview_no_second_drawing).toEqual([]);
+    expect(r.big).toEqual([[0, true, true], [0, true, true]]);
   });
 
   it('a text box left empty or holding only spaces is not drawn as a line (review 6, finding 3)', () => {

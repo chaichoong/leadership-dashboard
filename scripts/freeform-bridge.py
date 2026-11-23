@@ -725,13 +725,17 @@ def bounds(board, without_lines=False):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def render(board, without_lines=False, max_side=MAX_SIDE):
+def render(board, without_lines=False):
     """The whole board as one picture. Returns (image, pixels per board point).
 
     without_lines=True leaves out the straight lines made with the line tool,
     for check_picture's second look. That drawing is only ever compared, never
-    filed, so it is drawn small (max_side): at full size it doubled the memory
-    a big board takes (review 7, finding 3)."""
+    filed. It is still drawn at full size: pen strokes and borders are never
+    under a pixel wide, so a smaller drawing is a HEAVIER drawing, not the one
+    the check was set up on, and it turned right drawings of big boards red
+    (review 8). The cost is a second full-size picture in memory while the two
+    are compared (673 MB at most, against 348), on a board with straight lines
+    whose first look did not agree."""
     Image, ImageDraw, _ = _pil()
     box = bounds(board, without_lines)
     if box is None:
@@ -739,7 +743,7 @@ def render(board, without_lines=False, max_side=MAX_SIDE):
             return Image.new("RGB", (2 * MARGIN + 2, 2 * MARGIN + 2), "white"), SCALE
         raise BridgeError("nothing on this board has a place to draw")
     x0, y0, x1, y1 = box
-    scale = min(SCALE, (max_side - 2 * MARGIN) / max(x1 - x0, y1 - y0, 1.0))
+    scale = min(SCALE, (MAX_SIDE - 2 * MARGIN) / max(x1 - x0, y1 - y0, 1.0))
     W, H = int((x1 - x0) * scale) + 2 * MARGIN, int((y1 - y0) * scale) + 2 * MARGIN
     im = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(im)
@@ -1393,8 +1397,7 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
     im, _ = render(board)
     has_lines = any(it.get("line") for it in board["items"])
     check = check_picture(im, find_preview(previews, b["id"]), floor,
-                          (lambda: render(board, without_lines=True, max_side=OVERVIEW_SIDE)[0])
-                          if has_lines else None)
+                          (lambda: render(board, without_lines=True)[0]) if has_lines else None)
     preview = check["preview"]
     whole = shrunk(im, OVERVIEW_SIDE)
     parts = tiles(im)
