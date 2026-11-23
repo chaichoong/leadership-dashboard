@@ -76,9 +76,23 @@ def preview_for(spec, wrong=False):
     p = fx.build(scratch, [other if wrong else spec])
     con = fb.connect(p)
     im, _ = fb.render(fb.read_board(con, spec["id"], os.path.join(scratch, "Boards", "Assets")))
+    # As Freeform saves them: no margin round the drawing, and a see-through layer.
+    # A stand-in that kept our own margin hid a wrong verdict (review 4, finding 1).
+    from PIL import Image, ImageChops
+    im = im.crop(ImageChops.difference(im, Image.new("RGB", im.size, "white")).getbbox()).convert("RGBA")
     im.thumbnail((400, 400))
     b = spec["id"]
     im.save(os.path.join(PREVIEWS, f"board_{b[:8]}-{b[8:12]}-{b[12:16]}-{b[16:20]}-{b[20:]}#_large_2.0_light"), "PNG")
+def judge(theirs, ours):
+    """The verdict on the bridge's drawing of \`ours\` against a preview of \`theirs\`."""
+    preview_for(theirs)
+    v = os.path.join(D, "judge")
+    p = fx.build(v, [ours]); con = fb.connect(p)
+    im, _ = fb.render(fb.read_board(con, ours["id"], os.path.join(v, "Boards", "Assets")))
+    return fb.preview_match(im, fb.find_preview(PREVIEWS, theirs["id"]))[0]
+def scribble(rnd, n, x0, y0, w, h):
+    return [{"at": (x0 + rnd.random() * w, y0 + rnd.random() * h), "pts": fx.zigzag(6, 9.0, 14.0), "width": 1.2}
+            for _ in range(n)]
 result = None
 ${body}
 print("\\n@@RESULT@@" + json.dumps(result))
@@ -285,6 +299,80 @@ result = {"same": verdict(inside, inside), "ink_gone_from_box": verdict(inside, 
     expect(r.ink_gone_from_box).not.toBe('agrees');
     expect(r.half_the_ink).toBe('differs');
     expect(r.ink_mirrored).not.toBe('agrees');
+  });
+
+  it('a board mostly covered by one colour is judged on its drawing, not its margin (review 4, finding 1)', () => {
+    const r = py(`
+import random
+A = "A" * 32
+one = {"id": A, "name": "One", "stickies": [{"text": "Call the roofer", "at": (0, 0)}]}
+four = {"id": A, "name": "Four", "stickies": [{"text": t, "at": at} for t, at in
+        (("North", (0, 0)), ("East", (200, 0)), ("South", (0, 200)), ("West", (200, 200)))]}
+out = {"one_sticky": judge(one, one), "four_stickies": judge(four, four), "same": [], "half_gone": [], "dark": []}
+for seed in range(6):
+    rnd = random.Random(seed)
+    for key, fill in (("same", (0.2, 0.4, 0.8)), ("dark", (0.15, 0.15, 0.15))):
+        ink = scribble(rnd, 40, 30, 30, 500, 320)
+        if key == "dark":
+            ink = [dict(s, rgb=(1.0, 1.0, 1.0)) for s in ink]
+        box = {"id": A, "name": "Box", "drawing_at": (0, 0), "strokes": ink,
+               "boxes": [{"text": None, "at": (0, 0), "size": (600, 400), "fill": fill, "edge": None}]}
+        half = dict(box, strokes=[s for s in ink if s["at"][1] < 190])
+        if key == "same":
+            out["same"].append(judge(box, box))
+            out["half_gone"].append(judge(box, half))
+        else:
+            out["dark"].append([judge(box, box), judge(box, half)])
+sticky_ink = dict(one, drawing_at=(0, 0), strokes=scribble(random.Random(9), 12, 10, 60, 120, 110))
+out["sticky_with_ink"] = judge(sticky_ink, sticky_ink)
+out["sticky_ink_gone"] = judge(sticky_ink, one)
+result = out
+`);
+    expect(r.one_sticky).toBe('agrees');
+    expect(r.four_stickies).toBe('agrees');
+    expect(r.sticky_with_ink).toBe('agrees');
+    expect(r.sticky_ink_gone).not.toBe('agrees');
+    expect(r.same).toEqual(Array(6).fill('agrees'));
+    expect(r.half_gone).not.toContain('agrees');
+    // Pale ink on a dark fill: the fill must not read as solid black and swallow the ink.
+    expect(r.dark.map(d => d[0])).toEqual(Array(6).fill('agrees'));
+    expect(r.dark.map(d => d[1])).not.toContain('agrees');
+  });
+
+  it('a right drawing of an odd-shaped board is not called wrong: one straight line, a tall thin board (review 4, finding 2)', () => {
+    const r = py(`
+A = "A" * 32
+line = {"id": A, "name": "Line", "drawing_at": (0, 0), "strokes": [{"at": (0, 0), "pts": [(0, 0), (600, 0)], "width": 2.0}]}
+upright = {"id": A, "name": "Upright", "drawing_at": (0, 0), "strokes": [{"at": (0, 0), "pts": [(0, 0), (0, 600)], "width": 2.0}]}
+tall = {"id": A, "name": "Tall", "drawing_at": (0, 0),
+        "strokes": [{"at": (0, 0), "pts": [(0 if i % 2 else 8, i * 30.0) for i in range(60)], "width": 1.5}]}
+squat = dict(tall, strokes=[dict(tall["strokes"][0], pts=tall["strokes"][0]["pts"][:8])])
+result = {"line": judge(line, line), "tall": judge(tall, tall), "line_turned": judge(line, upright), "tall_cut_short": judge(tall, squat)}
+`);
+    expect(r.line).toBe('agrees');
+    expect(r.tall).toBe('agrees');
+    expect(r.line_turned).toBe('differs');
+    expect(r.tall_cut_short).toBe('differs');
+  });
+
+  it('a see-through preview is read on white, and a dark-mode preview is not used at all', () => {
+    const r = py(`
+from PIL import Image
+spec = fx.sample()
+preview_for(spec)
+light = fb.find_preview(PREVIEWS, spec["id"])
+im = Image.open(light).convert("RGB")
+clear = Image.new("RGBA", im.size, (0, 0, 0, 0))            # clear pixels are BLACK underneath
+clear.paste(im, mask=im.convert("L").point(lambda v: 0 if v > 250 else 255))
+clear.save(light, "PNG")
+p = db([spec]); con = fb.connect(p)
+ours, _ = fb.render(fb.read_board(con, spec["id"], os.path.join(D, "Boards", "Assets")))
+seen = fb.preview_match(ours, light)[0]
+os.rename(light, light.replace("_light", "_dark"))
+result = {"see_through": seen, "dark_only": fb.find_preview(PREVIEWS, spec["id"])}
+`);
+    expect(r.see_through).toBe('agrees');
+    expect(r.dark_only).toBe(null);
   });
 
   it('agreement is never thrown away for timing; timing only sorts a plain disagreement', () => {
@@ -747,6 +835,48 @@ result = {"code": code, "out": out, "left": left, "retry": retry, "notes": [f fo
     expect(r.notes).toEqual(['Garden plan (Freeform board).md']);
   });
 
+  it('when the note cannot be taken back out either, the error says it will be filed twice (review 4: no test)', () => {
+    const r = py(`
+db([fx.sample()])
+bridge("--baseline")
+spec = fx.sample(note="Changed"); edit(spec); preview_for(spec)
+real_save, real_remove = fb.save_state, os.remove
+def refuse(path, state): raise OSError(28, "No space left on device")
+def stuck(path, *a, **k):
+    if str(path).startswith(INBOX): raise PermissionError(13, "Permission denied")
+    return real_remove(path, *a, **k)
+fb.save_state = refuse; os.remove = stuck
+code, out = bridge()
+fb.save_state = real_save; os.remove = real_remove
+result = {"code": code, "out": out, "left": len(inbox())}
+`);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('could NOT be taken back out');
+    expect(r.out).toContain('filed twice');
+    expect(r.out).not.toContain('was taken back out');
+    expect(r.left).toBeGreaterThan(0);
+  });
+
+  it('--baseline --force is the way out of a state file that will not read, as the error says (review 4, finding 3)', () => {
+    const r = py(`
+db([fx.sample()])
+open(STATE, "w").write("[]")
+stopped, said = bridge()
+plain, _ = bridge("--baseline")
+forced, forced_out = bridge("--baseline", "--force")
+after, _ = bridge()
+result = {"stopped": stopped, "said": said, "plain": plain, "forced": forced, "forced_out": forced_out, "after": after,
+          "boards": len(json.load(open(STATE))["boards"])}
+`);
+    expect(r.stopped).toBe(1);
+    expect(r.said).toContain('--baseline --force');
+    expect(r.plain).toBe(1);                  // without --force a broken file is still never replaced
+    expect(r.forced).toBe(0);
+    expect(r.forced_out).toContain('Baseline: 1 existing board(s) recorded');
+    expect(r.after).toBe(0);
+    expect(r.boards).toBe(1);
+  });
+
   it('a database that errors part-way is an ERROR line, not a traceback (review 2, finding 8)', () => {
     const r = py(`
 db([fx.sample()])
@@ -951,6 +1081,23 @@ result = {"boards": sorted(got["arrivals"]), "err": err}
 `);
     expect(r.err).toBe(null);
     expect(r.boards).toEqual(['A']);
+  });
+
+  it('the picture of the database ignores its log file\'s timestamp and sees a real change (review 3, finding 7: no test)', () => {
+    const r = py(`
+p = db([fx.sample()])
+wal = p + "-wal"
+open(wal, "ab").close(); os.utime(wal, (5, 5)); os.utime(p, (5, 5))
+a = fb._snapshot(p)
+os.utime(wal, (99999, 99999)); os.utime(p, (99999, 99999))
+b = fb._snapshot(p)
+edit(fx.sample(note="Changed, and longer than it was before"))
+c = fb._snapshot(p)
+result = {"read": a is not None, "same": a == b, "changed": a != c}
+`);
+    expect(r.read).toBe(true);
+    expect(r.same).toBe(true);
+    expect(r.changed).toBe(true);
   });
 
   it('an unreadable database is never mistaken for a quiet one', () => {

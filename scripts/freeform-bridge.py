@@ -94,6 +94,12 @@ AGREE_AT = 0.90         # fine detail and shading must both correlate this well 
 COVER_AT = 0.85         # ...and this share of inked cells must be inked in the other picture
 WRONG_BELOW = 0.60      # under this on detail, shading or cover, the drawing is plainly wrong
 SHAPE_AGREE, SHAPE_WRONG = 0.90, 0.70   # how alike the two inked outlines are in proportion
+INK_FROM = 15           # a pixel this far from white (of 255) is part of the drawing
+FLAT, FLAT_LEVEL = 2.0, 25.0   # a grid varying less than FLAT has no pattern; two such agree within FLAT_LEVEL
+STRETCH, STRETCH_FLOOR = 0.5, 2.0   # the root curve darkness and detail are put through; see _stretch
+INKED_MEAN, INKED_DETAIL = 3.3, 5.4   # a cell this dark, or this varied, holds part of the drawing (of 255)
+EDGE = 2                # pixels left off each side of both pictures before they are compared
+NARROW = 16             # an inked area under this many pixels on a side is not judged across that side
 PICTURE_PIXELS = 60_000_000   # a pasted picture bigger than this is drawn as a box (180 MB decoded)
 TEXT_PT = 12.0         # text size for text boxes, in board points
 STICKY_PT = 20.0       # largest text size tried on a sticky note
@@ -790,40 +796,89 @@ def shrunk(im, side):
     return im.resize((max(1, int(im.size[0] * k)), max(1, int(im.size[1] * k))), Image.LANCZOS)
 
 
-def picture_features(im):
-    """(darkness per cell, fine detail per cell, proportion of the inked area).
+def _on_white(im):
+    """An RGB copy laid on white. Freeform saves its previews with a see-through
+    layer; dropping that layer blindly would turn clear pixels black."""
+    Image, _, _ = _pil()
+    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+        im = im.convert("RGBA")
+        flat = Image.new("RGB", im.size, "white")
+        flat.paste(im, mask=im.getchannel("A"))
+        return flat
+    return im.convert("RGB")
 
-    The picture is reduced to how far each pixel is from the background, cropped
-    to its inked area and laid on a CELLS x CELLS grid. "Darkness" is a cell's
-    mean; "fine detail" is how much it varies inside the cell, which is what pen
-    strokes and words add and a flat filled shape does not. None for a blank
-    picture."""
+
+def inked_area(im):
+    """The picture as "how far each pixel is from WHITE" (0 to 255), cropped to
+    its inked area. None for a blank picture.
+
+    The background is white by rule, never guessed. Every board is drawn on
+    white and all 49 of Freeform's light previews on this Mac measured white
+    (23 Nov 2026). Guessing it as the commonest colour took a sticky note that
+    covers most of a board for the background, and the white margin round our
+    own drawing for ink (review 4, finding 1)."""
+    away = _on_white(im).convert("L").point(lambda v: 255 - v)
+    box = away.point(lambda v: 255 if v > INK_FROM else 0).getbbox()
+    return None if box is None else away.crop(box)
+
+
+def picture_features(area, flat_x=False, flat_y=False):
+    """(darkness per cell, fine detail per cell) of an inked area, laid on a
+    CELLS x CELLS grid. "Darkness" is a cell's mean; "fine detail" is how much
+    it varies inside the cell, which is what pen strokes and words add and a
+    flat filled shape does not. Both are measured on the plain distance from
+    white, so ink shows on a dark fill as well as on a pale one, and then
+    stretched (STRETCH) so a faint pen line counts beside a heavy one.
+
+    flat_x / flat_y average the area across that side first. A side only a few
+    pixels long carries no pattern either picture can be held to: where the
+    line falls between two pixels is all it shows."""
     Image, _, _ = _pil()
     from PIL import ImageStat
-    g = im.convert("L")
-    bg = max(g.getcolors(g.size[0] * g.size[1]), key=lambda c: c[0])[1]
-    dark = g.point(lambda v: min(255, abs(v - bg) * 3))
-    box = dark.point(lambda v: 255 if v > 45 else 0).getbbox()
-    if box is None:
-        return None
-    cropped = dark.crop(box)
-    aspect = cropped.size[0] / max(1, cropped.size[1])
-    grid = cropped.resize((CELLS * CELL_PX, CELLS * CELL_PX), Image.BILINEAR)
+    if flat_x or flat_y:
+        area = area.resize((1 if flat_x else area.size[0], 1 if flat_y else area.size[1]), Image.BOX)
+    # The outermost pixels are left out. A fill that runs to the edge of the board
+    # ends in a half-covered row of pixels in one picture and a clean cut in the
+    # other, and that one row would count as the busiest thing on the board.
+    w, h = area.size
+    area = area.crop((EDGE if w >= NARROW else 0, EDGE if h >= NARROW else 0,
+                      w - EDGE if w >= NARROW else w, h - EDGE if h >= NARROW else h))
+    grid = area.resize((CELLS * CELL_PX, CELLS * CELL_PX), Image.BILINEAR)
     means, detail = [], []
     for y in range(CELLS):
         for x in range(CELLS):
             st = ImageStat.Stat(grid.crop((x * CELL_PX, y * CELL_PX, (x + 1) * CELL_PX, (y + 1) * CELL_PX)))
-            means.append(st.mean[0])
-            detail.append(st.stddev[0])
-    return means, detail, aspect
+            means.append(_stretch(st.mean[0]))
+            detail.append(_stretch(2 * st.stddev[0]))
+    return means, detail
 
 
-def _corr(a, b):
+def _stretch(v):
+    """0 to 255 onto 0 to 255 along a root curve, so faint counts beside heavy.
+    STRETCH_FLOOR keeps the curve from blowing up the first unit or two, which
+    is resampling noise, not ink."""
+    lo, hi = STRETCH_FLOOR ** STRETCH, (255.0 + STRETCH_FLOOR) ** STRETCH
+    return 255.0 * ((min(v, 255.0) + STRETCH_FLOOR) ** STRETCH - lo) / (hi - lo)
+
+
+def _corr(a, b, levels=True):
+    """How alike two grids are in pattern, -1 to 1. A grid with no pattern at
+    all (one straight line fills its own outline evenly; so does a lone sticky
+    note) has nothing to correlate, and the sum comes out as noise: it scored
+    an identical one-line board -1.00 (review 4, finding 2). Two flat grids
+    agree when their levels do; a flat grid against a patterned one does not.
+    levels=False drops the level test, for an area a few pixels wide, where
+    the level is set by how the line falls on the pixels and not by the ink."""
     n = len(a)
     ma, mb = sum(a) / n, sum(b) / n
     cov = sum((x - ma) * (y - mb) for x, y in zip(a, b))
     va, vb = sum((x - ma) ** 2 for x in a), sum((y - mb) ** 2 for y in b)
-    return cov / ((va * vb) ** 0.5) if va and vb else 0.0
+    sa, sb = (va / n) ** 0.5, (vb / n) ** 0.5
+    if max(sa, sb) < 2 * FLAT and min(sa, sb) < FLAT:
+        return 1.0 if not levels or abs(ma - mb) < FLAT_LEVEL else 0.0
+    if min(sa, sb) < FLAT:
+        return 0.0
+    return cov / ((va * vb) ** 0.5)
 
 
 def _covered(mask, other):
@@ -841,6 +896,18 @@ def _covered(mask, other):
     return hits / total if total else 1.0
 
 
+def _same_shape(a, b, slack=2):
+    """How alike two inked outlines are in proportion, 0 to 1. Each side is
+    allowed `slack` pixels either way: on a board a few pixels tall, one pixel
+    of rounding is a fifth of its height and says nothing about the drawing."""
+    def span(w, h):
+        return max(w - slack, 1) / (h + slack), (w + slack) / max(h - slack, 1)
+    (alo, ahi), (blo, bhi) = span(*a), span(*b)
+    if alo <= bhi and blo <= ahi:
+        return 1.0
+    return ahi / blo if ahi < blo else bhi / alo
+
+
 def preview_match(im, preview_path):
     """Our drawing against Freeform's own preview of the same board.
 
@@ -853,24 +920,36 @@ def preview_match(im, preview_path):
     whose handwriting was missing from inside a filled box (review, 23 Nov 2026).
     Fine detail is scored separately so missing ink shows wherever it sits.
 
-    What this cannot see: at 400 pixels, WHICH words a sticky note holds. Typed
-    words are copied from the board's data, not judged by the picture."""
+    What this cannot see, at 400 pixels:
+      - WHICH words a sticky note holds. Typed words are copied from the board's
+        data, not judged by the picture.
+      - pen marks that are a small part of a big board. On 4 of Kevin's 25 real
+        boards with ink, taking out half the pen strokes left the verdict at
+        "agrees" (23 Nov 2026): those marks are under a pixel in the preview.
+        The guard for ink is the count from the decode: a stroke that will not
+        read is counted in the note and turns the run red."""
     Image, _, _ = _pil()
     if not preview_path or not os.path.exists(preview_path):
         return None, None, "Freeform has no preview of this board on this Mac"
     try:
         with Image.open(preview_path) as p:
-            theirs_im = p.convert("RGB")
+            theirs_im = _on_white(p)
     except Exception as e:
         return None, None, f"Freeform's preview would not open ({type(e).__name__})"
-    ours = picture_features(shrunk(im, max(theirs_im.size)))
-    theirs = picture_features(theirs_im)
+    # Freeform's preview has no margin and ours has MARGIN all round: shrink ours
+    # so its drawn area, not its paper, comes out the size of theirs.
+    side = max(theirs_im.size) * max(im.size) / float(max(1, max(im.size) - 2 * MARGIN))
+    ours, theirs = inked_area(shrunk(im, side)), inked_area(theirs_im)
     if theirs is None or ours is None:
         return None, None, "one of the two pictures is blank"
-    (om, od, oa), (tm, td, ta) = ours, theirs
-    detail, shade = _corr(od, td), _corr(om, tm)
-    shape = min(oa, ta) / max(oa, ta) if oa and ta else 0.0
-    inked = lambda m, d: [a > 10 or b > 8 for a, b in zip(m, d)]
+    shape = _same_shape(ours.size, theirs.size)
+    flat_x = min(ours.size[0], theirs.size[0]) < NARROW
+    flat_y = min(ours.size[1], theirs.size[1]) < NARROW
+    (om, od), (tm, td) = picture_features(ours, flat_x, flat_y), picture_features(theirs, flat_x, flat_y)
+    wide = not (flat_x or flat_y)
+    detail, shade = _corr(od, td, wide), _corr(om, tm, wide)
+    dark_at, busy_at = _stretch(INKED_MEAN), _stretch(INKED_DETAIL)
+    inked = lambda m, d: [a > dark_at or b > busy_at for a, b in zip(m, d)]
     ours_on, theirs_on = inked(om, od), inked(tm, td)
     found, extra = _covered(theirs_on, ours_on), _covered(ours_on, theirs_on)
     why = (f"fine detail {detail:.2f}, shading {shade:.2f}, outline {shape:.2f}, "
@@ -884,15 +963,14 @@ def preview_match(im, preview_path):
 
 
 def find_preview(previews, bid):
-    """Freeform's newest light preview of a board, or None."""
+    """Freeform's light preview of a board, or None. Its dark-mode previews are
+    not used: the check assumes a white ground, and every board is drawn on one."""
     dashed = f"{bid[:8]}-{bid[8:12]}-{bid[12:16]}-{bid[16:20]}-{bid[20:]}"
-    best = None
-    for suffix in ("#_large_2.0_light", "#_large_1.0_light", "#_large_2.0_dark", "#_large_1.0_dark"):
+    for suffix in ("#_large_2.0_light", "#_large_1.0_light"):
         p = os.path.join(previews, f"board_{dashed}{suffix}")
         if os.path.exists(p):
-            best = p
-            break
-    return best
+            return p
+    return None
 
 
 def tiles(im):
@@ -1010,7 +1088,8 @@ def note_text(b, board, stem, pictures, words, check, first_time):
            "the board's layout, not for the newest marks.")
     if kind == "match":
         out.append(f"- Picture check: the redrawn board matches Freeform's own preview "
-                   f"({reason}).{old}")
+                   f"({reason}). That preview is small: it vouches for the layout and where the "
+                   f"marks are, not for every fine pen mark.{old}")
     elif kind == "partial":
         out.append(f"- Picture check: the redrawn board broadly matches Freeform's own preview but "
                    f"DIFFERS IN PLACES ({reason}). Use Freeform's preview below for the layout, and "
@@ -1240,7 +1319,8 @@ def load_state(path):
         state["unchecked_streak"] = int(state.get("unchecked_streak") or 0)
     except (OSError, ValueError, TypeError) as e:
         raise BridgeError(f"the Freeform state file at {path} will not read ({e}). "
-                          f"Nothing was exported. Restore it or run --baseline again on purpose.")
+                          f"Nothing was exported. Restore it, or run --baseline --force to start again "
+                          f"(boards changed since the last good run are then not filed).")
     return state
 
 
@@ -1368,7 +1448,9 @@ def run(args):
             print(f"{b['id']}  {when(b['changed'])}  {b['name']}")
         return 0
 
-    state = load_state(args.state)
+    # --baseline --force replaces the state file whatever it holds, so it is the
+    # way out of one that will not read: do not try to read it first.
+    state = None if (args.baseline and args.force) else load_state(args.state)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if args.baseline:
         if state is not None and not args.force:
