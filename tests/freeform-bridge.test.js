@@ -490,7 +490,7 @@ result["no_preview_no_second_drawing"] = calls
 # a pixel wide) and right drawings went red (review 8).
 import random
 result["big"] = []
-for seed in (0, 9):
+for seed in (0, 4, 7, 9):       # drawn smaller, 0 and 9 came back "does not match", 4 and 7 "differs in places"
     rnd = random.Random(seed); S = 6000
     st = [{"text": "note", "at": (rnd.randint(0, S), rnd.randint(0, S))} for _ in range(rnd.randint(1, 6))]
     bx = [{"text": None, "at": (rnd.randint(0, S), rnd.randint(0, S)), "size": (rnd.randint(200, 900), rnd.randint(200, 900)),
@@ -503,7 +503,9 @@ for seed in (0, 9):
     edit(lined); preview_for(base)
     code, out = bridge()
     text = next(note(f) for f in inbox() if f.endswith(".md"))
-    result["big"].append([code, "matches Freeform's own preview" in text, "left out of this check" in text])
+    # The whole phrase: "broadly matches Freeform's own preview but DIFFERS IN PLACES" must not pass (review 9).
+    result["big"].append([code, "the redrawn board matches Freeform's own preview" in text,
+                          "left out of this check" in text, "DIFFERS IN PLACES" in text, "WARNING" in out])
 `);
     // The full drawing, lines and all, plainly differs from a preview without them...
     expect(r.divider_not_shown).toEqual(['differs', 'match', true]);
@@ -517,7 +519,7 @@ for seed in (0, 9):
     expect(r.run).toEqual([0, true, true, false]);
     expect(r.lines_only_run).toEqual([0, true, true, false]);
     expect(r.no_preview_no_second_drawing).toEqual([]);
-    expect(r.big).toEqual([[0, true, true], [0, true, true]]);
+    expect(r.big).toEqual(Array(4).fill([0, true, true, false, false]));
   });
 
   it('a text box left empty or holding only spaces is not drawn as a line (review 6, finding 3)', () => {
