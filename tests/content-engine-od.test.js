@@ -60,7 +60,12 @@ describe('content-engine OD lane', () => {
     const out = execFileSync('python3', ['-c', guard], { encoding: 'utf8', cwd: DIR, stdio: ['ignore', 'pipe', 'pipe'] });
     const last = out.trim().split('\n').pop();
     expect(JSON.parse(last).failed).toEqual([]);
-  });
+    // 120 SECONDS, NOT THE 30s DEFAULT (finding 20261121-queue-fixer-1405, round 2). This case
+    // shells out to a script that builds real media with ffmpeg, so its wall time scales with how
+    // busy the machine is: measured on the Mac mini on 21 Nov 2026, qa.py's selftest took 5.6s
+    // alone and 25.9s beside a full gate. Found by tests/content-engine-selftest-budget.test.js,
+    // which reads the scripts rather than keeping a list of the cases.
+  }, 120000);
 
   it('the prompt copies the playbook exactly: locked pricing and the five hot-buttons in the customers\' words', () => {
     const playbook = readFileSync(path.join(ROOT, 'docs', 'content-engine-playbook.md'), 'utf8');
