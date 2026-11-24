@@ -19,6 +19,42 @@ describe('content-engine publish (GHL)', () => {
     expect(out.checks).toBeGreaterThanOrEqual(22);
   });
 
+  // Finding 20261119-agent-dispatch-1380 (written up as ofl-2932b148b0; task recIOxibSoKTGQA0I,
+  // episode 2138). A retry held because Spotify's episodes list would not read wrote no attempt, so
+  // the SPOTIFY_MAX_ATTEMPTS hold could never fire and nothing counted the wait: with Spotify signed
+  // out the episode stays off Spotify for ever and nobody is told. The hold has a clock now.
+  it('a retry held on an unreadable Spotify list is clocked and carded once, never silently', () => {
+    const harness = `
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("pub", ${JSON.stringify(PUBLISH)})
+m = importlib.util.module_from_spec(spec); sys.modules["pub"] = m; spec.loader.exec_module(m)
+cards = []
+def fake(day, pod, rec):
+    cards.append(day); return "recHoldCard00001"
+out = {"hours": m.SPOTIFY_HOLD_CARD_HOURS, "steps": []}
+pod = {"title": "Episode 2138"}
+T0 = "2026-11-19T08:00:00Z"
+for when in (T0, "2026-11-21T07:59:00Z", "2026-11-21T08:00:00Z", "2026-11-22T08:00:00Z"):
+    out["steps"].append(m.spotify_retry_held(2138, pod, "recEp2138", lambda: None, now=when, make_card=fake))
+out["cards"] = len(cards)
+out["heldCard"] = pod.get("held_card")
+out["error"] = pod.get("error")
+m.spotify_hold_clear(pod)
+out["cleared"] = sorted(pod.keys())
+print(json.dumps(out))
+`;
+    const r = JSON.parse(execFileSync('python3', ['-c', harness], { encoding: 'utf8', cwd: DIR }).trim().split('\n').pop());
+    expect(r.hours).toBe(48);
+    // stamped, then under the clock, then carded at 48h exactly, then never again
+    expect(r.steps).toEqual(['stamped', 'waiting', 'carded', 'already carded']);
+    expect(r.cards).toBe(1);
+    expect(r.heldCard).toBe('recHoldCard00001');
+    expect(r.error).toMatch(/episodes list could not be read/);
+    // the list reading, or an upload starting, ends the hold outright
+    expect(r.cleared).not.toContain('held_since');
+    expect(r.cleared).not.toContain('held_card');
+  });
+
   it('only ever schedules episodes Kevin approved on the card', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toMatch(/def approved_days\(\):[\s\S]*e\.get\("verdict"\) == "approved"/);

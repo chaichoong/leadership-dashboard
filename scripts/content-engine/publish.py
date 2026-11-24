@@ -590,6 +590,98 @@ def adopt_youtube(entry, key, have):
 
 
 SPOTIFY_MAX_ATTEMPTS = 3
+# A RETRY HELD ON AN UNREADABLE SPOTIFY LIST IS STILL A WAIT, AND A WAIT NEEDS A CLOCK
+# (finding 20261119-agent-dispatch-1380, written up as ofl-2932b148b0; task recIOxibSoKTGQA0I,
+# left over from PR #989, episode 2138). When verify_published says the episodes list is not
+# readable, that is not proof the episode is absent, so the retry is held until the next hour. But
+# the hold wrote no attempt, so the SPOTIFY_MAX_ATTEMPTS hold above could never fire, and nothing
+# else counted the wait: with Spotify signed out or its list blank, an episode could sit off Spotify
+# for ever and nobody would be told. That is exactly Kevin's no-silent-parking rule (14 Oct 2026),
+# and the hold had no clock. It has one now: the first hold stamps `held_since`, and once the hold
+# has stood this long ONE card is raised and its task id kept in `held_card`, so it is never raised
+# twice. `held_since` and `held_card` are cleared the moment the list reads or an upload starts.
+SPOTIFY_HOLD_CARD_HOURS = 48
+SPOTIFY_HELD_ERROR = "retry held: the Spotify episodes list could not be read"
+
+
+def spotify_hold_clear(pod):
+    """Forget a held retry: the list read, or an upload started, so the wait is over."""
+    pod.pop("held_since", None)
+    pod.pop("held_card", None)
+
+
+def _held_hours(stamp, now=None):
+    """Hours since STAMP, or None when it cannot be read."""
+    for v in (stamp, now):
+        if v is not None and not isinstance(v, str):
+            return None
+    try:
+        then = dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        at = dt.datetime.fromisoformat(str(now or now_utc()).replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return (at - then).total_seconds() / 3600.0
+
+
+def spotify_hold_card(day, pod, record_id):
+    """Raise ONE card for an episode held off Spotify, through the same task gate approval.py uses.
+    Its task id, or "" when the gate refused (then nothing is stamped and the next hold tries again,
+    so a gate that is down delays the card and never swallows it)."""
+    title = pod.get("title") or "episode %d" % day
+    today = dt.date.today().isoformat()
+    name = "Content Engine: episode %d is held off Spotify (the episodes list will not read)" % day
+    desc = ("Episode %d (\"%s\") has been held off Spotify since %s, which is %d hours or more.\n\n"
+            "The upload is NOT retried while Spotify's own episodes list cannot be read, because an "
+            "unreadable list is not proof the episode is absent and a blind retry publishes a second "
+            "copy. So the episode stays off Spotify until the list reads again.\n\n"
+            "The likely wall is the Spotify sign-in: the robot's session has dropped, or the list page "
+            "comes back blank. Check the robot's Spotify session first, then this episode's state.\n\n"
+            "Episode record %s. Last error: %s" % (day, title, pod.get("held_since") or "?",
+                                                   SPOTIFY_HOLD_CARD_HOURS, record_id or "?",
+                                                   pod.get("error") or SPOTIFY_HELD_ERROR))
+    fields = {approval.TF["name"]: name, approval.TF["desc"]: desc, approval.TF["status"]: "Today",
+              approval.TF["team"]: [approval.AGENT_TM], approval.TF["priority"]: "Medium",
+              approval.TF["due"]: today, approval.TF["business"]: [approval.BUSINESS_PERSONAL],
+              approval.TF["notes"]: ("Raised by the Content Engine %s: episode %d held off Spotify for "
+                                     "%d hours (finding 20261119-agent-dispatch-1380). Created with --force: "
+                                     "the episode number is the identity and the duplicate key strips numbers."
+                                     % (today, day, SPOTIFY_HOLD_CARD_HOURS))}
+    r = subprocess.run([sys.executable, approval.GATE, "create", "--force", "--fields-json", json.dumps(fields)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("episode %d: the Spotify hold card was not raised (%s)" % (day, (r.stderr or r.stdout)[-200:]),
+              file=sys.stderr)
+        return ""
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])["taskId"]
+    except (ValueError, KeyError, IndexError):
+        print("episode %d: the task gate gave no task id for the Spotify hold card" % day, file=sys.stderr)
+        return ""
+
+
+def spotify_retry_held(day, pod, record_id, save, now=None, make_card=None):
+    """Record a retry held because the Spotify list would not read, and card it once it has stood
+    SPOTIFY_HOLD_CARD_HOURS. Returns what it did: "stamped", "waiting", "carded", "gate refused" or
+    "already carded". MAKE_CARD is for the selftest; live it is spotify_hold_card."""
+    pod.update({"status": "failed", "error": SPOTIFY_HELD_ERROR})
+    if not pod.get("held_since"):
+        pod["held_since"] = now or now_utc()
+        save()
+        return "stamped"
+    if pod.get("held_card"):
+        save()
+        return "already carded"
+    held = _held_hours(pod.get("held_since"), now)
+    # An unreadable stamp is treated as DUE, never as a fresh hold: only this code writes it, and
+    # re-stamping it would restart the clock every hour and card nothing, which is the bug.
+    if held is not None and held < SPOTIFY_HOLD_CARD_HOURS:
+        save()
+        return "waiting"
+    tid = (make_card or spotify_hold_card)(day, pod, record_id)
+    if tid:
+        pod["held_card"] = tid
+    save()
+    return "carded" if tid else "gate refused"
 
 
 def finish_extras(day, entry, recs, test, save):
@@ -660,14 +752,19 @@ def finish_extras(day, entry, recs, test, save):
                     seen, why = spotify.verify_published(ptitle, tries=1)
                     if seen in ("published", "processing"):
                         pod.update({"plan": plan_path, "title": ptitle, "status": seen, "note": "found on Spotify before a retry",
-                                    "started": now_utc()}); save()   # starts the three days the sync asks for its link (review, 21 Sep 2026)
+                                    "started": now_utc()})
+                        spotify_hold_clear(pod); save()   # starts the three days the sync asks for its link (review, 21 Sep 2026)
                         print("episode %d: already on Spotify (%s); not uploaded again" % (day, seen)); return done
                     if "not readable" in str(why):
-                        # an unreadable list (signed out, blank page) is not proof of absence: wait for the next hour
-                        pod.update({"status": "failed", "error": "retry held: the Spotify episodes list could not be read"}); save()
-                        print("episode %d: Spotify list unreadable, podcast retry held until next run" % day, file=sys.stderr); return done
+                        # an unreadable list (signed out, blank page) is not proof of absence: wait for the next hour.
+                        # The wait is clocked and carded after SPOTIFY_HOLD_CARD_HOURS (finding 20261119-agent-dispatch-1380).
+                        pod.setdefault("title", ptitle)
+                        what = spotify_retry_held(day, pod, full["id"], save)
+                        print("episode %d: Spotify list unreadable, podcast retry held until next run (%s)" % (day, what), file=sys.stderr)
+                        return done
                 pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc(),
-                            "upload_attempts": int(pod.get("upload_attempts") or 0) + (0 if test else 1)}); save()
+                            "upload_attempts": int(pod.get("upload_attempts") or 0) + (0 if test else 1)})
+                spotify_hold_clear(pod); save()          # an upload has started, so the hold is over
                 done.append(run_spotify(day, card_task(day, full), plan_path, ptitle, test, pod)); save()
         except (Exception, SystemExit) as ex:
             pod.update({"status": "failed", "error": str(ex)[-200:]}); save()
@@ -2339,6 +2436,68 @@ def _selftest_refusal_reason():
     assert len(refusal_reason("x" * 500, 120)) == 120, "a long single-line reason is cut from the front"
 
 
+def _selftest_spotify_hold_card():
+    """Finding 20261119-agent-dispatch-1380: a retry held on an unreadable Spotify list wrote no
+    attempt, so nothing counted the wait and an episode could sit off Spotify for ever with nobody
+    told. Drives the real spotify_retry_held and spotify_hold_clear on fakes: no Airtable, no gate."""
+    saves = []
+    save = lambda: saves.append(1)
+    cards = []
+    def fake_card(day, pod, record_id):
+        cards.append((day, record_id, pod.get("title")))
+        return "recHoldCard00001"
+    T0 = "2026-11-19T08:00:00Z"
+
+    # 1. The first hold stamps the clock and raises nothing.
+    pod = {"title": "Episode 2138"}
+    assert spotify_retry_held(2138, pod, "recEp2138", save, now=T0, make_card=fake_card) == "stamped"
+    assert pod["held_since"] == T0 and "held_card" not in pod and cards == [], pod
+    assert pod["status"] == "failed" and pod["error"] == SPOTIFY_HELD_ERROR, pod
+
+    # 2. A hold under 48 hours still raises nothing.
+    assert spotify_retry_held(2138, pod, "recEp2138", save, now="2026-11-21T07:59:00Z", make_card=fake_card) == "waiting"
+    assert cards == [] and "held_card" not in pod, pod
+
+    # 3. At 48 hours exactly, ONE card.
+    assert spotify_retry_held(2138, pod, "recEp2138", save, now="2026-11-21T08:00:00Z", make_card=fake_card) == "carded"
+    assert cards == [(2138, "recEp2138", "Episode 2138")], cards
+    assert pod["held_card"] == "recHoldCard00001", pod
+
+    # 4. Every later hold raises nothing, however long it stands.
+    for when in ("2026-11-22T08:00:00Z", "2026-12-25T08:00:00Z"):
+        assert spotify_retry_held(2138, pod, "recEp2138", save, now=when, make_card=fake_card) == "already carded"
+    assert len(cards) == 1, cards
+
+    # 5. A gate that refuses stamps nothing, so the next hold tries again rather than swallowing the card.
+    pod2 = {"held_since": T0}
+    assert spotify_retry_held(2139, pod2, "recEp2139", save, now="2026-11-23T08:00:00Z",
+                              make_card=lambda *a: "") == "gate refused"
+    assert "held_card" not in pod2, pod2
+    assert spotify_retry_held(2139, pod2, "recEp2139", save, now="2026-11-23T09:00:00Z", make_card=fake_card) == "carded"
+    assert len(cards) == 2, cards
+
+    # 6. An unreadable stamp is due, never a fresh hold: re-stamping it would restart the clock every
+    #    hour and card nothing, which is the bug this fix exists to close.
+    pod3 = {"held_since": "rubbish"}
+    assert spotify_retry_held(2140, pod3, "recEp2140", save, now=T0, make_card=fake_card) == "carded"
+
+    # 7. The list reading, or an upload starting, ends the hold outright.
+    pod4 = {"held_since": T0, "held_card": "recHoldCard00001", "status": "failed"}
+    spotify_hold_clear(pod4)
+    assert pod4 == {"status": "failed"}, pod4
+    # ... and then the clock starts again from scratch, so a second spell of blindness cards again.
+    assert spotify_retry_held(2141, pod4, "recEp2141", save, now=T0, make_card=fake_card) == "stamped"
+
+    # 8. Both live callers clear the hold, and the unreadable branch goes through the clock.
+    import inspect as _i
+    src = _i.getsource(finish_extras)
+    assert src.count("spotify_hold_clear(pod)") == 2, "the list reading and the upload starting both end the hold"
+    assert "spotify_retry_held(day, pod, full[\"id\"], save)" in src, "the unreadable list goes through the clock"
+    assert SPOTIFY_HELD_ERROR not in src.replace("spotify_retry_held", ""), \
+        "the held error is written in one place only"
+    assert saves, "every verdict is saved"
+
+
 def _selftest_close_cards():
     """30 Sep 2026: 2059-2077 were live on all seven sections and their approved cards sat open at "Today" for up to
     two weeks, so the Task Manager asked Kevin to approve 2059 again. Drives close_cards end to end on fakes."""
@@ -2780,6 +2939,7 @@ def selftest():
     _selftest_time_budget()
     _selftest_refusal_reason()
     _selftest_close_cards()
+    _selftest_spotify_hold_card()
     import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state, clip=clip)"), "monetisation is checked every sync"
     msrc = _i5.getsource(monetise_long_video)
     # the old filter stepped over every GoHighLevel upload in silence: 2054 episode + Short and 2195 episode (20 Sep 2026)
