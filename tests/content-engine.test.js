@@ -17,7 +17,12 @@ const py = (file, args = []) => execFileSync('python3', [file, ...args], { encod
 describe('content-engine: stab.py (stitch + gyro horizon lock)', () => {
   it('passes its own selftest', () => {
     expect(py(STAB, ['selftest'])).toContain('stab selftest ok');
-  });
+    // 120 SECONDS, NOT THE 30s DEFAULT (finding 20261121-queue-fixer-1405, round 2). This case
+    // shells out to a script that builds real media with ffmpeg, so its wall time scales with how
+    // busy the machine is: measured on the Mac mini on 21 Nov 2026, qa.py's selftest took 5.6s
+    // alone and 25.9s beside a full gate. Found by tests/content-engine-selftest-budget.test.js,
+    // which reads the scripts rather than keeping a list of the cases.
+  }, 120000);
 
   it('keeps the X4 lens and IMU calibration that was measured against real footage', () => {
     const insta = readFileSync(INSTA, 'utf8');
@@ -38,7 +43,12 @@ describe('content-engine: stab.py (stitch + gyro horizon lock)', () => {
 describe('content-engine: overlays.py (captions + banners)', () => {
   it('passes its own selftest', () => {
     expect(py(OVERLAYS, ['selftest'])).toContain('overlays selftest ok');
-  });
+    // 120 SECONDS, NOT THE 30s DEFAULT (finding 20261121-queue-fixer-1405, round 2). This case
+    // shells out to a script that builds real media with ffmpeg, so its wall time scales with how
+    // busy the machine is: measured on the Mac mini on 21 Nov 2026, qa.py's selftest took 5.6s
+    // alone and 25.9s beside a full gate. Found by tests/content-engine-selftest-budget.test.js,
+    // which reads the scripts rather than keeping a list of the cases.
+  }, 120000);
 
   it("re-chunks a whisper SRT into <=5-word lines, drops noise and fixes the brand", () => {
     const src = readFileSync(OVERLAYS, 'utf8');

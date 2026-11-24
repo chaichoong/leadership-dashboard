@@ -22,7 +22,12 @@ describe('content-engine render', () => {
     // cut_with_override, jingle_cut_from, set_cut) is driven in there too — findings
     // 20261018-ceo-memory-sweep-973 and 20261025-phase-3-1077, four bounces on 2100 and 2113.
     expect(out.checks).toBeGreaterThanOrEqual(95);
-  });
+    // 120 SECONDS, NOT THE 30s DEFAULT (finding 20261121-queue-fixer-1405, round 2). This case
+    // shells out to a script that builds real media with ffmpeg, so its wall time scales with how
+    // busy the machine is: measured on the Mac mini on 21 Nov 2026, qa.py's selftest took 5.6s
+    // alone and 25.9s beside a full gate. Found by tests/content-engine-selftest-budget.test.js,
+    // which reads the scripts rather than keeping a list of the cases.
+  }, 120000);
 
   // 15 Oct 2026, finding 20261015-phase-3-888: day 2106 held two short recordings. Both were
   // role=teaser, both rendered, and both wrote Summary Video URL to the same episode record, so the
