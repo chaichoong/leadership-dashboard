@@ -54,6 +54,9 @@ def card(output=OUTPUT, outcome="Approved as-is", agent=CFV, name="RENT LATE: Un
         AF["sentForApprovalBy"]: [agent], AF["teamMember"]: [agent], AF["approvedAt"]: approved_at,
         AF["notes"]: notes, AF["tenants"]: list(tenants), AF["status"]: status, aef.TASK_TENANCIES: list(tenancies)}}
 TENANT_NUMBER = {"recTenantTest0001": "+44 7700 900123"}
+# A tenancy names its tenant through its Customers link (finding 20261119-agent-dispatch-1377): the
+# rent-lane card that went unsent linked only the tenancy, never the tenant.
+TENANCY_TENANTS = {"recTenancyTextAaa": ["recTenantTest0001"], "recTenancyEmptyB": []}
 CALLS, STAMPS = [], []
 def run(rec, dry=False, worker_fail=None):
     CALLS.clear(); STAMPS.clear()
@@ -62,6 +65,12 @@ def run(rec, dry=False, worker_fail=None):
         if path.startswith(st.TENANTS + "/"):
             tid = path.split("/")[1].split("?")[0]
             return {"id": tid, "fields": {st.TENANT_PHONE: TENANT_NUMBER.get(tid, "")}}
+        # getattr with a default so the BACK-TEST (this file against the code before the fix, which has
+        # no TENANCY_TENANTS) still only fails the one test that is about the fix.
+        if path.startswith(st.TENANCIES_TABLE + "/") and not path.rstrip("/").endswith("/comments"):
+            yid = path.split("/")[1].split("?")[0]
+            link = getattr(st, "TENANCY_TENANTS", "fld1i5bDoHL3B6rUf")
+            return {"id": yid, "fields": {link: TENANCY_TENANTS.get(yid, [])}}
         if method == "PATCH":
             STAMPS.append(((payload or {}).get("fields") or {}).get(AF["notes"], ""))
             return {}
@@ -215,6 +224,39 @@ print(json.dumps(out))`);
     expect(r.other).toMatch(/not the Contact Number of a tenant/);
     expect(r.noTenant).toMatch(/not the Contact Number of a tenant/);
     expect(r.long).toMatch(/the most is 300/);
+  });
+
+  // Finding 20261119-agent-dispatch-1377: the card for tenancy recNWaYRW3SbX8hZ2 linked the TENANCY
+  // and no tenant, so the gate refused a text Kevin had approved to that tenant's own mobile and the
+  // chase went unsent. A tenancy names its tenant through its Customers link; reading it is the same
+  // gate through the record's other door, so a number must still be a tenant's Contact Number.
+  it('a card that links only the tenancy still reaches that tenancy\'s tenant', () => {
+    const r = py(`
+open(st.SWITCH, "w").write("on")
+trial_ended()
+out = {}
+def as_task(rec, tid):                              # the ledger refuses a second send of the SAME task
+    rec["id"] = tid
+    return rec
+viaTenancy = run(as_task(card(tenants=(), tenancies=("recTenancyTextAaa",)), "recCARDTEXT0000A1"))
+out["viaTenancy"] = sends(viaTenancy) and "sent" or viaTenancy.get("refused", "")[:90]
+# The gate is not loosened: a tenancy with no tenant, and a number belonging to nobody on either
+# link, are both still refused.
+out["emptyTenancy"] = run(as_task(card(tenants=(), tenancies=("recTenancyEmptyB",)),
+                                  "recCARDTEXT0000A2")).get("refused", "")[:90]
+stranger = OUTPUT.replace("TEXT TO: 07700 900123", "TEXT TO: 07700 900999")
+out["stranger"] = run(as_task(card(output=stranger, tenants=(), tenancies=("recTenancyTextAaa",)),
+                              "recCARDTEXT0000A3")).get("refused", "")[:90]
+# A tenant on BOTH links is read once, so the tenancy read never doubles the tenant lookups.
+both = run(as_task(card(tenants=("recTenantTest0001",), tenancies=("recTenancyTextAaa",)), "recCARDTEXT0000A4"))
+out["both"] = sends(both) and "sent" or both.get("refused", "")[:90]
+out["tenantReads"] = len([c for c in both["calls"] if c[0] == "airtable" and c[2].startswith(st.TENANTS + "/")])
+print(json.dumps(out))`);
+    expect(r.viaTenancy).toBe('sent');
+    expect(r.emptyTenancy).toMatch(/not the Contact Number of a tenant/);
+    expect(r.stranger).toMatch(/not the Contact Number of a tenant/);
+    expect(r.both).toBe('sent');
+    expect(r.tenantReads).toBe(1);
   });
 
   it('an approved, matching card is texted verbatim, once; a second send, or one that may have gone, is refused', () => {

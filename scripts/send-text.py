@@ -26,7 +26,8 @@ Agent Output of an approved Correspondence task. It refuses, in this order:
   * a card Kevin has not approved AS-IS in an approval surface (scripts/approval_evidence.py): an edit he
     asked for cannot be checked against a text, so "Approved with minor edits" sends no text;
   * a card with no TEXT lines, or a text over 300 characters;
-  * a number that is not a UK mobile, or is not the Contact Number of a tenant linked to the task;
+  * a number that is not a UK mobile, or is not the Contact Number of a tenant the task names (its
+    Tenants link, or the tenants of a tenancy it links: a rent-lane card often carries only the tenancy);
   * a card already texted, or one whose send may have gone: the ledger on this Mac AND the SENT stamp on
     the task itself (a lost ledger or another Mac never sends twice).
 
@@ -62,6 +63,7 @@ AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
     "tenants": "fld6ZcfEogJmeQj2c",
 }
 TENANT_PHONE = "fldraHUkWfqo4olLF"          # Tenants: Contact Number
+TENANCY_TENANTS = "fld1i5bDoHL3B6rUf"       # Tenancies: Customers, the link to Tenants (tblX4elTuu01gwBYh)
 APPROVED_AS_IS = "Approved as-is"
 SENT_STAMP = "— send-text] SENT:"
 CONFIG = os.path.expanduser("~/.config/od")
@@ -130,10 +132,37 @@ def uk_mobile(raw):
     return digits if UK_MOBILE.match(digits) else ""
 
 
-def tenant_numbers(task_fields):
-    """The UK mobiles of the tenants linked to the task, read from their records."""
-    out = set()
+def task_tenant_ids(task_fields):
+    """The Tenants a task names: its own Tenants link, AND the tenants of every tenancy it links.
+
+    Finding 20261119-agent-dispatch-1377. This read only the Tenants link, and a rent-lane card does
+    not always carry one: the card for tenancy recNWaYRW3SbX8hZ2 links the TENANCY and nothing else,
+    so an approved text to that tenant's own mobile was refused as "not the Contact Number of a tenant
+    linked to the task" and the chase went unsent. A tenancy names its tenant as directly as the
+    Tenants link does, through its own Customers link, so this is the same gate reading the same
+    record by its other door, never a wider one: a number still has to be a tenant's Contact Number,
+    and a task that names neither a tenant nor a tenancy still reaches no one.
+
+    Ids are kept in the order they are met, with no repeats, so a tenant on both links is read once.
+    A tenancy that cannot be read fails the run (airtable() exits), because reading it as empty would
+    refuse a text Kevin approved and look exactly like a card that names nobody.
+    """
+    ids = []
     for tid in task_fields.get(AF["tenants"]) or []:
+        if tid not in ids:
+            ids.append(tid)
+    for yid in task_fields.get(TASK_TENANCIES) or []:
+        rec = airtable("GET", f"{TENANCIES_TABLE}/{yid}?returnFieldsByFieldId=true")
+        for tid in (rec.get("fields") or {}).get(TENANCY_TENANTS) or []:
+            if tid not in ids:
+                ids.append(tid)
+    return ids
+
+
+def tenant_numbers(task_fields):
+    """The UK mobiles of the tenants the task names, read from their own records."""
+    out = set()
+    for tid in task_tenant_ids(task_fields):
         rec = airtable("GET", f"{TENANTS}/{tid}?returnFieldsByFieldId=true")
         n = uk_mobile((rec.get("fields") or {}).get(TENANT_PHONE))
         if n:

@@ -340,6 +340,20 @@ const BUILTIN_SITES = {
   // 11:20, Kevin signed in again at 11:26, while reads 55 and 57 minutes apart on 13 Oct held.
   'login.xero.com':             { label: 'Xero', login: true,
                                   loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
+  // Xero's APP hosts (finding 20261005-agent-dispatch-750). The sign-in door is login.xero.com, but
+  // every page the robot is signed in TO lives on go.xero.com (the dashboard and Settings), my.xero.com
+  // (the account and subscription) and central.xero.com (the help centre it is sent to from both). The
+  // list is matched by host suffix, and go.xero.com does not end in '.login.xero.com', so on 5 Oct 2026
+  // a signed-in robot landed on go.xero.com/app and was then refused its own Settings/Subscription page
+  // as 'not on the allowlist'. A SITE wall on a host that cannot be added is a wall with no door, which
+  // is why that task waited 50 days. Each one carries the same sign-in page and the same 60-minute idle
+  // as the door, so a session check or a sign-in window opened from any of them reaches the same login.
+  'go.xero.com':                { label: 'Xero', login: true,
+                                  loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
+  'my.xero.com':                { label: 'Xero', login: true,
+                                  loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
+  'central.xero.com':           { label: 'Xero', login: true,
+                                  loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
   // The Acturis insurance portal for AXA. AXA showed "Sorry, your session has timed out" an hour after
   // Kevin's sign-in on 7 Oct 2026; Acturis publishes no limit, so 60 is the longest it can be.
   // Swinton's Acturis portal sat here too until 15 Nov 2026, when Kevin took it off the robot: it is
