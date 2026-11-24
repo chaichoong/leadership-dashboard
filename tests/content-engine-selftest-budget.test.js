@@ -36,6 +36,26 @@ function ffmpegScripts() {
   return out;
 }
 
+/**
+ * Names of helpers in SRC that run a script's selftest themselves, e.g.
+ * `const selftest = (file, min) => { ... execFileSync('python3', [path.join(DIR, file), 'selftest'] ...) }`
+ * in content-engine-od.test.js. A case that calls one of these runs a selftest without the word
+ * 'selftest' appearing anywhere in its own body, which is how the first version of this guard missed
+ * two ffmpeg-driven cases there (the second reviewer caught it on PR 1012, round 2).
+ */
+function selftestHelpers(src) {
+  const names = new Set();
+  const re = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>|function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/g;
+  for (const m of src.matchAll(re)) {
+    const name = m[1] || m[3];
+    // the helper's body: from its definition to the next top-level `describe(`/`it(`, or 1200 chars
+    const body = src.slice(m.index, Math.min(src.length, m.index + 1200));
+    const stop = body.search(/\n(?:describe|it)\(/);
+    if (/['"`]selftest['"`]/.test(stop === -1 ? body : body.slice(0, stop))) names.add(name);
+  }
+  return names;
+}
+
 /** `const NAME = path.join(DIR, 'x.py')` and friends, as NAME -> x.py. */
 function scriptConsts(src) {
   const map = new Map();
@@ -58,7 +78,7 @@ function scriptConsts(src) {
  * next and the scan reported a case that runs no selftest at all. Telling a regex literal from a
  * division needs a real parser; block boundaries do not.
  */
-function selftestCases(src, consts) {
+function selftestCases(src, consts, helpers) {
   const marks = [...src.matchAll(/(^|\n)[ \t]*(?:it|describe)(?:\.each\((?:[^)]|\n)*?\))?\(/g)];
   const cases = [];
   for (let k = 0; k < marks.length; k++) {
@@ -66,7 +86,10 @@ function selftestCases(src, consts) {
     if (!/\bit\b/.test(m[0])) continue;
     const from = m.index + m[0].length;
     const body = src.slice(from, k + 1 < marks.length ? marks[k + 1].index : src.length);
-    const marksAt = [...body.matchAll(/['"`]selftest['"`]/g)];
+    // A case runs a selftest when it says so, OR when it calls a helper that does (the helper form
+    // `() => selftest('publish.py', 32)` names no 'selftest' of its own).
+    const helperCalls = [...helpers].flatMap((h) => [...body.matchAll(new RegExp('\\b' + h + '\\s*\\(', 'g'))]);
+    const marksAt = [...body.matchAll(/['"`]selftest['"`]/g)].concat(helperCalls);
     if (!marksAt.length) continue;
     // ONLY the scripts this case RUNS, never the ones it merely reads. content-engine-sync.test.js's
     // spotify case reads publish.py's source two assertions later, which costs no wall time at all;
@@ -88,7 +111,7 @@ function selftestCases(src, consts) {
     }
     // The budget is the last argument of the it(...) call, either the shared constant or a plain
     // number: `it('x', () => { ... }, SELFTEST_BUDGET_MS);`
-    const tail = [...body.matchAll(/\}\s*,\s*(SELFTEST_BUDGET_MS|\d+)\s*\)\s*;/g)].pop();
+    const tail = [...body.matchAll(/[})]\s*,\s*(SELFTEST_BUDGET_MS|\d+)\s*\)\s*;/g)].pop();
     const declared = tail ? (tail[1] === 'SELFTEST_BUDGET_MS' ? SELFTEST_BUDGET_MS : Number(tail[1])) : null;
     cases.push({ line: src.slice(0, m.index).split('\n').length + 1, scripts, timeout: declared });
   }
@@ -97,7 +120,11 @@ function selftestCases(src, consts) {
 
 describe('the selftest budget covers every case that pays for ffmpeg', () => {
   const ffmpeg = ffmpegScripts();
-  const files = readdirSync(path.join(ROOT, 'tests')).filter((f) => f.endsWith('.test.js')).sort();
+  // This file is left out of its own scan: it NAMES the ffmpeg scripts in its control test and runs
+  // none of them, so counting it would demand a budget for work it never does.
+  const SELF = 'content-engine-selftest-budget.test.js';
+  const files = readdirSync(path.join(ROOT, 'tests'))
+    .filter((f) => f.endsWith('.test.js') && f !== SELF).sort();
 
   it('the scan finds the cases this bug was measured on', () => {
     // A guard that matches nothing reads as a pass for ever. These are the wrappers the incident and
@@ -106,7 +133,7 @@ describe('the selftest budget covers every case that pays for ffmpeg', () => {
     const seen = [];
     for (const f of files) {
       const src = readFileSync(path.join(ROOT, 'tests', f), 'utf8');
-      for (const c of selftestCases(src, scriptConsts(src))) {
+      for (const c of selftestCases(src, scriptConsts(src), selftestHelpers(src))) {
         if ([...c.scripts].some((s) => ffmpeg.has(s))) seen.push(f);
       }
     }
@@ -120,7 +147,7 @@ describe('the selftest budget covers every case that pays for ffmpeg', () => {
     const thin = [];
     for (const f of files) {
       const src = readFileSync(path.join(ROOT, 'tests', f), 'utf8');
-      for (const c of selftestCases(src, scriptConsts(src))) {
+      for (const c of selftestCases(src, scriptConsts(src), selftestHelpers(src))) {
         const paid = [...c.scripts].filter((s) => ffmpeg.has(s) && existsSync(path.join(CE, s)));
         if (!paid.length) continue;
         if (c.timeout === null || c.timeout < SELFTEST_BUDGET_MS) {

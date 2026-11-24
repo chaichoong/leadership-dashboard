@@ -20,14 +20,19 @@ describe('content-engine OD lane', () => {
   it('od_lane selftest: gate, sources, rules check, usefulness, cards, newsletter, topics', () => selftest('od_lane.py', 62));
   it('od_prompts selftest: the brief in every prompt, shapes, visual split, voice profile loader', () => selftest('od_prompts.py', 12));
   it('od_infographic selftest: five templates, escaping, a real render', () => selftest('od_infographic.py', 9), 120000);
-  it('od_illustrate selftest: Gemini prompt, required lines, the text check, no-key fallback', () => selftest('od_illustrate.py', 13));
+  // 120 SECONDS (finding 20261121-queue-fixer-1405). Both of these shell out through the
+  // selftest() helper to a script that builds real media with ffmpeg, so their wall time scales
+  // with how busy the machine is. The second reviewer found them on PR 1012 round 2: the guard's
+  // first version only read a quoted 'selftest' inside the case body, and the helper form names
+  // none, so od_illustrate sat on the 30s default and publish on 10s.
+  it('od_illustrate selftest: Gemini prompt, required lines, the text check, no-key fallback', () => selftest('od_illustrate.py', 13), 120000);
   it('od_board selftest: five boards from the lead magnet components, one hero each, no name, a real render', () => selftest('od_board.py', 10), 180000);
   it('od_compose selftest: the vendored Epic Infographics method, the OD design language, the preflight checker runs', () => selftest('od_compose.py', 18), 180000);
   // 10s, not the 5s default: the selftest genuinely needs ~3.1s, and it went red once
   // on the 25 Sep fixer run with 203 test files sharing 8 cores while passing in
   // isolation (finding 20260925-queue-fixer-612). A flaky red on the pre-push gate is
   // what teaches people to reach for SKIP_SYNC_TESTS=1.
-  it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32), 10000);
+  it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32), 120000);
 
   // A selftest that reaches the network is not a selftest, it is a flaky gate. publish.py's
   // stubbed blog left the article PUBLISHED with no read_time, which is exactly the state that
