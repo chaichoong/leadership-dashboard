@@ -21,10 +21,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { SELFTEST_BUDGET_MS } from '../vitest.budgets.js';
 
 const ROOT = path.resolve(__dirname, '..');
 const CE = path.join(ROOT, 'scripts', 'content-engine');
-export const SELFTEST_BUDGET_MS = 120000;
 
 /** Scripts in scripts/content-engine that really call ffmpeg, read off the scripts themselves. */
 function ffmpegScripts() {
@@ -86,10 +86,11 @@ function selftestCases(src, consts) {
         for (const x of loop[2].matchAll(/['"]([\w.-]+\.py)['"]/g)) scripts.add(x[1]);
       }
     }
-    // The budget is the last argument of the it(...) call: `it('x', () => { ... }, 120000);`
-    const tail = [...body.matchAll(/\}\s*,\s*(\d+)\s*\)\s*;/g)].pop();
-    cases.push({ line: src.slice(0, m.index).split('\n').length + 1, scripts,
-                 timeout: tail ? Number(tail[1]) : null });
+    // The budget is the last argument of the it(...) call, either the shared constant or a plain
+    // number: `it('x', () => { ... }, SELFTEST_BUDGET_MS);`
+    const tail = [...body.matchAll(/\}\s*,\s*(SELFTEST_BUDGET_MS|\d+)\s*\)\s*;/g)].pop();
+    const declared = tail ? (tail[1] === 'SELFTEST_BUDGET_MS' ? SELFTEST_BUDGET_MS : Number(tail[1])) : null;
+    cases.push({ line: src.slice(0, m.index).split('\n').length + 1, scripts, timeout: declared });
   }
   return cases;
 }
