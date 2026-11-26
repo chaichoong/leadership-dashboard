@@ -1394,6 +1394,19 @@ describe('the Replace a key box', () => {
     expect(handler.indexOf('display dialog')).toBeGreaterThan(-1);
   });
 
+  // Every handler the AI Agents page links to, not just the one this build added a button for
+  // (the second reviewer of PR 1015: runTurn opened a dialog and two alerts with no activate).
+  it.each(['runReplaceKey', 'runTurn'])('%s activates before its first dialog or alert', (name) => {
+    const h = src.slice(src.indexOf(`on ${name}(`));
+    const body = h.slice(0, h.indexOf(`end ${name}`));
+    const act = body.search(/^\tactivate$/m);
+    const asks = [body.indexOf('display dialog'), body.indexOf('display alert'), body.indexOf('choose from list')]
+      .filter(i => i > -1);
+    expect(asks.length).toBeGreaterThan(0);
+    expect(act).toBeGreaterThan(-1);
+    expect(act).toBeLessThan(Math.min(...asks));
+  });
+
   it('reads key/<name> off the link, run through osascript', () => {
     const { rmSync } = require('node:fs');
     const dir = mkdtempSync(join(tmpdir(), 'od-robot-key-'));

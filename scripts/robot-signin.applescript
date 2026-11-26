@@ -765,6 +765,9 @@ on turnTaskId(body)
 end turnTaskId
 
 on runTurn(taskId)
+	-- Same reason as runReplaceKey: the AI Agents page links robotsignin://turn/<task> here, and
+	-- every dialog and alert below would otherwise wait unseen behind another window.
+	activate
 	if taskId is "" then
 		display alert "Your turn" message "That link does not name a task."
 		return
