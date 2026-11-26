@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { readAll, readProblems, RETRY_MS } from '../scripts/padel-courts.mjs';
+import { readAll, readProblems, readPlaytomicDay, RETRY_MS } from '../scripts/padel-courts.mjs';
 import { parsePlaytomic, parsePlaytomicCourts, bookUrl, venueConfig, londonDates } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -88,6 +88,27 @@ describe('the Book link follows the club', () => {
   });
 });
 
+// Playtomic's CloudFront, probed live 26 Nov 2026: the availability call is a 403 unless all three
+// Sec-Fetch headers its page's own fetch sends are there. One or two alone is still a 403.
+const fromPage = (h = {}) => h['Sec-Fetch-Site'] === 'same-origin' && h['Sec-Fetch-Mode'] === 'cors' && h['Sec-Fetch-Dest'] === 'empty';
+
+describe('Playtomic refuses a call that does not look like its own page (26 Nov 2026)', () => {
+  it('the day call sends the three Sec-Fetch headers, so December reads instead of a 403 on every day', async () => {
+    const seen = [];
+    const fetchImpl = async (url, opts = {}) => {
+      seen.push(opts.headers || {});
+      if (!fromPage(opts.headers)) return new Response('Request blocked.', { status: 403 });
+      return new Response(JSON.stringify([{ resource_id: C(1), start_date: '2026-12-01', slots: [{ start_time: '18:00:00', duration: 90 }] }]), { status: 200 });
+    };
+    const day = await readPlaytomicDay(fetchImpl, '90683b2f-2f6a-4680-a167-cbfa4fd7ea55', '2026-12-01', COURTS);
+    expect(day.status).toBe('ok');
+    expect(Object.keys(day.starts).length).toBeGreaterThan(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ Accept: 'application/json', 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' });
+    expect(seen[0]['User-Agent']).toMatch(/Chrome/);
+  });
+});
+
 describe('the reader across the switch', () => {
   // 09:00 London on Tue 24 Nov 2026: the window is 24 Nov to 7 Dec, so PDL is 7 days on Matchi and 7 on Playtomic.
   const NOW = Date.parse('2026-11-24T09:00:00Z');
@@ -95,13 +116,14 @@ describe('the reader across the switch', () => {
   const fake = ({ club = () => new Response(CLUB, { status: 200 }), day = (date) => new Response(JSON.stringify([
     { resource_id: C(1), start_date: date, slots: [{ start_time: '18:00:00', duration: 90 }] }]), { status: 200 }) } = {}) => {
     const calls = { matchi: [], club: 0, days: [] };
-    const fetchImpl = async (url) => {
+    const fetchImpl = async (url, opts = {}) => {
       const u = new URL(url);
       if (u.hostname === 'www.matchi.se') { calls.matchi.push(`${u.searchParams.get('facilityId')} ${u.searchParams.get('date')}`); return new Response(u.searchParams.get('facilityId') === '3122' ? PDL_PAGE : SI_PAGE, { status: 200 }); }
       if (u.hostname === 'playtomic.com' && u.pathname === '/clubs/pdl-padel-united-cambridge') { calls.club++; return club(); }
       if (u.hostname === 'playtomic.com' && u.pathname === '/api/clubs/availability') {
         expect(u.searchParams.get('tenant_id')).toBe('90683b2f-2f6a-4680-a167-cbfa4fd7ea55');
         calls.days.push(u.searchParams.get('date'));
+        if (!fromPage(opts.headers)) return new Response('Request blocked.', { status: 403 });   // Playtomic's CloudFront, as live
         return day(u.searchParams.get('date'));
       }
       if (u.hostname === 'cambridgesport.gladstonego.cloud') return new Response('[]', { status: 200 });
@@ -157,7 +179,7 @@ describe('the reader across the switch', () => {
   it('each source is checked on its own: Cambridge on Matchi all lost, or on Playtomic all lost, fails the run (review of PR 888)', async () => {
     const matchiDown = fake();
     const real = matchiDown.fetchImpl;
-    const fetchImpl = async (url) => (new URL(url).searchParams.get('facilityId') === '3122' ? new Response('', { status: 429 }) : real(url));
+    const fetchImpl = async (url, opts) => (new URL(url).searchParams.get('facilityId') === '3122' ? new Response('', { status: 429 }) : real(url, opts));
     const a = await readAll({ fetchImpl, sleep, nowMs: NOW });
     expect(readProblems(a.raw, a.dates).join(' ')).toMatch(/PDL errored on every day that should be open \(HTTP 429/);
     const b = await readAll({ fetchImpl: fake({ day: () => new Response('', { status: 503 }) }).fetchImpl, sleep, nowMs: NOW });
