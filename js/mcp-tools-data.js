@@ -14,7 +14,7 @@
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-11-21T06:10:12Z",
+  "generatedAt": "2026-11-26T06:10:10Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "",
   "agentAllowlistSize": 15,
@@ -22,9 +22,9 @@ var MCP_TOOLS = {
     "total": 41,
     "verified": 28,
     "declared": 13,
-    "kevin": 22,
+    "kevin": 23,
     "agents": 0,
-    "needsAuth": 19
+    "needsAuth": 18
   },
   "groups": [
     {
@@ -113,8 +113,8 @@ var MCP_TOOLS = {
         {
           "name": "Stripe",
           "what": "Payments and subscriptions. Never authorised. Will matter at the Supabase cutover when clients start paying.",
-          "auth": "needs-auth",
-          "kevin": false,
+          "auth": "authorised",
+          "kevin": true,
           "agents": false,
           "source": "verified",
           "scope": ""
