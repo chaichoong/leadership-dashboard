@@ -1375,3 +1375,35 @@ print('---JSON---'); print(json.dumps({'profile': bb['profile'], 'closed': res.g
     expect(quoted).toMatchObject({ closed: false, status: 'Today', sfab: 'unchanged' });
   });
 });
+
+// The paste box comes to the front, and the link that opens it (22 Nov 2026). The AI Agents page
+// now links robotsignin://key/<name> from a key paste card, so a box that waits behind other
+// windows is a wall again (memory project_robot_signin_chain, 29 Sep 2026: 2 of 3 dialogs stalled
+// without activate, 5 of 5 clean with it).
+describe('the Replace a key box', () => {
+  const src = readFileSync(join(ROOT, 'scripts', 'robot-signin.applescript'), 'utf8');
+  const body = src.slice(src.indexOf('on runReplaceKey(keyName)'));
+  const handler = body.slice(0, body.indexOf('end runReplaceKey'));
+
+  it('activates before it asks anything, so the box is never behind another window', () => {
+    const act = handler.search(/^\tactivate$/m);
+    expect(act).toBeGreaterThan(-1);
+    expect(act).toBeLessThan(handler.indexOf('choose from list'));
+    expect(act).toBeLessThan(handler.indexOf('display dialog'));
+    expect(handler.indexOf('choose from list')).toBeGreaterThan(-1);
+    expect(handler.indexOf('display dialog')).toBeGreaterThan(-1);
+  });
+
+  it('reads key/<name> off the link, run through osascript', () => {
+    const { rmSync } = require('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-key-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const out = execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\n` +
+        `return (s's bodyOf("robotsignin://key/ebay_cert_id")) & "|" & (s's bodyOf("robotsignin://key"))`],
+        { encoding: 'utf8' }).trim();
+      expect(out).toBe('key/ebay_cert_id|key');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});

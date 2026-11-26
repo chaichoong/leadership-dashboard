@@ -414,3 +414,70 @@ test.describe('Your turn shows the moment the card arrives', () => {
     await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
   });
 });
+
+// A key paste card opens the paste box (22 Nov 2026). Kevin held the eBay Cert ID and his card
+// told him to "open the Robot sign-in app" with no way in. The app has always opened one key's
+// box from robotsignin://key/<name>; nothing linked to it, so a key paste card showed plain text.
+const KEY_STEP = '22 Nov: last piece is the eBay Cert ID. PASTE KEY: ebay_cert_id. Steps: 1. Press Open the paste box. 2. Press Cmd+V, then Replace.';
+
+test.describe('a key paste card opens the paste box', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36' });
+
+  test('the button opens that one key, and the register name is the only thing that reaches the link', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ step: KEY_STEP }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const btn = page.locator(`[data-apv-card="${ID}"] [data-apv-step-key="ebay_cert_id"]`);
+    await expect(btn).toHaveAttribute('href', 'robotsignin://key/ebay_cert_id');
+    await expect(btn).toHaveText('Open the paste box');
+    // The step itself still reads as text, and the turn slot is untouched beside it.
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-text]`)).toContainText('PASTE KEY: ebay_cert_id.');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
+  });
+
+  test('a name the app would refuse gets no button at all', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ step: '22 Nov: paste it. PASTE KEY: ebay cert;x. Then press Replace.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-key]`)).toHaveCount(0);
+  });
+
+  test('a card with no paste step has no key button', async ({ page }) => {
+    await mockAgentsPage(page, withStep());
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-key]`)).toHaveCount(0);
+  });
+
+  test('a robot sign-in card shows its own button and never a key button', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ outcome: '', step: 'ROBOT SIGN-IN: developer.ebay.example. Blocked. PASTE KEY: ebay_cert_id.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-signin]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-key]`)).toHaveCount(0);
+  });
+
+  test('a card with a Your turn plan still shows Your turn', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ turn: true }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn="${ID}"]`)).toHaveText('Your turn');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-key]`)).toHaveCount(0);
+  });
+});
+
+test.describe('a key paste card away from the Mac', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+             hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test('says where the box opens, and offers no link to press', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ step: KEY_STEP }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    await expect(card.locator('[data-apv-key-slot]')).toHaveText('The paste box opens on your Mac');
+    await expect(card.locator('[data-apv-step-key]')).toHaveCount(0);
+  });
+});

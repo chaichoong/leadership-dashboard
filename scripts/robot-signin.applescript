@@ -680,6 +680,10 @@ on keyField(theLine, n)
 end keyField
 
 on runReplaceKey(keyName)
+	-- Bring the box to the front. Without this a dialog from this app can wait unseen behind
+	-- other windows (memory project_robot_signin_chain, 29 Sep 2026: 2 of 3 dialogs stalled
+	-- without activate, 5 of 5 clean with it). It matters more now the AI Agents page links here.
+	activate
 	set theKeys to keyLines()
 	if keyName is "" then
 		set labels to {}

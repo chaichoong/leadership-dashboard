@@ -2906,6 +2906,11 @@ const APV_ROBOT_STEP_RE = /^ROBOT (SIGN-IN|SITE): ([a-z0-9-]+(?:\.[a-z0-9-]+)+)(
 // The sentence agent-dispatch.py writes only when the Your turn plan passes the window's own check
 // (YOUR_TURN_SENTENCE there): until the sweep has looked at a card, it is what says the button is ready.
 const APV_TURN_READY_RE = /Press Your turn on the AI Agents page, on your Mac/;
+// A key paste step (22 Nov 2026). Kevin held the eBay Cert ID and his card told him to "open the
+// Robot sign-in app" with no way in. The app already opens one key's paste box from a link
+// (robot-signin.applescript's `on open location` -> runReplaceKey), and nothing linked to it. The
+// name pattern is the app's own (its grep on the register name), so no other text reaches the link.
+const APV_KEY_STEP_RE = /\bPASTE KEY: ([A-Za-z0-9_.:-]+)\./;
 function apvYourStep(t){
     if(!t) return null;
     const s = String(t.agentOutput||'').replace(/^\s+/, '');
@@ -2949,6 +2954,17 @@ function apvStepTurnHtml(taskId){
         ? `<a class="btn btn-success btn-sm" href="robotsignin://turn/${esc(taskId)}" data-apv-step-turn="${esc(taskId)}" title="Opens the robot's window on your Mac, filled in up to your step">Your turn</a>`
         : `<span class="rs-mac">Your turn opens on your Mac</span>`;
 }
+// The one button on a key paste card: it opens that key's paste box on the Mac mini, already set
+// to the right key. The robot never copies, holds or sees the value; the paste stays Kevin's.
+function apvStepKeyHtml(ys){
+    if(!ys || ys.robot) return '';
+    const m = APV_KEY_STEP_RE.exec(ys.step);
+    if(!m) return '';
+    const name = m[1];
+    return SIGNIN_ON_MAC
+        ? `<a class="btn btn-success btn-sm" href="robotsignin://key/${esc(name)}" data-apv-step-key="${esc(name)}" title="Opens the paste box for this key on the Mac mini. Paste, then press Replace.">Open the paste box</a>`
+        : `<span class="rs-mac">The paste box opens on your Mac</span>`;
+}
 // The one button on a robot's sign-in card: the same links the Robot sign-in app always took.
 function apvRobotStepButton(r){
     if(!SIGNIN_ON_MAC) return `<span class="rs-mac">${r.kind === 'SITE' ? 'Add it' : 'Sign in'} on your Mac</span>`;
@@ -2974,7 +2990,7 @@ function apvStepCardHtml(t, ys){
                 ? (ys.robot.kind === 'SITE' ? 'A robot needs a site added to its list. Nothing else is asked of you.' : 'A robot needs you to sign it in. Nothing else is asked of you.')
                 : 'Your step. You approved this already: only you can do this part.'}</div>
             <div class="apv-step-text" data-apv-step-text>${esc(ys.step)}</div>
-            ${ys.robot ? `<div data-apv-robot-step>${apvRobotStepButton(ys.robot)}</div>` : `<div data-apv-turn-slot="${t.id}">${apvStepTurnHtml(t.id)}</div>`}
+            ${ys.robot ? `<div data-apv-robot-step>${apvRobotStepButton(ys.robot)}</div>` : `<div data-apv-turn-slot="${t.id}">${apvStepTurnHtml(t.id)}</div><div data-apv-key-slot>${apvStepKeyHtml(ys)}</div>`}
         </div>
         <div class="apv-meta">
             <span class="apv-chip">${esc(agent)}</span>
