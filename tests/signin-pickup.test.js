@@ -1396,8 +1396,8 @@ describe('the Replace a key box', () => {
 
   // Every handler the AI Agents page links to, not just the one this build added a button for
   // (the second reviewer of PR 1015: runTurn opened a dialog and two alerts with no activate).
-  it.each(['runReplaceKey', 'runTurn'])('%s activates before its first dialog or alert', (name) => {
-    const h = src.slice(src.indexOf(`on ${name}(`));
+  it.each(['runReplaceKey', 'runTurn', 'askNewSite', 'open location'])('%s activates before its first dialog or alert', (name) => {
+    const h = src.slice(src.search(new RegExp('^on ' + name + '\\b', 'm')));
     const body = h.slice(0, h.indexOf(`end ${name}`));
     const act = body.search(/^\tactivate$/m);
     const asks = [body.indexOf('display dialog'), body.indexOf('display alert'), body.indexOf('choose from list')]

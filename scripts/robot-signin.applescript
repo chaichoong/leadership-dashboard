@@ -262,6 +262,9 @@ end newSiteLine
 -- blocked on axa.co.uk, and the wall asked again each time. Whatever he settles on, the wall's
 -- address rides on the sign-in (`login --for-wall`), so the robot learns which site he meant.
 on askNewSite(wallHost)
+	-- Same reason as runReplaceKey: this is reached from the AI Agents page's + Add this site
+	-- link, and its box must not wait behind another window.
+	activate
 	if wallHost is "" then
 		set promptText to "Paste the address of the site's sign-in page. The robots will be able to use this site once you have signed in."
 		set startUrl to "https://"
@@ -828,6 +831,9 @@ on open location theURL
 		notOnRobotsMac()
 		return
 	end if
+	-- Every link from the AI Agents page ends in a dialog or an alert somewhere below, so the app
+	-- comes forward once, here, rather than at each of them (second reviewer of PR 1015).
+	activate
 	set body to bodyOf(theURL)
 	if body is "key" or body starts with "key/" then
 		if body is "key" then
