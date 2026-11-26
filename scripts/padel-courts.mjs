@@ -131,6 +131,11 @@ export async function readUni(fetchImpl, dates, nowMs = Date.now()) {
 // The defaults these read (venueConfig() with no settings) match wrangler.toml: a test holds them.
 const failReason = (e) => (e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'timed out' : 'could not reach the site');
 const httpReason = (status) => (status >= 400 && status < 500 ? `Playtomic refused (HTTP ${status})` : `HTTP ${status}`);
+// Playtomic's CloudFront refuses the availability call (HTTP 403 "Request blocked") unless it carries
+// all three of the Sec-Fetch headers its own page's fetch sends; any one or two alone is still a 403
+// (probed 26 Nov 2026, when every December day failed). The club page needs none of them.
+export const PLAYTOMIC_DAY_HEADERS = Object.freeze({ ...MATCHI_HEADERS, Accept: 'application/json',
+  'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' });
 export async function readPlaytomicCourts(fetchImpl, slug) {
   try {
     const res = await fetchImpl(playtomicClubUrl(slug), { headers: { ...MATCHI_HEADERS }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
@@ -141,7 +146,7 @@ export async function readPlaytomicCourts(fetchImpl, slug) {
 }
 export async function readPlaytomicDay(fetchImpl, tenantId, date, courts) {
   try {
-    const res = await fetchImpl(playtomicAvailabilityUrl(tenantId, date), { headers: { ...MATCHI_HEADERS, Accept: 'application/json' }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
+    const res = await fetchImpl(playtomicAvailabilityUrl(tenantId, date), { headers: { ...PLAYTOMIC_DAY_HEADERS }, signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
     if (res.status !== 200) return { status: 'error', reason: httpReason(res.status) };
     let json;
     try { json = JSON.parse(await res.text()); } catch { return { status: 'error', reason: 'unexpected shape' }; }
