@@ -58,7 +58,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { londonParts, londonDates, dayLabel } from '../workers/padel/padel.js';
+import { londonParts, londonDates, dayLabel, SIGNED_OUT_MARK } from '../workers/padel/padel.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PAID_URL = 'https://padel.runpreneur.org.uk/api/robot/paid';
@@ -544,6 +544,18 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
       }
     }
     if (stale) continue;
+    // A step that failed only because the robot was signed out of Splitwise: taken up again by the robot
+    // the first run Splitwise answers, in the same hours as the step itself.
+    const parked = ['splitwise', 'texts'].find((s) => b[s].state === 'failed' && String(b[s].note || '').includes(SIGNED_OUT_MARK));
+    if (parked) {
+      if (!textStart(now())) continue;
+      if (!(await swJson(`${SW}/api/v3.0/get_group/${players.splitwise_group.id}`, ab))?.group) {
+        problems.push(`${b.slot} ${parked}: the robot is still signed out of Splitwise`);
+        continue;
+      }
+      if (!(await mark(b, parked, 'resume'))) continue;             // not recorded: mark has said so
+      b[parked] = { state: null, at: null, note: null };
+    }
     if (b.splitwise.state === null) {
       if (!textStart(now())) continue;                              // Splitwise pings the players too: daytime only
       if (paidNow.has(b.slot) || heldByEmail(b.slot, emailDone, now())) continue;   // paid from an email: Kevin's half hour to Change the players
@@ -563,9 +575,24 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
   return 0;
 }
 
+// Splitwise's own answer once the robot's sign-in has lapsed, read 27 Nov 2026:
+// {"error":"Invalid API Request: you are not logged in"}. That day a paid booking sat on "waiting" on
+// Kevin's phone for seven hours while every run logged the failure where nobody looks. Only this answer
+// fails the step, with what to do, on the booking itself; a browser that read nothing at all is a
+// passing fault, left unclaimed and tried again next run. Once Splitwise answers again the robot takes
+// the step up by itself (resume, below), so Kevin's sign-in is the whole of his part.
+export const signedOutOfSplitwise = (reply) => /not logged in/i.test(JSON.stringify((reply && (reply.error || reply.errors)) || ''));
+export const SIGNED_OUT_NOTE = `The robot is ${SIGNED_OUT_MARK}. Sign it in on the Mac (Robot sign-in, Splitwise) and it carries on by itself`;
+async function signedOutStep(b, step, mark, note) {
+  if (await mark(b, step, 'claimed')) await mark(b, step, 'failed', note);
+  return 'the robot is signed out of Splitwise';
+}
+
 async function splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir, link }) {
   const gid = players.splitwise_group.id;
-  const group = (await swJson(`${SW}/api/v3.0/get_group/${gid}`, ab))?.group;
+  const reply = await swJson(`${SW}/api/v3.0/get_group/${gid}`, ab);
+  const group = reply?.group;
+  if (!group && signedOutOfSplitwise(reply)) return signedOutStep(b, 'splitwise', mark, SIGNED_OUT_NOTE);
   if (!group) return 'could not read the Splitwise group (is the robot still signed in?)';   // nothing claimed: tried again next run
   const members = (group.members || []).map((m) => m.id);
   const unlinked = link(b, group.members || []);                     // a new player's entry, found and saved
@@ -622,7 +649,9 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now, 
   // Splitwise step named, else the one entry for that date.
   const gid = players.splitwise_group.id;
   const ids = b.players.map((p) => players.players[String(p.id)]?.splitwise_id);
-  const expenses = (await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab))?.expenses;
+  const reply = await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab);
+  const expenses = reply?.expenses;
+  if (!expenses && signedOutOfSplitwise(reply)) return signedOutStep(b, 'texts', mark, `No texts sent: ${SIGNED_OUT_NOTE}`);
   if (!expenses) return 'could not read the group\'s entries';           // nothing claimed: tried again next run
   const named = /entry (\d+)/.exec(b.splitwise.note || '');
   const live = expenses.filter((e) => !e.deleted_at);

@@ -206,6 +206,11 @@ const BUILTIN_SITES = {
   // morning it lapses. It sat only in sites.json before: here, that need is on the list on any Mac.
   'www.facebook.com':           { label: 'Facebook',           login: true,
                                   loginUrl: 'https://www.facebook.com/login' },
+  // Splitwise (27 Nov 2026). The padel robot (scripts/padel-paid.mjs, run by the padel-courts job) adds
+  // each paid booking to Kevin's Padel group with this login, and that job lists it under `signins`.
+  // It sat only in sites.json, and lapsed unasked for four days before a booking stalled on it.
+  'secure.splitwise.com':       { label: 'Splitwise (padel)',  login: true,
+                                  loginUrl: 'https://secure.splitwise.com/login' },
   'www.linkedin.com':           { label: 'LinkedIn',           login: true,
                                   loginUrl: 'https://www.linkedin.com/login' },
   // my.edfenergy.com no longer answers (SSL error, 4 Sep 2026); the account

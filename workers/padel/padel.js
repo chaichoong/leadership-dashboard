@@ -28,7 +28,8 @@
 //        { action: 'retry', slot, step }              let the robot try a failed Splitwise entry or texts again
 //   GET  /api/robot/paid  (X-Robot-Key)     -> { ok, bookings }   paid bookings with a step still to do
 //   POST /api/robot/paid  (X-Robot-Key)     -> { ok, changed }    { slot, step, state, note, paidAt }: claimed,
-//        then done or failed; a step is claimed once and never again unless Kevin taps Retry.
+//        then done or failed; a step is claimed once and never again unless Kevin taps Retry, or the
+//        robot resumes one that failed only because it was signed out of Splitwise (SIGNED_OUT_MARK).
 //   POST /api/robot/booking (X-Robot-Key) -> { ok, booked, paid, venue, alreadyPaid }   { slot, venue, start,
 //        minutes, person_id, price_pence? }: a venue's booking email (8 Nov 2026). Marks an unmarked hour
 //        booked; with a price and no price yet, pays it, players from the votes at that moment.
@@ -70,7 +71,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-30.1';
+export const VERSION = '2026-11-27.1';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -101,6 +102,9 @@ const MAX_BODY = 16 * 1024;
 const MAX_COURTS_BODY = 64 * 1024;
 export const MAX_PRICE_POUNDS = 1000;              // a court booking above this is a typo
 export const PAID_STEPS = ['splitwise', 'texts'];  // what the Mac robot does for a paid booking, in this order
+// The words the robot's note carries when a step failed only because it was signed out of Splitwise
+// (scripts/padel-paid.mjs SIGNED_OUT_NOTE, 27 Nov 2026). Only such a step may the robot take up again itself.
+export const SIGNED_OUT_MARK = 'signed out of Splitwise';
 export const PAID_KEEP_DAYS = 7;                   // a paid booking the robot has not finished is kept this long
 // Latin letters only (A-Z, a-z and the Latin-1 letters), spaces, hyphens and straight apostrophes.
 const NAME_RE = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/;
@@ -775,14 +779,18 @@ export function makeRepo(db) {
       return (r.meta?.changes || 0) === 1;
     },
     // The robot's steps: claimed from nothing, then done or failed from claimed; Retry clears a failed one.
+    // Resume is the robot's own Retry, and only of a step that failed because it was signed out of
+    // Splitwise (its own note says so): nothing was tried, and Kevin's sign-in is all it waited on.
     async markStep(slot, step, state, note, nowIso, paidAt = null) {
-      if (!PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
-      let from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
+      if (!PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'retry', 'resume'].includes(state)) return false;
+      let from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' || state === 'resume' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
       if (state === 'claimed' && step === 'texts') from += " AND splitwise_state = 'done'";
       if (state === 'claimed') from += ' AND paid_at = ?5';
-      const to = state === 'retry' ? null : state;
+      if (state === 'resume') from += ` AND ${step}_note LIKE ?5`;
+      const to = state === 'retry' || state === 'resume' ? null : state;
       const args = [slot, to, to ? nowIso : null, to ? note : null];
-      if (state === 'claimed') args.push(paidAt);            // ?5 exists only in a claim
+      if (state === 'claimed') args.push(paidAt);            // ?5 is the version read in a claim,
+      if (state === 'resume') args.push(`%${SIGNED_OUT_MARK}%`);   // and the robot's own sign-out note in a resume
       const r = await db.prepare(`UPDATE booked SET ${step}_state = ?2, ${step}_at = ?3, ${step}_note = ?4 WHERE slot = ?1 AND paid_at IS NOT NULL AND ${from}`)
         .bind(...args).run();
       return (r.meta?.changes || 0) === 1;
@@ -1235,7 +1243,7 @@ async function handleRobotPaid(request, env, repo, nowMs) {
   const parsed = await readBody(request);
   if (parsed.error) return fail(parsed.error, parsed.status);
   const { slot, step, state } = parsed.body;
-  if (typeof slot !== 'string' || !SLOT_RE.test(slot) || !PAID_STEPS.includes(step) || !['claimed', 'done', 'failed'].includes(state)) return fail('slot, step and state are needed', 400);
+  if (typeof slot !== 'string' || !SLOT_RE.test(slot) || !PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'resume'].includes(state)) return fail('slot, step and state are needed', 400);
   const note = typeof parsed.body.note === 'string' ? parsed.body.note.slice(0, 200) : null;
   const paidAt = typeof parsed.body.paidAt === 'string' ? parsed.body.paidAt : null;
   if (state === 'claimed' && !paidAt) return fail('A claim names the paidAt it read', 400);

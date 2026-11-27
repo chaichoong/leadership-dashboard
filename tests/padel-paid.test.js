@@ -11,7 +11,9 @@ import { createRequire } from 'node:module';
 import {
   description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown, deliveryOf,
   matchSplitwise, matchPhone, linkPlayer, saveLink, readWhatsapp, newNote, emailStep, heldByEmail, readEmails, makeEmailLedger, BOOKING_URL,
+  signedOutOfSplitwise, SIGNED_OUT_NOTE, NOTE_MAX,
 } from '../scripts/padel-paid.mjs';
+import { SIGNED_OUT_MARK } from '../workers/padel/padel.js';
 
 const require_ = createRequire(import.meta.url);
 const tmp = () => mkdtempSync(join(tmpdir(), 'padel-paid-'));
@@ -52,20 +54,23 @@ function worker(bookings, { refuse = () => false, clock = () => AT } = {}) {
     posts.push(body);
     const b = bookings.find((x) => x.slot === body.slot);
     const cur = b[body.step].state;
-    const ok = !refuse(body) && (body.state === 'claimed' ? cur === null && body.paidAt === b.paidAt && (body.step === 'splitwise' || b.splitwise.state === 'done') : cur === 'claimed');
-    if (ok) b[body.step] = { state: body.state, at: clock(), note: body.note || null };
+    const ok = !refuse(body) && (body.state === 'claimed' ? cur === null && body.paidAt === b.paidAt && (body.step === 'splitwise' || b.splitwise.state === 'done')
+      : body.state === 'resume' ? cur === 'failed' && String(b[body.step].note || '').includes('signed out of Splitwise') : cur === 'claimed');
+    if (ok) b[body.step] = body.state === 'resume' ? { state: null, at: null, note: null } : { state: body.state, at: clock(), note: body.note || null };
     return new Response(JSON.stringify({ ok: true, changed: ok }), { status: 200 });
   };
   return { fetchImpl, posts };
 }
 // A fake Splitwise behind agent-browser: read gives the group and its entries; commit saves the plan's
 // entry with the ticked members owing equal shares (what the real form does), unless told to fail.
-function splitwise({ expenses = [], commitCode = 0, groupReadable = true, savedCost = null, members = MEMBERS.map((id) => ({ id })) } = {}) {
+function splitwise({ expenses = [], commitCode = 0, groupReadable = true, savedCost = null, members = MEMBERS.map((id) => ({ id })), signedOut = [] } = {}) {
   const calls = [];
   const memberIds = () => members.map((m) => m.id);   // read live: a test may add a member between runs
   const ab = async (args) => {
     calls.push(args);
     const page = (obj) => ({ code: 0, stdout: JSON.stringify({ text: JSON.stringify(obj) }), stderr: '' });
+    // Splitwise's real answer to a lapsed sign-in (read 27 Nov 2026), for the pages named in signedOut.
+    if (args[0] === 'read' && signedOut.some((p) => args[2].includes(p))) return page({ error: 'Invalid API Request: you are not logged in' });
     if (args[0] === 'read' && args[2].includes('get_group/')) return groupReadable ? page({ group: { id: GROUP, members } }) : { code: 1, stdout: '', stderr: 'signed out' };
     if (args[0] === 'read' && args[2].includes('get_expenses')) return page({ expenses });
     if (args[0] === 'commit') {
@@ -296,12 +301,101 @@ describe('a run', () => {
     expect(r.lines[0]).toMatch(/2026-11-03\|19 splitwise: the Worker did not record done/);
   });
 
-  it('a robot signed out of Splitwise: nothing claimed, FAILED, tried again next run', async () => {
+  it('a browser that cannot read the group at all: nothing claimed, FAILED, tried again next run', async () => {
     const w = worker([booking()]);
     const r = go(w, splitwise({ groupReadable: false }));
     expect(await r.run()).toBe(1);
     expect(w.posts).toEqual([]);
     expect(r.lines[0]).toMatch(/^FAILED: padel-paid: 2026-11-03\|19 Splitwise: could not read the Splitwise group/);
+  });
+
+  // 27 Nov 2026: the robot's sign-in lapsed on 23-24 Nov, and the 29 Nov booking showed "waiting" on
+  // Kevin's phone for seven hours while every run logged it where nobody looks.
+  it('Splitwise says the robot is not logged in: the booking says so on Kevin\'s phone, with what to do, and nothing is saved', async () => {
+    const w = worker([booking()]);
+    const s = splitwise({ signedOut: ['get_group/'] });
+    const r = go(w, s);
+    expect(await r.run()).toBe(1);
+    expect(s.calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(w.posts.map((p) => [p.step, p.state, p.note])).toEqual([['splitwise', 'claimed', undefined], ['splitwise', 'failed', SIGNED_OUT_NOTE]]);
+    expect(SIGNED_OUT_NOTE.length).toBeLessThanOrEqual(NOTE_MAX);
+    expect(r.lines[0]).toMatch(/^FAILED: padel-paid: 2026-11-03\|19 Splitwise: the robot is signed out of Splitwise/);
+  });
+
+  it('signed out between the entry and the texts: no text goes, and the texts step says why', async () => {
+    const done = { state: 'done', at: AT, note: 'entry 5000' };
+    const w = worker([booking({ splitwise: done })]);
+    const r = go(w, splitwise({ signedOut: ['get_expenses'] }));
+    expect(await r.run()).toBe(1);
+    expect(r.sent).toEqual([]);
+    expect(w.posts.map((p) => [p.step, p.state, p.note])).toEqual([['texts', 'claimed', undefined], ['texts', 'failed', `No texts sent: ${SIGNED_OUT_NOTE}`]]);
+    expect(`No texts sent: ${SIGNED_OUT_NOTE}`.length).toBeLessThanOrEqual(NOTE_MAX);
+  });
+
+  // Kevin's part is the sign-in, never a Retry as well (his rule of four things, 16 Oct 2026).
+  it('signed in again: the robot takes the failed step up by itself and the entry is made in the same run', async () => {
+    const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: SIGNED_OUT_NOTE } })]);
+    const s = splitwise();
+    const r = go(w, s);
+    expect(await r.run()).toBe(0);
+    expect(w.posts.map((p) => [p.step, p.state])).toEqual([['splitwise', 'resume'], ['splitwise', 'claimed'], ['splitwise', 'done']]);
+    expect(s.expenses).toHaveLength(1);
+  });
+
+  it('still signed out: nothing is resumed or claimed, and the run says so', async () => {
+    const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: SIGNED_OUT_NOTE } })]);
+    const r = go(w, splitwise({ signedOut: ['get_group/'] }));
+    expect(await r.run()).toBe(1);
+    expect(w.posts).toEqual([]);
+    expect(r.lines[0]).toMatch(/2026-11-03\|19 splitwise: the robot is still signed out of Splitwise/);
+  });
+
+  it('the texts step parked by a sign-out is taken up again and the texts go', async () => {
+    const s = splitwise({ expenses: [entry(5000, 'Tue 3 Nov, Testford, 19:30, 90 min', NINES)] });
+    const w = worker([booking({ splitwise: { state: 'done', at: AT, note: 'entry 5000' }, texts: { state: 'failed', at: AT, note: `No texts sent: ${SIGNED_OUT_NOTE}` } })]);
+    const r = go(w, s);
+    await r.run();
+    expect(w.posts.slice(0, 2).map((p) => [p.step, p.state])).toEqual([['texts', 'resume'], ['texts', 'claimed']]);
+    expect(r.sent).toHaveLength(3);
+  });
+
+  it('a resume the Worker refuses is loud, and nothing is claimed after it', async () => {
+    const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: SIGNED_OUT_NOTE } })], { refuse: (p) => p.state === 'resume' });
+    const s = splitwise();
+    const r = go(w, s);
+    expect(await r.run()).toBe(1);
+    expect(w.posts.map((p) => p.state)).toEqual(['resume']);
+    expect(s.calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(r.lines[0]).toMatch(/2026-11-03\|19 splitwise: the Worker did not record resume/);
+  });
+
+  it('a step that failed for any other reason waits for Kevin\'s Retry, as before', async () => {
+    const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: 'Test Out: not in the Splitwise group under that name. Fix it, then Retry' } })]);
+    const s = splitwise();
+    const r = go(w, s);
+    expect(await r.run()).toBe(0);
+    expect(w.posts).toEqual([]);
+    expect(s.calls).toEqual([]);
+  });
+
+  it('a parked step is not taken up outside the daytime hours', async () => {
+    const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: SIGNED_OUT_NOTE } })]);
+    const s = splitwise();
+    const r = go(w, s, { opts: { now: () => Date.parse('2026-11-01T22:30:00Z') } });
+    await r.run();
+    expect(w.posts).toEqual([]);
+    expect(s.calls).toEqual([]);
+  });
+
+  it('the sign-out note carries the words the Worker lets the robot resume on', () => {
+    expect(SIGNED_OUT_NOTE).toContain(SIGNED_OUT_MARK);
+  });
+
+  it('only Splitwise\'s not-logged-in answer counts as signed out', () => {
+    expect(signedOutOfSplitwise({ error: 'Invalid API Request: you are not logged in' })).toBe(true);
+    expect(signedOutOfSplitwise({ errors: { base: ['You are not logged in'] } })).toBe(true);
+    for (const r of [null, undefined, {}, { group: { id: GROUP } }, { error: 'Too many requests' }, { errors: { base: ['Group not found'] } }])
+      expect([r, signedOutOfSplitwise(r)]).toEqual([r, false]);
   });
 
   it('a player not in the Splitwise group: the step fails naming the player for Kevin (the log says a count), and nothing is saved', async () => {
