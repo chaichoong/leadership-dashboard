@@ -62,11 +62,25 @@ from datetime import date, datetime, timezone
 
 warnings.filterwarnings("ignore")
 
+# Action boxes (Kevin, 27 Nov 2026): a pen-drawn square is an action. The code
+# lives in the sibling freeform_actions.py; a fault there must never stop a board
+# being filed, so even a failed import is held and said in each note.
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+try:
+    import freeform_actions as fa
+    FA_IMPORT_ERROR = ""
+except Exception as _e:     # said in every note and as an ERROR line
+    fa = None
+    FA_IMPORT_ERROR = f"the action-box code would not load ({type(_e).__name__})"
+
 HOME = os.path.expanduser("~")
 DB = os.path.join(HOME, "Library/Group Containers/group.com.apple.freeform/Boards/boards.db")
 PREVIEWS = os.path.join(HOME, "Library/Containers/com.apple.freeform/Data/Library/Caches/BoardPreviewImages2")
 INBOX = os.path.join(HOME, "Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context/_Inbox")
 STATE = os.path.join(HOME, "knowledge-os/freeform_state.json")
+ACTIONS_STATE = os.path.join(HOME, "knowledge-os/freeform_actions.json")
+CLOSEUP_MARGIN = 14.0   # board points round an action box's close-up
 OCR_BIN = os.path.join(HOME, "knowledge-os/bin/ocr_image")
 SANDBOX = "/usr/bin/sandbox-exec"
 NO_NETWORK = "(version 1)(allow default)(deny network*)"
@@ -1185,9 +1199,48 @@ def reading_order(items):
     return sorted(items, key=lambda it: (round(it["at"][1] / 60.0), it["at"][0]))
 
 
-def note_text(b, board, stem, pictures, words, check, first_time):
+def actions_section(actions, items):
+    """The "Action boxes" part of a note, as lines. `actions` is None (nothing to
+    say), {"not_read": reason}, or {"plan": board_actions' answer, "squares":
+    [(key, file name)], "unsure": [(file name, reason)]}."""
+    if not actions:
+        return []
+    if actions.get("not_read"):
+        return [f"ACTION BOXES NOT READ: {actions['not_read']}.", ""]
+    p = actions["plan"]
+    if not (p["squares"] or p["ovals"] or p["unsure"]):
+        return []
+    out = ["## Action boxes (squares)", "",
+           f"_Kevin's rule (27 Nov 2026): a square box is an action and an oval or circle is a title. "
+           f"The bridge measured the pen strokes on this board: {p['squares']} square(s), "
+           f"{p['ovals']} oval(s), {len(p['unsure'])} shape(s) it could not call. "
+           f"{p['raised']} square(s) already have a task._", ""]
+    if p["history"]:
+        out += [f"_{p['history']} square(s) were drawn before the action-box record began and are "
+                f"not raised._", ""]
+    if p["refused"]:
+        out += [f"_{p['refused']} square(s) were refused by the task gate and are not raised again._", ""]
+    for n, (key, fname) in enumerate(actions["squares"], 1):
+        out += [f"### Action box {n}", "", f"Box key: {key}", "", f"![[{fname}]]", "",
+                f"Image file: {fname}", ""]
+    if actions["unsure"]:
+        out += ["### Shapes not called", "",
+                "_These closed shapes are neither a clean square nor a clean oval. No task was raised "
+                "for them._", ""]
+        for fname, why in actions["unsure"]:
+            out += [f"- {why}: ![[{fname}]] (Image file: {fname})"]
+        out.append("")
+    if any(it["type"] == T_STICKY or (it["type"] == T_TEXT and not it.get("line")) for it in items):
+        out += ["_Typed shapes and sticky notes are not read as action boxes: only pen-drawn squares "
+                "are._", ""]
+    return out
+
+
+def note_text(b, board, stem, pictures, words, check, first_time, actions=None, refiled=False):
     """The markdown for one board. `pictures` is [(file name, label)], the whole
-    board first; `words` maps a file name to its machine-read words."""
+    board first; `words` maps a file name to its machine-read words. `actions`
+    is what actions_section() takes; `refiled` marks a board filed again,
+    unchanged, because a square on it still has no task."""
     items = board["items"]
     count = lambda t: sum(1 for it in items if it["type"] == t)
     kind, score, reason = check["kind"], check["score"], check["why"]
@@ -1197,6 +1250,9 @@ def note_text(b, board, stem, pictures, words, check, first_time):
            f"Read from the synced board on this Mac on {date.today().strftime('%-d %b %Y')}._", "",
            f"Freeform board id: {b['id']}", "",
            ("_This is the first time this board has been filed._" if first_time else
+            "_This board was filed before and has not changed. It is filed again because an action "
+            "box on it still has no task. Update the brain note that carries this board id; do not "
+            "make a second note._" if refiled else
             "_This board was filed before and has changed. Update the brain note that carries "
             "this board id; do not make a second note._"), "",
            "## What is on the board", "",
@@ -1258,6 +1314,7 @@ def note_text(b, board, stem, pictures, words, check, first_time):
     files = sorted({it["file"] for it in items if it["type"] in (T_IMAGE, T_FILE) and it["file"]})
     if files:
         out += ["## Pictures and files on the board", ""] + [f"- {f}" for f in files] + [""]
+    out += actions_section(actions, items)
     out += ["## Handwriting (machine-read)", "",
             f"_The pictures below were redrawn from the board's own data. The words under each "
             f"were read by Apple's text recognition, on this Mac, on "
@@ -1366,12 +1423,51 @@ def plain_note(inbox, b, first_time, lines):
     return stem, path
 
 
+def _closeup(im, scale, origin, box):
+    """The part of the full drawing round one shape, CLOSEUP_MARGIN points wide."""
+    x0, y0 = origin
+    l, t = (box[0] - CLOSEUP_MARGIN - x0) * scale + MARGIN, (box[1] - CLOSEUP_MARGIN - y0) * scale + MARGIN
+    r, b = (box[2] + CLOSEUP_MARGIN - x0) * scale + MARGIN, (box[3] + CLOSEUP_MARGIN - y0) * scale + MARGIN
+    W, H = im.size
+    return im.crop((max(0, int(l)), max(0, int(t)), min(W, int(math.ceil(r))), min(H, int(math.ceil(b)))))
+
+
+def plan_actions(board, b, actions_state, im, scale):
+    """The action boxes on one board, read only. Returns (plan, closeups,
+    not_read, error): `closeups` is [(key or None, image, reason)], squares
+    awaiting a task first, then the shapes not called. `not_read` is the reason
+    the note gives instead of the section; `error` is set when that reason is
+    a fault the run must go red for. Never raises."""
+    if fa is None:
+        return None, [], FA_IMPORT_ERROR, FA_IMPORT_ERROR
+    try:
+        plan = fa.board_actions(board, b["id"], b["name"], actions_state)
+        if plan["not_read"]:
+            return None, [], plan["not_read"], plan["not_read"] if plan["error"] else ""
+        origin = bounds(board)[:2]
+        closeups = [(a["key"], _closeup(im, scale, origin, a["box"]), "") for a in plan["awaiting"]] + \
+                   [(None, _closeup(im, scale, origin, s["box"]), s["why"]) for s in plan["unsure"]]
+        return plan, closeups, None, ""
+    except fa.ActionsError as e:
+        return None, [], str(e).rstrip("."), str(e).rstrip(".")
+    except Exception as e:      # a fault here never stops the board being filed
+        why = f"the action-box check failed ({type(e).__name__})"
+        return None, [], why, why
+
+
 def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, ocr_bin=OCR_BIN,
-                 floor=0.0):
+                 floor=0.0, actions_state=ACTIONS_STATE, refiled=False):
     """File one board into `inbox`. Returns None for a board with nothing on it
-    that was never filed, else {"stem", "pictures", "check", "lost", "written"}.
-    Everything is built in a scratch folder first; on any failure nothing is left
-    in the inbox, so the board is tried again next run."""
+    that was never filed, else {"stem", "pictures", "check", "lost", "written",
+    "actions_error", "awaiting"}. Everything is built in a scratch folder first;
+    on any failure nothing is left in the inbox, so the board is tried again
+    next run.
+
+    Action boxes: each square still awaiting a task, and each shape not called,
+    gets a close-up picture (not sent to the text reader). Squares never seen
+    before are recorded as waiting BEFORE the files are written: a line the
+    23:00 pass writes for a box must always find it recorded, and a failed
+    write only leaves a waiting square whose picture the retry refreshes."""
     Image, _, _ = _pil()
     board = read_board(con, b["id"], assets_dir)
     unchecked = {"kind": "unchecked", "fresh": False, "score": None,
@@ -1394,7 +1490,8 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             "Mac yet (it is filed again if ink arrives). Keep everything in the brain note and add "
             "one dated line saying the board read as empty."])
         return {"stem": stem, "pictures": 0, "check": unchecked, "lost": 0, "written": [path]}
-    im, _ = render(board)
+    im, scale = render(board)
+    plan, closeups, not_read, actions_error = plan_actions(board, b, actions_state, im, scale)
     has_lines = any(it.get("line") for it in board["items"])
     check = check_picture(im, find_preview(previews, b["id"]), floor,
                           (lambda: render(board, without_lines=True)[0]) if has_lines else None)
@@ -1410,12 +1507,30 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             img.save(os.path.join(scratch, fname), optimize=True)
         to_read = [os.path.join(scratch, f) for f, _, _ in (local[1:] if parts else local)]
         read = read_images(to_read, ocr_bin) if do_ocr else {}
-        stem = free_stem(inbox, b["name"], len(local))
-        names = [f"{stem} - handwriting {n}.png" for n in range(1, len(local) + 1)]
+        # Close-ups of the action boxes join the pictures, numbered on from them,
+        # and are never sent to the text reader (it cannot read Kevin's hand).
+        extra = []
+        for i, (key, img, why) in enumerate(closeups, 1):
+            extra.append((f"close-{i}.png", key, why))
+            img.save(os.path.join(scratch, extra[-1][0]), optimize=True)
+        stem = free_stem(inbox, b["name"], len(local) + len(extra))
+        names = [f"{stem} - handwriting {n}.png" for n in range(1, len(local) + len(extra) + 1)]
         words = {names[i]: read[os.path.join(scratch, local[i][0])]
                  for i in range(len(local)) if os.path.join(scratch, local[i][0]) in read}
         pictures = [(names[i], local[i][1]) for i in range(len(local))]
-        text = note_text(b, board, stem, pictures, words, check, first_time)
+        extra_names = names[len(local):]
+        actions = {"not_read": not_read} if not_read else None
+        if plan is not None:
+            squares = [(key, extra_names[i]) for i, (_, key, _) in enumerate(extra) if key]
+            try:
+                fa.board_actions(board, b["id"], b["name"], actions_state,
+                                 pictures=dict(squares), shapes=plan["shapes"])
+                actions = {"plan": plan, "squares": squares,
+                           "unsure": [(extra_names[i], why) for i, (_, key, why) in enumerate(extra) if not key]}
+            except Exception as e:      # the board is still filed; the note and the run say so
+                actions_error = f"the waiting squares could not be recorded ({type(e).__name__})"
+                actions, extra = {"not_read": actions_error}, []
+        text = note_text(b, board, stem, pictures, words, check, first_time, actions, refiled)
         if preview:
             text += (f"\n## Freeform's own preview\n\n_Apple's small picture of the whole board, "
                      f"kept as the check on the redrawn pictures above._\n\n"
@@ -1424,6 +1539,9 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
         try:
             for i, (fname, _, _) in enumerate(local):
                 written.append(os.path.join(inbox, names[i]))
+                shutil.copyfile(os.path.join(scratch, fname), written[-1])
+            for i, (fname, _, _) in enumerate(extra):
+                written.append(os.path.join(inbox, extra_names[i]))
                 shutil.copyfile(os.path.join(scratch, fname), written[-1])
             if preview:
                 written.append(os.path.join(inbox, f"{stem} - Freeform preview.png"))
@@ -1437,8 +1555,9 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             raise
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    return {"stem": stem, "pictures": len(local), "check": check, "lost": board["lost_strokes"],
-            "written": written}
+    return {"stem": stem, "pictures": len(local) + len(extra), "check": check, "lost": board["lost_strokes"],
+            "written": written, "actions_error": actions_error,
+            "awaiting": sum(1 for _, key, _ in extra if key)}
 
 
 def _remove(paths):
@@ -1630,11 +1749,29 @@ def run(args):
         raise BridgeError(f"the brain inbox is not there ({args.inbox}). Google Drive is not "
                           f"mounted, so nothing was filed and nothing was recorded.")
     filed = failed = unmatched = partial = lost_ink = fresh_checks = stale = 0
+    # The action-box record is read once up front, so a missing or broken one is
+    # loud even on a night when no board changed.
+    actions_problem = FA_IMPORT_ERROR
+    if fa is not None:
+        try:
+            if fa.load_state(args.actions_state) is None:
+                actions_problem = (f"the Freeform action-box record is missing ({args.actions_state}). "
+                                   f"Run freeform_actions.py baseline once")
+        except fa.ActionsError as e:
+            actions_problem = str(e).rstrip(".")
+    refile = set(args.refile or [])
+    waited = actions_errors = 0
     for b in boards:
         known = state["boards"].get(b["id"])
+        refiled = False
         if known and known.get("fingerprint") == b["fingerprint"]:
-            known["seen_at"] = now          # still as recorded: the floor for its next change
-            continue
+            if b["id"] in refile:
+                refiled = True
+            elif not actions_problem and _waiting(args.actions_state, b["id"]):
+                refiled, waited = True, waited + 1
+            else:
+                known["seen_at"] = now          # still as recorded: the floor for its next change
+                continue
         # The floor: the latest moment this Mac is KNOWN to have still held the
         # board as it was. Seen arriving in this run: that moment (less one poll).
         # Synced but not seen arriving (a same-size rewrite, or a change that
@@ -1649,7 +1786,8 @@ def run(args):
         first_time = not (known and known.get("filed_at"))
         try:
             done = export_board(con, b, args.inbox, args.previews, assets_dir, first_time,
-                                do_ocr=not args.no_ocr, ocr_bin=args.ocr_bin, floor=floor)
+                                do_ocr=not args.no_ocr, ocr_bin=args.ocr_bin, floor=floor,
+                                actions_state=args.actions_state, refiled=refiled and not first_time)
         except Exception as e:
             failed += 1
             # The title and the full error go to the log only (the wrapper filters
@@ -1679,6 +1817,8 @@ def run(args):
             continue
         filed += 1
         lost_ink += 1 if done["lost"] else 0
+        if done.get("actions_error") and done["actions_error"] != actions_problem:
+            actions_errors += 1
         check = done["check"]
         if check["kind"] == "mismatch":
             unmatched += 1
@@ -1719,7 +1859,26 @@ def run(args):
               f"note says how many.")
     if failed:
         print(f"ERROR: {failed} board(s) could not be filed. They stay queued for the next run.")
-    return 1 if failed or unmatched or lost_ink or quiet_control else 0
+    if waited:
+        print(f"{waited} unchanged board(s) filed again: a square on each has waited over "
+              f"{int(fa.WAIT_HOURS)} hours for a task.")
+    if actions_problem:
+        print(f"ERROR: Freeform action boxes were not read: {actions_problem}. Boards were still "
+              f"filed; each note says ACTION BOXES NOT READ.")
+    if actions_errors:
+        print(f"ERROR: the action boxes on {actions_errors} filed board(s) could not be read. Each "
+              f"note says ACTION BOXES NOT READ and why.")
+    return 1 if failed or unmatched or lost_ink or quiet_control or actions_problem or actions_errors else 0
+
+
+def _waiting(actions_state, board_id):
+    """has_waiting, or False with an ERROR line when the record will not read
+    (load_state already said so up front; this only covers a fault mid-run)."""
+    try:
+        return fa.has_waiting(actions_state, board_id)
+    except Exception as e:      # the run goes on; the next has_waiting call says it again
+        print(f"ERROR: could not tell whether a Freeform board holds a waiting square ({type(e).__name__}).")
+        return False
 
 
 def main(argv=None):
@@ -1735,6 +1894,10 @@ def main(argv=None):
     ap.add_argument("--list", action="store_true", help="print the boards and stop")
     ap.add_argument("--no-sync", action="store_true", help="read the database as it is; do not open Freeform")
     ap.add_argument("--no-ocr", action="store_true", help="skip the handwriting read (tests only)")
+    ap.add_argument("--actions-state", default=ACTIONS_STATE,
+                    help="the action-box record (freeform_actions.py); its hand-off file sits beside it")
+    ap.add_argument("--refile", action="append", metavar="BOARD_ID",
+                    help="file this board even if it has not changed (repeatable)")
     args = ap.parse_args(argv)
     try:
         return run(args)

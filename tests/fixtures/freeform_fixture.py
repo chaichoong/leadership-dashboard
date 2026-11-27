@@ -241,3 +241,53 @@ def asset_path(folder, board_id, index=0):
     """Where the bridge will look for picture `index` of a board built in `folder`."""
     u = uuid.uuid5(uuid.NAMESPACE_OID, f"{board_id}asset{index}").hex.upper()
     return os.path.join(folder, "Boards", "Assets", f"{u[:8]}-{u[8:12]}-{u[12:16]}-{u[16:20]}-{u[20:]}.png")
+
+
+# ── closed pen loops, for tests/freeform-actions.test.js (invented sizes and noise) ──
+
+def _turn(pts, w, h, angle, noise, seed):
+    import math
+    import random
+    rnd = random.Random(seed)
+    t = math.radians(angle)
+    cx, cy = w / 2.0, h / 2.0
+    out = []
+    for x, y in pts:
+        dx, dy = x - cx, y - cy
+        out.append((cx + dx * math.cos(t) - dy * math.sin(t) + (rnd.gauss(0, noise) if noise else 0.0),
+                    cy + dx * math.sin(t) + dy * math.cos(t) + (rnd.gauss(0, noise) if noise else 0.0)))
+    out.append(out[0])              # a closed loop ends where it began
+    return out
+
+
+def rect_loop(w, h, n=8, angle=0.0, noise=0.0, seed=1):
+    """A rectangle w x h as one pen loop: n points spaced evenly round it, plus
+    its four corners (a snapped box always has its corners)."""
+    per = 2 * (w + h)
+    pts = []
+    for d in sorted(set([per * i / n for i in range(n)] + [0.0, w, w + h, 2 * w + h])):
+        if d < w:
+            pts.append((d, 0.0))
+        elif d < w + h:
+            pts.append((w, d - w))
+        elif d < 2 * w + h:
+            pts.append((w - (d - w - h), h))
+        else:
+            pts.append((0.0, h - (d - 2 * w - h)))
+    return _turn(pts, w, h, angle, noise, seed)
+
+
+def ellipse_loop(w, h, n=256, angle=0.0, noise=0.0, seed=1, power=2.0, gap=0.0):
+    """An ellipse inside w x h as one pen loop (power 2). A higher power gives a
+    rounded box (power 3 fills about 0.88 of its frame). gap leaves that share
+    of the loop undrawn, so it is open."""
+    import math
+    pts = []
+    for i in range(n):
+        a = 2 * math.pi * i / n * (1.0 - gap)
+        c, s = math.cos(a), math.sin(a)
+        x = math.copysign(abs(c) ** (2.0 / power), c)
+        y = math.copysign(abs(s) ** (2.0 / power), s)
+        pts.append((w / 2.0 * (1 + x), h / 2.0 * (1 + y)))
+    out = _turn(pts, w, h, angle, noise, seed)
+    return out[:-1] if gap else out
