@@ -245,22 +245,34 @@ def asset_path(folder, board_id, index=0):
 
 # ── closed pen loops, for tests/freeform-actions.test.js (invented sizes and noise) ──
 
-def _turn(pts, w, h, angle, noise, seed):
-    import math
+def _wobble(n, sd, seed, smooth):
+    """n (dx, dy) offsets with standard deviation sd. smooth > 0 averages each
+    over that many neighbours round the loop and scales back to sd: a hand's
+    wobble drifts, it does not jump from one sampled point to the next."""
     import random
     rnd = random.Random(seed)
+    raw = [(rnd.gauss(0, 1), rnd.gauss(0, 1)) for _ in range(n)]
+    if smooth:
+        raw = [(sum(raw[(i + j) % n][0] for j in range(-smooth, smooth + 1)),
+                sum(raw[(i + j) % n][1] for j in range(-smooth, smooth + 1))) for i in range(n)]
+    k = (sum(a * a + b * b for a, b in raw) / (2.0 * n)) ** 0.5 or 1.0
+    return [(a * sd / k, b * sd / k) for a, b in raw]
+
+
+def _turn(pts, w, h, angle, noise, seed, smooth=0):
+    import math
     t = math.radians(angle)
     cx, cy = w / 2.0, h / 2.0
+    jit = _wobble(len(pts), noise, seed, smooth) if noise else [(0.0, 0.0)] * len(pts)
     out = []
-    for x, y in pts:
+    for (x, y), (jx, jy) in zip(pts, jit):
         dx, dy = x - cx, y - cy
-        out.append((cx + dx * math.cos(t) - dy * math.sin(t) + (rnd.gauss(0, noise) if noise else 0.0),
-                    cy + dx * math.sin(t) + dy * math.cos(t) + (rnd.gauss(0, noise) if noise else 0.0)))
+        out.append((cx + dx * math.cos(t) - dy * math.sin(t) + jx, cy + dx * math.sin(t) + dy * math.cos(t) + jy))
     out.append(out[0])              # a closed loop ends where it began
     return out
 
 
-def rect_loop(w, h, n=8, angle=0.0, noise=0.0, seed=1):
+def rect_loop(w, h, n=8, angle=0.0, noise=0.0, seed=1, smooth=0):
     """A rectangle w x h as one pen loop: n points spaced evenly round it, plus
     its four corners (a snapped box always has its corners)."""
     per = 2 * (w + h)
@@ -274,10 +286,10 @@ def rect_loop(w, h, n=8, angle=0.0, noise=0.0, seed=1):
             pts.append((w - (d - w - h), h))
         else:
             pts.append((0.0, h - (d - 2 * w - h)))
-    return _turn(pts, w, h, angle, noise, seed)
+    return _turn(pts, w, h, angle, noise, seed, smooth)
 
 
-def ellipse_loop(w, h, n=256, angle=0.0, noise=0.0, seed=1, power=2.0, gap=0.0):
+def ellipse_loop(w, h, n=256, angle=0.0, noise=0.0, seed=1, power=2.0, gap=0.0, smooth=0):
     """An ellipse inside w x h as one pen loop (power 2). A higher power gives a
     rounded box (power 3 fills about 0.88 of its frame). gap leaves that share
     of the loop undrawn, so it is open."""
@@ -289,5 +301,33 @@ def ellipse_loop(w, h, n=256, angle=0.0, noise=0.0, seed=1, power=2.0, gap=0.0):
         x = math.copysign(abs(c) ** (2.0 / power), c)
         y = math.copysign(abs(s) ** (2.0 / power), s)
         pts.append((w / 2.0 * (1 + x), h / 2.0 * (1 + y)))
-    out = _turn(pts, w, h, angle, noise, seed)
+    out = _turn(pts, w, h, angle, noise, seed, smooth)
     return out[:-1] if gap else out
+
+
+def pill_loop(w, h, n=256):
+    """A long rounded "pill" w x h (round ends of radius h/2), as a hand might draw a long oval."""
+    import math
+    r = h / 2.0
+    per = 2 * (w - 2 * r) + 2 * math.pi * r
+    pts = []
+    for i in range(n):
+        d = per * i / n
+        straight = w - 2 * r
+        if d < straight:
+            pts.append((r + d, 0.0))
+            continue
+        d -= straight
+        if d < math.pi * r:
+            a = -math.pi / 2 + d / r
+            pts.append((w - r + r * math.cos(a), r + r * math.sin(a)))
+            continue
+        d -= math.pi * r
+        if d < straight:
+            pts.append((w - r - d, h))
+            continue
+        d -= straight
+        a = math.pi / 2 + d / r
+        pts.append((r + r * math.cos(a), r + r * math.sin(a)))
+    pts.append(pts[0])
+    return pts

@@ -1,43 +1,72 @@
 #!/usr/bin/env python3
 """
 Freeform action boxes: a pen-drawn SQUARE on a Freeform board is an action and
-becomes one Airtable task. An OVAL or circle is a title and never an action
-(Kevin's rule, 27 Nov 2026).
+becomes one Airtable task of its own. An OVAL or circle is a title and never an
+action (Kevin's rule, 27 Nov 2026).
 
-How the shapes are told apart. Kevin draws with the pen and Freeform snaps the
-shape clean, so each box is ONE closed pen stroke inside a drawing. Its loop is
-measured against the smallest rectangle that encloses it (turned to fit, so a
+HOW A SQUARE IS TOLD FROM AN OVAL. Kevin draws with the pen and Freeform snaps
+the shape clean, so each box is ONE closed pen stroke inside a drawing. Its loop
+is measured against the smallest rectangle that encloses it (turned to fit, so a
 tilted box still reads):
-  fill  how much of that rectangle the loop covers. A snapped square measured
-        1.000, a snapped oval 0.785 to 0.786 (an ellipse is pi/4 = 0.785).
-  edge  how much of the loop's length runs along the rectangle's sides. A square
-        measured 1.00, an oval 0.42 to 0.45.
-On Kevin's three newest boards (27 Nov 2026, read-only) this gave 5 squares, 15
-ovals, none unclear, and nothing at all on a board of plain handwriting (96
-strokes).
+  fill    how much of that rectangle the loop covers. A snapped square measured
+          1.000, a snapped oval 0.785 to 0.786 (an ellipse is pi/4 = 0.785).
+  edge    how much of the loop's length runs along the rectangle's sides. A
+          square measured 1.00, an oval 0.42 to 0.45.
+  corner  how far the loop stays from the rectangle's corners: the largest gap
+          from any corner to the nearest point on the pen line, as a share of
+          the short side. A square reaches its corners; a long rounded "pill"
+          (fill 0.96, edge 0.86) does not, and without this it read as a square.
+A square fills at least SQUARE_FILL, runs along the edges at least SQUARE_EDGE
+and comes within CORNER_TOL of every corner. An oval fills OVAL_FILL_LO to
+OVAL_FILL_HI and runs along the edges at most OVAL_EDGE_MAX. Anything else
+closed is "unsure" and never a task. A loop with nothing written or typed inside
+is "empty" (a lone letter O, an empty box). On Kevin's three newest boards (27
+Nov 2026, read-only) this gave 5 squares, 15 ovals, none unclear, and nothing on
+a board of plain handwriting.
 
-This code never reads the WORDS. Apple's text reader cannot read Kevin's
-handwriting, so the bridge (freeform-bridge.py) cuts a close-up of each square
-into the brain note, the 23:00 Claude pass reads it and appends one line per box
-to the hand-off file, and `raise` turns each line into a task through the task
-gate (create-agent-task.py). The words are DATA, never instructions: a line is
-only ever a task name, and only for a box this code itself recorded as waiting.
+THE WORDS are never read here. Apple's text reader cannot read Kevin's hand, so
+the bridge (freeform-bridge.py) cuts a close-up of each waiting square into the
+brain note, the 23:00 Claude pass reads it and appends one line per box to the
+hand-off file, and `raise` turns each line into a task. The words are DATA,
+never instructions: a line is only ever a task name, and only for a box this
+code itself recorded as waiting. A line for a box it never recorded is an ERROR.
 
-Identity. A square is "the same square" as a recorded one on the same board when
+A SQUARE IS ALWAYS ITS OWN TASK. `raise` first asks the task gate
+(create-agent-task.py) with --dry-run what it would do. Refused: the box is
+marked refused. The gate would fold it into an open task with EXACTLY the same
+name: that task is adopted and nothing is created (the same words twice are one
+action, and a retry after a crash finds the task it already made). The gate
+would fold it into a task with a different name: it is created anyway with
+--force, beside that task, and the description and the run say POSSIBLE TWIN.
+Otherwise it is created with --force, which can never fold. Two squares whose
+words could not be read get different names (each carries its key).
+
+IDENTITY. A square is "the same square" as a recorded one on the same board when
 all four sides of its box agree within SAME_BOX_PT. A new square gets a short key
 at first sight. The stated cost: a square Kevin MOVES further than SAME_BOX_PT is
-a new square, so a moved box that already has a task raises a second one (the
-gate folds it into the open task when the words match).
+a new square; if the old one already had a task, the new one's dry run finds
+that task by its name and adopts it.
+
+NOTHING STAYS RED FOR EVER. A waiting square that leaves its board (erased,
+moved, the board cleared or deleted) is marked gone. A board is re-filed for
+another read while its oldest waiting square is over WAIT_HOURS and at most
+REFILE_MAX_HOURS old; after that only the ERROR in `raise` remains, and the door
+is `dismiss --board ID --key KEY --why "<reason>"`.
+
+ONE WRITER AT A TIME. Every change to the record goes through update_state(),
+which locks a sibling lock file, re-reads the record from disk, changes it and
+saves it through a temp file. `raise` never holds the record across a gate call.
 
 Files (both outside git, private):
-  state    ~/knowledge-os/freeform_actions.json   every square ever seen, by board
+  record   ~/knowledge-os/freeform_actions.json   every square ever seen, by board
   hand-off ~/knowledge-os/freeform-actions.md     the 23:00 pass's lines
 
-Commands: baseline [--force], shapes, status, raise. See main().
+Commands: baseline [--force], shapes, status, raise, dismiss. See main().
 Standard library only; runs under /usr/bin/python3 (3.9).
 """
 
 import argparse
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -59,21 +88,26 @@ BRIDGE = os.path.join(HERE, "freeform-bridge.py")
 HEADER = "# Freeform actions"
 OWNER = "od-ceo"            # the AI CEO's agent file: create-agent-task.py CEO_AGENT_FILE
 GATE_TIMEOUT = 300
+T_TEXT, T_STICKY = 3, 12    # Freeform item types holding typed text (freeform-bridge.py)
 
 # ── the thresholds (measured on Kevin's boards, 27 Nov 2026) ──
-MIN_POINTS = 8          # a snapped shape carries many points; a dot or a dash does not
+MIN_POINTS = 4          # a snapped rectangle can be its four corners and the join
 MIN_W, MIN_H = 40.0, 20.0   # smallest box seen 407 x 83, smallest oval 138 x 57: a letter O is far under
 CLOSE_GAP = 0.08        # closed: start-to-end gap at most this share of the path length
 EDGE_TOL = 0.04         # "on an edge": within this share of the rectangle's short side
-SQUARE_FILL = 0.93      # squares measured 1.000
-SQUARE_EDGE = 0.85      # squares measured 1.00
+SQUARE_FILL = 0.90      # snapped squares measured 1.000; a hand-drawn box with wobble about 0.92
+SQUARE_EDGE = 0.50      # snapped squares measured 1.00; ovals 0.42 to 0.45
+CORNER_TOL = 0.08       # a square's line passes within this share of the short side of every corner;
+                        # a 400 x 80 pill misses its corners by 0.21
 OVAL_FILL_LO, OVAL_FILL_HI = 0.70, 0.84   # ovals measured 0.785 to 0.786
 OVAL_EDGE_MAX = 0.60    # ovals measured 0.42 to 0.45
+FRAME_INNER = 2         # a square is a frame only round a called shape holding at least this much
 SAME_BOX_PT = 2.0       # two boxes are one square when every side agrees within this (board points)
 WAIT_HOURS = 20.0       # a square waiting longer than this for a task is a fault
+REFILE_MAX_HOURS = 96.0  # ...and its board is re-filed for another read until it is this old
 NAME_MAX = 140
-FALLBACK_NAME = "Freeform action box (handwriting unclear)"
-STATUSES = ("history", "pending", "raised", "refused", "gone")
+STATUSES = ("history", "pending", "raised", "refused", "gone", "dismissed")
+NOT_OURS = ("history", "refused", "gone", "dismissed")   # a line for one of these is a WARNING
 
 
 class ActionsError(Exception):
@@ -150,26 +184,38 @@ def _inside(pt, poly):
     return hit
 
 
+def _seg_dist(p, a, b):
+    """Distance from point p to the segment a-b."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2))
+    return math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+
+
 def _measure(pts):
-    """(fill, edge) of a closed loop against its minimum-area rectangle, or None."""
+    """(fill, edge, corner) of a closed loop against its minimum-area rectangle, or None."""
     r = min_rect(pts)
     if r is None:
         return None
     fill = _area(pts) / r["area"]
     (ex, ey), (nx, ny) = r["e"], r["n"]
     (ulo, uhi), (vlo, vhi) = r["u"], r["v"]
-    tol = EDGE_TOL * min(uhi - ulo, vhi - vlo)
+    short = min(uhi - ulo, vhi - vlo)
+    tol = EDGE_TOL * short
 
     def near(x, y):
         u, v = x * ex + y * ey, x * nx + y * ny
         return min(u - ulo, uhi - u, v - vlo, vhi - v) <= tol
     total = on = 0.0
-    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+    segs = list(zip(pts, pts[1:]))
+    for (x0, y0), (x1, y1) in segs:
         L = math.hypot(x1 - x0, y1 - y0)
         total += L
         if near(x0, y0) and near(x1, y1) and near((x0 + x1) / 2, (y0 + y1) / 2):
             on += L
-    return fill, (on / total if total else 0.0)
+    corners = [(u * ex + v * nx, u * ey + v * ny) for u in (ulo, uhi) for v in (vlo, vhi)]
+    corner = max(min(_seg_dist(c, a, b) for a, b in segs) for c in corners) / short
+    return fill, (on / total if total else 0.0), corner
 
 
 def _points(stroke):
@@ -180,12 +226,15 @@ def _points(stroke):
 def find_shapes(board):
     """Every closed pen loop big enough to be a box, in reading order. Each is
     {"kind": square|oval|unsure|empty, "box": (x0, y0, x1, y1), "inside": n,
-    "fill", "edge", "why"}. `inside` counts the OTHER strokes whose centre lies
-    inside the loop; a loop with none is "empty" (a lone letter O, an empty box)
-    and is never an action."""
+    "fill", "edge", "corner", "why"}. `inside` counts the OTHER strokes, and the
+    typed sticky notes and text boxes, whose centre lies inside the loop; a loop
+    with none is "empty" and is never an action."""
     strokes = [s for s in board.get("strokes", []) if s.get("path")]
     pts_of = [_points(s) for s in strokes]
     centres = [(sum(x for x, _ in p) / len(p), sum(y for _, y in p) / len(p)) for p in pts_of]
+    typed = [(it["at"][0] + it["size"][0] / 2.0, it["at"][1] + it["size"][1] / 2.0)
+             for it in board.get("items", [])
+             if it.get("type") in (T_TEXT, T_STICKY) and str(it.get("text") or "").strip()]
     cands = []
     for i, s in enumerate(strokes):
         path, pts = s["path"], pts_of[i]
@@ -202,26 +251,32 @@ def find_shapes(board):
         m = _measure(pts)
         if m is None:
             continue
-        fill, edge = m
-        inside = sum(1 for j, c in enumerate(centres) if j != i
-                     and box[0] <= c[0] <= box[2] and box[1] <= c[1] <= box[3] and _inside(c, pts))
-        if fill >= SQUARE_FILL and edge >= SQUARE_EDGE:
+        fill, edge, corner = m
+
+        def within(c):
+            return box[0] <= c[0] <= box[2] and box[1] <= c[1] <= box[3] and _inside(c, pts)
+        inside = sum(1 for j, c in enumerate(centres) if j != i and within(c)) + \
+            sum(1 for c in typed if within(c))
+        if fill >= SQUARE_FILL and edge >= SQUARE_EDGE and corner <= CORNER_TOL:
             kind, why = "square", ""
         elif OVAL_FILL_LO <= fill <= OVAL_FILL_HI and edge <= OVAL_EDGE_MAX:
             kind, why = "oval", ""
         else:
-            kind, why = "unsure", "fills %.2f of its frame and %.2f of it runs along the frame" % (fill, edge)
+            kind, why = "unsure", ("fills %.2f of its frame, %.2f of it runs along the frame, and it "
+                                   "misses a corner by %.2f of its short side" % (fill, edge, corner))
         if not inside:
             kind, why = "empty", "nothing is written inside it"
         cands.append({"kind": kind, "box": box, "inside": inside, "fill": round(fill, 3),
-                      "edge": round(edge, 3), "why": why, "_pts": pts, "_centre": centres[i]})
-    for c in cands:
-        if c["kind"] != "square":
-            continue
-        b = c["box"]
-        if any(o is not c and o["kind"] != "empty" and b[0] <= o["_centre"][0] <= b[2]
-               and b[1] <= o["_centre"][1] <= b[3] and _inside(o["_centre"], c["_pts"]) for o in cands):
-            c["kind"], c["why"] = "unsure", "holds other shapes"
+                      "edge": round(edge, 3), "corner": round(corner, 3), "why": why,
+                      "_pts": pts, "_centre": centres[i]})
+    # A frame: a square round another called square or oval that itself holds
+    # writing. A letter loop inside a box (empty, or one stroke) does not count.
+    frames = [c for c in cands if c["kind"] == "square" and any(
+        o is not c and o["kind"] in ("square", "oval") and o["inside"] >= FRAME_INNER
+        and c["box"][0] <= o["_centre"][0] <= c["box"][2] and c["box"][1] <= o["_centre"][1] <= c["box"][3]
+        and _inside(o["_centre"], c["_pts"]) for o in cands)]
+    for c in frames:
+        c["kind"], c["why"] = "unsure", "holds other shapes"
     for c in cands:
         del c["_pts"], c["_centre"]
     return sorted(cands, key=lambda c: (round(c["box"][1] / 60.0), c["box"][0]))
@@ -235,7 +290,7 @@ def box_key(board_id, box):
     return hashlib.sha1((board_id + ":" + ",".join("%.1f" % v for v in box)).encode()).hexdigest()[:10]
 
 
-# ───────────────────────── state ─────────────────────────
+# ───────────────────────── the record ─────────────────────────
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -252,12 +307,12 @@ def _hours_since(iso, now=None):
 
 
 def load_state(path):
-    """The state, or None when the file does not exist. Raises ActionsError when
+    """The record, or None when the file does not exist. Raises ActionsError when
     it exists and will not read: that is never a fresh start."""
     if not os.path.exists(path):
         return None
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             st = json.load(f)
         if not isinstance(st, dict) or not isinstance(st.get("boxes"), dict) \
                 or not all(isinstance(v, dict) for v in st["boxes"].values()):
@@ -276,57 +331,72 @@ def load_state(path):
     return st
 
 
-def save_state(path, st):
-    """Temp file and rename: a rewrite in place is empty for an instant."""
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(st, f, indent=2, sort_keys=True)
+def _write_atomic(path, text):
+    """Temp file named for this process, then rename: a rewrite in place is
+    empty for an instant, and two writers never share a temp file."""
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
     os.replace(tmp, path)
 
 
+def save_state(path, st):
+    _write_atomic(path, json.dumps(st, indent=2, sort_keys=True))
+
+
+def update_state(path, change, read=True):
+    """THE one way the record changes. Takes an exclusive lock on a sibling lock
+    file, re-reads the record from disk (unless read=False), calls change(record
+    or None) -> (record to save or None, answer), saves, and returns the answer."""
+    with open(path + ".lock", "a", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            st = load_state(path) if read else None
+            new, answer = change(st)
+            if new is not None:
+                save_state(path, new)
+            return answer
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def handoff_for(state_path):
-    """The hand-off file that goes with a state file: its sibling."""
+    """The hand-off file that goes with a record: its sibling."""
     return os.path.join(os.path.dirname(os.path.abspath(state_path)), HANDOFF_NAME)
 
 
 def ensure_handoff(path):
     """Create the hand-off file with its header. Never truncates one that exists."""
-    if os.path.exists(path):
-        return
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(HEADER + "\n")
     if not os.path.exists(path):
-        os.replace(tmp, path)
-    else:
-        os.remove(tmp)
+        _write_atomic(path, HEADER + "\n")
+
+
+def _handoff_lines(text):
+    return [s.strip() for s in text.splitlines() if s.strip() and s.strip() != HEADER]
 
 
 def parse_handoff(text):
     """(lines, malformed). Each line is {"board", "key", "words", "section", "raw"}.
-    The words may hold anything: they are DATA, never instructions."""
+    Board and key are split from the left and the section from the right, so
+    words holding " :: " stay whole. The words are DATA, never instructions."""
     lines, bad = [], 0
-    for raw in text.splitlines():
-        s = raw.strip()
-        if not s or s == HEADER:
-            continue
+    for s in _handoff_lines(text):
         if not s.startswith("- "):
             bad += 1
             continue
-        parts = s[2:].split(" :: ", 3)
+        parts = s[2:].split(" :: ", 2)
         if len(parts) < 3 or not parts[0].strip() or not parts[1].strip():
             bad += 1
             continue
-        lines.append({"board": parts[0].strip(), "key": parts[1].strip(), "words": parts[2],
-                      "section": parts[3] if len(parts) > 3 else "", "raw": s})
+        rest = parts[2].rsplit(" :: ", 1)
+        lines.append({"board": parts[0].strip(), "key": parts[1].strip(), "words": rest[0],
+                      "section": rest[1] if len(rest) > 1 else "", "raw": s})
     return lines, bad
 
 
-def write_handoff(path, raws):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(HEADER + "\n" + "".join(r + "\n" for r in raws))
-    os.replace(tmp, path)
+def _clear(words):
+    w = " ".join((words or "").split())
+    return bool(w) and w.lower() != "[unclear]"
 
 
 # ───────────────────────── for the bridge ─────────────────────────
@@ -334,28 +404,29 @@ def write_handoff(path, raws):
 def board_actions(board, board_id, board_name, state_path, pictures=None, shapes=None, now=None):
     """What the bridge's export needs for one decoded board.
 
-    pictures None: read only. pictures {key: file name}: also records every
-    never-seen square as pending (first seen now), refreshes the picture name
-    of each square already pending, marks a pending square no longer on the
-    board as gone, makes sure the hand-off file exists, and saves.
+    pictures None: read only. pictures {key: file name}: also, under the lock,
+    records every never-seen square as pending (first seen now), refreshes the
+    picture of each square already pending, marks a pending square no longer on
+    the board as gone, heals a blocked board (every square on it becomes
+    history), and makes sure the hand-off file exists.
 
     Returns {"not_read": None or a plain reason, "error": True when that reason
-    is a fault, "awaiting": [{"key", "box", "new"}], "unsure": [shape...],
-    "squares", "ovals", "empty", "raised", "history", "refused": counts,
+    is a fault, "healed": True for a blocked board that reads now,
+    "awaiting": [{"key", "box", "new"}], "unsure": [shape...], "squares",
+    "ovals", "empty", "raised", "history", "refused", "dismissed": counts,
     "shapes": the shapes found}."""
-    out = {"not_read": None, "error": False, "awaiting": [], "unsure": [], "squares": 0, "ovals": 0,
-           "empty": 0, "raised": 0, "history": 0, "refused": 0, "shapes": []}
+    out = {"not_read": None, "error": False, "healed": False, "awaiting": [], "unsure": [],
+           "squares": 0, "ovals": 0, "empty": 0, "raised": 0, "history": 0, "refused": 0,
+           "dismissed": 0, "shapes": []}
     st = load_state(state_path)
     if st is None:
         out.update(not_read="the action-box record is missing (%s), so no square on this board was "
                             "looked at" % state_path, error=True)
         return out
-    if board_id in st["blocked_boards"]:
-        out["not_read"] = ("this board would not decode when the action boxes were first recorded, "
-                           "so squares on it are never raised")
-        return out
     shapes = find_shapes(board) if shapes is None else shapes
     out["shapes"] = shapes
+    healed = board_id in st["blocked_boards"]
+    out["healed"] = healed
     recorded = st["boxes"].get(board_id, {})
     used = set()
     for s in shapes:
@@ -368,6 +439,9 @@ def board_actions(board, board_id, board_name, state_path, pictures=None, shapes
         if s["kind"] != "square":
             continue
         out["squares"] += 1
+        if healed:
+            out["history"] += 1
+            continue
         best = None
         for k, e in recorded.items():
             if k not in used and same_box(e["box"], s["box"]):
@@ -388,37 +462,85 @@ def board_actions(board, board_id, board_name, state_path, pictures=None, shapes
             out["awaiting"].append({"key": key, "box": list(s["box"]), "new": False})
         elif status in out:
             out[status] += 1
-    if pictures is not None:
-        stamp = now or now_iso()
-        boxes = st["boxes"].setdefault(board_id, {})
+    if pictures is None:
+        return out
+    stamp = now or now_iso()
+
+    def change(fresh):
+        if fresh is None:
+            raise ActionsError("the action-box record went missing while a board was filed")
+        boxes = fresh["boxes"].setdefault(board_id, {})
+        if healed:
+            for s in shapes:
+                if s["kind"] == "square" and not any(same_box(e["box"], s["box"]) for e in boxes.values()):
+                    key = box_key(board_id, s["box"])
+                    while key in boxes:
+                        key = hashlib.sha1(key.encode()).hexdigest()[:10]
+                    boxes[key] = {"box": list(s["box"]), "status": "history", "first_seen": stamp,
+                                  "picture": "", "board_name": board_name}
+            fresh["blocked_boards"].pop(board_id, None)
         for a in out["awaiting"]:
             e = boxes.get(a["key"])
             if e is None:
                 boxes[a["key"]] = {"box": a["box"], "status": "pending", "first_seen": stamp,
                                    "picture": pictures.get(a["key"], ""), "board_name": board_name}
-            else:
-                if e["status"] == "gone":
-                    e["status"], e["first_seen"] = "pending", stamp
-                    e.pop("gone_at", None)
-                e.update(box=a["box"], picture=pictures.get(a["key"], e.get("picture", "")),
-                         board_name=board_name)
-        for k, e in boxes.items():
-            if e["status"] == "pending" and k not in used:
-                e["status"], e["gone_at"] = "gone", stamp
+                continue
+            if e["status"] == "gone":
+                e["status"], e["first_seen"] = "pending", stamp
+                e.pop("gone_at", None)
+            e.update(box=a["box"], picture=pictures.get(a["key"], e.get("picture", "")),
+                     board_name=board_name)
+        if not healed:
+            for k, e in boxes.items():
+                if e["status"] == "pending" and k not in used:
+                    e["status"], e["gone_at"] = "gone", stamp
         if not boxes:
-            st["boxes"].pop(board_id, None)
-        ensure_handoff(handoff_for(state_path))
-        save_state(state_path, st)
+            fresh["boxes"].pop(board_id, None)
+        return fresh, None
+    update_state(state_path, change)
+    ensure_handoff(handoff_for(state_path))
     return out
 
 
+def _mark_gone(state_path, keep, now=None):
+    """Pending squares on boards `keep(board id)` says are gone become gone. Returns the count."""
+    stamp = now or now_iso()
+
+    def change(st):
+        if st is None:
+            return None, 0
+        n = 0
+        for bid, boxes in st["boxes"].items():
+            if keep(bid):
+                continue
+            for e in boxes.values():
+                if e["status"] == "pending":
+                    e["status"], e["gone_at"] = "gone", stamp
+                    n += 1
+        return (st if n else None), n
+    return update_state(state_path, change)
+
+
+def forget_boards(state_path, live_ids, now=None):
+    """Pending squares on boards that are no longer live (deleted) become gone."""
+    live = set(live_ids)
+    return _mark_gone(state_path, lambda bid: bid in live, now)
+
+
+def clear_board(state_path, board_id, now=None):
+    """Pending squares on a board that now shows nothing become gone."""
+    return _mark_gone(state_path, lambda bid: bid != board_id, now)
+
+
 def has_waiting(state_path, board_id, now=None):
-    """True when the board holds a square that has waited over WAIT_HOURS for a task."""
+    """True while the oldest square waiting on this board is over WAIT_HOURS and
+    at most REFILE_MAX_HOURS old: the board is then worth filing again."""
     st = load_state(state_path)
     if st is None:
         return False
-    return any(e["status"] == "pending" and _hours_since(e.get("first_seen"), now) > WAIT_HOURS
-               for e in st["boxes"].get(board_id, {}).values())
+    ages = [_hours_since(e.get("first_seen"), now) for e in st["boxes"].get(board_id, {}).values()
+            if e["status"] == "pending"]
+    return bool(ages) and WAIT_HOURS < max(ages) <= REFILE_MAX_HOURS
 
 
 # ───────────────────────── commands ─────────────────────────
@@ -435,7 +557,7 @@ def _bridge_state(path):
         raise ActionsError("there is no Freeform bridge state at %s, so which boards were filed "
                            "cannot be told" % path)
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             bs = json.load(f)
         if not isinstance(bs.get("boards"), dict):
             raise ValueError("not a boards map")
@@ -445,9 +567,10 @@ def _bridge_state(path):
 
 
 def cmd_baseline(args):
+    exists = "an action-box record already exists at %s. A second baseline would turn waiting " \
+             "squares into history. Pass --force to mean it." % args.state
     if os.path.exists(args.state) and not args.force:
-        raise ActionsError("an action-box record already exists at %s. A second baseline would turn "
-                           "waiting squares into history. Pass --force to mean it." % args.state)
+        raise ActionsError(exists)
     filed_map = _bridge_state(args.bridge_state)
     fb = _bridge()
     con = fb.connect(args.db)
@@ -472,7 +595,12 @@ def cmd_baseline(args):
                     "box": list(s["box"]), "status": "history", "first_seen": st["baseline_at"],
                     "picture": "", "board_name": b["name"]}
                 history += 1
-    save_state(args.state, st)
+
+    def change(_):
+        if os.path.exists(args.state) and not args.force:
+            raise ActionsError(exists)      # made while the boards were being read
+        return st, None
+    update_state(args.state, change, read=False)
     ensure_handoff(args.handoff)
     print("Baseline: %d old board(s) read, %d square(s) recorded as history, %d board(s) that would "
           "not decode blocked, %d filed or new board(s) left for their next export."
@@ -519,11 +647,32 @@ def cmd_status(args):
     return 0
 
 
-def task_name(words):
-    w = " ".join((words or "").split())
-    if not w or w.lower() == "[unclear]":
-        return FALLBACK_NAME
-    return w[:NAME_MAX].rstrip()
+def cmd_dismiss(args):
+    if not (args.board and args.key and (args.why or "").strip()):
+        raise ActionsError("dismiss needs --board, --key and --why")
+
+    def change(st):
+        if st is None:
+            raise ActionsError("there is no action-box record at %s" % args.state)
+        e = st["boxes"].get(args.board, {}).get(args.key)
+        if e is None or e["status"] != "pending":
+            raise ActionsError("that square is not waiting for a task (%s), so it was not dismissed"
+                               % ("not in the record" if e is None else e["status"]))
+        e.update(status="dismissed", dismissed_at=now_iso(), dismissed_why=args.why.strip())
+        return st, None
+    update_state(args.state, change)
+    print("Dismissed 1 Freeform square. It will not be raised.")
+    return 0
+
+
+def norm(name):
+    return " ".join(str(name or "").split()).lower()
+
+
+def task_name(words, key):
+    if not _clear(words):
+        return "Freeform action box %s (handwriting unclear)" % key
+    return " ".join(words.split())[:NAME_MAX].rstrip()
 
 
 def task_fields(board_id, key, entry, words, section):
@@ -535,10 +684,10 @@ def task_fields(board_id, key, entry, words, section):
         'The words were read by machine from your handwriting. Picture: "%s" in the brain '
         "(_Inbox/_processed)." % entry.get("picture", ""),
         "Freeform box: %s/%s" % (board_id, key)])
-    return {"fldgFjGBw6bTKJFCD": task_name(words),       # Task Name
-            "fldx4qCw17UfrKpaN": "Today",                 # Status (a new agent-owned task)
-            "fld7XP8w8kbxfETV4": date.today().isoformat(),  # Due Date
-            "fldRGhBQViKZKtkQ6": desc}                     # Description
+    return {"fldgFjGBw6bTKJFCD": task_name(words, key),       # Task Name
+            "fldx4qCw17UfrKpaN": "Today",                      # Status (a new agent-owned task)
+            "fld7XP8w8kbxfETV4": date.today().isoformat(),     # Due Date
+            "fldRGhBQViKZKtkQ6": desc}                          # Description
 
 
 def _gate_json(stdout):
@@ -552,119 +701,187 @@ def _gate_json(stdout):
     return None
 
 
-def run_gate(gate, fields):
-    """(outcome, record id, plain reason). outcome: created | folded | refused | failed."""
+def call_gate(gate, fields, flag):
+    """(exit code or None, the gate's JSON answer or None, plain reason). `flag`
+    is --dry-run (reads only) or --force (creates, and can never fold)."""
     try:
-        r = subprocess.run([sys.executable, gate, "create", "--owner", OWNER,
+        r = subprocess.run([sys.executable, gate, "create", "--owner", OWNER, flag,
                             "--fields-json", json.dumps(fields)],
-                           capture_output=True, text=True, timeout=GATE_TIMEOUT)
+                           capture_output=True, text=True, encoding="utf-8", timeout=GATE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return "failed", "", "the task gate took longer than %d seconds" % GATE_TIMEOUT
+        return None, None, "the task gate took longer than %d seconds" % GATE_TIMEOUT
     except OSError as e:
-        return "failed", "", "the task gate would not start (%s)" % type(e).__name__
-    out = _gate_json(r.stdout)
+        return None, None, "the task gate would not start (%s)" % type(e).__name__
+    return r.returncode, _gate_json(r.stdout), ""
+
+
+def raise_one(gate, fields):
+    """One square through the gate. Returns (outcome, task id, twin id, reason);
+    outcome is created | adopted | refused | failed."""
+    code, out, why = call_gate(gate, fields, "--dry-run")
+    if code is None:
+        return "failed", "", "", why
     action = (out or {}).get("action")
-    if r.returncode == 3 or action == "refused":
-        # Exit 4 with action "refused" is the gate's never-a-card refusal: nothing was made.
-        return "refused", "", "the task gate refused it (exit %d)" % r.returncode
-    if r.returncode in (0, 4) and action in ("created", "updated") and (out or {}).get("taskId"):
-        return ("folded" if action == "updated" else "created"), out["taskId"], \
-            ("" if r.returncode == 0 else "created, but a field did not stick (exit 4)")
-    if r.returncode == 2:
-        return "failed", "", "the task gate could not run (exit 2)"
-    return "failed", "", "the task gate gave exit %d and no record id" % r.returncode
+    if code == 3 or action == "refused":
+        return "refused", "", "", "the task gate refused it (exit %d)" % code
+    if code == 2 or out is None:
+        return "failed", "", "", "the task gate could not run (exit %d)" % code
+    twin = ""
+    if action == "updated" and out.get("taskId"):
+        if norm(out.get("matchedName")) == norm(fields["fldgFjGBw6bTKJFCD"]):
+            return "adopted", out["taskId"], "", ""
+        twin = out["taskId"]
+        fields = dict(fields)
+        fields["fldRGhBQViKZKtkQ6"] += ("\nPOSSIBLE TWIN: the task gate matched this to %s. Not folded "
+                                        "in: a square is always its own task." % twin)
+    elif action != "created":
+        return "failed", "", "", "the task gate's dry run gave no answer it could use (exit %d)" % code
+    code, out, why = call_gate(gate, fields, "--force")
+    if code is None:
+        return "failed", "", twin, why
+    action = (out or {}).get("action")
+    if action == "refused" or code == 3:
+        return "refused", "", twin, "the task gate refused it (exit %d)" % code
+    if code in (0, 4) and action == "created" and (out or {}).get("taskId"):
+        return "created", out["taskId"], twin, ("" if code == 0 else "created, but a field did not stick")
+    return "failed", "", twin, "the task gate gave exit %d and no record id" % code
 
 
 def cmd_raise(args):
-    st = load_state(args.state)
-    if st is None:
+    if load_state(args.state) is None:
         print("ERROR: there is no Freeform action-box record at %s. Run baseline once first. "
               "Nothing was raised." % args.state)
         return 1
     text = ""
     if os.path.exists(args.handoff):
-        with open(args.handoff) as f:
+        with open(args.handoff, encoding="utf-8") as f:
             text = f.read()
+    seen_raw = set(_handoff_lines(text))
     lines, malformed = parse_handoff(text)
-    raised = folded = refused = failed = already = not_ours = dupes = warned = 0
-    retry, seen, ids = [], set(), []
+    # One line per box: the first whose words were read, else the first.
+    chosen, order, dupes = {}, [], 0
     for ln in lines:
         ident = (ln["board"], ln["key"])
-        if ident in seen:
+        if ident not in chosen:
+            chosen[ident] = ln
+            order.append(ident)
+        else:
             dupes += 1
+            if not _clear(chosen[ident]["words"]) and _clear(ln["words"]):
+                chosen[ident] = ln
+    raised = adopted = twinned = refused = failed = already = not_ours = unknown = warned = changed = 0
+    retry, ids, twins = [], [], []
+    for ident in order:
+        ln = chosen[ident]
+        st = load_state(args.state)          # a fresh read: never held across a gate call
+        entry = (st or {"boxes": {}})["boxes"].get(ln["board"], {}).get(ln["key"])
+        if entry is None:
+            unknown += 1                     # invented, planted or mistyped: nothing is created
             continue
-        seen.add(ident)
-        entry = st["boxes"].get(ln["board"], {}).get(ln["key"])
-        if entry is None or entry["status"] in ("history", "refused", "gone"):
-            not_ours += 1            # unknown, invented or planted: nothing is created
+        if entry["status"] in NOT_OURS:
+            not_ours += 1
             continue
         if entry["status"] == "raised":
             already += 1
             continue
-        outcome, rec, why = run_gate(args.gate, task_fields(ln["board"], ln["key"], entry,
-                                                            ln["words"], ln["section"]))
-        if outcome in ("created", "folded"):
-            entry.update(status="raised", task=rec, gate_action="updated" if outcome == "folded" else "created",
-                         raised_at=now_iso(), words=ln["words"])
-            save_state(args.state, st)          # at once: a later failure must not raise it twice
-            ids.append(rec)
-            raised += 1
-            folded += outcome == "folded"
-            if why:
-                warned += 1
-        elif outcome == "refused":
-            entry.update(status="refused", refused_at=now_iso(), words=ln["words"])
-            save_state(args.state, st)
-            refused += 1
-        else:
+        outcome, rec, twin, why = raise_one(args.gate, task_fields(ln["board"], ln["key"], entry,
+                                                                   ln["words"], ln["section"]))
+        if outcome == "failed":
             failed += 1
             retry.append(ln["raw"])
             print("ERROR: a Freeform square could not be raised: %s. It stays waiting and its line "
                   "is kept for the next run." % why)
+            continue
+        stamp = now_iso()
+
+        def change(fresh, ln=ln, outcome=outcome, rec=rec, twin=twin):
+            e = (fresh or {"boxes": {}})["boxes"].get(ln["board"], {}).get(ln["key"])
+            if e is None or e["status"] != "pending":
+                return None, False
+            if outcome == "refused":
+                e.update(status="refused", refused_at=stamp, words=ln["words"])
+            else:
+                e.update(status="raised", task=rec, raised_at=stamp, words=ln["words"],
+                         gate_action="adopted" if outcome == "adopted" else "created")
+                if twin:
+                    e["twin"] = twin
+            return fresh, True
+        if not update_state(args.state, change):
+            changed += 1
+        if outcome == "refused":
+            refused += 1
+            continue
+        raised += 1
+        ids.append(rec)
+        adopted += outcome == "adopted"
+        if twin:
+            twinned += 1
+            twins.append((rec, twin))
+        if why:
+            warned += 1
+    # The hand-off file: header, the lines being retried, and any line appended
+    # while this run worked (never seen by it).
     if os.path.exists(args.handoff) or retry:
-        write_handoff(args.handoff, retry)
-    late = sum(1 for boxes in st["boxes"].values() for e in boxes.values()
-               if e["status"] == "pending" and _hours_since(e.get("first_seen")) > WAIT_HOURS)
-    waiting = sum(1 for boxes in st["boxes"].values() for e in boxes.values() if e["status"] == "pending")
-    print("Freeform squares: %d raised (%d folded into open tasks), %d waiting, %d refused, "
-          "%d lines not understood." % (raised, folded, waiting, refused, malformed))
+        now_text = ""
+        if os.path.exists(args.handoff):
+            with open(args.handoff, encoding="utf-8") as f:
+                now_text = f.read()
+        late_lines = [s for s in _handoff_lines(now_text) if s not in seen_raw]
+        _write_atomic(args.handoff, HEADER + "\n" + "".join(r + "\n" for r in retry + late_lines))
+    st = load_state(args.state) or {"boxes": {}}
+    pend = [e for boxes in st["boxes"].values() for e in boxes.values() if e["status"] == "pending"]
+    late = sum(1 for e in pend if _hours_since(e.get("first_seen")) > WAIT_HOURS)
+    print("Freeform squares: %d raised (%d matched an open task with the same words, %d created beside "
+          "a possible twin), %d waiting, %d refused, %d lines not understood."
+          % (raised, adopted, twinned, len(pend), refused, malformed))
     if ids:
         print("Records: " + ", ".join(ids))
+    for new, old in twins:
+        print("WARNING: possible twin: %s was created beside %s." % (new, old))
     if already:
         print("%d line(s) were for squares that already have a task, and were ignored." % already)
     if dupes:
-        print("%d line(s) repeated a square already listed: the first line was used." % dupes)
+        print("%d line(s) repeated a square already listed: one line per square was used." % dupes)
     if not_ours:
-        print("WARNING: %d line(s) named a square that is not waiting for a task (unknown, recorded "
-              "before the baseline, refused or no longer on the board). Nothing was created for them."
+        print("WARNING: %d line(s) named a square that is not waiting for a task (recorded before the "
+              "baseline, refused, dismissed or no longer on the board). Nothing was created for them."
               % not_ours)
     if malformed:
         print("WARNING: %d line(s) in the hand-off file were not understood." % malformed)
     if warned:
         print("WARNING: %d task(s) were created but a field did not stick." % warned)
+    if changed:
+        print("WARNING: %d square(s) changed in the record while being raised; the record was left "
+              "as the other writer set it." % changed)
+    if unknown:
+        print("ERROR: %d line(s) named a square that is not in the record at all. Nothing was created "
+              "for them." % unknown)
     if refused:
         print("ERROR: the task gate refused %d Freeform square(s). Each is marked refused." % refused)
     if late:
         print("ERROR: %d Freeform square(s) have waited over %d hours with no task. The 23:00 pass "
               "has not read them." % (late, int(WAIT_HOURS)))
-    return 1 if failed or refused or late else 0
+    return 1 if failed or refused or late or unknown else 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Freeform action boxes: a pen-drawn square becomes a task.")
-    ap.add_argument("command", choices=["baseline", "shapes", "status", "raise"])
+    ap.add_argument("command", choices=["baseline", "shapes", "status", "raise", "dismiss"])
     ap.add_argument("--state", default=STATE)
-    ap.add_argument("--handoff", default=None, help="default: freeform-actions.md beside the state file")
+    ap.add_argument("--handoff", default=None, help="default: freeform-actions.md beside the record")
     ap.add_argument("--bridge-state", default=BRIDGE_STATE)
     ap.add_argument("--db", default=DB)
     ap.add_argument("--gate", default=GATE)
     ap.add_argument("--force", action="store_true", help="with baseline: replace an existing record")
+    ap.add_argument("--board", help="with dismiss: the board id")
+    ap.add_argument("--key", help="with dismiss: the box key")
+    ap.add_argument("--why", help="with dismiss: why the square is not an action")
     args = ap.parse_args(argv)
     if args.handoff is None:
         args.handoff = handoff_for(args.state)
     try:
         return {"baseline": cmd_baseline, "shapes": cmd_shapes, "status": cmd_status,
-                "raise": cmd_raise}[args.command](args)
+                "raise": cmd_raise, "dismiss": cmd_dismiss}[args.command](args)
     except ActionsError as e:
         print("ERROR: %s" % e)
     except OSError as e:

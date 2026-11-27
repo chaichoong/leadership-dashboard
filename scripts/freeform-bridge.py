@@ -1215,11 +1215,17 @@ def actions_section(actions, items):
            f"The bridge measured the pen strokes on this board: {p['squares']} square(s), "
            f"{p['ovals']} oval(s), {len(p['unsure'])} shape(s) it could not call. "
            f"{p['raised']} square(s) already have a task._", ""]
-    if p["history"]:
+    if p.get("healed"):
+        out += [f"_This board would not decode when the action-box record began. It reads now: its "
+                f"{p['history']} square(s) are recorded as drawn before the record and are not raised. "
+                f"Squares drawn from now on are._", ""]
+    elif p["history"]:
         out += [f"_{p['history']} square(s) were drawn before the action-box record began and are "
                 f"not raised._", ""]
     if p["refused"]:
         out += [f"_{p['refused']} square(s) were refused by the task gate and are not raised again._", ""]
+    if p.get("dismissed"):
+        out += [f"_{p['dismissed']} square(s) were dismissed as not an action and are not raised._", ""]
     for n, (key, fname) in enumerate(actions["squares"], 1):
         out += [f"### Action box {n}", "", f"Box key: {key}", "", f"![[{fname}]]", "",
                 f"Image file: {fname}", ""]
@@ -1489,7 +1495,14 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             "NOTHING is on the board now. Either Kevin cleared it, or its ink has not reached this "
             "Mac yet (it is filed again if ink arrives). Keep everything in the brain note and add "
             "one dated line saying the board read as empty."])
-        return {"stem": stem, "pictures": 0, "check": unchecked, "lost": 0, "written": [path]}
+        actions_error = ""
+        if fa is not None:
+            try:
+                fa.clear_board(actions_state, b["id"])     # its waiting squares are gone with the ink
+            except Exception as e:      # the note is still filed; the run says so and goes red
+                actions_error = f"the waiting squares of a cleared board could not be marked gone ({type(e).__name__})"
+        return {"stem": stem, "pictures": 0, "check": unchecked, "lost": 0, "written": [path],
+                "actions_error": actions_error}
     im, scale = render(board)
     plan, closeups, not_read, actions_error = plan_actions(board, b, actions_state, im, scale)
     has_lines = any(it.get("line") for it in board["items"])
@@ -1557,7 +1570,8 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
         shutil.rmtree(scratch, ignore_errors=True)
     return {"stem": stem, "pictures": len(local) + len(extra), "check": check, "lost": board["lost_strokes"],
             "written": written, "actions_error": actions_error,
-            "awaiting": sum(1 for _, key, _ in extra if key)}
+            "awaiting": sum(1 for _, key, _ in extra if key),
+            "unsure": sum(1 for _, key, _ in extra if not key)}
 
 
 def _remove(paths):
@@ -1760,14 +1774,27 @@ def run(args):
         except fa.ActionsError as e:
             actions_problem = str(e).rstrip(".")
     refile = set(args.refile or [])
-    waited = actions_errors = 0
+    waited = owed = actions_errors = unsure = unsure_boards = 0
+    if not actions_problem:
+        try:
+            fa.forget_boards(args.actions_state, [b["id"] for b in boards])   # deleted boards
+        except Exception as e:      # the run goes on, red
+            actions_errors += 1
+            print(f"ERROR: waiting squares on deleted Freeform boards could not be marked gone "
+                  f"({type(e).__name__}).")
     for b in boards:
         known = state["boards"].get(b["id"])
         refiled = False
         if known and known.get("fingerprint") == b["fingerprint"]:
+            waiting = None if actions_problem else _waiting(args.actions_state, b["id"])
+            if waiting is None and not actions_problem:
+                actions_errors += 1
             if b["id"] in refile:
                 refiled = True
-            elif not actions_problem and _waiting(args.actions_state, b["id"]):
+            elif not actions_problem and known.get("actions_owed"):
+                # Its action boxes were not read when it was last filed: read them now.
+                refiled, owed = True, owed + 1
+            elif waiting:
                 refiled, waited = True, waited + 1
             else:
                 known["seen_at"] = now          # still as recorded: the floor for its next change
@@ -1801,6 +1828,8 @@ def run(args):
                  "filed_at": known.get("filed_at") if known else None}
         if done is not None:
             entry["filed_at"] = now
+            if done.get("actions_error"):
+                entry["actions_owed"] = True    # filed again, unchanged, once the record reads
         state["boards"][b["id"]] = entry
         try:
             save_state(args.state, state)   # after every board: a later failure must not lose it
@@ -1819,12 +1848,14 @@ def run(args):
         lost_ink += 1 if done["lost"] else 0
         if done.get("actions_error") and done["actions_error"] != actions_problem:
             actions_errors += 1
+        if done.get("unsure"):
+            unsure, unsure_boards = unsure + done["unsure"], unsure_boards + 1
         check = done["check"]
         if check["kind"] == "mismatch":
             unmatched += 1
         elif check["kind"] == "partial":
             partial += 1
-        if done["pictures"]:
+        if done["pictures"] and not (refiled and not first_time):   # a re-file is not a picture-check event
             # A real check is a comparison with a preview Freeform can have drawn
             # from the board as it is NOW. An old preview that still agrees, and
             # no preview at all, both leave tonight's marks unchecked.
@@ -1862,6 +1893,12 @@ def run(args):
     if waited:
         print(f"{waited} unchanged board(s) filed again: a square on each has waited over "
               f"{int(fa.WAIT_HOURS)} hours for a task.")
+    if owed:
+        print(f"{owed} unchanged board(s) filed again: their action boxes were not read when they "
+              f"were last filed.")
+    if unsure:
+        print(f"{unsure} closed shape(s) on {unsure_boards} filed board(s) are neither a clean square nor "
+              f"a clean oval. No task was raised for them. Each note shows them.")
     if actions_problem:
         print(f"ERROR: Freeform action boxes were not read: {actions_problem}. Boards were still "
               f"filed; each note says ACTION BOXES NOT READ.")
@@ -1872,13 +1909,13 @@ def run(args):
 
 
 def _waiting(actions_state, board_id):
-    """has_waiting, or False with an ERROR line when the record will not read
-    (load_state already said so up front; this only covers a fault mid-run)."""
+    """has_waiting, or None with an ERROR line when it cannot be told (the
+    caller counts that and the run exits 1)."""
     try:
         return fa.has_waiting(actions_state, board_id)
-    except Exception as e:      # the run goes on; the next has_waiting call says it again
+    except Exception as e:      # said here; the caller makes the run red
         print(f"ERROR: could not tell whether a Freeform board holds a waiting square ({type(e).__name__}).")
-        return False
+        return None
 
 
 def main(argv=None):
