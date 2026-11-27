@@ -940,7 +940,11 @@ def cmd_raise(args):
     if malformed:
         print("WARNING: %d line(s) in the hand-off file were not understood." % malformed)
     if warned:
-        print("WARNING: %d task(s) were created but a field did not stick." % warned)
+        # The gate's exit 4: the task exists and its square is marked raised, but
+        # Airtable did not keep every field (the holder, the status or the due
+        # date). That is the gate's own "turn the run red", so it is red here too.
+        print("ERROR: %d task(s) were created but Airtable did not keep every field. Open each "
+              "record above and check its holder, status and due date." % warned)
     if changed:
         print("WARNING: %d square(s) changed in the record while this run worked; the record was left "
               "as the other writer set it." % changed)
@@ -953,7 +957,7 @@ def cmd_raise(args):
     if late:
         print("ERROR: %d Freeform square(s) have waited over %d hours with no task. The 23:00 pass "
               "has not read them." % (late, int(WAIT_HOURS)))
-    return 1 if failed or late or unknown or readback or control_bad else 0
+    return 1 if failed or late or unknown or readback or control_bad or warned else 0
 
 
 def main(argv=None):

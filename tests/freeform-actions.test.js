@@ -705,6 +705,26 @@ result = {"code": code, "statuses": sorted(e["status"] for e in st.values()), "k
     expect(r.allowed.sort()).toEqual(['dismissed', 'gone', 'history', 'pending', 'raised']);
   });
 
+  it('a task created with a field Airtable did not keep is raised once, and the run is red', () => {
+    const r = py(`
+pending_state(["k1"])
+handoff("- " + BID + " :: k1 :: Something :: none")
+gate(real=[{"code": 4, "out": {"action": "created", "taskId": "recHALF000000001"}}])
+code, out = act("raise")
+first = actions()["boxes"][BID]["k1"]
+gate()
+code2, out2 = act("raise")
+result = {"code": code, "out": out, "status": first["status"], "task": first.get("task"),
+          "real": len(real_calls()), "code2": code2}
+`);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('ERROR: 1 task(s) were created but Airtable did not keep every field');
+    expect(r.status).toBe('raised');
+    expect(r.task).toBe('recHALF000000001');
+    expect(r.real).toBe(1);
+    expect(r.code2).toBe(0);
+  });
+
   it('an unreadable box skips the dry run: marker lookup, then a forced create', () => {
     const r = py(`
 pending_state(["k1"])
