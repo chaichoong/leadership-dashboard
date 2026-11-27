@@ -563,9 +563,23 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
   return 0;
 }
 
+// Splitwise's own answer once the robot's sign-in has lapsed, read 27 Nov 2026:
+// {"error":"Invalid API Request: you are not logged in"}. That day a paid booking sat on "waiting" on
+// Kevin's phone for seven hours while every run logged the failure where nobody looks. Only this answer
+// fails the step, with what to do, on the booking itself; a browser that read nothing at all is a
+// passing fault, left unclaimed and tried again next run.
+export const signedOutOfSplitwise = (reply) => /not logged in/i.test(JSON.stringify((reply && (reply.error || reply.errors)) || ''));
+export const SIGNED_OUT_NOTE = 'The robot is signed out of Splitwise. Sign it in on the Mac (Robot sign-in, Splitwise), then tap Retry';
+async function signedOutStep(b, step, mark, note) {
+  if (await mark(b, step, 'claimed')) await mark(b, step, 'failed', note);
+  return 'the robot is signed out of Splitwise';
+}
+
 async function splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir, link }) {
   const gid = players.splitwise_group.id;
-  const group = (await swJson(`${SW}/api/v3.0/get_group/${gid}`, ab))?.group;
+  const reply = await swJson(`${SW}/api/v3.0/get_group/${gid}`, ab);
+  const group = reply?.group;
+  if (!group && signedOutOfSplitwise(reply)) return signedOutStep(b, 'splitwise', mark, SIGNED_OUT_NOTE);
   if (!group) return 'could not read the Splitwise group (is the robot still signed in?)';   // nothing claimed: tried again next run
   const members = (group.members || []).map((m) => m.id);
   const unlinked = link(b, group.members || []);                     // a new player's entry, found and saved
@@ -622,7 +636,9 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now, 
   // Splitwise step named, else the one entry for that date.
   const gid = players.splitwise_group.id;
   const ids = b.players.map((p) => players.players[String(p.id)]?.splitwise_id);
-  const expenses = (await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab))?.expenses;
+  const reply = await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab);
+  const expenses = reply?.expenses;
+  if (!expenses && signedOutOfSplitwise(reply)) return signedOutStep(b, 'texts', mark, `No texts sent: ${SIGNED_OUT_NOTE}`);
   if (!expenses) return 'could not read the group\'s entries';           // nothing claimed: tried again next run
   const named = /entry (\d+)/.exec(b.splitwise.note || '');
   const live = expenses.filter((e) => !e.deleted_at);
