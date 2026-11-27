@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
 // The phone key the mock Worker accepts (Kevin's phone, 30 Oct 2026): a request carrying it gets admin: true.
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [], setup = null } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [], setup = null, levels = { players: [], scores: [] } } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
@@ -60,7 +60,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
   // crowdAt 'HH': six more people, and all eight (Ann too) on tomorrow at that hour: a second court's crowd.
   const PEOPLE = ['Test Cat', 'Test Dan', 'Test Eve', 'Test Fay', 'Test Gus', 'Test Hal'].map((name, i) => ({ id: i + 3, name, venues: ['si', 'pdl', 'pp'], savedAt: null }));
   const extras = crowdAt ? PEOPLE : readyAt ? PEOPLE.slice(0, 2) : [];
-  const store = { votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  const store = { levels: structuredClone(levels), levelBodies: [], scoreBodies: [], feedbackBodies: [], votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   if (readyAt) {
     const slot = `${londonDates(Date.now())[1]}|${readyAt}`;
     for (const pid of [2, 3, 4]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
@@ -85,7 +85,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     );
     const named = (p) => (store.realNames.has(p.id) ? { ...p, realName: store.realNames.get(p.id) } : p);
     const everyone = (store.gone ? [other, ...extras] : [person, other, ...extras]).concat(store.added);
-    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier };
+    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier, levels: store.levels };
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -105,6 +105,27 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       if (body.action === 'paid') Object.assign(store.booked.find((b) => b.slot === body.slot), { price_pence: Math.round(body.price * 100), players: JSON.stringify(body.players), paid_at: new Date().toISOString() });
       if (body.action === 'retry') { const e = earlier.find((x) => x.slot === body.slot); if (e) e.paid[body.step] = { state: null, at: null, note: null }; }
       return reply(route, 200, { ...state(), admin: true, setup });
+    }
+    // Stage 2 (27 Nov 2026): the level, score and feedback saves, as far as the page uses them.
+    if (path === '/api/level') {
+      const body = req.postDataJSON();
+      store.levelBodies.push(body);
+      const row = store.levels.players.find((x) => x.id === body.person_id);
+      if (row) row.level = Number(body.level); else store.levels.players.push({ id: body.person_id, level: Number(body.level), matches: 0, reliability: 0, last: null });
+      return reply(route, 200, { ...state(), admin });
+    }
+    if (path === '/api/score') {
+      const body = req.postDataJSON();
+      store.scoreBodies.push(body);
+      store.levels.scores.unshift({ id: 900 + store.scoreBodies.length, on: body.played_on, a: body.team_a, b: body.team_b, sets: body.sets, rated: body.rated, kind: 'match', winner: 'a', finished: true, changes: {}, feedback: {}, enteredBy: body.entered_by, feedbackOpen: body.rated, voted: [] });
+      return reply(route, 200, { ...state(), admin });
+    }
+    if (path === '/api/feedback') {
+      const body = req.postDataJSON();
+      store.feedbackBodies.push(body);
+      const sc = store.levels.scores.find((x) => x.id === body.match_id);
+      if (sc) sc.voted.push(body.from_id);
+      return reply(route, 200, { ...state(), admin });
     }
     if (path === '/api/person') {                                        // adding a player by name
       const body = req.postDataJSON();
@@ -738,7 +759,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(page.locator('#people-card')).toBeVisible();
       const when = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
       await expect(page.locator('#setup-line')).toHaveText(`Last check: ${when}.`);
-      const lines = page.locator('#people-rows tr.setup');
+      const lines = page.locator('#people-rows tr.setup .setup-status');
       await expect(lines).toHaveCount(2);
       await expect(lines.nth(0)).toHaveText('✓ Ready for bookings');
       await expect(lines.nth(1)).toHaveText('Needs: not in the Padel WhatsApp group under that name; <b>not bold</b>');   // shown as text, never as markup
@@ -760,7 +781,7 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
       await page.goto(PAGE);
       await expect(page.locator('#setup-line')).toHaveText('The robot has not checked yet.');
-      await expect(page.locator('#people-rows tr.setup').first()).toHaveText('Not checked yet');
+      await expect(page.locator('#people-rows tr.setup .setup-status').first()).toHaveText('Not checked yet');
     });
 
     // 8 Nov 2026: a booking marked at 20:41 sat all night with no price because the price was a second
@@ -917,6 +938,111 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       expect(page.url()).not.toContain('#k=');
       expect(page.url().endsWith(PAGE)).toBe(true);
       expect(await page.evaluate(() => localStorage.getItem('padel.k'))).toBeNull();
+    });
+  });
+
+  // Stage 2 (Kevin, 27 Nov 2026): levels on Playtomic's 0 to 7 scale, scores, feedback, a league table.
+  test.describe('levels and scores (27 Nov 2026)', () => {
+    const today = () => londonDates(Date.now())[0];
+    const scored = (extra = {}) => ({ id: 7, on: today(), a: [1, 2], b: [3, 4], sets: [[6, 4], [6, 3]], rated: true, kind: 'match', winner: 'a', finished: true,
+      changes: { 1: 0.177, 2: 0.186, 3: -0.177, 4: -0.177 }, feedback: {}, enteredBy: 1, feedbackOpen: true, voted: [], ...extra });
+
+    test('a player picks a starting Playtomic level, or types their exact one, and saves it', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7 });
+      await openAsTestAnn(page);
+      const step = page.locator('#level-step');
+      await expect(step.locator('option')).toHaveCount(15);                     // "Choose a level" and Playtomic's 14 steps
+      await expect(step.locator('option[value="3"]')).toHaveText(/^3\.0 Intermediate: /);
+      await expect(page.locator('#level-card a')).toHaveAttribute('href', 'https://playerhelp.playtomic.com/hc/article_attachments/19831794916753');
+      await step.selectOption('3');
+      await page.locator('#level-form button[type="submit"]').click();
+      await expect(page.locator('#level-body')).toContainText('Your level: 3.00');
+      expect(store.levelBodies).toEqual([{ person_id: 1, level: '3' }]);
+      await page.locator('#level-exact').fill('2.37');
+      await page.locator('#level-form button[type="submit"]').click();
+      await expect(page.locator('#level-body')).toContainText('Your level: 2.37');
+      expect(store.levelBodies[1]).toEqual({ person_id: 1, level: '2.37' });
+    });
+
+    test('once scores have moved a level, the card says so and has no picker', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, levels: { players: [{ id: 1, level: 3.18, matches: 2, reliability: 10, last: 0.18 }], scores: [] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#level-body')).toContainText('3.18');
+      await expect(page.locator('#level-body')).toContainText('2 rated scores, reliability 10%');
+      await expect(page.locator('#level-form')).toHaveCount(0);
+    });
+
+    test('the league table lists levels highest first with the last change, and who has no level yet', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [
+        { id: 2, level: 2.69, matches: 1, reliability: 5, last: 0.186 }, { id: 1, level: 3.18, matches: 1, reliability: 5, last: 0.177 }, { id: 3, level: null, matches: 0, reliability: 0, last: null },
+      ], scores: [] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#league li')).toHaveText([/^3\.18 Test Ann \+0\.18\s+1 score, reliability 5%$/, /^2\.69 Test Bob \+0\.19\s+1 score, reliability 5%$/]);
+      await expect(page.locator('#no-level')).toHaveText('No level yet: Test Cat, Test Dan.');
+    });
+
+    test('Add a score: two pairs and the games go in one body, and what was typed survives a redraw', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await openAsTestAnn(page);
+      await page.locator('[data-score-open]').click();
+      await page.locator('[data-sf="a1"]').selectOption('2');
+      await page.locator('[data-sf="b0"]').selectOption('3');
+      await page.locator('[data-sf="b1"]').selectOption('4');
+      await page.locator('[data-sf="s0a"]').fill('6');
+      await page.locator('[data-sf="s0b"]').fill('4');
+      await Promise.all([                                                         // a redraw from a fresh reply, landed before typing on
+        page.waitForResponse((r) => r.url().includes('/api/refresh')),
+        page.locator('#check-now').click(),
+      ]);
+      await expect(page.locator('#check-now')).toBeEnabled();
+      await expect(page.locator('[data-sf="s0a"]')).toHaveValue('6');
+      await expect(page.locator('[data-sf="b1"]')).toHaveValue('4');
+      await page.locator('[data-sf="s1a"]').fill('6');
+      await page.locator('[data-sf="s1b"]').fill('3');
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(0);
+      expect(store.scoreBodies).toHaveLength(1);
+      expect(store.scoreBodies[0]).toEqual({ key: expect.stringMatching(/^[A-Za-z0-9-]{8,64}$/), entered_by: 1, played_on: today(), team_a: [1, 2], team_b: [3, 4], sets: [[6, 4], [6, 3]], rated: true });
+      await expect(page.locator('#scores li').first()).toContainText('Test Ann + Test Bob 6-4 6-3 Test Cat + Test Dan');
+      // Three players is refused on the page, before anything is sent.
+      await page.locator('[data-score-open]').click();
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#toast')).toContainText('four different players');
+      expect(store.scoreBodies).toHaveLength(1);
+    });
+
+    test('a player in a fresh rated score sees the changes, marks the other three and sends feedback once', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored()] } });
+      await openAsTestAnn(page);
+      const li = page.locator('#scores li').first();
+      await expect(li).toContainText('TA +0.18, TB +0.19, TC −0.18, TD −0.18');
+      await expect(li.locator('[data-fb]')).toHaveCount(3);
+      await li.locator('[data-fb="7|3"]').selectOption('higher');
+      await li.locator('[data-fb-send]').click();
+      await expect(page.locator('#scores li').first()).toContainText('your feedback is in');
+      expect(store.feedbackBodies).toEqual([{ match_id: 7, from_id: 1, votes: { 2: 'expected', 3: 'higher', 4: 'expected' } }]);
+    });
+
+    test('a friendly or unfinished score says so; someone who did not play sees no feedback', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [
+        scored({ id: 8, rated: false, changes: {}, feedbackOpen: false }), scored({ id: 9, a: [2, 3], b: [4, 5], finished: false, sets: [[6, 4], [3, 2]] }),
+      ] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#scores li').nth(0)).toContainText('Friendly: no level change.');
+      await expect(page.locator('#scores li').nth(1)).toContainText('Unfinished: half the usual change.');
+      await expect(page.locator('#scores [data-fb]')).toHaveCount(0);
+    });
+
+    test('Kevin\'s phone: Delete asks first, and a level can be set for anyone on the People screen', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored({ feedbackOpen: false })] } });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      page.once('dialog', (d) => d.accept());
+      await page.locator('[data-score-delete="7"]').click();
+      await expect.poll(() => store.adminBodies).toEqual([{ action: 'score-delete', id: 7 }]);
+      await page.locator('[data-level-id="2"]').fill('2.5');
+      await page.locator('[data-set-level="2"]').click();
+      await expect.poll(() => store.adminBodies.at(-1)).toEqual({ action: 'level', id: 2, level: '2.5' });
     });
   });
 });
