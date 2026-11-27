@@ -1037,6 +1037,28 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(page.locator('#score-form')).toHaveCount(0);
     });
 
+    test('a second score for the same four on the same day asks first: No sends nothing, Yes sends it', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored({ feedbackOpen: false })] } });
+      await openAsTestAnn(page);
+      const fill = async () => {
+        await page.locator('[data-score-open]').click();
+        await page.locator('[data-sf="a1"]').selectOption('4');
+        await page.locator('[data-sf="b0"]').selectOption('2');
+        await page.locator('[data-sf="b1"]').selectOption('3');
+        await page.locator('[data-sf="s0a"]').fill('6');
+        await page.locator('[data-sf="s0b"]').fill('2');
+      };
+      await fill();
+      page.once('dialog', (d) => d.dismiss());
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(1);
+      expect(store.scoreBodies).toEqual([]);
+      page.once('dialog', (d) => d.accept());
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(0);
+      expect(store.scoreBodies).toHaveLength(1);
+    });
+
     test('a player in a fresh rated score sees the changes, marks the other three and sends feedback once', async ({ page }) => {
       const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored()] } });
       await openAsTestAnn(page);

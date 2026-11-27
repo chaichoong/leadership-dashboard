@@ -650,6 +650,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const sets = f.sets.filter(([x, y]) => String(x).trim() !== '').map(([x, y]) => [Number(x), Number(y)]);
     if (!sets.length) { toast('Put in the games for at least one set.'); return; }
     if (sets.some(([x, y]) => !Number.isInteger(x) || !Number.isInteger(y))) { toast('Games are whole numbers, 0 to 7.'); return; }
+    // The other pair may have put this match in already (more than half an hour ago, so the Worker would
+    // take it as a new match): ask before a second score for the same four on the same day.
+    const four = [...ids].sort((x, y) => x - y).join(',');
+    const twin = ((S.levels && S.levels.scores) || []).some((sc) => sc.on === f.on && [...sc.a, ...sc.b].sort((x, y) => x - y).join(',') === four);
+    if (twin && !window.confirm('A score for these four players on this day is already in. Is this a different match?')) return;
     f.sent = true;                                    // an edit after this gets a new id, so a changed score is never taken as this one
     const ok = await postAndApply('/api/score', { key: f.key, entered_by: me, played_on: f.on, team_a: f.a, team_b: f.b, sets, rated: !f.friendly }, f.friendly ? 'Score saved.' : 'Score saved: levels updated.');
     if (ok) { scoreForm = null; keepFocus(renderScores); }
