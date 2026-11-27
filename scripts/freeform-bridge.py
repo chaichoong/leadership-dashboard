@@ -1215,15 +1215,9 @@ def actions_section(actions, items):
            f"The bridge measured the pen strokes on this board: {p['squares']} square(s), "
            f"{p['ovals']} oval(s), {len(p['unsure'])} shape(s) it could not call. "
            f"{p['raised']} square(s) already have a task._", ""]
-    if p.get("healed"):
-        out += [f"_This board would not decode when the action-box record began. It reads now: its "
-                f"{p['history']} square(s) are recorded as drawn before the record and are not raised. "
-                f"Squares drawn from now on are._", ""]
-    elif p["history"]:
+    if p["history"]:
         out += [f"_{p['history']} square(s) were drawn before the action-box record began and are "
                 f"not raised._", ""]
-    if p["refused"]:
-        out += [f"_{p['refused']} square(s) were refused by the task gate and are not raised again._", ""]
     if p.get("dismissed"):
         out += [f"_{p['dismissed']} square(s) were dismissed as not an action and are not raised._", ""]
     for n, (key, fname) in enumerate(actions["squares"], 1):
@@ -1495,14 +1489,14 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
             "NOTHING is on the board now. Either Kevin cleared it, or its ink has not reached this "
             "Mac yet (it is filed again if ink arrives). Keep everything in the brain note and add "
             "one dated line saying the board read as empty."])
-        actions_error = ""
+        actions_error, dropped = "", 0
         if fa is not None:
             try:
-                fa.clear_board(actions_state, b["id"])     # its waiting squares are gone with the ink
+                dropped = fa.clear_board(actions_state, b["id"])   # its waiting squares are gone with the ink
             except Exception as e:      # the note is still filed; the run says so and goes red
                 actions_error = f"the waiting squares of a cleared board could not be marked gone ({type(e).__name__})"
         return {"stem": stem, "pictures": 0, "check": unchecked, "lost": 0, "written": [path],
-                "actions_error": actions_error}
+                "actions_error": actions_error, "dropped": dropped}
     im, scale = render(board)
     plan, closeups, not_read, actions_error = plan_actions(board, b, actions_state, im, scale)
     has_lines = any(it.get("line") for it in board["items"])
@@ -1533,11 +1527,12 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
         pictures = [(names[i], local[i][1]) for i in range(len(local))]
         extra_names = names[len(local):]
         actions = {"not_read": not_read} if not_read else None
+        dropped = 0
         if plan is not None:
             squares = [(key, extra_names[i]) for i, (_, key, _) in enumerate(extra) if key]
             try:
-                fa.board_actions(board, b["id"], b["name"], actions_state,
-                                 pictures=dict(squares), shapes=plan["shapes"])
+                dropped = fa.board_actions(board, b["id"], b["name"], actions_state,
+                                           pictures=dict(squares), shapes=plan["shapes"])["dropped"]
                 actions = {"plan": plan, "squares": squares,
                            "unsure": [(extra_names[i], why) for i, (_, key, why) in enumerate(extra) if not key]}
             except Exception as e:      # the board is still filed; the note and the run say so
@@ -1571,7 +1566,7 @@ def export_board(con, b, inbox, previews, assets_dir, first_time, do_ocr=True, o
     return {"stem": stem, "pictures": len(local) + len(extra), "check": check, "lost": board["lost_strokes"],
             "written": written, "actions_error": actions_error,
             "awaiting": sum(1 for _, key, _ in extra if key),
-            "unsure": sum(1 for _, key, _ in extra if not key)}
+            "unsure": sum(1 for _, key, _ in extra if not key), "dropped": dropped}
 
 
 def _remove(paths):
@@ -1774,10 +1769,10 @@ def run(args):
         except fa.ActionsError as e:
             actions_problem = str(e).rstrip(".")
     refile = set(args.refile or [])
-    waited = owed = actions_errors = unsure = unsure_boards = 0
+    waited = owed = actions_errors = unsure = unsure_boards = dropped = 0
     if not actions_problem:
         try:
-            fa.forget_boards(args.actions_state, [b["id"] for b in boards])   # deleted boards
+            dropped += fa.forget_boards(args.actions_state, [b["id"] for b in boards])   # deleted boards
         except Exception as e:      # the run goes on, red
             actions_errors += 1
             print(f"ERROR: waiting squares on deleted Freeform boards could not be marked gone "
@@ -1848,6 +1843,7 @@ def run(args):
         lost_ink += 1 if done["lost"] else 0
         if done.get("actions_error") and done["actions_error"] != actions_problem:
             actions_errors += 1
+        dropped += done.get("dropped") or 0
         if done.get("unsure"):
             unsure, unsure_boards = unsure + done["unsure"], unsure_boards + 1
         check = done["check"]
@@ -1896,6 +1892,8 @@ def run(args):
     if owed:
         print(f"{owed} unchanged board(s) filed again: their action boxes were not read when they "
               f"were last filed.")
+    if dropped:
+        print(f"{dropped} waiting square(s) were dropped: the box or its board is no longer there.")
     if unsure:
         print(f"{unsure} closed shape(s) on {unsure_boards} filed board(s) are neither a clean square nor "
               f"a clean oval. No task was raised for them. Each note shows them.")

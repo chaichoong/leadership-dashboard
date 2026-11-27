@@ -72,7 +72,7 @@ def bridge(*extra):
                              "--ocr-bin", OCR, "--no-sync", "--actions-state", ACTIONS] + list(extra))
 def act(*argv):
     return capture(fa.main, list(argv) + ["--state", ACTIONS, "--handoff", HANDOFF, "--bridge-state", STATE,
-                                          "--db", DBP, "--gate", GATE])
+                                          "--db", DBP, "--gate", GATE, "--reader", READER])
 def inbox():
     return sorted(os.listdir(INBOX))
 def notes():
@@ -103,10 +103,15 @@ def square_spec(bid, squares, ovals=(), name="Invented board"):
     return {"id": bid, "name": name, "strokes": strokes}
 GATE = os.path.join(D, "gate.py")
 GATE_CFG, GATE_CALLS = os.path.join(D, "gate.json"), os.path.join(D, "gate-calls.jsonl")
+TASKS_DB, READER, READER_CFG = os.path.join(D, "tasks.json"), os.path.join(D, "reader.py"), os.path.join(D, "reader.json")
+READER_CALLS = os.path.join(D, "reader-calls.jsonl")
+# A stand-in Tasks table: one unrelated task, so the control read finds a row.
+json.dump([{"id": "recUNRELATED01", "createdTime": "2026-01-01T00:00:00.000Z",
+            "fields": {"Description": "Some other task description"}}], open(TASKS_DB, "w"))
 with open(GATE, "w") as f:
     f.write("""import sys, json, os
 cfg = json.load(open(%r))
-calls = %r
+calls, tasks_db = %r, %r
 argv = sys.argv[1:]
 before = [json.loads(l) for l in open(calls)] if os.path.exists(calls) else []
 with open(calls, "a") as f:
@@ -117,8 +122,17 @@ done = sum(1 for c in before if ("--dry-run" in c) == dry)
 spec = cfg.get(kind)
 if isinstance(spec, list):
     spec = spec[min(done, len(spec) - 1)]
+new_id = "recSTUB%%05d" %% (done + 1)
 if spec is None:
-    spec = {"code": 0, "out": {"action": "created", "taskId": "(dry run)" if dry else "recSTUB%%05d" %% (done + 1)}}
+    spec = {"code": 0, "out": {"action": "created", "taskId": "(dry run)" if dry else new_id}}
+if not dry and spec.get("creates", spec.get("code", 0) in (0, 4)):
+    fields = json.loads(argv[argv.index("--fields-json") + 1])
+    out = spec.get("out")
+    rid = out["taskId"] if isinstance(out, dict) and out.get("taskId") else new_id
+    rows = json.load(open(tasks_db))
+    rows.append({"id": rid, "createdTime": "2026-11-27T23:%%02d:00.000Z" %% (done + 1), "by_gate": True,
+                 "fields": {"Description": fields["fldRGhBQViKZKtkQ6"], "Task Name": fields["fldgFjGBw6bTKJFCD"]}})
+    json.dump(rows, open(tasks_db, "w"))
 if not dry and cfg.get("during"):
     d = cfg["during"]
     st = json.load(open(d["state"]))
@@ -130,7 +144,39 @@ print("GATE NOTE: a log line before the answer")
 if spec.get("out") != "none":
     print(json.dumps(spec.get("out")))
 sys.exit(spec.get("code", 0))
-""" % (GATE_CFG, GATE_CALLS))
+""" % (GATE_CFG, GATE_CALLS, TASKS_DB))
+with open(READER, "w") as f:
+    f.write("""import sys, json, os, re
+cfg = json.load(open(%r)) if os.path.exists(%r) else {}
+argv = sys.argv[1:]
+with open(%r, "a") as f:
+    f.write(json.dumps(argv) + "\\\\n")
+formula = argv[argv.index("--formula") + 1]
+mode = cfg.get("mode", "ok")
+rows = json.load(open(%r))
+control = formula == "FIND('e', {Description}) > 0"
+if (control and mode == "control_fail") or (not control and mode == "fail"):
+    print(json.dumps({"ok": False, "error": "HTTP 503"})); sys.exit(2)
+if control:
+    found = [] if mode == "control_zero" else [r for r in rows if "e" in r["fields"].get("Description", "")][:1]
+else:
+    m = re.match(r"FIND\\\\('(.*)', \\\\{Description\\\\}\\\\) > 0$", formula)
+    needle = m.group(1)
+    found = [r for r in rows if needle in r["fields"].get("Description", "")
+             and not (mode == "blind" and r.get("by_gate"))]
+print(json.dumps({"ok": True, "table": "tblTEST", "count": len(found), "pages": 1,
+                  "records": [{k: v for k, v in r.items() if k != "by_gate"} for r in found]}, indent=2))
+""" % (READER_CFG, READER_CFG, READER_CALLS, TASKS_DB))
+def reader(mode="ok"):
+    json.dump({"mode": mode}, open(READER_CFG, "w"))
+def add_task(rid, desc, created="2026-11-20T10:00:00.000Z"):
+    rows = json.load(open(TASKS_DB))
+    rows.append({"id": rid, "createdTime": created, "fields": {"Description": desc}})
+    json.dump(rows, open(TASKS_DB, "w"))
+def tasks():
+    return json.load(open(TASKS_DB))
+def reader_calls():
+    return [json.loads(l) for l in open(READER_CALLS)] if os.path.exists(READER_CALLS) else []
 def gate(dry=None, real=None, during=None):
     json.dump({"dry": dry, "real": real, "during": during}, open(GATE_CFG, "w"))
 gate()
@@ -241,6 +287,15 @@ result = {"circle": kinds(boxed(fx.ellipse_loop(200, 200), w=200, h=200)),
 `);
     expect(r.circle).toEqual(['oval']);
     expect(r.flat).toEqual(['oval']);
+  });
+
+  it('a jagged box that fills like an oval still reaches its corners: unsure and shown, never a title', () => {
+    const r = py(`
+j = fa.find_shapes({"strokes": boxed(fx.rect_loop(460, 85, 200, noise=5.0, seed=3), w=460, h=85)})[0]
+result = [j["kind"], j["fill"], j["corner"]]
+`);
+    expect(r[0]).toBe('unsure');
+    expect(r[2]).toBeLessThan(0.18);
   });
 
   it('a rounded box is unsure, an open loop and a tiny loop are not shapes, an empty loop is only counted', () => {
@@ -355,10 +410,10 @@ bridge()
 nudged = notes()[-1]
 st_n = actions()["boxes"][BID]
 edit(square_spec(BID, [(0, 0, 460, 85), (101, 301, 452, 85)]))
-bridge()
+_, moved_out = bridge()
 moved = notes()[-1]
 st_m = actions()["boxes"][BID]
-result = {"keys": keys, "nudged": nudged, "st_n": st_n, "moved": moved, "st_m": st_m}
+result = {"keys": keys, "nudged": nudged, "st_n": st_n, "moved": moved, "st_m": st_m, "moved_out": moved_out}
 `);
     const [raisedKey, secondKey] = r.keys;
     expect(r.nudged).not.toContain('Box key: ' + raisedKey);
@@ -372,6 +427,7 @@ result = {"keys": keys, "nudged": nudged, "st_n": st_n, "moved": moved, "st_m": 
     expect(r.moved).toContain('Box key: ' + newKeys[0]);
     expect(r.st_m[newKeys[0]].status).toBe('pending');
     expect(r.st_m[secondKey].status).toBe('gone');
+    expect(r.moved_out).toContain('1 waiting square(s) were dropped');
   });
 
   it('a new square on a baselined old board is listed; its history squares are not', () => {
@@ -393,23 +449,6 @@ result = {"code": code, "hist": hist, "note": notes()[0], "st": st}
     expect(fresh.length).toBe(1);
     expect(r.note).toContain('Box key: ' + fresh[0]);
     expect(r.note).toContain('1 square(s) were drawn before the action-box record began');
-  });
-
-  it('a blocked board that decodes heals: its squares become history and it leaves the blocked list', () => {
-    const r = py(`
-db([{"id": BID, "name": "Invented board", "strokes": [{"at": (0, 0), "pts": fx.zigzag()}]}])
-bridge("--baseline"); empty_actions()
-st = actions(); st["blocked_boards"][BID] = "would not decode (ValueError)"; put_actions(st)
-edit(square_spec(BID, [(0, 0, 460, 85)]))
-code, out = bridge()
-after = actions()
-result = {"note": notes()[0], "after": after}
-`);
-    expect(r.after.blocked_boards).toEqual({});
-    expect(Object.values(r.after.boxes['B'.repeat(32)]).map(e => e.status)).toEqual(['history']);
-    expect(r.note).toContain('It reads now: its 1 square(s) are recorded as drawn before the record');
-    expect(r.note).not.toContain('Box key:');
-    expect(r.note).not.toContain('never raised');
   });
 
   it('with no record the board is still filed, red and owed; next night, unchanged, it is filed again with its boxes', () => {
@@ -519,10 +558,12 @@ edit({"id": BID, "name": "Invented board", "strokes": []})
 code, out = bridge()
 st = actions()["boxes"]
 result = {"deleted": [e["status"] for e in st[other].values()], "cleared": [e["status"] for e in st[BID].values()],
-          "note": notes()[-1]}
+          "note": notes()[-1], "out": out}
 `);
     expect(r.deleted).toEqual(['gone']);
     expect(r.cleared).toEqual(['gone']);
+    expect(r.out).toContain('2 waiting square(s) were dropped: the box or its board is no longer there.');
+    expect(r.out).not.toMatch(/ERROR.*dropped/);
     expect(r.note).toContain('NOTHING is on the board now');
   });
 
@@ -578,7 +619,7 @@ result = {"code": code, "out": out, "st": st, "again": again, "again_out": again
     expect(r.st.status).toBe('raised');
     expect(r.st.task).toBe('recSTUB00001');
     expect(r.st.gate_action).toBe('created');
-    expect(r.out).toContain('Freeform squares: 1 raised (0 matched an open task with the same words, 0 created beside a possible twin), 0 waiting, 0 refused, 0 lines not understood.');
+    expect(r.out).toContain('Freeform squares: 1 raised (0 found by their marker, 0 matched an open task with the same words, 0 created beside a possible twin), 0 waiting, 0 lines not understood.');
     expect(r.out).toContain('recSTUB00001');
     expect(r.out).not.toContain('blue paint');
     expect(r.out).not.toContain('Garden');
@@ -602,7 +643,7 @@ result = {"code": code, "out": out, "st": actions()["boxes"][BID]["k1"], "real":
     expect(r.st.status).toBe('raised');
     expect(r.st.task).toBe('recOPEN000001');
     expect(r.st.gate_action).toBe('adopted');
-    expect(r.out).toContain('1 raised (1 matched an open task with the same words, 0 created beside a possible twin)');
+    expect(r.out).toContain('1 raised (0 found by their marker, 1 matched an open task with the same words, 0 created beside a possible twin)');
   });
 
   it('a different open task the gate would fold into is a twin: created beside it with --force, and said', () => {
@@ -622,12 +663,12 @@ result = {"code": code, "out": out, "st": actions()["boxes"][BID]["k1"], "real":
     expect(r.st.status).toBe('raised');
     expect(r.st.task).toBe('recSTUB00001');
     expect(r.st.twin).toBe('recOTHER00001');
-    expect(r.out).toContain('1 raised (0 matched an open task with the same words, 1 created beside a possible twin)');
+    expect(r.out).toContain('1 raised (0 found by their marker, 0 matched an open task with the same words, 1 created beside a possible twin)');
     expect(r.out).toContain('WARNING: possible twin: recSTUB00001 was created beside recOTHER00001.');
     expect(r.out).not.toContain('Paint');
   });
 
-  it('a dry-run refusal marks the box refused and creates nothing (exit 3, or exit 4 with action refused)', () => {
+  it('a dry-run refusal is not a refusal of a square: it still ends in one forced create', () => {
     const r = py(`
 pending_state(["k1", "k2"])
 handoff("- " + BID + " :: k1 :: Something :: none", "- " + BID + " :: k2 :: Something else :: none")
@@ -635,14 +676,48 @@ gate(dry=[{"code": 3, "out": {"action": "refused", "refusal": "auto-reply"}},
           {"code": 4, "out": {"action": "refused", "refusal": "never-a-card"}}])
 code, out = act("raise")
 st = actions()["boxes"][BID]
-result = {"code": code, "out": out, "st": [st["k1"]["status"], st["k2"]["status"]], "real": real_calls()}
+real = real_calls()
+result = {"code": code, "out": out, "st": [st["k1"]["status"], st["k2"]["status"]], "real": len(real),
+          "forced": all("--force" in c for c in real), "twin": any("POSSIBLE TWIN" in call_fields(c)["fldRGhBQViKZKtkQ6"] for c in real)}
 `);
-    expect(r.code).toBe(1);
-    expect(r.st).toEqual(['refused', 'refused']);
-    expect(r.real).toEqual([]);
-    expect(r.out).toContain('2 refused');
+    expect(r.code).toBe(0);
+    expect(r.st).toEqual(['raised', 'raised']);
+    expect(r.real).toBe(2);
+    expect(r.forced).toBe(true);
+    expect(r.twin).toBe(false);
+    expect(r.out).not.toContain('refused');
   });
 
+  it('a forced create that answers anything but created leaves the box waiting and its line kept; only the five statuses exist', () => {
+    const r = py(`
+pending_state(["k1", "k2", "k3"])
+handoff("- " + BID + " :: k1 :: One :: none", "- " + BID + " :: k2 :: Two :: none", "- " + BID + " :: k3 :: Three :: none")
+gate(real=[{"code": 3, "out": {"action": "refused"}, "creates": False}, {"code": 1, "out": "none", "creates": False},
+           {"code": 0, "out": {"action": "updated", "taskId": "recX"}, "creates": False}])
+code, out = act("raise")
+st = actions()["boxes"][BID]
+result = {"code": code, "statuses": sorted(e["status"] for e in st.values()), "kept": open(HANDOFF).read().count("\\n- "),
+          "allowed": list(fa.STATUSES)}
+`);
+    expect(r.code).toBe(1);
+    expect(r.statuses).toEqual(['pending', 'pending', 'pending']);
+    expect(r.kept).toBe(3);
+    expect(r.allowed.sort()).toEqual(['dismissed', 'gone', 'history', 'pending', 'raised']);
+  });
+
+  it('an unreadable box skips the dry run: marker lookup, then a forced create', () => {
+    const r = py(`
+pending_state(["k1"])
+handoff("- " + BID + " :: k1 :: [unclear] :: none")
+code, out = act("raise")
+result = {"code": code, "dry": len(dry_calls()), "real": len(real_calls()),
+          "looked": sum(1 for c in reader_calls() if "Freeform box: " + BID + "/k1" in c[c.index("--formula") + 1])}
+`);
+    expect(r.code).toBe(0);
+    expect(r.dry).toBe(0);
+    expect(r.real).toBe(1);
+    expect(r.looked).toBe(2);       // once before the create, once to read it back
+  });
   it('a gate that cannot run leaves the box waiting and its line kept, and creates nothing', () => {
     const r = py(`
 pending_state(["k1"])
@@ -658,6 +733,106 @@ result = {"code": code, "out": out, "kept": open(HANDOFF).read(), "line": line,
     expect(r.kept).toBe('# Freeform actions\n' + r.line + '\n');
     expect(r.out).toContain('could not run (exit 2)');
     expect(r.real).toEqual([]);
+  });
+
+  it('a task already carrying the box marker is adopted and the gate is never called', () => {
+    const r = py(`
+pending_state(["k1"])
+add_task("recEXIST00002", "From your board.\\nFreeform box: " + BID + "/k1", created="2026-11-21T10:00:00.000Z")
+add_task("recEXIST00001", "Older.\\nFreeform box: " + BID + "/k1", created="2026-11-20T10:00:00.000Z")
+add_task("recNOTTHIS001", "Freeform box: " + BID + "/k10")
+handoff("- " + BID + " :: k1 :: Order paint :: none")
+code, out = act("raise")
+st = actions()["boxes"][BID]["k1"]
+result = {"code": code, "out": out, "st": st, "calls": calls()}
+`);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.st.status).toBe('raised');
+    expect(r.st.task).toBe('recEXIST00001');      // the oldest of the two
+    expect(r.st.gate_action).toBe('found');
+    expect(r.out).toContain('1 raised (1 found by their marker');
+    expect(r.out).toContain("WARNING: 2 tasks carry one square's marker: recEXIST00001, recEXIST00002. The oldest was used.");
+    expect(r.out).not.toContain('recNOTTHIS001');
+  });
+
+  it('a marker lookup that cannot read creates nothing, keeps the line and is red', () => {
+    const r = py(`
+pending_state(["k1"])
+line = "- " + BID + " :: k1 :: Order paint :: none"
+handoff(line)
+reader("fail")
+code, out = act("raise")
+result = {"code": code, "out": out, "calls": calls(), "status": actions()["boxes"][BID]["k1"]["status"],
+          "kept": open(HANDOFF).read(), "line": line}
+`);
+    expect(r.code).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(r.status).toBe('pending');
+    expect(r.kept).toBe('# Freeform actions\n' + r.line + '\n');
+    expect(r.out).toContain('ERROR: a Freeform square could not be raised: the task lookup could not read (exit 2)');
+  });
+
+  it('a control read that finds nothing, or fails, raises nothing for any line and keeps every line', () => {
+    const r = py(`
+pending_state(["k1", "k2"])
+text = "# Freeform actions\\n- " + BID + " :: k1 :: One :: none\\n- " + BID + " :: k2 :: Two :: none\\nnot a line\\n"
+out = {}
+for mode in ("control_zero", "control_fail"):
+    open(HANDOFF, "w").write(text)
+    reader(mode)
+    out[mode] = act("raise") + (open(HANDOFF).read() == text,)
+result = {"out": out, "calls": calls(), "statuses": [e["status"] for e in actions()["boxes"][BID].values()],
+          "lookups": [c for c in reader_calls() if "Freeform box" in c[c.index("--formula") + 1]]}
+`);
+    for (const mode of ['control_zero', 'control_fail']) {
+      expect(r.out[mode][0]).toBe(1);
+      expect(r.out[mode][1]).toContain('ERROR: the task lookup is not working');
+      expect(r.out[mode][2]).toBe(true);
+    }
+    expect(r.calls).toEqual([]);
+    expect(r.lookups).toEqual([]);
+    expect(r.statuses).toEqual(['pending', 'pending']);
+  });
+
+  it("a new task its marker cannot find again is an ERROR, and the box keeps the gate's id", () => {
+    const r = py(`
+pending_state(["k1"])
+handoff("- " + BID + " :: k1 :: Order paint :: none")
+reader("blind")
+code, out = act("raise")
+st = actions()["boxes"][BID]["k1"]
+result = {"code": code, "out": out, "st": st}
+`);
+    expect(r.code).toBe(1);
+    expect(r.st.status).toBe('raised');
+    expect(r.st.task).toBe('recSTUB00001');
+    expect(r.out).toContain('ERROR: the new task recSTUB00001 could not be read back by its marker: the marker lookup found nothing, not the new record.');
+  });
+
+  it('the crash case: the gate creates and answers nothing; next night the marker finds it; one create in all', () => {
+    const r = py(`
+pending_state(["k1"])
+handoff("- " + BID + " :: k1 :: Order paint :: none")
+gate(real={"code": 0, "out": "none", "creates": True})
+first, first_out = act("raise")
+after_first = actions()["boxes"][BID]["k1"]["status"]
+gate()
+second, second_out = act("raise")
+st = actions()["boxes"][BID]["k1"]
+result = {"first": first, "after_first": after_first, "second": second, "st": st,
+          "creates": len(real_calls()), "made": [t["id"] for t in tasks() if t.get("by_gate")],
+          "handoff": open(HANDOFF).read()}
+`);
+    expect(r.first).toBe(1);
+    expect(r.after_first).toBe('pending');
+    expect(r.second).toBe(0);
+    expect(r.creates).toBe(1);
+    expect(r.made.length).toBe(1);
+    expect(r.st.status).toBe('raised');
+    expect(r.st.task).toBe(r.made[0]);
+    expect(r.st.gate_action).toBe('found');
+    expect(r.handoff).toBe('# Freeform actions\n');
   });
 
   it('two squares whose words could not be read get two different names', () => {
@@ -841,4 +1016,71 @@ result = {"code": code, "out": out, "st": st, "again": again, "again_out": again
     expect(r.shapes_code).toBe(0);
     expect(r.shapes_out.trim()).toBe('EEEEEEEE  1 square(s), 0 oval(s), 0 unsure, 0 empty');
   });
+
+  it('baseline --force keeps what a readable record knows about filed boards, and starts clean from a broken one', () => {
+    const r = py(`
+old, filed = "D" * 32, "E" * 32
+db([square_spec(old, [(0, 0, 460, 85)]), square_spec(filed, [(0, 0, 460, 85)])])
+bridge("--baseline")
+bs = json.load(open(STATE)); bs["boards"][filed]["filed_at"] = "2026-11-26T22:40:00+00:00"
+json.dump(bs, open(STATE, "w"))
+kept = {"box": [0, 0, 460, 85], "status": "raised", "first_seen": ago(30), "picture": "p.png",
+        "board_name": "Invented board", "task": "recKEPT000001"}
+put_actions({"version": 1, "baseline_at": ago(100), "boxes": {filed: {"keep000001": kept},
+             old: {"stale00001": dict(kept, status="history")}}, "blocked_boards": {}})
+code, out = act("baseline", "--force")
+st = actions()
+open(ACTIONS, "w").write("{not json")
+code2, out2 = act("baseline", "--force")
+st2 = actions()
+result = {"code": code, "out": out, "st": st, "code2": code2, "st2": st2}
+`);
+    expect(r.code).toBe(0);
+    expect(r.st.boxes['E'.repeat(32)]).toEqual({ keep000001: expect.objectContaining({ status: 'raised', task: 'recKEPT000001' }) });
+    expect(Object.keys(r.st.boxes['D'.repeat(32)])).not.toContain('stale00001');
+    expect(Object.values(r.st.boxes['D'.repeat(32)]).map(e => e.status)).toEqual(['history']);
+    expect(r.out).toContain('1 box(es) on filed boards carried over');
+    expect(r.code2).toBe(0);
+    expect(r.st2.boxes['E'.repeat(32)]).toBeUndefined();
+    expect(Object.keys(r.st2.boxes)).toEqual(['D'.repeat(32)]);
+  });
+
+  it('baseline fails on a board that will not decode and writes nothing', () => {
+    const r = py(`
+bad = "F" * 32
+db([{"id": bad, "name": "Invented board", "strokes": [{"at": (0, 0), "pts": [(0.0, 0.0), (float("nan"), 1.0)]}]}])
+bridge("--baseline")
+code, out = act("baseline")
+result = {"code": code, "out": out, "made": os.path.exists(ACTIONS)}
+`);
+    expect(r.code).toBe(1);
+    expect(r.out.trim()).toBe('ERROR: board FFFFFFFF would not decode (BridgeError). Nothing was recorded.');
+    expect(r.made).toBe(false);
+  });
+
+  it('a record carrying an empty blocked_boards key still reads', () => {
+    const r = py(`
+put_actions({"version": 1, "baseline_at": ago(1), "boxes": {}, "blocked_boards": {}})
+code, out = act("status")
+result = {"code": code, "out": out}
+`);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Freeform squares: 0 history, 0 pending, 0 raised, 0 gone, 0 dismissed.');
+  });
+});
+
+describe('freeform-actions: the re-file window', () => {
+  it('is per square: one square 100 hours old does not stop one 30 hours old being re-filed', () => {
+    const r = py(`
+boxes = {"old0000001": {"box": [0, 0, 460, 85], "status": "pending", "first_seen": ago(100), "picture": "", "board_name": "x"},
+         "new0000001": {"box": [0, 200, 460, 285], "status": "pending", "first_seen": ago(30), "picture": "", "board_name": "x"}}
+put_actions({"version": 1, "baseline_at": ago(200), "boxes": {BID: boxes}})
+both = fa.has_waiting(ACTIONS, BID)
+del boxes["new0000001"]; put_actions({"version": 1, "baseline_at": ago(200), "boxes": {BID: boxes}})
+result = {"both": both, "old_only": fa.has_waiting(ACTIONS, BID)}
+`);
+    expect(r.both).toBe(true);
+    expect(r.old_only).toBe(false);
+  });
+
 });
