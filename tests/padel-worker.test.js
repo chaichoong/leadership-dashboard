@@ -18,7 +18,7 @@ import worker from '../workers/padel/worker.js';
 import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
-  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl,
+  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl, SIGNED_OUT_MARK,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -408,12 +408,13 @@ function mapRepo() {
       },
       async markStep(slot, step, state, note, now, paidAt = null) {
         const b = booked.get(slot);
-        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
+        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step) || !['claimed', 'done', 'failed', 'retry', 'resume'].includes(state)) return false;
         const cur = b[`${step}_state`] ?? null;
         const ok = state === 'claimed' ? cur === null && b.paid_at === paidAt && (step === 'splitwise' || b.splitwise_state === 'done')
-          : state === 'retry' ? cur === 'failed' : cur === 'claimed';
+          : state === 'retry' ? cur === 'failed'
+          : state === 'resume' ? cur === 'failed' && String(b[`${step}_note`] || '').toLowerCase().includes('signed out of splitwise') : cur === 'claimed';
         if (!ok) return false;
-        const to = state === 'retry' ? null : state;
+        const to = state === 'retry' || state === 'resume' ? null : state;
         Object.assign(b, { [`${step}_state`]: to, [`${step}_at`]: to ? now : null, [`${step}_note`]: to ? note : null });
         return true;
       },
@@ -1366,6 +1367,25 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect((await step('texts', 'done', '1 of 1 sent')).json.changed).toBe(true);
       expect((await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings).toEqual([]);
       expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'nope', state: 'done' }, { robot: ROBOT })).status).toBe(400);
+    });
+    // 27 Nov 2026: the robot's Splitwise sign-in lapsed. Kevin's sign-in is all such a step waits on.
+    it('the robot resumes only a step that failed because it was signed out of Splitwise', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a, b] }, { admin: ADMIN });
+      const step = (step, state, note) => t.call('/api/robot/paid', { slot: SLOT, step, state, note, paidAt: iso(NOW) }, { robot: ROBOT });
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // nothing to resume
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // claimed is not failed
+      expect((await step('splitwise', 'failed', 'Test Bob: not in the Splitwise group. Fix it, then Retry')).json.changed).toBe(true);
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // any other failure is Kevin's Retry
+      expect((await t.call('/api/admin', { action: 'retry', slot: SLOT, step: 'splitwise' }, { admin: ADMIN })).status).toBe(200);
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
+      expect((await step('splitwise', 'failed', `The robot is ${SIGNED_OUT_MARK}. Sign it in on the Mac and it carries on by itself`)).json.changed).toBe(true);
+      expect((await step('splitwise', 'resume')).json.changed).toBe(true);
+      expect((await t.call('/api/state')).json.booked[SLOT].paid.splitwise).toMatchObject({ state: null, note: null });
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // once
+      expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'splitwise', state: 'retry' }, { robot: ROBOT })).status).toBe(400);   // Retry stays Kevin's
     });
     it('a paid booking the robot has not finished survives midnight; a finished or unpaid one is cleared as before', async () => {
       const [a] = await t.addPeople(['Test Ann']);
