@@ -108,7 +108,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .f15-over b{color:var(--danger)}
 
 /* Approval cards (Zone A) */
-.apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
+/* More room between cards (Kevin, 27 Nov 2026): one card must never read as part of the next. */
+.apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:24px}
+/* The page holds Kevin's place itself (apvPlaceKeep) on the approvals view and on Home, so the
+   browser's own scroll anchoring must not move it a second time (Chrome corrected a sign-ins change
+   too, and the card moved by the same again). Other views keep the browser's. */
+#main.apv-hold{overflow-anchor:none}
 .apv-ask{font-size:var(--fs-base);font-weight:var(--fw-semibold);line-height:1.5;margin-bottom:6px}
 .apv-ask-stem{color:var(--accent);font-weight:var(--fw-bold)}
 /* The plain summary (Kevin, 22 Sep 2026): what the task is and what approving
@@ -128,10 +133,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-tier1{border:1px solid var(--danger);background:var(--danger-bg);color:var(--danger);border-radius:var(--radius-md);padding:8px 12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:8px}
 .apv-details{margin:8px 0}
 .apv-details summary{cursor:pointer;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent)}
-.apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
-/* The work starts OPEN (Kevin, 23 Sep 2026) and scrolls in its own box, the
-   same as the task it was given (Kevin, 24 Sep 2026). A long report is read by
-   scrolling, never a "Show all" click, and it does not bury the buttons. */
+.apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
+/* The work starts OPEN (Kevin, 23 Sep 2026). A long report is read by scrolling,
+   never a "Show all" click, and it does not bury the buttons (24 Sep 2026). NO BOX
+   INSIDE A CARD SCROLLS (Kevin, 27 Nov 2026): the work and the task it was given each
+   scrolled in a box of their own, so the wheel moved a box, then the page, and he
+   could not tell where one card ended. Everything shows at full length and only
+   the page scrolls; the pinned buttons keep the decision in reach. */
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
 /* Tick to decide several at once (Kevin, 15 Sep 2026). The tick lives in
@@ -212,6 +220,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
    decide (Approve, the note, the two slower approvals), no (the reasons), and
    not yet (the dates). Every one is a single click. */
 .apv-decide{position:sticky;bottom:0;background:var(--bg-surface);padding:10px 0 4px;margin-top:8px;border-top:1px solid var(--border-subtle);z-index:2}
+/* WHOSE BUTTONS THESE ARE (Kevin, 27 Nov 2026: he approved the wrong card more than once).
+   The rows pin only inside .apv-pinzone, which starts at the card's own work, so the next
+   card's buttons never sit over its header: its header is read first. The rows name their card. */
+.apv-decide-for{font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apv-decide-for strong{color:var(--text-primary)}
 .apv-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
 .apv-decide .apv-reasons,.apv-decide .apv-defer{margin-top:6px;padding-top:6px}
 .apv-actions .apv-note-row{display:flex;flex:1 1 260px;min-width:0;margin-top:0;padding:0;flex-wrap:nowrap;align-items:flex-start;gap:6px}
@@ -227,7 +240,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-state.saving{background:var(--bg-subtle);color:var(--text-secondary)}
 .apv-state.saved{background:var(--success-bg);color:var(--success)}
 .apv-state.failed{background:var(--danger-bg);color:var(--danger)}
+.apv-state .apv-state-name{font-weight:var(--fw-regular);color:var(--text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .apv-state .apv-undo{margin-left:auto;font-size:var(--fs-xs);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:4px 12px;cursor:pointer;color:var(--text-primary)}
+.apv-state .apv-undo:disabled{cursor:default;color:var(--text-muted)}   /* the Undo window has closed */
 /* Answered Your step cards (Kevin, 9 Oct 2026): the card leaves the queue at once and its Undo
    sits here, at the foot of the window wherever he has scrolled, for two minutes. */
 .apv-answered-bar{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:290;display:flex;flex-direction:column;gap:6px;width:min(560px,calc(100vw - 32px))}
@@ -237,8 +252,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-answered-row .apv-answered-left{font-size:var(--fs-xs);opacity:.75;font-variant-numeric:tabular-nums}
 .apv-answered-row .apv-undo{font-size:var(--fs-xs);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:4px 12px;cursor:pointer;color:var(--text-primary);font-weight:var(--fw-semibold)}
 .apv-answered-line{font-size:var(--fs-xs);color:var(--text-muted);margin:0 0 10px}
-.apv-card.apv-done{transition:opacity .25s ease,max-height .3s ease,margin .3s ease,padding .3s ease;overflow:hidden}
-.apv-card.apv-done.apv-gone{opacity:0;max-height:0!important;margin-bottom:0;padding-top:0;padding-bottom:0;border-width:0}
 .apv-kind{font-size:var(--fs-xs);color:var(--text-secondary)}
 .apv-kind a{color:var(--accent);cursor:pointer;margin-left:6px}
 @media (max-width:600px){.apv-card{padding:10px 12px}.apv-actions .btn{flex:1 1 auto}}
@@ -266,7 +279,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
    written elsewhere may apply to, and the line at the top of the queue. */
 .apv-cross{border:1px solid var(--accent-gold);background:var(--warning-bg);border-radius:var(--radius-md);padding:8px 12px;margin:0 0 8px;font-size:var(--fs-sm)}
 .apv-cross-head{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-primary);margin-bottom:4px}
-.apv-cross-note{color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
+.apv-cross-note{color:var(--text-primary);white-space:pre-wrap;word-break:break-word}
 .apv-cross-why{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px;word-break:break-word}
 .apv-cross-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
 .apv-cross-notice{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--accent-gold);background:var(--warning-bg);border-radius:var(--radius-md);padding:8px 12px;margin-bottom:12px;font-size:var(--fs-sm)}
@@ -282,9 +295,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-trail-last{color:var(--text-primary);font-weight:var(--fw-regular)}
 .apv-trail-day{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);margin:8px 0 2px;padding-bottom:2px;border-bottom:1px solid var(--border-subtle)}
 .apv-trail-day.latest{color:var(--accent-hover)}
-/* Open by default (23 Sep 2026), newest at the bottom and scrolled to it:
-   column-reverse starts a scroll box at its end, so no script has to. */
-.apv-trail-list{display:flex;flex-direction:column-reverse;max-height:220px;overflow:auto;margin-top:4px}
+/* Open by default (23 Sep 2026), newest at the bottom. It scrolled in a box of its own that
+   started at its end; since 27 Nov 2026 no box inside a card scrolls, so it shows at full length. */
+.apv-trail-list{margin-top:4px}
 .apv-trail-row{display:grid;grid-template-columns:44px 118px minmax(0,1fr);gap:8px;font-size:var(--fs-sm);padding:3px 0;align-items:start;word-break:break-word}
 .apv-trail-row.latest{background:var(--accent-soft);border-radius:var(--radius-sm);padding:3px 4px}
 .apv-trail-time{color:var(--text-muted);font-size:var(--fs-xs)}
@@ -967,7 +980,9 @@ function switchAgentsView(view){
     if(view==='checks') loadChecksAndRender();
     if(view==='estate') loadEstateStatus();
     if(view==='built') loadBuilt();
-    window.scrollTo(0,0);
+    apvOwnScrollTo(0);
+    document.getElementById('main').classList.toggle('apv-hold', HOME_MODE || view === 'approvals');
+    apvPlaceMark();   // a move he asked for: held from here
 }
 window.switchAgentsView = switchAgentsView;
 
@@ -1871,7 +1886,9 @@ function renderApprovals(){
         ? apvBulkBarHtml(shown) + shown.map(apvCardHtml).join('')
         : `<div class="empty-state"><p>No approvals match these filters.</p>
            <button class="btn btn-sm" onclick="clearApvFilters()">Clear filters</button></div>`;
+    const strips = apvStripsBeforeRedraw(body);
     body.innerHTML = html;
+    apvStripsAfterRedraw(body, strips);
     restoreApprovalDrafts();
     apvBulkRestore(bulkDraft);
 }
@@ -1893,18 +1910,21 @@ function apvTodayCount(){ return allApprovals.filter(t=>apvArrivedToday(t) && ap
 function setApvAgentFilter(key){
     _apvAgentFilter = key;
     renderApprovals();
+    apvPlaceMark();   // he asked for this redraw: it is not a move to undo
 }
 window.setApvAgentFilter = setApvAgentFilter;
 
 function toggleApvTier1(){
     _apvTier1Only = !_apvTier1Only;
     renderApprovals();
+    apvPlaceMark();   // he asked for this redraw: it is not a move to undo
 }
 window.toggleApvTier1 = toggleApvTier1;
 
 function toggleApvToday(){
     _apvTodayOnly = !_apvTodayOnly;
     renderApprovals();
+    apvPlaceMark();   // he asked for this redraw: it is not a move to undo
 }
 window.toggleApvToday = toggleApvToday;
 
@@ -1914,6 +1934,7 @@ function toggleApvNewestFirst(){
     try { localStorage.setItem(APV_NEWEST_KEY, _apvNewestFirst ? '1' : '0'); }
     catch(e){ console.warn('could not remember the queue order', e); }
     renderApprovals();
+    apvPlaceMark();   // he asked for this redraw: it is not a move to undo
 }
 window.toggleApvNewestFirst = toggleApvNewestFirst;
 
@@ -1922,6 +1943,7 @@ function clearApvFilters(){
     _apvTier1Only = false;
     _apvTodayOnly = false;
     renderApprovals();
+    apvPlaceMark();   // he asked for this redraw: it is not a move to undo
 }
 window.clearApvFilters = clearApvFilters;
 
@@ -2159,6 +2181,7 @@ async function agBulkDecide(outcome, opts){
     // An old tab decides nothing, so the run never starts (7 Oct 2026). Locked across the check,
     // so a second tap cannot start a second run while it waits; the reload takes the lock away.
     apvBulkLock(true);
+    const startedAt = Date.now();   // the press: a move at the end only if he has not moved since
     if(await apvStaleTab()) return;
     const total = ids.length;
     // Where the view lands, worked out while every card is still on the
@@ -2219,9 +2242,9 @@ async function agBulkDecide(outcome, opts){
     // The lowest ticked card's strip at the top, the card after it below.
     // If that card has already folded (a slow run), its fold has handed the
     // focus on and that stands; if a reload took it away, the card after it.
-    if(document.querySelector(`#approvalsBody .apv-card[data-apv-card="${lowest}"]:not(.apv-gone)`)) _apvFocusId = lowest;
+    if(document.querySelector(`#approvalsBody .apv-card[data-apv-card="${lowest}"]`)) _apvFocusId = lowest;
     else if(_apvFocusId === lowest) _apvFocusId = landing;
-    apvScrollToFocus();
+    apvScrollToFocus(startedAt);
 }
 
 // Put the remaining ticks and the locked bar back after anything rebuilt the
@@ -2287,6 +2310,7 @@ async function apvBulkDeferTo(until){
     const ids = apvBulkIds();
     if(!ids.length) return;
     apvBulkLock(true);
+    const startedAt = Date.now();
     if(await apvStaleTab()) return;   // an old tab knocks nothing back, as agBulkDecide (15 Oct 2026)
     const whyEl = document.getElementById('apvBulkDeferWhy');
     const why = (whyEl && whyEl.value || '').trim();
@@ -2308,7 +2332,7 @@ async function apvBulkDeferTo(until){
     apvBulkLock(false);
     _apvSelected.clear();
     _apvFocusId = landing;
-    await refreshApprovalZone(true);
+    await refreshApprovalZone(startedAt);
     const parts = [`Knocked back ${done} to ${apvDeferWhenLabel(until)}.`];
     if(elsewhere) parts.push(`${elsewhere} already decided elsewhere.`);
     if(failed) parts.push(`${failed} could not be knocked back and are still in the queue.`);
@@ -2853,6 +2877,7 @@ function apvCardHtml(t){
                 <span><strong>To:</strong> ${esc(e.to)}</span>
             </div>`;
         })()}
+        <div class="apv-pinzone">
         <details class="apv-details"${_apvOpen.workShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.workShut.delete('${t.id}');else _apvOpen.workShut.add('${t.id}')">
             <summary>${work ? 'The agent’s full work' : 'The agent left its work empty'}</summary>
             ${work
@@ -2863,6 +2888,7 @@ function apvCardHtml(t){
         ${apvDocumentLineHtml(t, askLine)}
         ${apvTrailHtml(t)}
         <div class="apv-decide" data-apv-decide>
+            ${apvDecideForHtml(t)}
             ${signIn ? `<div class="apv-actions" data-apv-signin-actions>
                 <a class="btn btn-success" href="${esc(apvSignInLink(signIn))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>
                 ${apvNoteRowHtml(t.id, 'Optional note. Kept with a knock-back or a close.', false)}
@@ -2877,7 +2903,13 @@ function apvCardHtml(t){
             ${apvReasonChips(t.id)}`}
             ${apvDeferRow(t.id)}
         </div>
+        </div>
     </div>`;
+}
+// The line that names the card a row of buttons decides (27 Nov 2026), so the row pinned at the
+// foot of the screen says whose it is.
+function apvDecideForHtml(t){
+    return `<div class="apv-decide-for" data-apv-decide-for title="${esc(t.name)}">Deciding: <strong>${esc(t.name)}</strong></div>`;
 }
 
 // ─── YOUR STEP (Kevin, 7 Oct 2026) ───────────────────────────────────
@@ -2981,12 +3013,14 @@ function apvStepCardHtml(t, ys){
             <span class="apv-age" title="Measured from when it came back to you">waiting ${esc(agoText(t.submittedAt))}</span>
             ${links}
         </div>
+        <div class="apv-pinzone">
         <details class="apv-details"${_apvOpen.workShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.workShut.delete('${t.id}');else _apvOpen.workShut.add('${t.id}')">
             <summary>The agent's work, as you approved it</summary>
             ${ys.work ? `<div class="apv-body" data-apv-work>${apvLinkify(ys.work)}</div>` : `<div class="apv-body">The agent left no work under the step.</div>`}
         </details>
         ${apvTrailHtml(t)}
         <div class="apv-decide" data-apv-decide>
+            ${apvDecideForHtml(t)}
             <div class="apv-actions" data-apv-step-actions>
                 ${apvNoteRowHtml(t.id, ys.robot ? "Only if you can't: say why (no account, no password, the wrong site)" : "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
                 ${ys.robot ? '' : `<button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>`}
@@ -2994,6 +3028,7 @@ function apvStepCardHtml(t, ys){
             </div>
             <div id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</div>
             ${apvDeferRow(t.id)}
+        </div>
         </div>
     </div>`;
 }
@@ -3009,6 +3044,7 @@ function apvStepCardHtml(t, ys){
 function apvStepDone(taskId){ return apvStepSay(taskId, false); }
 function apvStepCant(taskId){ return apvStepSay(taskId, true); }
 async function apvStepSay(taskId, cant){
+    _apvActedAt[taskId] = Date.now();   // the move after it is made only if he has not moved since
     const t = allApprovals.find(x=>x.id===taskId);
     const ys0 = t ? apvYourStep(t) : null;
     // A robot's sign-in is cleared by the sign-in itself, never by a "done" line.
@@ -3089,8 +3125,15 @@ function apvStepAnswered(t){
     allAnswered = allAnswered.filter(x => x.id !== t.id).concat([t]);
     const card = document.querySelector(`[data-apv-card="${t.id}"]`);
     if(card){
-        card.classList.add('apv-done');
-        apvFoldAway(t.id);
+        // It leaves at once (its Undo is in the bar at the foot of the window), and the card after
+        // it takes the top: the one move, straight after his press (27 Nov 2026; it used to fold, and
+        // the fold sent the view to whichever card the last decision had left in focus).
+        _apvFocusId = apvLandingAfter([t.id]);
+        card.remove();
+        const body = document.getElementById('approvalsBody');
+        const left = body ? body.querySelectorAll('.apv-card:not(.apv-done)').length : 0;
+        if(!left && !Object.keys(_apvUndo).length) renderApprovals();
+        else { apvSyncCountsInPlace(null); apvScrollToFocus(_apvActedAt[t.id] || 0); }
     } else {
         apvSyncCountsInPlace(null);
     }
@@ -3150,6 +3193,7 @@ function apvAnsweredLineHtml(){
         + `${waiting.length} answered card${waiting.length === 1 ? '' : 's'} going back to the agents at the next check (every half hour).</div>`;
 }
 async function apvStepUndo(taskId){
+    const pressed = Date.now();
     const t = allAnswered.find(x => x.id === taskId);
     const u = apvStepUndoInfo(t);
     if(!u){ apvRenderAnsweredBar(); return 'gone'; }
@@ -3193,7 +3237,7 @@ async function apvStepUndo(taskId){
         renderApprovals();
         const box = document.getElementById('apvNote-' + taskId);
         if(box){ box.value = u.words; apvGrowNote(box); }
-        apvScrollToFocus();
+        apvScrollToFocus(pressed);
         postApprovalBadge();
         try { await postTaskComment(taskId, 'Kevin took back his answer with Undo. The card is back in his queue.'); }
         catch(e){ console.error('undo comment failed', e); }
@@ -3615,6 +3659,7 @@ window.apvStaleTab = apvStaleTab;
 async function applyApprovalDecision(taskId, outcome, remember, opts){
     opts = opts || {};
     if(_apvSaving.has(taskId)) return 'elsewhere';
+    _apvActedAt[taskId] = Date.now();   // the move that follows the save is made only if he has not moved since
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return 'elsewhere';
     // Your step (7 Oct 2026): approved already. A verdict here would change nothing he meant
@@ -4139,34 +4184,304 @@ function apvShowSaving(taskId, what){
 function apvShowSaved(taskId, t, text, undoPayload, kind){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(!card) return;
+    // Where he is when the save lands. Still on this card (it covers the middle of the screen): it is
+    // about to shrink to its strip, so the strip goes to the top with the next card under it, as if
+    // he had not moved. Moved on: the card he is reading now is held where it is while this one shrinks.
+    // The marks held are the ones taken before this run changed anything (a knock-back has just
+    // redrawn the list above), less this card, so those changes are put right too.
+    const [vt, vb] = apvViewBand(), mid = (vt + vb) / 2, cy = apvDocY(card);
+    const stillOnIt = cy <= mid && cy + card.getBoundingClientRect().height > mid;
+    if(!stillOnIt) _apvPlace.marks = _apvPlace.marks.filter(m => m.card !== taskId);
     card.classList.remove('apv-saving');
     card.classList.add('apv-done');
     // Hide the decided card's controls; only the strip remains readable.
     Array.from(card.children).forEach(ch=>{ if(!ch.classList.contains('apv-state')) ch.style.display = 'none'; });
-    apvStateStrip(taskId, 'saved', `Saved. ${text}`, `<button class="apv-undo" type="button" data-apv-undo onclick="apvUndo('${taskId}')">Undo</button>`);
+    // The strip names the card, so he can see which one his answer went to (27 Nov 2026).
+    const name = t && t.name ? `<span class="apv-state-name" data-apv-state-name>${esc(t.name)}</span>` : '';
+    apvStateStrip(taskId, 'saved', `Saved. ${text}`, `${name}<button class="apv-undo" type="button" data-apv-undo onclick="apvUndo('${taskId}')">Undo</button>`);
     const timer = setTimeout(()=>apvFoldAway(taskId), APV_UNDO_MS);
     _apvUndo[taskId] = { t, payload: undoPayload, timer, kind: kind || 'decision' };
     // A bulk run sets where it lands once, at the end, not once per card.
-    if(!_apvBulkBusy){ _apvFocusId = taskId; apvScrollToFocus(); }
+    if(!_apvBulkBusy){ _apvFocusId = taskId; apvScrollToFocus(stillOnIt ? Date.now() : (_apvActedAt[taskId] || 0)); }
+    // A bulk run lands once, at the end, but the card in front of him shrinking would lift whatever
+    // is under it into view while the run goes on: that card's strip goes to the top as it saves.
+    else if(stillOnIt) apvScrollToCard(card, Date.now());
 }
 
-// THE VIEW MOVES ON TO THE NEXT CARD (Kevin, 30 Sep 2026). This replaces
-// "the view returns to the first card" (15 Sep 2026): working through the
-// queue out of order, every decision threw him back to the top. Now the
-// decided card's Saved strip is put at the top, under the sticky top bar
-// (and the bulk bar when it is showing), with the card that followed it
-// straight underneath, so the Undo and the next thing to read are both in
-// view. When the strip folds away, that next card takes its place at the
-// top. The last card in the list hands on to the one above it.
-// If Kevin scrolls during the five-second Undo window, the fold that follows
-// leaves him where he went rather than dragging him back.
-let _apvAutoScrollUntil = 0, _apvUserScrolled = false;
-let _apvFocusId = '';   // the card the view holds on; blank means the first card
-window.addEventListener('scroll', ()=>{ if(Date.now() > _apvAutoScrollUntil) _apvUserScrolled = true; }, { passive: true });
+// THE VIEW MOVES ON TO THE NEXT CARD (Kevin, 30 Sep 2026), ONCE (Kevin, 27 Nov 2026). This
+// replaced "the view returns to the first card" (15 Sep 2026): working the queue out of order,
+// every decision threw him back to the top. The decided card's Saved strip is put at the top,
+// under the sticky top bar (and the bulk bar when it is showing), with the card that followed it
+// straight underneath, so the Undo and the next thing to read are both in view. The last card in
+// the list hands on to the one above it.
+// That is the ONLY move the page makes by itself: made at once (never a glide), and only when
+// Kevin has not scrolled, tapped, clicked or typed since he pressed the button. The strip then
+// stays where it is until it is off the screen (apvTidyStrips): it used to fold away five seconds
+// later and the next card rose into its place. Why (27 Nov 2026): the Home copy never scrolls (Home
+// does), so it never saw him scroll, and five seconds after every decision the fold glided Home
+// back to "the next card" wherever he had gone; a click in that glide decided whatever card passed
+// under it. Measured on test: he scrolled 1,000px on to the next card and was pulled back 1,000px.
+// Where the page's own last scroll left it, until the scroll event that reports it: a scroll that
+// lands anywhere else is Kevin's (a time window here missed his scroll straight after a page move).
+let _apvOwnScrollY = null;
+let _apvActionAt = 0;          // his last click on a button or a link
+let _apvMovedAt = 0;           // his last scroll, tap, click or key
+const _apvActedAt = {};        // taskId -> when he pressed the button that decided it
+let _apvFocusId = '';          // the card the view holds on; blank means the first open card
+// Where Home says he is looking inside this copy (homeViewport): the top of the band and its height.
+let _homeVisTop = 0, _homeVisH = window.innerHeight;
+function apvSetHomeBand(top, h){
+    _homeVisTop = Math.max(0, Number(top) || 0);
+    _homeVisH = Math.max(120, Number(h) || 0);
+    document.documentElement.style.setProperty('--home-vis-top', `${_homeVisTop}px`);
+    document.documentElement.style.setProperty('--home-vis-h', `${_homeVisH}px`);
+}
+document.addEventListener('click', (e) => {
+    const t = e.target && e.target.closest ? e.target : null;
+    if(t && t.closest('button, a, [onclick]')) _apvActionAt = Date.now();
+    // Outside the cards, what changes is what he asked for (apvPlaceKeep): for this click only. Not in
+    // a pinned bar (the bulk bar): it sits at the top of the list, far above him, so the cards are held.
+    if(t && !t.closest('.apv-card') && !apvInPinned(t)){ _apvOwnChange = true; setTimeout(() => { _apvOwnChange = false; }, 0); }
+}, true);
+function apvInPinned(el){
+    for(let n = el; n && n !== document.body; n = n.parentElement){
+        if(/sticky|fixed/.test(getComputedStyle(n).position)) return true;
+    }
+    return false;
+}
+['wheel', 'touchmove', 'keydown', 'pointerdown'].forEach(t => window.addEventListener(t, () => { _apvMovedAt = Date.now(); }, { passive: true, capture: true }));
+window.addEventListener('scroll', () => {
+    if(_apvOwnScrollY === null || Math.abs(window.pageYOffset - _apvOwnScrollY) > 1) _apvMovedAt = Date.now();
+    _apvOwnScrollY = null;
+    apvPlaceMark();
+    apvTidySoon();
+}, { passive: true });
+
+// What sits over the top of the screen: the sticky top bar, and the bulk bar when it is showing.
+function apvViewOffset(){
+    let offset = 0;
+    const top = document.querySelector('.topbar');
+    if(top) offset += top.getBoundingClientRect().height;
+    const bulk = document.getElementById('apvBulk');
+    if(bulk && bulk.classList.contains('on')) offset += bulk.getBoundingClientRect().height + 12;
+    return offset;
+}
+// The part of this page he can see, top and bottom, in this page's own coordinates.
+function apvViewBand(){
+    const off = apvViewOffset();
+    return HOME_MODE ? [_homeVisTop + off, _homeVisTop + _homeVisH]
+        : [window.pageYOffset + off, window.pageYOffset + window.innerHeight];
+}
+const apvDocY = (el) => el.getBoundingClientRect().top + window.pageYOffset;
+const apvShown = (el) => !!el && el.getBoundingClientRect().height > 0;
+
+// NOTHING MOVES UNDER HIM (Kevin, 27 Nov 2026). A card arriving, a card answered in the other copy,
+// a strip leaving, the knocked-back list or a cross-card note changing above him used to push the
+// card he was reading off its place (on test a new urgent card moved it 371px, and a different card
+// sat under his pointer). After every change to the page, the card at the top of what he can see
+// is put back exactly where it was on screen: on the AI Agents tab before the page is painted, and
+// on Home by scrolling Home in the same moment. Only a change ABOVE that point can move it, so
+// whatever he opens, ticks or types in is never moved. The point is held three levels deep (the
+// card, the part of it there, the part of that), because a card's work can run to thousands of
+// pixels and a strip appearing at its top would otherwise move the line he is on.
+// marks: [{ sel, steps: [[partKey, nthOfKey]], ys: [page y per level] }], top first; screen: where the
+// screen was when they were taken. Only what MOVED IN THE PAGE is put right: a scroll made by code
+// (a deep link, a test) leaves every part where it was in the page, so it is never undone.
+const _apvPlace = { marks: [], screen: 0 };
+// Held only once the page has drawn itself the first time (start()): while it loads, the sections
+// grow from nothing, and holding them scrolled Home under the loading copy (a reload for a new version).
+let _apvPlaceReady = false;
+// The top of the screen in this page's coordinates, bars left out.
+function apvScreenTop(){ return HOME_MODE ? _homeVisTop : window.pageYOffset; }
+// WHAT HE IS READING (final review, 27 Nov 2026: holding the first CARD on screen pushed a section
+// heading he was reading, above that card, off the top). In page order: the first section on screen;
+// inside it, the first part still on screen at the top, and so on down, until a part starts on screen
+// (held by its own top) or nothing goes further. Never a pinned row (the buttons, the bulk bar): it
+// stays on the screen while the page moves. A card is found again by its id, a part with an id by its
+// id, any other part by its kind and its place among parts of that kind, so a strip put in at the top
+// of a card (Saving, Saved) or a card arriving above does not lose the line he is on.
+const APV_PLACE_DEPTH = 6;
+const apvPartKey = (k) => k.classList[0] || k.tagName;
+function apvStepOf(k, kids){
+    const card = k.getAttribute('data-apv-card');
+    if(card) return ['card', card];
+    if(k.id) return ['id', k.id];
+    const key = apvPartKey(k);
+    return [key, kids.filter(x => apvPartKey(x) === key).indexOf(k)];
+}
+function apvStepFind(el, step){
+    const kids = Array.from(el.children);
+    if(step[0] === 'card') return kids.find(x => x.getAttribute('data-apv-card') === step[1]) || null;
+    if(step[0] === 'id') return kids.find(x => x.id === step[1]) || null;
+    return kids.filter(x => apvPartKey(x) === step[0])[step[1]] || null;
+}
+function apvPlaceMarkOf(root, sel, top){
+    const mark = { sel, steps: [], ys: [apvDocY(root)], card: '' };
+    let at = root;
+    for(let d = 0; d < APV_PLACE_DEPTH && apvDocY(at) < top - 1; d++){
+        const kids = Array.from(at.children);
+        const k = kids.find(x => apvShown(x) && !/sticky|fixed/.test(getComputedStyle(x).position)
+            && apvDocY(x) + x.getBoundingClientRect().height > top + 1);
+        if(!k) break;
+        const step = apvStepOf(k, kids);
+        if(step[0] === 'card') mark.card = step[1];
+        mark.steps.push(step);
+        mark.ys.push(apvDocY(k));
+        at = k;
+    }
+    // Only the foot of a list showing (its padding, under its last row): the list can grow inside
+    // without its top moving, so something that starts on screen is held ahead of it.
+    mark.footOnly = apvDocY(at) < top - 1 && !at.closest('.apv-card');
+    return mark;
+}
+function apvPlaceMark(){
+    _apvPlace.marks = [];
+    _apvPlace.screen = apvScreenTop();
+    if(!HOME_MODE && _agentsView !== 'approvals') return;
+    const [top, bottom] = apvViewBand();
+    const onScreen = (el) => { if(!apvShown(el)) return false; const y = apvDocY(el); return y + el.getBoundingClientRect().height > top + 1 && y < bottom; };
+    // Sections in page order (Home draws the CEO brief below the queue though it comes first in the page).
+    const zones = Array.from(document.querySelectorAll('#main .zone[id]')).filter(onScreen).sort((a, b) => apvDocY(a) - apvDocY(b));
+    const marks = [];
+    if(zones.length) marks.push(apvPlaceMarkOf(zones[0], '#' + zones[0].id, top));
+    const startsOnScreen = zones.find(z => apvDocY(z) >= top - 1);
+    if(marks.length && marks[0].footOnly && startsOnScreen && startsOnScreen !== zones[0]) marks.unshift(apvPlaceMarkOf(startsOnScreen, '#' + startsOnScreen.id, top));
+    // To fall back on if what he is reading goes (a card answered in the other copy): the cards on
+    // screen, then a section that starts on screen.
+    const body = document.getElementById('approvalsBody');
+    if(body && body.offsetParent !== null){
+        for(const card of body.querySelectorAll(':scope > .apv-card')){
+            if(!onScreen(card)) continue;
+            const id = card.getAttribute('data-apv-card');
+            marks.push({ sel: `#approvalsBody > .apv-card[data-apv-card="${id}"]`, steps: [], ys: [apvDocY(card)], card: id });
+            if(marks.length >= 5) break;
+        }
+    }
+    if(startsOnScreen) marks.push(apvPlaceMarkOf(startsOnScreen, '#' + startsOnScreen.id, top));
+    _apvPlace.marks = marks;
+}
+// A click outside the cards (a list opened or folded above them, a tab, a filter, a section's fold)
+// changes what he asked to change: the place is taken again from there, never undone.
+let _apvOwnChange = false;
+// The jump to a section of this copy that Home is gliding to (homeJump), and where that section was.
+let _apvJump = null;
+function apvHomeGliding(){
+    try { return typeof window.parent.homeAgentsGliding === 'function' ? String(window.parent.homeAgentsGliding() || '') : ''; }
+    catch(e){ console.warn('could not ask Home whether it is mid-jump', e); return ''; }
+}
+// The section moved while Home glides to it (a re-read redrew the queue above it): the glide is
+// aimed at where it is now, still a glide. Once the glide is over, the jump is forgotten.
+function apvJumpReaim(){
+    if(!_apvJump) return;
+    if(apvHomeGliding() !== _apvJump.key || !_apvJump.zone.isConnected){ _apvJump = null; return; }
+    const y = Math.round(apvDocY(_apvJump.zone));
+    if(Math.abs(y - _apvJump.y) < 1) return;
+    _apvJump.y = y;
+    if(_homeSendHeight) _homeSendHeight();
+    homeEmbedTell({ type:'agentsHomeScrollTo', y });
+}
+function apvPlaceKeep(){
+    if(HOME_MODE) apvJumpReaim();
+    if(_apvOwnChange || !_apvPlaceReady){ apvPlaceMark(); return; }
+    for(const m of _apvPlace.marks){
+        const root = document.querySelector(m.sel);
+        if(!apvShown(root)) continue;   // gone or hidden: hold on to the next one
+        let el = root, depth = 0;
+        for(const step of m.steps){
+            const k = apvStepFind(el, step);
+            if(!apvShown(k)) break;
+            el = k; depth++;
+        }
+        // The card he was reading has gone (answered elsewhere): what it held is gone too.
+        if(depth < m.steps.length && m.steps[depth][0] === 'card') continue;
+        let dy = apvDocY(el) - m.ys[depth];   // how far it moved in the page
+        // A page that got shorter at its foot has already been scrolled up by the browser: that part
+        // is not made twice. (On Home, apvMoveHome does the same against Home's own scroll.)
+        if(dy && !HOME_MODE){
+            const now = window.pageYOffset, max = document.documentElement.scrollHeight - window.innerHeight;
+            if(now < _apvPlace.screen - 1 && now >= max - 1) dy -= now - _apvPlace.screen;
+        }
+        dy = Math.round(dy);
+        if(dy) apvScrollByNow(dy);
+        break;
+    }
+    apvPlaceMark();
+}
+// Home, moved by this copy in this same moment, so what moved and the move are painted together.
+// Returns false when Home cannot be reached that way. move(pw) makes the move; the part of it the
+// browser made itself as the frame changed height is never made twice.
+function apvMoveHome(move){
+    try {
+        const fe = window.frameElement, pw = window.parent;
+        if(!fe || !pw || pw === window) return false;
+        const was = pw.scrollY, h = homeEmbedMeasure();
+        if(h > 0){ fe.style.height = `${h}px`; fe.getBoundingClientRect(); }   // its new height first, so the move is not cut short
+        const ok = move(pw, pw.scrollY - was);
+        // Where Home's next viewport message will say he is, read from Home itself (the row may have pinned).
+        const band = typeof pw.homeAgentsBand === 'function' ? pw.homeAgentsBand() : null;
+        if(band) apvSetHomeBand(band.top, band.h); else _homeVisTop += pw.scrollY - was;
+        if(_homeSendHeight) _homeSendHeight();
+        return ok !== false;
+    } catch(e){ console.warn('Home move in place failed, asking Home instead', e); return false; }
+}
+function apvOwnScrollTo(y){ window.scrollTo(0, y); _apvOwnScrollY = window.pageYOffset; }
+// The page's own scroll by dy, at once.
+function apvScrollByNow(dy){
+    if(!HOME_MODE){ apvOwnScrollTo(window.pageYOffset + dy); return; }
+    // Home is gliding to a jump button's section: an instant scroll would stop it dead. A section of
+    // this copy is aimed again by apvJumpReaim; Home aims any other again once the glide stops.
+    if(apvHomeGliding()){ if(_homeSendHeight) _homeSendHeight(); return; }
+    if(apvMoveHome((pw, already) => { if(dy - already) pw.scrollBy(0, dy - already); })) return;
+    _homeVisTop += dy;
+    if(_homeSendHeight) _homeSendHeight();
+    homeEmbedTell({ type:'agentsHomeScrollBy', dy });
+}
+(function apvPlaceWatch(){
+    const root = document.getElementById('main');
+    if(!root || typeof MutationObserver !== 'function') return;
+    new MutationObserver(apvPlaceKeep).observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
+    if(typeof ResizeObserver === 'function') new ResizeObserver(apvPlaceKeep).observe(root);
+    window.addEventListener('resize', apvPlaceKeep);
+})();
+
+// A decided card's strip, once its Undo has gone, leaves when it is off the screen, after he has
+// stopped scrolling. Off the screen, its going moves nothing he can see.
+let _apvTidyTimer = 0;
+function apvTidySoon(){ clearTimeout(_apvTidyTimer); _apvTidyTimer = setTimeout(apvTidyStrips, 400); }
+function apvTidyStrips(){
+    const body = document.getElementById('approvalsBody');
+    if(!body || body.offsetParent === null) return;
+    const [top, bottom] = apvViewBand();
+    // Measured first, every one, then removed: a strip taken out moves the ones after it.
+    Array.from(body.querySelectorAll('.apv-card[data-apv-folded]')).filter(c => {
+        const y = apvDocY(c);
+        return y + c.getBoundingClientRect().height <= top || y >= bottom;
+    }).forEach(c => c.remove());
+}
+// The strips on screen stay where they are across a redraw, between the same two cards.
+function apvStripsBeforeRedraw(body){
+    const near = (el, dir) => {
+        let n = el[dir];
+        while(n && !(n.classList && n.classList.contains('apv-card') && !n.classList.contains('apv-done'))) n = n[dir];
+        return n ? n.getAttribute('data-apv-card') : '';
+    };
+    return Array.from(body.querySelectorAll('.apv-card.apv-done')).map(el =>
+        ({ el, next: near(el, 'nextElementSibling'), prev: near(el, 'previousElementSibling') }));
+}
+function apvStripsAfterRedraw(body, strips){
+    const open = id => id && body.querySelector(`.apv-card[data-apv-card="${id}"]:not(.apv-done)`);
+    const lastAfter = {};
+    strips.forEach(s => {
+        if(open(s.el.getAttribute('data-apv-card'))) return;   // back in the queue (Undo elsewhere): the card is drawn, not the strip
+        const next = open(s.next), prev = open(s.prev);
+        if(next) next.before(s.el);
+        else if(prev){ (lastAfter[s.prev] || prev).after(s.el); lastAfter[s.prev] = s.el; }
+    });
+}
 
 // Where the view lands once `ids` leave the list: the first card still open
 // below the lowest of them, or the nearest one above when they were at the
-// bottom. Cards already decided and folding away are passed over.
+// bottom. Cards already decided are passed over.
 function apvLandingAfter(ids){
     const leaving = new Set(ids);
     const body = document.getElementById('approvalsBody');
@@ -4174,28 +4489,30 @@ function apvLandingAfter(ids){
     const idOf = c => c.getAttribute('data-apv-card');
     const lowest = cards.reduce((m, c, i) => leaving.has(idOf(c)) ? i : m, -1);
     if(lowest === -1) return '';
-    const open = c => !leaving.has(idOf(c)) && !c.classList.contains('apv-done') && !c.classList.contains('apv-gone');
+    const open = c => !leaving.has(idOf(c)) && !c.classList.contains('apv-done');
     const hit = cards.slice(lowest + 1).find(open) || cards.slice(0, lowest).reverse().find(open);
     return hit ? idOf(hit) : '';
 }
 
-function apvScrollToFocus(){
+// `since`: when he pressed the button that asks for this move. Once he has scrolled, tapped,
+// clicked or typed since, he is somewhere he chose, and the page leaves him there.
+function apvScrollToFocus(since){
     const body = document.getElementById('approvalsBody');
-    const card = body ? ((_apvFocusId && body.querySelector(`.apv-card[data-apv-card="${_apvFocusId}"]:not(.apv-gone)`))
-        || body.querySelector('.apv-card:not(.apv-gone)')) : null;
-    // offsetParent is null while the approvals view is display:none: a fold
-    // timer firing after Kevin switched tab must not move the tab he is on.
+    apvScrollToCard(body ? ((_apvFocusId && body.querySelector(`.apv-card[data-apv-card="${_apvFocusId}"]`))
+        || body.querySelector('.apv-card:not(.apv-done)') || body.querySelector('.apv-card')) : null, since);
+}
+// That card at the top of the screen, at once.
+function apvScrollToCard(card, since){
+    if(_apvMovedAt > (since == null ? _apvActionAt : since)) return;
+    // offsetParent is null while the approvals view is display:none: a late
+    // save after Kevin switched tab must not move the tab he is on.
     if(!card || card.offsetParent === null) return;
-    _apvAutoScrollUntil = Date.now() + 300;
-    _apvUserScrolled = false;
-    let offset = 0;
-    const top = document.querySelector('.topbar');
-    if(top) offset += top.getBoundingClientRect().height;
-    const bulk = document.getElementById('apvBulk');
-    if(bulk && bulk.classList.contains('on')) offset += bulk.getBoundingClientRect().height + 12;
-    const y = card.getBoundingClientRect().top + window.pageYOffset - offset;
-    if(HOME_MODE){ homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.max(0, Math.round(y)) }); return; }   // the frame never scrolls; Home does
-    window.scrollTo({ top: Math.max(0, Math.round(y)) });
+    const y = Math.max(0, Math.round(apvDocY(card) - apvViewOffset()));
+    if(HOME_MODE){   // the frame never scrolls; Home does, at once, in the same moment if it can
+        const moved = apvMoveHome(pw => typeof pw.homeAgentsScrollTo === 'function' && pw.homeAgentsScrollTo(y));
+        if(!moved){ if(_homeSendHeight) _homeSendHeight(); homeEmbedTell({ type:'agentsHomeScrollTo', y, instant: true }); }
+    } else apvOwnScrollTo(y);
+    apvPlaceMark();   // this move is meant: the place is held from here
 }
 // Try again repeats the SAME call, options included: a carried note is not
 // in the card's box, so re-reading the box would send it back with no words.
@@ -4213,26 +4530,25 @@ function apvRetry(taskId){
     return applyApprovalDecision(taskId, r[0], r[1], r[2]);
 }
 window.apvRetry = apvRetry;
+// The Undo window has closed. The strip stays where it is, without its Undo, and leaves once it is
+// off the screen (apvTidyStrips), so nothing moves under him.
 function apvFoldAway(taskId){
     delete _apvUndo[taskId];
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(!card) return;
     // The view was holding on this card's strip: hand on to the card after it.
     if(_apvFocusId === taskId) _apvFocusId = apvLandingAfter([taskId]);
-    card.style.maxHeight = card.offsetHeight + 'px';
-    // The shrink can make the browser clamp the scroll position; that is the
-    // page moving, not Kevin, so it must not count as him scrolling away.
-    if(!_apvUserScrolled) _apvAutoScrollUntil = Date.now() + 400;
-    requestAnimationFrame(()=>{ card.classList.add('apv-gone'); });
-    setTimeout(()=>{
-        if(card.parentNode) card.parentNode.removeChild(card);
-        const body = document.getElementById('approvalsBody');
-        const left = body ? body.querySelectorAll('.apv-card').length : 0;
-        // Only when the visible list is empty does the page rebuild: a filter
-        // whose agent has nothing left resets to All, and an empty queue says so.
-        if(!left && !Object.keys(_apvUndo).length) renderApprovals();
-        else { apvSyncCountsInPlace(null); if(!_apvUserScrolled) apvScrollToFocus(); }
-    }, 320);
+    // The Undo becomes a plain "Done" of the same size, so the strip keeps its height.
+    const undo = card.querySelector('[data-apv-undo]');
+    if(undo){ undo.removeAttribute('data-apv-undo'); undo.removeAttribute('onclick'); undo.disabled = true; undo.textContent = 'Done'; }
+    card.setAttribute('data-apv-folded', '');
+    const body = document.getElementById('approvalsBody');
+    const left = body ? body.querySelectorAll('.apv-card:not(.apv-done)').length : 0;
+    // Only when no open card is left does the page rebuild: a filter whose
+    // agent has nothing left resets to All, and an empty queue says so.
+    if(!left && !Object.keys(_apvUndo).length){ renderApprovals(); return; }
+    apvSyncCountsInPlace(null);
+    apvTidySoon();   // once he has stopped scrolling, never in the middle of it
 }
 // Five seconds to take it back: the same fields the decision wrote, put back.
 // The hand-back poller runs every 30 minutes, so nothing has been carried out
@@ -4495,6 +4811,7 @@ async function apvDeferWrite(taskId, until, why){
 async function apvDeferNow(taskId, until){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return;
+    _apvActedAt[taskId] = Date.now();
     const noteEl = document.getElementById('apvNote-'+taskId);
     // One line: the knocked-back list reads the reason back off one line of
     // Feedback History, and the note box takes several.
@@ -4511,7 +4828,7 @@ async function apvDeferNow(taskId, until){
         if(!ok){
             toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
             _apvFocusId = apvLandingAfter([taskId]);
-            await refreshApprovalZone(true);
+            await refreshApprovalZone(_apvActedAt[taskId]);
             return;
         }
         allApprovals = allApprovals.filter(x=>x.id!==taskId);
@@ -4571,6 +4888,7 @@ function apvBackTodayIso(){
     return utc < london ? utc : london;
 }
 async function agUndefer(taskId){
+    const pressed = Date.now();
     const t = allDeferred.find(x=>x.id===taskId);
     if(!t) return;
     try {
@@ -4582,7 +4900,7 @@ async function agUndefer(taskId){
         await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of '
             + (t.backAt ? apvLondonStamp(t.backAt) : t.until) + '.');
         _apvFocusId = '';
-        await refreshApprovalZone(true);
+        await refreshApprovalZone(pressed);
         toast('Back in your queue.');
     } catch(e){
         if(e.message==='auth') return;
@@ -4600,7 +4918,7 @@ window.agUndefer = agUndefer;
 async function refreshApprovalZone(land){
     await Promise.all([loadApprovals(), loadDeferred()]);
     renderApprovals();
-    if(land) apvScrollToFocus();
+    if(land) apvScrollToFocus(typeof land === 'number' ? land : _apvActionAt);
     postApprovalBadge();
     loadChecksAndRender();
     renderRegister();
@@ -8771,16 +9089,16 @@ function homeEmbedTell(msg){
     catch(e){ console.warn('home embed message failed', e); }
 }
 let _homeSendHeight = null;   // so the ready message can go out behind the real height, never before it
+// The content's own height, never scrollHeight: scrollHeight is at least the frame's height, so a
+// frame could grow and never shrink after cards are answered (review, 14 Oct 2026).
+function homeEmbedMeasure(){
+    const main = document.getElementById('main');
+    const el = (main && getComputedStyle(main).display !== 'none') ? main : document.getElementById('loader');
+    return el ? Math.ceil(el.getBoundingClientRect().bottom + window.pageYOffset + 24) : 0;
+}
 function homeEmbedWatchHeight(){
     let last = 0, raf = 0;
-    // The content's own height, never scrollHeight: scrollHeight is at least the frame's height, so a
-    // frame could grow and never shrink after cards are answered (review, 14 Oct 2026).
-    const measure = () => {
-        const main = document.getElementById('main');
-        const el = (main && getComputedStyle(main).display !== 'none') ? main : document.getElementById('loader');
-        return el ? Math.ceil(el.getBoundingClientRect().bottom + window.pageYOffset + 24) : 0;
-    };
-    const send = () => { raf = 0; const h = measure(); if(h > 0 && h !== last){ last = h; homeEmbedTell({ type:'agentsHomeHeight', h }); } };
+    const send = () => { raf = 0; const h = homeEmbedMeasure(); if(h > 0 && h !== last){ last = h; homeEmbedTell({ type:'agentsHomeHeight', h }); } };
     _homeSendHeight = send;
     const ro = new ResizeObserver(() => { if(!raf) raf = requestAnimationFrame(send); });
     ['main','loader'].forEach(id => { const el = document.getElementById(id); if(el) ro.observe(el); });
@@ -8802,15 +9120,23 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
         const open = _homeFoldOpen[String(d.zone || '')];
         if(!open) return;
         const zone = open();
+        apvPlaceMark();   // he opened it: not a change to undo
         if(_homeSendHeight) _homeSendHeight();   // the frame is its new height before Home scrolls
-        homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.round(zone.getBoundingClientRect().top + window.pageYOffset) });
+        const y = Math.round(zone.getBoundingClientRect().top + window.pageYOffset);
+        _apvJump = { key: String(d.zone || ''), zone, y };   // aimed again if it moves mid-glide (apvJumpReaim)
+        homeEmbedTell({ type:'agentsHomeScrollTo', y });
         const toggle = zone.querySelector('.home-fold-toggle');   // a keyboard jump: the keyboard carries on from here
         if(d.focus && toggle) toggle.focus({ preventScroll:true });
         return;
     }
     if(d.type === 'homeViewport'){
-        document.documentElement.style.setProperty('--home-vis-top', `${Math.max(0, Number(d.top) || 0)}px`);
-        document.documentElement.style.setProperty('--home-vis-h', `${Math.max(120, Number(d.h) || 0)}px`);
+        // Home moved and the page did not move it: Kevin scrolled (the wheel over Home's edges, the
+        // scroll bar, the keyboard), which this copy sees only here. This copy's own moves have already
+        // set the band to where they left Home.
+        if(Math.abs(Math.max(0, Number(d.top) || 0) - _homeVisTop) > 1) _apvMovedAt = Date.now();
+        apvSetHomeBand(d.top, d.h);
+        apvPlaceMark();
+        apvTidySoon();
         return;
     }
     if(d.type === 'homeRefresh' && PAT){
@@ -8870,6 +9196,7 @@ async function start(){
             if(_homeSendHeight) _homeSendHeight();
             homeEmbedTell({ type:'agentsHomeReady', ok:true, waiting: allApprovals.length, brief: _ceoBriefState });
         }
+        _apvPlaceReady = true; apvPlaceMark();   // drawn: his place is held from here (apvPlaceKeep)
     } catch(e){
         if(e.message==='auth'){ if(HOME_MODE) homeEmbedTell({ type:'agentsHomeReady', ok:false, error:'sign-in needed' }); return; }
         document.getElementById('loader').textContent='Error loading data: '+e.message;

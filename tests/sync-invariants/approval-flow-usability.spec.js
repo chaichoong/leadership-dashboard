@@ -100,7 +100,10 @@ test.describe('every option on the card, one click each', () => {
   // work ... it needs to be like how it is with the task it was given: I can
   // just scroll down in a larger box rather than having to click another Show
   // all button." The work box capped at eight lines had scrolling switched off.
-  test('the work, the task it was given and the story so far start open; a long report scrolls in its box with no Show all', async ({ page }) => {
+  // NO BOX OF ITS OWN (Kevin, 27 Nov 2026): the two boxes that scrolled on their
+  // own made it hard to tell one card from the next, so the work shows in full
+  // and the page is what scrolls. Still never a Show all click.
+  test('the work, the task it was given and the story so far start open; a long report shows in full with no Show all and no box of its own', async ({ page }) => {
     await mockAgentsPage(page, withLongWork());
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -110,19 +113,19 @@ test.describe('every option on the card, one click each', () => {
     const body = card.locator('[data-apv-work]');
     await expect(body).toContainText('Line 1 of the agent');
     await expect(card.locator('button', { hasText: /Show (all|less)/ })).toHaveCount(0);
-    // The same box as the task it was given: same height cap, scrollable.
-    const style = (el) => { const s = getComputedStyle(el); return { maxHeight: s.maxHeight, overflowY: s.overflowY }; };
-    const work = await body.evaluate(style);
-    expect(work).toEqual(await card.locator('[data-apv-given]').evaluate(style));
-    expect(work.overflowY).toBe('auto');
-    // The report is longer than the box, and the mouse wheel reaches its end.
-    const fit = await body.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
-    expect(fit.sh).toBeGreaterThan(fit.ch * 1.5);
+    // Neither box scrolls: each is as tall as what it holds.
+    for (const box of [body, card.locator('[data-apv-given]')]) {
+      const fit = await box.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight, oy: getComputedStyle(el).overflowY }));
+      expect(fit.oy).toBe('visible');
+      expect(fit.sh - fit.ch).toBeLessThanOrEqual(2);
+    }
+    // The wheel over the report moves the page.
     await body.scrollIntoViewIfNeeded();
     const box = await body.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + 20);
-    await page.mouse.wheel(0, 5000);
-    await expect.poll(() => body.evaluate((el) => el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
+    const y0 = await page.evaluate(() => window.pageYOffset);
+    await page.mouse.move(box.x + box.width / 2, Math.min(box.y + 20, 600));
+    await page.mouse.wheel(0, 400);
+    await expect.poll(() => page.evaluate(() => window.pageYOffset)).toBeGreaterThan(y0 + 100);
   });
 
   test('a long note grows the box only so far, so the buttons never cover the work', async ({ page }) => {
@@ -179,10 +182,13 @@ test.describe('a decision is saved in place; nothing else moves', () => {
     // The counts updated in place.
     await expect(page.locator('#approvalsTabBadge')).toHaveText('2');
     await expect(page.locator('.apv-filter', { hasText: 'All (2)' })).toHaveCount(1);
-    // After the Undo window the card folds and the next one rises into its place.
-    await expect(page.locator('.apv-card')).toHaveCount(2, { timeout: 8000 });
-    const newTop = (await page.locator('.apv-card').first().boundingBox()).y;
-    expect(newTop).toBeLessThan(secondTop);
+    // The Undo ends and nothing moves (Kevin, 27 Nov 2026): the strip stays on screen without its
+    // Undo, and the next card is where it was when the strip was drawn.
+    const drawnTop = (await cards.nth(1).boundingBox()).y;
+    await expect(cards.nth(0).locator('[data-apv-undo]')).toHaveCount(0, { timeout: 8000 });
+    await expect(cards.nth(0).locator('[data-apv-state="saved"]')).toBeVisible();
+    expect(Math.abs((await cards.nth(1).boundingBox()).y - drawnTop)).toBeLessThanOrEqual(2);
+    expect(drawnTop).toBeLessThan(secondTop);   // the decided card shrank to its strip, so it sits higher
   });
 });
 
