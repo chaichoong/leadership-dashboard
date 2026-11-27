@@ -359,6 +359,16 @@ describe('a run', () => {
     expect(r.sent).toHaveLength(3);
   });
 
+  it('a resume the Worker refuses is loud, and nothing is claimed after it', async () => {
+    const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: SIGNED_OUT_NOTE } })], { refuse: (p) => p.state === 'resume' });
+    const s = splitwise();
+    const r = go(w, s);
+    expect(await r.run()).toBe(1);
+    expect(w.posts.map((p) => p.state)).toEqual(['resume']);
+    expect(s.calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(r.lines[0]).toMatch(/2026-11-03\|19 splitwise: the Worker did not record resume/);
+  });
+
   it('a step that failed for any other reason waits for Kevin\'s Retry, as before', async () => {
     const w = worker([booking({ splitwise: { state: 'failed', at: AT, note: 'Test Out: not in the Splitwise group under that name. Fix it, then Retry' } })]);
     const s = splitwise();

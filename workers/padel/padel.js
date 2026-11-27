@@ -71,7 +71,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-30.1';
+export const VERSION = '2026-11-27.1';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
