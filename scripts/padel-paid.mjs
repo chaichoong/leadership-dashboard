@@ -45,9 +45,9 @@
 //   * The players' phone numbers and Splitwise ids live in ~/Projects/kevin-hq/padel/players.json
 //     (private, never in this repo). A player with no entry yet is linked by the robot (linkPlayer,
 //     below), from the Splitwise group and the Padel WhatsApp group (scripts/padel-delivery.py lists
-//     it each run), and the entry is saved there: at the setup check (once a day, and within 15
-//     minutes of Kevin adding or renaming a player, 27 Nov 2026), and again on a paid booking. A saved
-//     Splitwise id that has left the group (an accepted invite gives a new id) is matched again.
+//     it each run), and the entry is saved there at his or her first paid booking. A saved Splitwise
+//     id that has left the group (an accepted invite gives a new id) is matched again by the full
+//     name, at the setup check or on a booking (27 Nov 2026).
 //   * The setup check tells Kevin's People screen, per player, what a booking would still be missing
 //     (setupRun, below), so a gap shows the day he adds someone, never as a failed booking.
 //
@@ -85,7 +85,7 @@ export const EMAIL_HOLD_MS = 30 * 60 * 1000;        // a booking paid from an em
 export const SETUP_URL = 'https://padel.runpreneur.org.uk/api/robot/setup';
 export const SETUP_FILE = join(LOG_DIR, 'setup.json');              // when the setup check last ran, and on which list
 export const SETUP_EVERY_MS = 20 * 3600 * 1000;     // the setup check runs once a day...
-export const SETUP_RETRY_MS = 60 * 60 * 1000;       // ...hourly while part of it could not be checked, and at once when the list changes
+export const SETUP_RETRY_MS = 60 * 60 * 1000;       // ...hourly while a list could not be read or anyone is missing something, and at once when the list changes
 
 // ── Pure parts ──
 export const money = (pence) => (pence / 100).toFixed(2);
@@ -204,7 +204,9 @@ const firstFits = (a, b) => a === b || (Math.min(a.length, b.length) >= 3 && (a.
 // used only when no name with a surname is known, so "Rich" never outranks "Richard Jones". Two at
 // one level is never a guess.
 const nameParts = (n) => { const w = words(n); return { full: w.join(' '), first: w[0] || '', last: w.length > 1 ? w[w.length - 1] : '' }; };
-export function matchSplitwise(names, members, taken = new Set()) {
+// fullOnly: the full name and nothing looser, for a player whose saved id has left the group (review of
+// PR #1022): a "Chris L" who joined later must never inherit a "Chris Long" who left.
+export function matchSplitwise(names, members, taken = new Set(), { fullOnly = false } = {}) {
   const free = (members || []).filter((m) => m && m.id && !taken.has(m.id));
   let want = [...new Set(names.map(fold).filter(Boolean))].map(nameParts);
   if (want.some((n) => n.last)) want = want.filter((n) => n.last);
@@ -212,7 +214,7 @@ export function matchSplitwise(names, members, taken = new Set()) {
     (s, n) => s.full === n.full,
     (s, n) => s.last && n.last && (s.last === n.last || (s.last.length === 1 && n.last.startsWith(s.last))) && firstFits(s.first, n.first),
     (s, n) => !s.last && s.first === n.first,
-  ];
+  ].slice(0, fullOnly ? 1 : 3);
   for (const fits of levels) {
     const hit = free.filter((m) => want.some((n) => fits(nameParts(`${m.first_name || ''} ${m.last_name || ''}`), n)));
     if (hit.length === 1) return { id: hit[0].id, as: `${hit[0].first_name || ''} ${hit[0].last_name || ''}`.trim() };
@@ -242,9 +244,10 @@ export function matchPhone(names, members, taken = new Set()) {
 // given) and the Splitwise member (when the group's members are given). Never touches Kevin's own
 // entry, and changes nothing that is there, with one exception: a saved Splitwise id that is no longer
 // in the group. Accepting a Splitwise invite gives the person a NEW id (Gareth, 20 Nov 2026: the old
-// one failed his 22 Nov booking), so that player is matched again by the same strict rule, and the old
-// id is kept as splitwise_was. Only when the group read includes Kevin's own id: a broken read must
-// never make every saved id look stale.
+// one failed his 22 Nov booking), so that player is matched again, by the full name only (someone
+// who left must never pass to a newcomer with a similar name), and the old id is kept as
+// splitwise_was. Only when the group read includes Kevin's own id: a broken read must never make
+// every saved id look stale.
 export function linkPlayer(p, players, { members = null, whatsapp = null, today = new Date().toISOString().slice(0, 10) } = {}) {
   const id = String(p.id);
   const row = players.players[id] || {};
@@ -262,11 +265,11 @@ export function linkPlayer(p, players, { members = null, whatsapp = null, today 
   }
   const selfSw = (Object.values(players.players).find((r) => r && r.self) || {}).splitwise_id;
   const inGroup = (sid) => (members || []).some((m) => m && m.id === sid);
-  const stale = !!(row.splitwise_id && members && members.length && (!selfSw || inGroup(selfSw)) && !inGroup(row.splitwise_id));
+  const stale = !!(row.splitwise_id && selfSw && inGroup(selfSw) && !inGroup(row.splitwise_id));
   if ((!row.splitwise_id && members) || stale) {
-    const m = matchSplitwise([p.name, contact].filter(Boolean), members, new Set(others.map((r) => r.splitwise_id).filter(Boolean)));
+    const m = matchSplitwise([p.name, contact].filter(Boolean), members, new Set(others.map((r) => r.splitwise_id).filter(Boolean)), { fullOnly: stale });
     if (m.id) { add.splitwise_id = m.id; add.splitwise_as = m.as; if (stale) add.splitwise_was = row.splitwise_id; }
-    else problems.push(stale ? `their Splitwise id is no longer in the group, and they are ${m.why}` : m.why);
+    else problems.push(stale ? `their Splitwise id is no longer in the group, and ${m.why.startsWith('not in') ? 'nobody in it has their full name' : m.why}` : m.why);
   }
   if (!Object.keys(add).length) return { add, problems };
   if (!players.players[id]) add.page_name = p.nick || p.name;
@@ -293,13 +296,13 @@ export function newNote(b, players, nowMs, room = NOTE_MAX) {
 const withNew = (note, b, players, nowMs) => `${note}${newNote(b, players, nowMs, NOTE_MAX - note.length)}`;
 // The job log's line for what the robot saved: counts and kinds only, never a name or a number.
 export const linkedLine = (add) => (add.splitwise_was != null
-  ? 'padel-paid: updated a player\'s Splitwise id (their invite was accepted)'
+  ? 'padel-paid: updated a player\'s Splitwise id (their old one left the group)'
   : `padel-paid: linked a new player's ${Object.keys(add).filter((k) => k === 'phones' || k === 'splitwise_id').join(' and ') || 'entry'}`);
 
 // ── The setup check (Kevin, 27 Nov 2026: "how do we add new players ... so that it doesn't cock up") ──
 // Per player on the app's list, what a booking would still be missing: ready, missing (what to fix,
 // in the words linkPlayer uses), or unchecked (a list the robot could not read). Kevin's own entry is
-// always ready. A one-word name is flagged only while the robot cannot link that player.
+// always ready. A one-word name is flagged only while the robot definitely cannot link that player.
 export const SETUP_NOTES_MAX = 4;
 export function setupStatus(p, players, { members = null, whatsapp = null, membersWhy = 'the Splitwise group was not read' } = {}) {
   const row = players.players[String(p.id)] || {};
@@ -309,7 +312,7 @@ export function setupStatus(p, players, { members = null, whatsapp = null, membe
   const info = [];
   const { problems } = linkPlayer(p, players, { members, whatsapp });
   for (const why of problems) (why === 'couldn\'t read the Padel WhatsApp group' ? unchecked : missing).push(why);
-  if (problems.length && words(p.name).length < 2) missing.unshift('only one name here: add their surname');
+  if (missing.length && words(p.name).length < 2) missing.unshift('only one name here: add their surname');
   if (!members) unchecked.push(`Splitwise not checked: ${membersWhy}`);
   else if (row.splitwise_id && (members.find((m) => m && m.id === row.splitwise_id) || {}).registration_status === 'invited') {
     info.push('invited to Splitwise, not joined yet');           // fine: when they join, the robot follows the new id
@@ -318,10 +321,14 @@ export function setupStatus(p, players, { members = null, whatsapp = null, membe
   return { state, notes: [...missing, ...unchecked, ...info].slice(0, SETUP_NOTES_MAX).map((n) => n.slice(0, 120)) };
 }
 // Runs the check when the list or a name has changed since the last one, once a day, and hourly while
-// the Splitwise group or the WhatsApp list could not be read. It reads the Splitwise group once, saves
-// what it can link (the same rules as a paid booking), and posts every player's status to the Worker
-// for Kevin's People screen. Returns problems for the job log: a Worker that does not answer, or an
-// entry that cannot be saved. A player missing something is Kevin's to see on the page, not a failure.
+// a list could not be read or anyone is missing something (Kevin may fix it in WhatsApp or Splitwise,
+// which the list does not show). It reads the Splitwise group once and posts every player's status to
+// the Worker for Kevin's People screen. It saves only to a player who already has an entry (a stale id,
+// a missing piece): a new player's entry is still made at the first paid booking, the one Kevin vetted,
+// so a name anyone types on the open page never takes a real player's Splitwise id (review of PR
+// #1022). Returns problems for the job log: a Worker that does not answer, or an entry that cannot be
+// saved (that player reads missing, and the run is not recorded so the next one tries again). A player
+// missing something is Kevin's to see on the page, not a job failure.
 export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save, now, log, file = SETUP_FILE }) {
   if (!players || !players.players || !players.splitwise_group) return [`setup check: no players file at ${PLAYERS_FILE}`];
   const r = await fetchImpl(SETUP_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
@@ -331,7 +338,7 @@ export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save
   const sig = people.map((p) => `${p.id}:${p.name}`).join('|');
   let last = {};
   try { last = JSON.parse(readFileSync(file, 'utf8')) || {}; } catch (e) { if (e.code !== 'ENOENT') log(`padel-paid: setup check: ${file} unreadable (${e.code || e.name}), checking again`); }
-  if (sig === last.sig && now() - (Number(last.at) || 0) < (last.unchecked ? SETUP_RETRY_MS : SETUP_EVERY_MS)) return [];
+  if (sig === last.sig && now() - (Number(last.at) || 0) < (last.retry ? SETUP_RETRY_MS : SETUP_EVERY_MS)) return [];
   const reply = await swJson(`${SW}/api/v3.0/get_group/${players.splitwise_group.id}`, ab);
   let members = Array.isArray(reply?.group?.members) ? reply.group.members : null;
   let membersWhy = signedOutOfSplitwise(reply) ? 'the robot is signed out of Splitwise' : 'the Splitwise group could not be read';
@@ -342,25 +349,31 @@ export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save
   const problems = [];
   const out = {};
   const counts = { ready: 0, missing: 0, unchecked: 0 };
+  let saveFailed = false;
   for (const p of people) {
-    const { add } = linkPlayer(p, players, { members, whatsapp: wa, today });
+    const { add } = players.players[String(p.id)] ? linkPlayer(p, players, { members, whatsapp: wa, today }) : { add: {} };
+    let unsaved = false;
     if (Object.keys(add).length) {
       try {
         players.players[String(p.id)] = { ...save(p.id, add) };
         log(linkedLine(add));
       } catch (e) {
         problems.push(`setup check: could not save player ${p.id}'s entry (${e.code || e.name})`);
+        unsaved = saveFailed = true;
       }
     }
-    out[p.id] = setupStatus(p, players, { members, whatsapp: wa, membersWhy });
+    out[p.id] = unsaved ? { state: 'missing', notes: ['found, but the entry could not be saved'] } : setupStatus(p, players, { members, whatsapp: wa, membersWhy });
     counts[out[p.id].state] += 1;
   }
   const post = await fetchImpl(SETUP_URL, { method: 'POST', headers, body: JSON.stringify({ people: out }), signal: AbortSignal.timeout(20000) }).catch(() => null);
   if (!post || post.status !== 200) return [...problems, `setup check: the Worker answered ${post ? post.status : 'nothing'} to the results`];
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(`${file}.tmp`, JSON.stringify({ at: now(), sig, unchecked: counts.unchecked > 0 }), { mode: 0o600 });
-    renameSync(`${file}.tmp`, file);
+    if (!saveFailed) {
+      mkdirSync(dirname(file), { recursive: true });
+      const retry = members == null || wa == null || counts.unchecked > 0 || counts.missing > 0;
+      writeFileSync(`${file}.tmp`, JSON.stringify({ at: now(), sig, retry }), { mode: 0o600 });
+      renameSync(`${file}.tmp`, file);
+    }
   } catch (e) {
     problems.push(`setup check: could not record the run (${e.code || e.name})`);
   }
@@ -598,7 +611,7 @@ export async function runOnce({ fetchImpl = globalThis.fetch, ab = browser, now 
     problems.push(`setup check stopped: ${e.code || e.name}`);
   }
   const get = await fetchImpl(PAID_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
-  if (!get || get.status !== 200) { log(`FAILED: padel-paid: the Worker answered ${get ? get.status : 'nothing'}`); return 1; }
+  if (!get || get.status !== 200) { log(`FAILED: padel-paid: ${[...problems, `the Worker answered ${get ? get.status : 'nothing'}`].join('; ')}`); return 1; }
   const { bookings = [] } = await get.json();
   if (!bookings.length) {                                           // nothing paid and waiting: silent
     if (problems.length) { log(`FAILED: padel-paid: ${problems.join('; ')}`); return 1; }
@@ -749,7 +762,6 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now, 
   // The texts quote the entry Splitwise holds, read before anything is claimed: the one the
   // Splitwise step named, else the one entry for that date.
   const gid = players.splitwise_group.id;
-  const ids = b.players.map((p) => players.players[String(p.id)]?.splitwise_id);
   const reply = await swJson(`${SW}/api/v3.0/get_expenses?group_id=${gid}&limit=40`, ab);
   const expenses = reply?.expenses;
   if (!expenses && signedOutOfSplitwise(reply)) return signedOutStep(b, 'texts', mark, `No texts sent: ${SIGNED_OUT_NOTE}`);
@@ -758,6 +770,11 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now, 
   const live = expenses.filter((e) => !e.deleted_at);
   const mine = entriesFor(live, b);
   const entry = (named && live.find((e) => String(e.id) === named[1])) || (mine.length === 1 ? mine[0] : null);
+  // The id each player owes under ON this entry: the saved one, or the one it replaced (splitwise_was)
+  // when the entry was made before the player's invite was accepted (review of PR #1022).
+  const onEntry = new Set(((entry && entry.users) || []).filter((u) => Math.round(Number(u.owed_share) * 100) > 0).map((u) => u.user_id ?? u.user?.id));
+  const idOf = (row) => (row && row.splitwise_was != null && !onEntry.has(row.splitwise_id) && onEntry.has(row.splitwise_was) ? row.splitwise_was : row && row.splitwise_id);
+  const ids = b.players.map((p) => idOf(players.players[String(p.id)]));
   if (!(await mark(b, 'texts', 'claimed'))) return null;
   const check = checkEntry(entry, b, kevinSw, ids);
   if (!check.ok) {
@@ -780,7 +797,7 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now, 
     if (!textHours(now())) { late = true; continue; }                 // checked before every text
     const number = ((info && info.phones) || [])[0];
     if (!number) { noMobile.push({ name: p.name || `player ${p.id}`, why: (unlinked.find((x) => x.id === p.id) || {}).why || 'no entry' }); continue; }
-    const text = textFor(b, names, check.owes[info.splitwise_id]);
+    const text = textFor(b, names, check.owes[idOf(info)]);
     const sentAt = new Date(now()).toISOString();
     ledger.add({ at: sentAt, slot: b.slot, person: p.id, state: 'sending' });
     const r = await textOne(number, text);

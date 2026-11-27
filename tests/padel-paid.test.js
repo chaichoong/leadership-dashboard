@@ -805,7 +805,18 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
 
   it('left the group and nobody by that name: one problem saying both, nothing changed', () => {
     expect(linkPlayer({ id: 2, name: 'Gil Hart' }, base(), { members: MEM.filter((m) => m.id !== 41), whatsapp: WA2 }))
-      .toEqual({ add: {}, problems: ['their Splitwise id is no longer in the group, and they are not in the Splitwise group under that name'] });
+      .toEqual({ add: {}, problems: ['their Splitwise id is no longer in the group, and nobody in it has their full name'] });
+  });
+
+  // Review of PR #1022: someone who left must never pass to a newcomer with a similar name.
+  it('a stale id is matched again by the full name only: a "Gil H" or a "Gil" who joined later is never taken', () => {
+    for (const newcomer of [{ id: 77, first_name: 'Gil', last_name: 'H' }, { id: 77, first_name: 'Gil', last_name: null }, { id: 77, first_name: 'Gilbert', last_name: 'Hart' }]) {
+      const members = [...MEM.filter((m) => m.id !== 41), newcomer];
+      expect(linkPlayer({ id: 2, name: 'Gil Hart' }, base(), { members, whatsapp: WA2 }).add).toEqual({});
+    }
+    const noSelf = base();
+    delete noSelf.players[1].splitwise_id;                                // no id of Kevin's to prove the read whole: nothing is stale
+    expect(linkPlayer({ id: 2, name: 'Gil Hart' }, noSelf, { members: MEM, whatsapp: WA2 })).toEqual({ add: {}, problems: [] });
   });
 
   it('the save replaces the stale id only while the file still holds that id: one Kevin corrected stays', () => {
@@ -831,7 +842,7 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     expect(r.saved).toEqual([[3, { splitwise_id: 17, splitwise_as: 'Test Cat', splitwise_was: 13, linked_at: '2026-11-01' }]]);
     expect(w.posts.map((p) => [p.step, p.state])).toEqual([['splitwise', 'claimed'], ['splitwise', 'done']]);
     expect(s.expenses[0].users.filter((u) => Number(u.owed_share) > 0).map((u) => u.user_id).sort()).toEqual([11, 12, 14, 17]);
-    expect(r.lines).toContain("padel-paid: updated a player's Splitwise id (their invite was accepted)");
+    expect(r.lines).toContain("padel-paid: updated a player's Splitwise id (their old one left the group)");
     expect(r.lines.join('\n')).not.toMatch(/Test Cat/);
   });
 
@@ -846,6 +857,20 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     expect(setupStatus({ id: 7, name: 'Bo Nobody' }, pl, { members: MEM, whatsapp: null }))
       .toEqual({ state: 'missing', notes: ['not in the Splitwise group under that name', "couldn't read the Padel WhatsApp group"] });
     expect(setupStatus({ id: 8, name: 'Nia' }, pl, { members: MEM, whatsapp: WA2 }).notes).toEqual(['only one name here: add their surname', 'not in the Splitwise group under that name']);
+    // One name, the WhatsApp list unreadable, fine in Splitwise: not checked, and no wrong advice.
+    const inSw = { id: 8, name: 'Nia' };
+    expect(setupStatus(inSw, pl, { members: [...MEM, { id: 61, first_name: 'Nia', last_name: null }], whatsapp: null }))
+      .toEqual({ state: 'unchecked', notes: ["couldn't read the Padel WhatsApp group"] });
+  });
+
+  it('the texts follow a player whose id changed after the Splitwise entry was made', async () => {
+    const players = structuredClone(PLAYERS);
+    Object.assign(players.players[3], { splitwise_id: 17, splitwise_was: 13 });   // moved to 17 by the setup check
+    const s = splitwise({ expenses: [entry(5000, 'Tue 3 Nov, Testford, 19:30, 90 min', NINES)] });   // made earlier, Test Cat still 13
+    const w = worker([booking({ splitwise: { state: 'done', at: AT, note: 'entry 5000' } })]);
+    const r = go(w, s, { players });
+    expect(await r.run()).toBe(0);
+    expect(r.sent.map((x) => [x.number, /£9\.00/.test(x.text)])).toEqual([['+447700900002', true], ['+447700900003', true], ['+447700900004', true]]);
   });
 
   // The Worker and Splitwise behind the setup check, as fakes.
@@ -888,10 +913,8 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
   it('on a new list it links what it can, posts every player to the Worker, and records the run', async () => {
     const h = setupHarness();
     expect(await h.run()).toEqual([]);
-    expect(h.saved).toEqual([
-      [2, { splitwise_id: 41, splitwise_as: 'Gil Hart', splitwise_was: 31, linked_at: '2026-11-01' }],
-      [7, { phones: ['+447700900007'], mobile_as: 'mobile from your contacts', page_name: 'Nia', contact: 'Nia Cole', linked_at: '2026-11-01' }],
-    ]);
+    // Only an existing entry is saved to: Nia's is made at her first paid booking, as before.
+    expect(h.saved).toEqual([[2, { splitwise_id: 41, splitwise_as: 'Gil Hart', splitwise_was: 31, linked_at: '2026-11-01' }]]);
     expect(h.w.posts).toEqual([{ people: {
       1: { state: 'ready', notes: [] },
       2: { state: 'ready', notes: [] },
@@ -900,12 +923,12 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     } }]);
     expect(h.lines).toContain('padel-paid: setup check: 3 ready, 1 missing something, 0 not fully checked');
     expect(h.lines.join('\n')).not.toMatch(/Gil|Hart|Nia|Cole|7700900007/);
-    expect(JSON.parse(readFileSync(h.file, 'utf8'))).toMatchObject({ at: NOON, unchecked: false });
+    expect(JSON.parse(readFileSync(h.file, 'utf8'))).toMatchObject({ at: NOON, retry: true });   // Nia is missing something: hourly
     expect(statSync(h.file).mode & 0o777).toBe(0o600);
   });
 
   it('once a day while nothing changes, at once when a name changes, and hourly while Splitwise could not be read', async () => {
-    const h = setupHarness();
+    const h = setupHarness(PEOPLE.slice(0, 3));
     const groupReads = () => h.g.calls.length;
     h.state.signedOut = true;
     await h.run();
@@ -921,11 +944,34 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     h.state.now += SETUP_EVERY_MS - 60000;
     await h.run();
     expect(groupReads()).toBe(2);                                          // all checked: left for a day
-    await h.run([...PEOPLE.slice(0, 3), { id: 7, name: 'Nia Colebrook', nick: 'Nia' }]);
+    await h.run([PEOPLE[0], PEOPLE[1], { id: 3, name: 'Ada Lund-Hart' }]);
     expect(groupReads()).toBe(3);                                          // Kevin renamed someone: checked at once
     h.state.now += SETUP_EVERY_MS;
-    await h.run([...PEOPLE.slice(0, 3), { id: 7, name: 'Nia Colebrook', nick: 'Nia' }]);
+    await h.run([PEOPLE[0], PEOPLE[1], { id: 3, name: 'Ada Lund-Hart' }]);
     expect(groupReads()).toBe(4);                                          // and again the next day
+  });
+
+  it('hourly while anyone is missing something: Kevin may fix it in WhatsApp or Splitwise, which the list does not show', async () => {
+    const h = setupHarness();                                              // Nia is not in Splitwise
+    await h.run();
+    expect(h.w.posts[0].people[7].state).toBe('missing');
+    h.state.now = NOON + SETUP_RETRY_MS - 60000;
+    await h.run();
+    expect(h.g.calls.length).toBe(1);
+    h.state.now = NOON + SETUP_RETRY_MS;
+    h.state.members = [...MEM, { id: 62, first_name: 'Nia', last_name: 'Cole' }];   // Kevin added her in Splitwise
+    await h.run();
+    expect(h.g.calls.length).toBe(2);
+    expect(h.w.posts[1].people[7]).toEqual({ state: 'ready', notes: [] });
+  });
+
+  it('an entry that cannot be saved reads missing for that player, and the run is not recorded, so the next one tries again', async () => {
+    const h = setupHarness();
+    const r = await setupRun({ fetchImpl: h.w.fetchImpl, headers: {}, ab: h.g.ab, players: h.players, whatsapp: () => WA2, now: () => NOON, log: () => {}, file: h.file,
+      save: () => { const e = new Error('denied'); e.code = 'EACCES'; throw e; } });
+    expect(r).toEqual(["setup check: could not save player 2's entry (EACCES)"]);
+    expect(h.w.posts[0].people[2]).toEqual({ state: 'missing', notes: ['found, but the entry could not be saved'] });
+    expect(() => statSync(h.file)).toThrow();
   });
 
   it('a group read that does not include Kevin is not trusted: nothing is re-linked and Splitwise reads as not checked', async () => {
