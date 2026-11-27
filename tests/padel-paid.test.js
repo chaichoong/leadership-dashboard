@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import {
   description, equalShares, firstNames, textFor, sameBooking, buildPlan, checkEntry, runOnce, texted, textHours, textStart, makeLedger, PAID_URL, perPersonShown, deliveryOf,
   matchSplitwise, matchPhone, linkPlayer, saveLink, readWhatsapp, newNote, emailStep, heldByEmail, readEmails, makeEmailLedger, BOOKING_URL,
-  signedOutOfSplitwise, SIGNED_OUT_NOTE, NOTE_MAX, setupStatus, setupRun, SETUP_URL, SETUP_EVERY_MS, SETUP_RETRY_MS,
+  signedOutOfSplitwise, SIGNED_OUT_NOTE, NOTE_MAX, setupStatus, setupRun, SETUP_URL, SETUP_EVERY_MS, SETUP_RETRY_MS, SETUP_FRESH_MS,
 } from '../scripts/padel-paid.mjs';
 import { SIGNED_OUT_MARK } from '../workers/padel/padel.js';
 
@@ -817,6 +817,18 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     const noSelf = base();
     delete noSelf.players[1].splitwise_id;                                // no id of Kevin's to prove the read whole: nothing is stale
     expect(linkPlayer({ id: 2, name: 'Gil Hart' }, noSelf, { members: MEM, whatsapp: WA2 })).toEqual({ add: {}, problems: [] });
+    // A one-word name is no full name: a newcomer known only as "Gil" never inherits a stale "Gil".
+    expect(linkPlayer({ id: 2, name: 'Gil' }, base(), { members: [...MEM.filter((m) => m.id !== 41), { id: 77, first_name: 'Gil', last_name: null }], whatsapp: WA2 }).add).toEqual({});
+  });
+
+  it('an entry already in Splitwise under the old id still counts when the Splitwise step is tried again', async () => {
+    const players = structuredClone(PLAYERS);
+    Object.assign(players.players[3], { splitwise_id: 17, splitwise_was: 13 });
+    const members = [...MEMBERS.filter((id) => id !== 13).map((id) => ({ id })), { id: 17, first_name: 'Test', last_name: 'Cat' }];
+    const w = worker([booking()]);
+    const s = splitwise({ members, expenses: [entry(5000, 'Tue 3 Nov, Testford, 19:30, 90 min', NINES)] });   // Test Cat owes as 13 on it
+    expect(await go(w, s, { players }).run()).toBe(0);
+    expect(w.posts.map((p) => [p.state, p.note])).toEqual([['claimed', undefined], ['done', 'already in Splitwise (entry 5000)']]);
   });
 
   it('the save replaces the stale id only while the file still holds that id: one Kevin corrected stays', () => {
@@ -965,13 +977,50 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     expect(h.w.posts[1].people[7]).toEqual({ state: 'ready', notes: [] });
   });
 
-  it('an entry that cannot be saved reads missing for that player, and the run is not recorded, so the next one tries again', async () => {
+  it('an entry that cannot be saved reads missing for that player, and the next try is in an hour, not every 15 minutes', async () => {
     const h = setupHarness();
     const r = await setupRun({ fetchImpl: h.w.fetchImpl, headers: {}, ab: h.g.ab, players: h.players, whatsapp: () => WA2, now: () => NOON, log: () => {}, file: h.file,
       save: () => { const e = new Error('denied'); e.code = 'EACCES'; throw e; } });
     expect(r).toEqual(["setup check: could not save player 2's entry (EACCES)"]);
     expect(h.w.posts[0].people[2]).toEqual({ state: 'missing', notes: ['found, but the entry could not be saved'] });
-    expect(() => statSync(h.file)).toThrow();
+    expect(JSON.parse(readFileSync(h.file, 'utf8'))).toMatchObject({ at: NOON, retry: true });
+  });
+
+  it('after 48 hours of the same list, a player still missing something is checked daily, not hourly', async () => {
+    const h = setupHarness();                                              // Nia is never set up
+    await h.run();
+    h.state.now = NOON + SETUP_FRESH_MS - SETUP_RETRY_MS;
+    await h.run();
+    expect(h.g.calls.length).toBe(2);                                      // still inside the 48 hours: hourly
+    h.state.now = NOON + SETUP_FRESH_MS + 60000;
+    await h.run();
+    expect(h.g.calls.length).toBe(3);                                      // an hour on, now past 48 hours: this run says daily from here
+    h.state.now += SETUP_RETRY_MS;
+    await h.run();
+    expect(h.g.calls.length).toBe(3);
+    h.state.now += SETUP_EVERY_MS;
+    await h.run();
+    expect(h.g.calls.length).toBe(4);
+  });
+
+  it('the run is timed from its start, so a slow Splitwise read does not push "hourly" to 75 minutes', async () => {
+    const h = setupHarness();
+    h.state.signedOut = true;
+    const slow = async (args) => { h.state.now += 20000; return h.g.ab(args); };   // the read takes 20 seconds
+    const run = () => setupRun({ fetchImpl: h.w.fetchImpl, headers: {}, ab: slow, players: h.players, whatsapp: () => WA2, now: () => h.state.now, log: () => {}, file: h.file, save: (id, add) => add });
+    await run();
+    expect(JSON.parse(readFileSync(h.file, 'utf8')).at).toBe(NOON);
+    h.state.now = NOON + SETUP_RETRY_MS;
+    await run();
+    expect(h.g.calls.length).toBe(2);
+  });
+
+  it('two new names never both read ready on one Splitwise member: the first claims it', async () => {
+    const h = setupHarness([{ id: 1, name: 'Test Payer' }, { id: 8, name: 'Nia Cole' }, { id: 9, name: 'Niamh Cole' }]);
+    h.state.members = [...MEM, { id: 62, first_name: 'Nia', last_name: 'Cole' }];
+    await h.run();
+    expect(h.w.posts[0].people[8].state).toBe('ready');
+    expect(h.w.posts[0].people[9]).toEqual({ state: 'missing', notes: ['not in the Padel WhatsApp group under that name', 'not in the Splitwise group under that name'] });
   });
 
   it('a group read that does not include Kevin is not trusted: nothing is re-linked and Splitwise reads as not checked', async () => {

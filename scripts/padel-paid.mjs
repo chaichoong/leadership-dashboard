@@ -85,7 +85,8 @@ export const EMAIL_HOLD_MS = 30 * 60 * 1000;        // a booking paid from an em
 export const SETUP_URL = 'https://padel.runpreneur.org.uk/api/robot/setup';
 export const SETUP_FILE = join(LOG_DIR, 'setup.json');              // when the setup check last ran, and on which list
 export const SETUP_EVERY_MS = 20 * 3600 * 1000;     // the setup check runs once a day...
-export const SETUP_RETRY_MS = 60 * 60 * 1000;       // ...hourly while a list could not be read or anyone is missing something, and at once when the list changes
+export const SETUP_RETRY_MS = 60 * 60 * 1000;       // ...hourly while a list could not be read or a save failed, and at once when the list changes
+export const SETUP_FRESH_MS = 48 * 3600 * 1000;     // ...and hourly while anyone is missing something, for 48 hours after the list changed
 
 // ── Pure parts ──
 export const money = (pence) => (pence / 100).toFixed(2);
@@ -178,6 +179,14 @@ export function checkEntry(e, b, kevinId, playerIds) {
   if (!payer || Math.round(Number(payer.paid_share) * 100) !== b.pricePence) return { ok: false, why: 'the entry is not paid by Kevin', id: e.id };
   return { ok: true, id: e.id, owes };
 }
+// The id each player owes under ON an entry: the saved one, or the one it replaced (splitwise_was)
+// when the entry was made before the player's invite was accepted (review of PR #1022). With both or
+// neither on the entry it is the saved id, and checkEntry fails safely for Kevin to look.
+export function idsOnEntry(b, players, entry) {
+  const onEntry = new Set(((entry && entry.users) || []).filter((u) => Math.round(Number(u.owed_share) * 100) > 0).map((u) => u.user_id ?? u.user?.id));
+  const idOf = (row) => (row && row.splitwise_was != null && !onEntry.has(row.splitwise_id) && onEntry.has(row.splitwise_was) ? row.splitwise_was : row && row.splitwise_id);
+  return { ids: b.players.map((p) => idOf(players.players[String(p.id)])), idOf };
+}
 const clock = (ms) => { const p = londonParts(ms); return `${p.hh}:${p.mm}`; };
 export const textHours = (ms) => clock(ms) >= TEXT_FROM && clock(ms) < TEXT_UNTIL;
 // A texts step starts by 21:00, so a normal run (a few players, under a minute each) ends well
@@ -210,6 +219,7 @@ export function matchSplitwise(names, members, taken = new Set(), { fullOnly = f
   const free = (members || []).filter((m) => m && m.id && !taken.has(m.id));
   let want = [...new Set(names.map(fold).filter(Boolean))].map(nameParts);
   if (want.some((n) => n.last)) want = want.filter((n) => n.last);
+  if (fullOnly && !want.some((n) => n.last)) return { why: 'not in the Splitwise group under that name' };   // "Gil" alone is no full name
   const levels = [
     (s, n) => s.full === n.full,
     (s, n) => s.last && n.last && (s.last === n.last || (s.last.length === 1 && n.last.startsWith(s.last))) && firstFits(s.first, n.first),
@@ -321,14 +331,14 @@ export function setupStatus(p, players, { members = null, whatsapp = null, membe
   return { state, notes: [...missing, ...unchecked, ...info].slice(0, SETUP_NOTES_MAX).map((n) => n.slice(0, 120)) };
 }
 // Runs the check when the list or a name has changed since the last one, once a day, and hourly while
-// a list could not be read or anyone is missing something (Kevin may fix it in WhatsApp or Splitwise,
-// which the list does not show). It reads the Splitwise group once and posts every player's status to
+// a list could not be read, a save failed, or (for 48 hours after the list changed) anyone is missing
+// something: Kevin may fix it in WhatsApp or Splitwise, which the list does not show. It reads the Splitwise group once and posts every player's status to
 // the Worker for Kevin's People screen. It saves only to a player who already has an entry (a stale id,
 // a missing piece): a new player's entry is still made at the first paid booking, the one Kevin vetted,
 // so a name anyone types on the open page never takes a real player's Splitwise id (review of PR
 // #1022). Returns problems for the job log: a Worker that does not answer, or an entry that cannot be
-// saved (that player reads missing, and the run is not recorded so the next one tries again). A player
-// missing something is Kevin's to see on the page, not a job failure.
+// saved (that player reads missing, and the next try is in an hour). A player missing something is
+// Kevin's to see on the page, not a job failure.
 export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save, now, log, file = SETUP_FILE }) {
   if (!players || !players.players || !players.splitwise_group) return [`setup check: no players file at ${PLAYERS_FILE}`];
   const r = await fetchImpl(SETUP_URL, { headers, signal: AbortSignal.timeout(20000) }).catch(() => null);
@@ -338,7 +348,9 @@ export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save
   const sig = people.map((p) => `${p.id}:${p.name}`).join('|');
   let last = {};
   try { last = JSON.parse(readFileSync(file, 'utf8')) || {}; } catch (e) { if (e.code !== 'ENOENT') log(`padel-paid: setup check: ${file} unreadable (${e.code || e.name}), checking again`); }
-  if (sig === last.sig && now() - (Number(last.at) || 0) < (last.retry ? SETUP_RETRY_MS : SETUP_EVERY_MS)) return [];
+  const started = now();                                            // the run's time is when it started, so "hourly" is hourly
+  if (sig === last.sig && started - (Number(last.at) || 0) < (last.retry ? SETUP_RETRY_MS : SETUP_EVERY_MS)) return [];
+  const changedAt = sig === last.sig && Number(last.changedAt) ? Number(last.changedAt) : started;
   const reply = await swJson(`${SW}/api/v3.0/get_group/${players.splitwise_group.id}`, ab);
   let members = Array.isArray(reply?.group?.members) ? reply.group.members : null;
   let membersWhy = signedOutOfSplitwise(reply) ? 'the robot is signed out of Splitwise' : 'the Splitwise group could not be read';
@@ -349,31 +361,44 @@ export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save
   const problems = [];
   const out = {};
   const counts = { ready: 0, missing: 0, unchecked: 0 };
-  let saveFailed = false;
+  // Every save first, then every status: a later player's save can never take a member an earlier
+  // player was already shown as ready with.
+  const unsaved = new Set();
   for (const p of people) {
     const { add } = players.players[String(p.id)] ? linkPlayer(p, players, { members, whatsapp: wa, today }) : { add: {} };
-    let unsaved = false;
-    if (Object.keys(add).length) {
-      try {
-        players.players[String(p.id)] = { ...save(p.id, add) };
-        log(linkedLine(add));
-      } catch (e) {
-        problems.push(`setup check: could not save player ${p.id}'s entry (${e.code || e.name})`);
-        unsaved = saveFailed = true;
+    if (!Object.keys(add).length) continue;
+    try {
+      players.players[String(p.id)] = { ...save(p.id, add) };
+      log(linkedLine(add));
+    } catch (e) {
+      problems.push(`setup check: could not save player ${p.id}'s entry (${e.code || e.name})`);
+      unsaved.add(p.id);
+    }
+  }
+  // A player with no entry yet is checked against a copy in which each one found before claims what
+  // was found, so two new names can never both read ready on one Splitwise member or one mobile.
+  const view = structuredClone(players);
+  for (const p of people) {
+    if (unsaved.has(p.id)) out[p.id] = { state: 'missing', notes: ['found, but the entry could not be saved'] };
+    else {
+      out[p.id] = setupStatus(p, view, { members, whatsapp: wa, membersWhy });
+      if (!view.players[String(p.id)]) {
+        const { add } = linkPlayer(p, view, { members, whatsapp: wa, today });
+        if (Object.keys(add).length) view.players[String(p.id)] = { ...add };
       }
     }
-    out[p.id] = unsaved ? { state: 'missing', notes: ['found, but the entry could not be saved'] } : setupStatus(p, players, { members, whatsapp: wa, membersWhy });
     counts[out[p.id].state] += 1;
   }
   const post = await fetchImpl(SETUP_URL, { method: 'POST', headers, body: JSON.stringify({ people: out }), signal: AbortSignal.timeout(20000) }).catch(() => null);
   if (!post || post.status !== 200) return [...problems, `setup check: the Worker answered ${post ? post.status : 'nothing'} to the results`];
+  // Hourly while something could not be checked or saved, and while anyone is missing something in
+  // the 48 hours after the list last changed (Kevin is setting someone up); daily after that, so a
+  // guest who is never set up does not keep the robot's browser busy for ever.
+  const retry = counts.unchecked > 0 || unsaved.size > 0 || (counts.missing > 0 && started - changedAt < SETUP_FRESH_MS);
   try {
-    if (!saveFailed) {
-      mkdirSync(dirname(file), { recursive: true });
-      const retry = members == null || wa == null || counts.unchecked > 0 || counts.missing > 0;
-      writeFileSync(`${file}.tmp`, JSON.stringify({ at: now(), sig, retry }), { mode: 0o600 });
-      renameSync(`${file}.tmp`, file);
-    }
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(`${file}.tmp`, JSON.stringify({ at: started, sig, changedAt, retry }), { mode: 0o600 });
+    renameSync(`${file}.tmp`, file);
   } catch (e) {
     problems.push(`setup check: could not record the run (${e.code || e.name})`);
   }
@@ -729,7 +754,7 @@ async function splitwiseStep(b, { players, kevinSw, ab, mark, now, logDir, link 
     return `${already.length} entries for this day already in Splitwise`;
   }
   if (already.length) {
-    const c = checkEntry(already[0], b, kevinSw, ids);
+    const c = checkEntry(already[0], b, kevinSw, idsOnEntry(b, players, already[0]).ids);
     if (c.ok) { await mark(b, 'splitwise', 'done', withNew(`already in Splitwise (entry ${c.id})`, b, players, now())); return null; }
     await mark(b, 'splitwise', 'failed', `an entry for this day is already in Splitwise, but ${c.why}: correct it, then Retry`);
     return `the entry already in Splitwise disagrees: ${c.why}`;
@@ -770,11 +795,7 @@ async function textsStep(b, { players, kevinSw, ab, mark, textOne, ledger, now, 
   const live = expenses.filter((e) => !e.deleted_at);
   const mine = entriesFor(live, b);
   const entry = (named && live.find((e) => String(e.id) === named[1])) || (mine.length === 1 ? mine[0] : null);
-  // The id each player owes under ON this entry: the saved one, or the one it replaced (splitwise_was)
-  // when the entry was made before the player's invite was accepted (review of PR #1022).
-  const onEntry = new Set(((entry && entry.users) || []).filter((u) => Math.round(Number(u.owed_share) * 100) > 0).map((u) => u.user_id ?? u.user?.id));
-  const idOf = (row) => (row && row.splitwise_was != null && !onEntry.has(row.splitwise_id) && onEntry.has(row.splitwise_was) ? row.splitwise_was : row && row.splitwise_id);
-  const ids = b.players.map((p) => idOf(players.players[String(p.id)]));
+  const { ids, idOf } = idsOnEntry(b, players, entry);
   if (!(await mark(b, 'texts', 'claimed'))) return null;
   const check = checkEntry(entry, b, kevinSw, ids);
   if (!check.ok) {
