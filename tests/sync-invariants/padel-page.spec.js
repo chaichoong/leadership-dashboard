@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
 // The phone key the mock Worker accepts (Kevin's phone, 30 Oct 2026): a request carrying it gets admin: true.
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [] } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [], setup = null } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
@@ -94,7 +94,8 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     if (store.offline) return route.abort('internetdisconnected');      // no signal at all
     store.headers.push(req.headers());
     const admin = req.headers()['x-admin-key'] === ADMIN_KEY;
-    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, { ...state(), admin }); }
+    // The robot's setup check rides only on Kevin's phone's replies, as the Worker sends it (27 Nov 2026).
+    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, { ...state(), admin, ...(admin ? { setup } : {}) }); }
     if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false, admin });
     if (path === '/api/admin') {                                         // the Worker's admin route, as far as the page uses it
       if (!admin) return reply(route, 401, { error: "Only Kevin's phone can do that" });
@@ -103,7 +104,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       if (body.action === 'name') { if (body.real_name) store.realNames.set(body.id, body.real_name); else store.realNames.delete(body.id); }
       if (body.action === 'paid') Object.assign(store.booked.find((b) => b.slot === body.slot), { price_pence: Math.round(body.price * 100), players: JSON.stringify(body.players), paid_at: new Date().toISOString() });
       if (body.action === 'retry') { const e = earlier.find((x) => x.slot === body.slot); if (e) e.paid[body.step] = { state: null, at: null, note: null }; }
-      return reply(route, 200, { ...state(), admin: true });
+      return reply(route, 200, { ...state(), admin: true, setup });
     }
     if (path === '/api/person') {                                        // adding a player by name
       const body = req.postDataJSON();
@@ -721,6 +722,45 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await page.locator('#add-player').fill('Test Carl');
       await page.locator('#add-player-form button').click();
       await expect(page.locator('#people-rows')).toContainText('Test Carl');
+    });
+
+    // 27 Nov 2026 (Kevin: adding players must not "cock up every time"): under each person, the robot's
+    // setup check says ready, what is missing, or not checked; adding a player needs the full name.
+    test('the People screen shows each player ready, missing something, or not checked, and Add needs a full name', async ({ page }) => {
+      const at = new Date(Date.now() - 5 * 60000).toISOString();
+      const setup = { at, people: {
+        1: { state: 'ready', notes: [] },
+        2: { state: 'missing', notes: ['not in the Padel WhatsApp group under that name', '<b>not bold</b>'] },
+      } };
+      const store = await mockPadel(page, { siClosedFrom: 7, setup });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await expect(page.locator('#people-card')).toBeVisible();
+      const when = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+      await expect(page.locator('#setup-line')).toHaveText(`Last check: ${when}.`);
+      const lines = page.locator('#people-rows tr.setup');
+      await expect(lines).toHaveCount(2);
+      await expect(lines.nth(0)).toHaveText('✓ Ready for bookings');
+      await expect(lines.nth(1)).toHaveText('Needs: not in the Padel WhatsApp group under that name; <b>not bold</b>');   // shown as text, never as markup
+      await expect(lines.nth(1).locator('b')).toHaveCount(0);
+      // One word is refused before anything is sent; the full name goes through and shows "Not checked yet".
+      await page.locator('#add-player').fill('Carl');
+      await page.locator('#add-player-form button').click();
+      await expect(page.locator('#toast')).toContainText('first name and surname');
+      expect(store.added).toEqual([]);
+      await page.locator('#add-player').fill('Test Carl');
+      await page.locator('#add-player-form button').click();
+      await expect(page.locator('#people-rows')).toContainText('Test Carl');
+      await expect(lines).toHaveCount(3);
+      await expect(lines.nth(2)).toHaveText('Not checked yet');
+    });
+
+    test('before the robot\'s first check the People screen says so', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7 });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await expect(page.locator('#setup-line')).toHaveText('The robot has not checked yet.');
+      await expect(page.locator('#people-rows tr.setup').first()).toHaveText('Not checked yet');
     });
 
     // 8 Nov 2026: a booking marked at 20:41 sat all night with no price because the price was a second

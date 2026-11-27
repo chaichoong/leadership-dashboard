@@ -33,6 +33,10 @@
 //   POST /api/robot/booking (X-Robot-Key) -> { ok, booked, paid, venue, alreadyPaid }   { slot, venue, start,
 //        minutes, person_id, price_pence? }: a venue's booking email (8 Nov 2026). Marks an unmarked hour
 //        booked; with a price and no price yet, pays it, players from the votes at that moment.
+//   GET  /api/robot/setup (X-Robot-Key) -> { ok, people }   who is on the list, for the robot's setup check
+//   POST /api/robot/setup (X-Robot-Key) -> { ok, saved }    { people: { <id>: { state, notes } } } (27 Nov
+//        2026): per player, ready, missing (what a booking would still lack) or unchecked. Kept in the
+//        cache table and sent only to Kevin's phone (state.setup), for his People screen.
 //   TWO RULES, IN THE DATABASE (review of PR #858): (1) once the robot has claimed the Splitwise step,
 //   nothing changes or removes that booking, Kevin's phone included, until that step has failed; (2) the
 //   texts can be claimed only after the Splitwise entry is done, and a claim names the paid_at it read, so
@@ -71,7 +75,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-11-27.1';
+export const VERSION = '2026-11-27.2';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -1217,7 +1221,46 @@ async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
   } else {
     return fail('Unknown action', 400);
   }
-  return json({ ...(await loadState(env, repo, nowMs)), admin: true });
+  return json({ ...(await loadState(env, repo, nowMs, true)), admin: true });
+}
+
+// The robot's setup check (Kevin, 27 Nov 2026: adding a player must not "cock up every time"): per
+// player on the list, ready, missing (with what to fix) or unchecked. Players removed since the robot
+// read the list are dropped; anything else malformed refuses the whole post.
+export const SETUP_STATES = ['ready', 'missing', 'unchecked'];
+export function cleanSetup(body, people) {
+  const raw = body && body.people;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'people is needed' };
+  const known = new Set(people.map((p) => p.id));
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const id = intId(k);
+    if (!id) return { error: 'Each player is named by id' };
+    if (!v || !SETUP_STATES.includes(v.state)) return { error: 'Each player needs a state: ready, missing or unchecked' };
+    if (!known.has(id)) continue;
+    const notes = Array.isArray(v.notes) ? v.notes.filter((n) => typeof n === 'string' && n.trim()).slice(0, 4).map((n) => n.trim().slice(0, 120)) : [];
+    out[id] = { state: v.state, notes };
+  }
+  return { people: out };
+}
+async function handleRobotSetup(request, env, repo, nowMs) {
+  if (!keyOk(request.headers.get('X-Robot-Key'), env.ROBOT_KEY)) return fail('Robot key needed', 401);
+  const people = await repo.listPeople();
+  if (request.method === 'GET') return json({ ok: true, people: people.map((p) => ({ id: p.id, name: p.realName || p.name, nick: p.name })) });
+  if (request.method !== 'POST') return fail('Not found', 404);
+  const parsed = await readBody(request, MAX_COURTS_BODY);
+  if (parsed.error) return fail(parsed.error, parsed.status);
+  const clean = cleanSetup(parsed.body, people);
+  if (clean.error) return fail(clean.error, 400);
+  const nowIso = new Date(nowMs).toISOString();
+  await repo.setCache('setup', JSON.stringify({ at: nowIso, people: clean.people }), nowIso);
+  return json({ ok: true, saved: Object.keys(clean.people).length });
+}
+// Kevin's phone only: the robot's last setup check, or null before the first one.
+async function loadSetup(repo) {
+  const raw = await repo.getCache('setup');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { console.error('padel: setup cache unreadable', String(e)); return null; }
 }
 
 // The Mac robot's view of a paid booking: everything it needs for the Splitwise entry and the texts.
@@ -1303,7 +1346,7 @@ async function earlierPaid(env, repo, today) {
   });
 }
 
-async function loadState(env, repo, nowMs) {
+async function loadState(env, repo, nowMs, admin = false) {
   const dates = londonDates(nowMs);
   const [{ pulse, availability }, people, votes, booked] = await Promise.all([
     loadAvailability(repo), repo.listPeople(), repo.listVotes(dates[0]), repo.listBooked(dates[0]),
@@ -1311,6 +1354,7 @@ async function loadState(env, repo, nowMs) {
   const state = computeState({ people, votes, booked, availability, dates, nowMs, cfg: venueConfig(env) });
   state.availability.stale = pulseDue(pulse, nowMs);
   state.earlier = await earlierPaid(env, repo, dates[0]);
+  if (admin) state.setup = await loadSetup(repo);
   return state;
 }
 
@@ -1413,10 +1457,11 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
     if (path === '/api/robot/paid') return await handleRobotPaid(request, env, repo, nowMs);
     if (path === '/api/robot/booking') return await handleRobotBooking(request, env, repo, nowMs);
+    if (path === '/api/robot/setup') return await handleRobotSetup(request, env, repo, nowMs);
     const admin = isAdmin(request, env);
 
     if (path === '/api/state' && request.method === 'GET') {
-      const state = await loadState(env, repo, nowMs);
+      const state = await loadState(env, repo, nowMs, admin);
       if (state.availability.stale && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {
         ctx.waitUntil(refreshAndAlert(env, repo, nowMs, fetchImpl, clock, sleep));
       }
@@ -1432,7 +1477,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
         try { refreshed = await refreshPulse(env, repo, nowMs, fetchImpl); } catch (e) { console.error('padel: Pulse read failed', String(e && e.stack || e)); }
       }
       const now = clock();
-      const state = await loadState(env, repo, now);
+      const state = await loadState(env, repo, now, admin);
       // The alert check runs in waitUntil: a caller going away cannot stop it between claim and reply.
       ctx.waitUntil(alertSafely(state, env, repo, now, sleep));
       return json({ ...state, refreshed, admin });
@@ -1481,7 +1526,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       if (both.length) return fail(`An hour cannot be added and removed at once: ${both[0]}`, 400);
       if (!(await repo.getPerson(id))) return fail('No such person', 404);
       await repo.applyVotes(id, add.slots, remove.slots, nowIso);
-      const state = await loadState(env, repo, nowMs);
+      const state = await loadState(env, repo, nowMs, admin);
       // The save answers at once; the DM (up to 20 s on the relay) goes in the background.
       ctx.waitUntil(alertSafely(state, env, repo, nowMs, sleep));
       return json({ ...state, admin });
@@ -1518,7 +1563,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       } else {
         return fail('booked must be true or false', 400);
       }
-      return json({ ...(await loadState(env, repo, nowMs)), admin });
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
     }
     return fail('Not found', 404);
   } catch (e) {

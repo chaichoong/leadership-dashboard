@@ -1387,6 +1387,31 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // once
       expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'splitwise', state: 'retry' }, { robot: ROBOT })).status).toBe(400);   // Retry stays Kevin's
     });
+    // 27 Nov 2026: the robot's setup check, shown only on Kevin's phone (the People screen).
+    it('the robot reads the list and posts each player\'s setup; only Kevin\'s phone gets it back', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await t.call('/api/admin', { action: 'name', id: b, real_name: 'Test Robert' }, { admin: ADMIN });
+      expect((await t.call('/api/robot/setup')).status).toBe(401);
+      expect((await t.call('/api/robot/setup', undefined, { robot: ROBOT })).json.people)
+        .toEqual([{ id: a, name: 'Test Ann', nick: 'Test Ann' }, { id: b, name: 'Test Robert', nick: 'Test Bob' }]);
+      expect((await t.call('/api/state', undefined, { admin: ADMIN })).json.setup).toBe(null);   // before the first check
+      const post = (people) => t.call('/api/robot/setup', { people }, { robot: ROBOT });
+      const long = 'x'.repeat(200);
+      const r = await post({ [a]: { state: 'ready', notes: [] }, [b]: { state: 'missing', notes: ['not in the Padel WhatsApp group under that name', long, 'c', 'd', 'e', 7] }, 999: { state: 'ready', notes: [] } });
+      expect(r.json).toEqual({ ok: true, saved: 2 });                                     // a person no longer on the list is dropped
+      const setup = (await t.call('/api/state', undefined, { admin: ADMIN })).json.setup;
+      expect(setup.at).toBe(iso(NOW));
+      expect(setup.people[a]).toEqual({ state: 'ready', notes: [] });
+      expect(setup.people[b].notes).toEqual(['not in the Padel WhatsApp group under that name', 'x'.repeat(120), 'c', 'd']);
+      const pub = (await t.call('/api/state')).json;
+      expect(pub).not.toHaveProperty('setup');                                            // never on anyone else's page
+      expect(pub.admin).toBe(false);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Anna' }, { admin: ADMIN })).json.setup.people[a]).toEqual({ state: 'ready', notes: [] });
+      expect((await post({ [a]: { state: 'fine' } })).status).toBe(400);
+      expect((await post({ x: { state: 'ready' } })).status).toBe(400);
+      expect((await post([])).status).toBe(400);
+      expect((await t.call('/api/robot/setup', { people: {} }, { robot: 'wrong' })).status).toBe(401);
+    });
     it('a paid booking the robot has not finished survives midnight; a finished or unpaid one is cleared as before', async () => {
       const [a] = await t.addPeople(['Test Ann']);
       await book(a);
