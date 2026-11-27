@@ -19,6 +19,7 @@ import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
   readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl, SIGNED_OUT_MARK,
+  levelChanges, matchResult, decayedLevel, cleanLevel, cleanScore, kFactor, expectedWin, setDone, FEEDBACK_MS,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -376,6 +377,10 @@ function mapRepo() {
     putAlert: (row) => alerts.set(row.slot, { names: '', venues: '', relay_reply: null, ...row }),
     repo: {
       async listPeople() { return [...people.values()].sort((a, b) => a.name.localeCompare(b.name)).map(out); },
+      // Levels and scores are tested on the real SQL (makeRepo over SQLite) below; this copy only answers the reads.
+      async listLevels() { return [...people.values()].map((p) => ({ id: p.id, level: null, level_matches: 0, level_active_at: null })); },
+      async listMatches() { return []; },
+      async listFeedback() { return []; },
       async getPerson(id) { return people.has(id) ? out(people.get(id)) : null; },
       async countPeople() { return people.size; },
       async addPerson(name, now) {
@@ -1720,3 +1725,188 @@ describe('Worker entry point', () => {
     expect(Object.keys(worker)).toEqual(['fetch']);
   });
 });
+
+// ── Stage 2 (Kevin, 27 Nov 2026): levels on Playtomic's 0 to 7 scale, moved by Nettla's published rules ──
+// Every name here is invented. The routes run on the real SQL (makeRepo over SQLite); the maths is pure.
+describe('levels: the maths (Nettla\'s rules, our numbers)', () => {
+  const p = (id, level, recent) => ({ id, level, recent });
+  it('the worked example Kevin approved: +0.19 new, +0.06 settled, -0.18 new on the losing side', () => {
+    const r = levelChanges({ a: [p(1, 3.0, 20), p(2, 2.5, 0)], b: [p(3, 3.0, 0), p(4, 3.0, 20)], sets: [[6, 4], [6, 3]] });
+    expect(r.winner).toBe('a');
+    expect(r.finished).toBe(true);
+    expect(r.changes).toEqual({ 1: 0.059, 2: 0.186, 3: -0.177, 4: -0.059 });
+    expect(expectedWin(2.75, 3.0)).toBeCloseTo(0.4285, 4);
+  });
+  it('stopped at 6-4 3-2: the team ahead wins at half the change; no finished set, or level, changes nothing', () => {
+    expect(levelChanges({ a: [p(1, 3.0, 20), p(2, 2.5, 0)], b: [p(3, 3.0, 0), p(4, 3.0, 20)], sets: [[6, 4], [3, 2]] }).changes[2]).toBe(0.086);
+    expect(levelChanges({ a: [p(1, 3, 0), p(2, 3, 0)], b: [p(3, 3, 0), p(4, 3, 0)], sets: [[4, 3]] }).changes).toEqual({});
+    expect(levelChanges({ a: [p(1, 3, 0), p(2, 3, 0)], b: [p(3, 3, 0), p(4, 3, 0)], sets: [[6, 4], [4, 6]] }).changes).toEqual({});   // 1-1, 10-10
+    expect(matchResult([[6, 4], [4, 6], [3, 1]])).toMatchObject({ winner: 'a', finished: false, half: 0.5 });   // sets level, more games
+  });
+  it('a win always goes up and a loss down, even when the favourites only just win; an upset counts for more', () => {
+    const fav = levelChanges({ a: [p(1, 5, 20), p(2, 5, 20)], b: [p(3, 2, 20), p(4, 2, 20)], sets: [[7, 6], [7, 6]] }).changes;
+    expect(fav[1]).toBeGreaterThan(0);
+    expect(fav[3]).toBeLessThan(0);
+    const upset = levelChanges({ a: [p(1, 2, 20), p(2, 2, 20)], b: [p(3, 5, 20), p(4, 5, 20)], sets: [[7, 6], [7, 6]] }).changes;
+    expect(upset[1]).toBeGreaterThan(fav[1] * 5);
+  });
+  it('a clear win counts for more than a close one; lower levels and newer players move faster; no one moves more than 0.4', () => {
+    const at = (sets) => levelChanges({ a: [p(1, 3, 20), p(2, 3, 20)], b: [p(3, 3, 20), p(4, 3, 20)], sets }).changes[1];
+    expect(at([[6, 0], [6, 0]])).toBeGreaterThan(at([[7, 6], [7, 6]]));
+    expect(kFactor(1.5, 1)).toBeGreaterThan(kFactor(5, 1));
+    expect(kFactor(3, 0)).toBeCloseTo(kFactor(3, 1) * 3, 10);
+    const huge = levelChanges({ a: [p(1, 1, 0), p(2, 1, 0)], b: [p(3, 6, 0), p(4, 6, 0)], sets: [[6, 0], [6, 0]] }).changes;
+    expect(huge[1]).toBe(0.4);
+    const top = levelChanges({ a: [p(1, 6.9, 0), p(2, 2, 0)], b: [p(3, 6, 0), p(4, 6, 0)], sets: [[6, 0], [6, 0]] }).changes;
+    expect(top[1]).toBe(0.1);                                       // never past 7
+  });
+  it('90 days without a rated score drops a level 0.10, and again every 90 days, never below 0', () => {
+    expect(decayedLevel(3, '2026-09-01', '2026-11-27')).toBe(3);    // 87 days
+    expect(decayedLevel(3, '2026-08-01', '2026-11-27')).toBe(2.9);  // 118 days
+    expect(decayedLevel(3, '2026-03-01', '2026-11-27')).toBe(2.7);  // 271 days
+    expect(decayedLevel(0.1, '2025-01-01', '2026-11-27')).toBe(0);
+    expect(decayedLevel(null, '2025-01-01', '2026-11-27')).toBe(null);
+  });
+  it('a level is 0 to 7 with at most 2 decimals; a set is 6 with a 2-game lead, 7-5 or 7-6', () => {
+    expect([cleanLevel('3.25'), cleanLevel(4), cleanLevel(0), cleanLevel(7), cleanLevel('7.5'), cleanLevel('3.333'), cleanLevel(-1), cleanLevel('x')]).toEqual([3.25, 4, 0, 7, null, null, null, null]);
+    expect([setDone(6, 4), setDone(6, 5), setDone(7, 5), setDone(7, 6), setDone(7, 4), setDone(4, 6)]).toEqual([true, false, true, true, false, true]);
+  });
+});
+
+describe('a score as a phone sends it (cleanScore)', () => {
+  const people = [{ id: 1, name: 'Ann One' }, { id: 2, name: 'Bo Two' }, { id: 3, name: 'Cy Three' }, { id: 4, name: 'Di Four' }, { id: 5, name: 'Ed Five' }];
+  const levels = new Map([[1, 3], [2, 2.5], [3, 3], [4, 3], [5, null]]);
+  const dates = ['2026-11-27', '2026-11-28'];
+  const ok = { key: 'k-0000000001', entered_by: 1, played_on: '2026-11-27', team_a: [1, 2], team_b: [3, 4], sets: [[6, 4], [6, 3]] };
+  const err = (extra, admin = false) => cleanScore({ ...ok, ...extra }, people, levels, dates, admin).error;
+  it('a good score comes back clean', () => {
+    expect(cleanScore(ok, people, levels, dates)).toEqual({ key: 'k-0000000001', playedOn: '2026-11-27', a: [1, 2], b: [3, 4], sets: [[6, 4], [6, 3]], rated: true, enteredBy: 1 });
+  });
+  it('refused: no id, outside the 7 days, not four different players, someone not on the list or not playing', () => {
+    expect(err({ key: 'x' })).toMatch(/no id/);
+    expect(err({ played_on: '2026-11-20' })).toMatch(/today or the 6 days before/);
+    expect(err({ played_on: '2026-11-21' })).toBeUndefined();
+    expect(err({ played_on: '2026-11-28' })).toMatch(/today or the 6 days before/);
+    expect(err({ team_b: [3, 1] })).toMatch(/four different players/);
+    expect(err({ team_b: [3, 99] })).toMatch(/not on the list/);
+    expect(err({ entered_by: 5 })).toMatch(/Only someone who played/);
+    expect(err({ entered_by: 5 }, true)).toBeUndefined();          // Kevin's phone
+  });
+  it('refused: a set that is not a set, an unfinished set before the last, a third set after 2-0', () => {
+    expect(err({ sets: [[7, 3]] })).toMatch(/not a set score/);
+    expect(err({ sets: [[6, 2], [6, 1]] })).toBeUndefined();
+    expect(err({ sets: [[4, 3], [6, 1]] })).toMatch(/Set 1 is not finished/);
+    expect(err({ sets: [[6, 2], [6, 1], [3, 0]] })).toMatch(/leave the third set empty/);
+    expect(err({ sets: [[6, 2], [3, 6], [5, 4]] })).toBeUndefined(); // stopped in the third
+    expect(err({ sets: [[0, 0]] })).toMatch(/not a set score/);
+    expect(err({ sets: [[8, 6]] })).toMatch(/0 to 7/);
+    expect(err({ sets: [] })).toMatch(/1 to 3 sets/);
+  });
+  it('a rated score needs four levels and names who has none; a friendly one does not', () => {
+    const r = cleanScore({ ...ok, team_b: [3, 5] }, people, levels, dates);
+    expect(r).toEqual({ error: 'Ed Five has no level yet: pick one first, or tick Friendly', status: 409 });
+    expect(cleanScore({ ...ok, team_b: [3, 5], rated: false }, people, levels, dates).rated).toBe(false);
+  });
+});
+
+describe('levels and scores on the live database shape (makeRepo SQL on SQLite)', () => {
+  let t;
+  let ids;
+  beforeEach(async () => {
+    t = harness(sqlRepo);
+    t.setNow(Date.parse('2026-11-27T18:00:00Z'));
+    ids = await t.addPeople(['Ann One', 'Bo Two', 'Cy Three', 'Di Four', 'Ed Five']);
+  });
+  const lv = (state, id) => state.levels.players.find((x) => x.id === id);
+  const setAll = async (levels) => { for (const [i, l] of levels.entries()) expect((await t.call('/api/level', { person_id: ids[i], level: l })).status).toBe(200); };
+  let n = 0;
+  const score = (extra = {}, opts = {}) => t.call('/api/score', { key: `key-test-${++n}-0000`, entered_by: ids[0], played_on: '2026-11-27', team_a: [ids[0], ids[1]], team_b: [ids[2], ids[3]], sets: [[6, 4], [6, 3]], ...extra }, opts);
+
+  it('a player picks a starting level; everyone sees it in the league table; Kevin\'s phone can set anyone\'s', async () => {
+    const r = await t.call('/api/level', { person_id: ids[0], level: '3.5' });
+    expect(lv(r.json, ids[0])).toEqual({ id: ids[0], level: 3.5, matches: 0, reliability: 0, last: null });
+    expect(lv(r.json, ids[1]).level).toBe(null);
+    expect((await t.call('/api/level', { person_id: ids[0], level: 9 })).status).toBe(400);
+    expect((await t.call('/api/admin', { action: 'level', id: ids[1], level: 2 }, { admin: ADMIN })).json.levels.players.find((x) => x.id === ids[1]).level).toBe(2);
+    expect((await t.call('/api/admin', { action: 'level', id: ids[1], level: 2 })).status).toBe(401);
+  });
+
+  it('a rated score moves all four levels once, and a second tap of the same form is the same score', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const r = await score();
+    expect(r.status).toBe(200);
+    expect([ids[0], ids[1], ids[2], ids[3]].map((id) => lv(r.json, id).level)).toEqual([3.18, 2.69, 2.82, 2.82]);   // all four new: +0.177 for a 3.0, +0.186 for the 2.5
+    expect(lv(r.json, ids[0])).toMatchObject({ matches: 1, reliability: 5, last: 0.177 });
+    expect(r.json.levels.scores).toHaveLength(1);
+    expect(r.json.levels.scores[0]).toMatchObject({ on: '2026-11-27', a: [ids[0], ids[1]], b: [ids[2], ids[3]], sets: [[6, 4], [6, 3]], rated: true, winner: 'a', finished: true, enteredBy: ids[0], feedbackOpen: true, voted: [] });
+    const again = await t.call('/api/score', { key: `key-test-${n}-0000`, entered_by: ids[0], played_on: '2026-11-27', team_a: [ids[0], ids[1]], team_b: [ids[2], ids[3]], sets: [[6, 4], [6, 3]] });
+    expect(again.status).toBe(200);
+    expect(again.json.levels.scores).toHaveLength(1);
+    expect(lv(again.json, ids[0]).level).toBe(3.18);
+    // The same score with a new form id, from the other team, minutes later: already in.
+    expect((await score({ entered_by: ids[2], team_a: [ids[2], ids[3]], team_b: [ids[0], ids[1]], sets: [[4, 6], [3, 6]] })).status).toBe(409);
+    // Once a score has moved your level, only Kevin's phone changes it.
+    expect((await t.call('/api/level', { person_id: ids[0], level: 5 })).status).toBe(409);
+  });
+
+  it('refused: a player with no level (named), someone who did not play; a friendly score changes no level', async () => {
+    await setAll([3, 2.5, 3]);
+    const r = await score();
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe('Di Four has no level yet: pick one first, or tick Friendly');
+    expect((await score({ entered_by: ids[4] })).status).toBe(400);
+    const f = await score({ rated: false });
+    expect(f.status).toBe(200);
+    expect(f.json.levels.scores[0]).toMatchObject({ rated: false, changes: {}, feedbackOpen: false });
+    expect(lv(f.json, ids[0])).toMatchObject({ level: 3, matches: 0 });
+  });
+
+  it('peer feedback: 2 matching votes move a player 0.05 once; a changed vote moves it back; only the four, only for 24 hours', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    const vote = (from, votes) => t.call('/api/feedback', { match_id: mid, from_id: from, votes });
+    let r = await vote(ids[2], { [ids[0]]: 'higher', [ids[1]]: 'expected', [ids[3]]: 'expected' });
+    expect(lv(r.json, ids[0]).level).toBe(3.18);                    // one vote: nothing yet
+    expect(r.json.levels.scores[0].voted).toEqual([ids[2]]);
+    r = await vote(ids[3], { [ids[0]]: 'higher' });
+    expect(lv(r.json, ids[0]).level).toBe(3.23);                    // two: +0.05
+    expect(r.json.levels.scores[0].feedback).toEqual({ [ids[0]]: 0.05 });
+    r = await vote(ids[1], { [ids[0]]: 'higher' });
+    expect(lv(r.json, ids[0]).level).toBe(3.23);                    // three: still once
+    r = await vote(ids[3], { [ids[0]]: 'expected' });
+    r = await vote(ids[1], { [ids[0]]: 'expected' });
+    expect(lv(r.json, ids[0]).level).toBe(3.18);                    // back to one higher: the 0.05 comes off
+    expect((await vote(ids[4], { [ids[0]]: 'higher' })).status).toBe(400);
+    expect((await vote(ids[1], { [ids[1]]: 'higher' })).status).toBe(400);   // not about yourself
+    expect((await vote(ids[1], { [ids[0]]: 'great' })).status).toBe(400);
+    t.setNow(Date.parse('2026-11-27T18:00:00Z') + FEEDBACK_MS + 1000);
+    expect((await vote(ids[1], { [ids[0]]: 'higher' })).status).toBe(409);
+  });
+
+  it('Kevin\'s phone deletes a wrong score and every change it made comes off exactly, feedback included', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    expect((await t.call('/api/admin', { action: 'score-delete', id: mid })).status).toBe(401);
+    const r = await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN });
+    expect(r.status).toBe(200);
+    expect([ids[0], ids[1], ids[2], ids[3]].map((id) => lv(r.json, id))).toEqual([
+      { id: ids[0], level: 3, matches: 0, reliability: 0, last: null }, { id: ids[1], level: 2.5, matches: 0, reliability: 0, last: null },
+      { id: ids[2], level: 3, matches: 0, reliability: 0, last: null }, { id: ids[3], level: 3, matches: 0, reliability: 0, last: null },
+    ]);
+    expect(r.json.levels.scores).toEqual([]);
+    expect((await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN })).status).toBe(404);
+    expect((await t.call('/api/level', { person_id: ids[0], level: 3.5 })).status).toBe(200);   // no score now: their own pick again
+  });
+
+  it('a level 100 days without a score shows 0.10 lower, and the next score starts from that', async () => {
+    await setAll([3, 3, 3, 3]);
+    await t.repo.setLevel(ids[0], 3, '2026-08-19');               // 100 days before 27 Nov
+    const s = await t.call('/api/state');
+    expect(lv(s.json, ids[0]).level).toBe(2.9);
+    const r = await score();
+    expect(lv(r.json, ids[0]).level).toBeCloseTo(2.9 + 0.2, 1);    // settled from 2.9, not 3
+  });
+});
+

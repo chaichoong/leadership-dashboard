@@ -33,6 +33,14 @@
 //   POST /api/robot/booking (X-Robot-Key) -> { ok, booked, paid, venue, alreadyPaid }   { slot, venue, start,
 //        minutes, person_id, price_pence? }: a venue's booking email (8 Nov 2026). Marks an unmarked hour
 //        booked; with a price and no price yet, pays it, players from the votes at that moment.
+//   POST /api/level  { person_id, level }   -> state   a player's own starting level (Playtomic's 0 to 7),
+//        only until a rated score has moved it; Kevin's phone sets anyone's ({ action: 'level' }).
+//   POST /api/score  { key, entered_by, played_on, team_a, team_b, sets, rated } -> state   a 2-v-2 score
+//        from one of the four (or Kevin's phone), in the last 7 days; a rated one moves all four levels
+//        by Nettla's published rules (levelChanges). Kevin's phone deletes one ({ action: 'score-delete' }),
+//        which reverses its changes exactly.
+//   POST /api/feedback { match_id, from_id, votes: { <id>: higher|expected|lower } } -> state   within 24 h
+//        of a rated score, each of the four marks the other three; 2 matching votes move a player 0.05.
 //   GET  /api/robot/setup (X-Robot-Key) -> { ok, people }   who is on the list, for the robot's setup check
 //   POST /api/robot/setup (X-Robot-Key) -> { ok, saved }    { people: { <id>: { state, notes } } } (27 Nov
 //        2026): per player, ready, missing (what a booking would still lack) or unchecked. Kept in the
@@ -75,7 +83,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-11-27.2';
+export const VERSION = '2026-11-28.1';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -703,6 +711,155 @@ export function alertText(r, cfg, pageUrl, nowMs) {
 // find the same person.
 export const foldName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
+// ── Levels (Stage 2, Kevin 27 Nov 2026) ──
+// The scale is Playtomic's, 0 to 7 (the starting levels on the page are Playtomic's chart steps). How a
+// score moves a level follows Nettla's published rules (player-help.nettla.co, "How do Nettla padel
+// levels work?", read 27 Nov 2026): a win always goes up and a loss down; beating stronger opponents
+// counts for more; a close match counts for less than a clear win; your partner's level matters; lower
+// levels and players with fewer matches move faster; an unfinished match with a completed set moves
+// half as far, and one with no completed set (or level) not at all; peer feedback has a small extra
+// effect from 2 matching votes; 90 days without a match drops a level 0.10. Nettla does not publish its
+// numbers, so the sizes below are ours: a new player moves about 0.2 a match, a settled one about 0.05.
+export const LEVEL_MIN = 0;
+export const LEVEL_MAX = 7;
+export const LEVEL_SCALE = 2;          // a 1.0 gap between the pairs: the stronger pair expected to win 76%
+export const LEVEL_K = 0.15;           // the size of a change for a settled player at level 2
+export const LEVEL_CAP = 0.4;          // no one moves more than this in one score
+export const RELIABLE_AT = 20;         // rated scores in the last RELIABLE_DAYS for 100% reliability
+export const RELIABLE_DAYS = 180;
+export const DECAY_DAYS = 90;          // Nettla: 90 days without a match, the level drops 0.10, and again
+export const DECAY_STEP = 0.1;
+export const FEEDBACK_STEP = 0.05;
+export const FEEDBACK_MS = 24 * 3600 * 1000;
+export const SCORE_DAYS = 7;           // a score can go in for today and the 6 days before
+export const SCORE_SAME_MS = 10 * 60 * 1000;   // the same score again within this is a double entry
+export const KC_WEIGHT = 0.25;         // Stage 3: a first-to-3 Kings and challengers game counts a quarter
+export const VOTES = ['higher', 'expected', 'lower'];
+const r3 = (x) => Math.round(x * 1000) / 1000;
+export const clampLevel = (x) => Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, x));
+// A finished set: 6 games with a 2-game lead, or 7-5, or 7-6.
+export const setDone = (a, b) => { const hi = Math.max(a, b), lo = Math.min(a, b); return (hi === 6 && hi - lo >= 2) || (hi === 7 && (lo === 5 || lo === 6)); };
+// The result of a score: first to 2 sets is finished; otherwise the team with more finished sets (or, if
+// equal, more games) wins, at half the change (Nettla's unfinished match); no finished set, no winner.
+export function matchResult(sets) {
+  let setsA = 0, setsB = 0, gamesA = 0, gamesB = 0, completed = 0;
+  for (const [x, y] of sets) {
+    gamesA += x; gamesB += y;
+    if (setDone(x, y)) { completed += 1; if (x > y) setsA += 1; else setsB += 1; }
+  }
+  const finished = setsA === 2 || setsB === 2;
+  let winner = null;
+  if (completed) winner = setsA > setsB ? 'a' : setsB > setsA ? 'b' : gamesA > gamesB ? 'a' : gamesB > gamesA ? 'b' : null;
+  return { setsA, setsB, gamesA, gamesB, completed, finished, winner, half: finished ? 1 : 0.5 };
+}
+export const expectedWin = (win, lose) => 1 / (1 + 10 ** ((lose - win) / LEVEL_SCALE));
+export const reliabilityOf = (recent) => Math.min(1, recent / RELIABLE_AT);
+// Lower levels and fewer matches move faster: up to three times for a new player.
+export const kFactor = (level, reliability) => LEVEL_K * (1.2 - level / 10) * (1 + 2 * (1 - reliability));
+// The change to each level for a score. a and b: [{ id, level, recent }] (recent = rated scores in the last
+// RELIABLE_DAYS). weight is 1 for a match (KC_WEIGHT for a Kings and challengers game in Stage 3).
+export function levelChanges({ a, b, sets, weight = 1 }) {
+  const res = matchResult(sets);
+  if (!res.winner) return { ...res, changes: {} };
+  const [win, lose] = res.winner === 'a' ? [a, b] : [b, a];
+  const [gw, gl] = res.winner === 'a' ? [res.gamesA, res.gamesB] : [res.gamesB, res.gamesA];
+  const avg = (t) => (t[0].level + t[1].level) / 2;
+  const base = 1 - expectedWin(avg(win), avg(lose));          // the less likely the win, the bigger the change
+  const margin = Math.max(0.25, 0.5 + (gw - gl) / (gw + gl));   // a close match counts for less than a clear one
+  const changes = {};
+  for (const [team, sign] of [[win, 1], [lose, -1]]) {
+    for (const p of team) {
+      const size = Math.min(LEVEL_CAP, kFactor(p.level, reliabilityOf(p.recent)) * base * margin * res.half * weight);
+      changes[p.id] = r3(clampLevel(p.level + sign * size) - p.level);
+    }
+  }
+  return { ...res, changes };
+}
+// The level shown: 0.10 off for every 90 days since the last level pick or rated score.
+export function decayedLevel(level, activeAt, today) {
+  if (level == null) return null;
+  if (!activeAt) return level;
+  const days = Math.floor((Date.parse(today) - Date.parse(activeAt)) / 86400000);
+  return days >= DECAY_DAYS ? r3(Math.max(LEVEL_MIN, level - DECAY_STEP * Math.floor(days / DECAY_DAYS))) : level;
+}
+// A level typed on a phone: a number from 0 to 7, kept to 2 decimals.
+export function cleanLevel(raw) {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d(\.\d{1,2})?$/.test(raw.trim()) ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= LEVEL_MIN && n <= LEVEL_MAX ? Math.round(n * 100) / 100 : null;
+}
+// A score as a phone sends it, checked. people: the list; levels: id -> level; dates: the page's days
+// (today first); admin: Kevin's phone, which may enter a score it did not play in.
+export function cleanScore(body, people, levels, dates, admin = false) {
+  const key = String(body.key || '');
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(key)) return { error: 'The score has no id: reload the page and try again' };
+  const today = dates[0];
+  const playedOn = String(body.played_on || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(playedOn) || playedOn > today || playedOn < addDays(today, -(SCORE_DAYS - 1))) return { error: `A score is for today or the ${SCORE_DAYS - 1} days before` };
+  const team = (t) => (Array.isArray(t) && t.length === 2 ? t.map(intId) : null);
+  const a = team(body.team_a), b = team(body.team_b);
+  if (!a || !b || [...a, ...b].some((x) => !x) || new Set([...a, ...b]).size !== 4) return { error: 'Pick two pairs: four different players' };
+  const known = new Map(people.map((p) => [p.id, p]));
+  if ([...a, ...b].some((x) => !known.has(x))) return { error: 'One of those players is not on the list' };
+  const enteredBy = admin ? (intId(body.entered_by) || 0) : intId(body.entered_by);
+  if (!admin && (!enteredBy || ![...a, ...b].includes(enteredBy))) return { error: 'Only someone who played can put the score in' };
+  if (!Array.isArray(body.sets) || !body.sets.length || body.sets.length > 3) return { error: 'Put in 1 to 3 sets' };
+  const sets = [];
+  let wonA = 0, wonB = 0;
+  for (const [i, raw] of body.sets.entries()) {
+    const g = Array.isArray(raw) && raw.length === 2 ? raw.map((x) => (Number.isInteger(x) && x >= 0 && x <= 7 ? x : null)) : null;
+    if (!g || g.includes(null)) return { error: 'Games in a set are 0 to 7' };
+    const [x, y] = g;
+    if (wonA === 2 || wonB === 2) return { error: 'The match was over after two sets: leave the third set empty' };
+    const last = i === body.sets.length - 1;
+    if (!setDone(x, y) && (!last || Math.max(x, y) === 7 || (Math.max(x, y) === 6 && Math.min(x, y) <= 4) || x + y === 0)) {
+      return { error: last ? `Set ${i + 1} is not a set score (6-4, 7-5, 7-6, or the games when you stopped)` : `Set ${i + 1} is not finished: only the last set can be` };
+    }
+    if (setDone(x, y)) { if (x > y) wonA += 1; else wonB += 1; }
+    sets.push([x, y]);
+  }
+  const rated = body.rated !== false;
+  if (rated) {
+    const none = [...a, ...b].filter((x) => levels.get(x) == null).map((x) => known.get(x).realName || known.get(x).name);
+    if (none.length) return { error: `${none.join(', ')} ${none.length === 1 ? 'has' : 'have'} no level yet: pick one first, or tick Friendly`, status: 409 };
+  }
+  return { key, playedOn, a, b, sets, rated, enteredBy };
+}
+// The same two pairs and games, either way round.
+const sameScore = (m, c) => {
+  const pair = (t) => [...t].sort((x, y) => x - y).join(',');
+  const one = (x, y) => pair(x.a) === pair(y.a) && pair(x.b) === pair(y.b) && JSON.stringify(x.sets) === JSON.stringify(y.sets);
+  const flip = (x) => ({ a: x.b, b: x.a, sets: x.sets.map(([p, q]) => [q, p]) });
+  return m.playedOn === c.playedOn && (one(m, c) || one(m, flip(c)));
+};
+const countRecent = (matches, from) => {
+  const n = new Map();
+  for (const m of matches) if (m.rated && m.playedOn >= from) for (const id of [...m.a, ...m.b]) n.set(id, (n.get(id) || 0) + 1);
+  return n;
+};
+// The league table and the last month's scores, for everyone's page.
+export function computeLevels({ levels, matches, voters = [], today, nowMs }) {
+  const recent = countRecent(matches, addDays(today, -RELIABLE_DAYS));
+  const last = new Map();
+  for (const m of [...matches].sort((x, y) => (x.playedOn === y.playedOn ? x.id - y.id : x.playedOn < y.playedOn ? -1 : 1))) {
+    for (const id of [...m.a, ...m.b]) if (m.rated && (m.changes[id] != null || m.feedback[id] != null)) last.set(id, r3((m.changes[id] || 0) + (m.feedback[id] || 0)));
+  }
+  const players = levels.map((l) => ({
+    id: l.id, level: l.level == null ? null : Math.round(decayedLevel(l.level, l.level_active_at, today) * 100) / 100,
+    matches: l.level_matches || 0, reliability: Math.round(reliabilityOf(recent.get(l.id) || 0) * 100), last: last.has(l.id) ? last.get(l.id) : null,
+  }));
+  const votedBy = new Map();
+  for (const v of voters) { if (!votedBy.has(v.match_id)) votedBy.set(v.match_id, new Set()); votedBy.get(v.match_id).add(v.from_id); }
+  const scores = matches.filter((m) => m.playedOn >= addDays(today, -30)).sort((x, y) => (x.playedOn === y.playedOn ? y.id - x.id : x.playedOn < y.playedOn ? 1 : -1)).map((m) => {
+    const r = matchResult(m.sets);
+    const until = Date.parse(m.enteredAt) + FEEDBACK_MS;
+    return {
+      id: m.id, on: m.playedOn, a: m.a, b: m.b, sets: m.sets, rated: m.rated, kind: m.kind, winner: r.winner, finished: r.finished,
+      changes: m.changes, feedback: m.feedback, enteredBy: m.enteredBy, feedbackOpen: m.rated && nowMs < until, voted: [...(votedBy.get(m.id) || [])],
+    };
+  });
+  return { players, scores };
+}
+
 // ── D1 access, behind one small object so tests can swap in a Map-backed copy ──
 const toPerson = (r) => {
   const p = { id: r.id, name: r.name, venues: splitVenues(r.venues), savedAt: r.votes_at || null };
@@ -710,6 +867,15 @@ const toPerson = (r) => {
   return p;
 };
 const PEOPLE_COLS = 'id, name, venues, votes_at, real_name';
+const MATCH_COLS = 'id, key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, feedback_changes, deleted_at';
+// A level written whole (worked out in the Worker), the rated-score count moved, the active date kept unless given.
+const PEOPLE_LEVEL_SQL = 'UPDATE people SET level = ?2, level_matches = MAX(0, level_matches + ?3), level_active_at = COALESCE(?4, level_active_at) WHERE id = ?1';
+const parseChanges = (raw) => { try { const o = JSON.parse(raw || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v === 'number')) : {}; } catch { return {}; } };
+const parseSets = (raw) => { try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+const toMatch = (r) => ({
+  id: r.id, key: r.key, playedOn: r.played_on, a: parseIds(r.team_a), b: parseIds(r.team_b), sets: parseSets(r.sets), rated: !!r.rated, kind: r.kind,
+  enteredBy: r.entered_by, enteredAt: r.entered_at, changes: parseChanges(r.changes), feedback: parseChanges(r.feedback_changes), deletedAt: r.deleted_at || null,
+});
 // Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it failed).
 const SET_PAID_SQL = `UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
   texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`;
@@ -798,6 +964,54 @@ export function makeRepo(db) {
       const r = await db.prepare(`UPDATE booked SET ${step}_state = ?2, ${step}_at = ?3, ${step}_note = ?4 WHERE slot = ?1 AND paid_at IS NOT NULL AND ${from}`)
         .bind(...args).run();
       return (r.meta?.changes || 0) === 1;
+    },
+    // Levels and scores (sql-changes/0006, 27 Nov 2026).
+    async listLevels() {
+      const r = await db.prepare('SELECT id, level, level_matches, level_active_at FROM people').all();
+      return r.results || [];
+    },
+    async setLevel(id, level, activeAt, onlyUnplayed = false) {
+      const r = await db.prepare(`UPDATE people SET level = ?2, level_active_at = ?3 WHERE id = ?1${onlyUnplayed ? ' AND level_matches = 0' : ''}`).bind(id, level, activeAt).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    async listMatches(fromDate) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE played_on >= ? AND deleted_at IS NULL ORDER BY played_on, id`).bind(fromDate).all();
+      return (r.results || []).map(toMatch);
+    },
+    async getMatch(id) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE id = ?`).bind(id).first();
+      return r ? toMatch(r) : null;
+    },
+    async getMatchByKey(key) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE key = ?`).bind(key).first();
+      return r ? toMatch(r) : null;
+    },
+    async listFeedback(matchIds) {
+      if (!matchIds.length) return [];
+      const r = await db.prepare('SELECT match_id, from_id, about_id, vote FROM feedback WHERE match_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(matchIds)).all();
+      return r.results || [];
+    },
+    // One score and the levels it moves, in one transaction: a double tap (the same key) fails whole.
+    async addScore(m, updates, nowIso) {
+      await db.batch([
+        db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)')
+          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), JSON.stringify(m.sets), m.rated ? 1 : 0, m.kind || 'match', m.enteredBy, nowIso, JSON.stringify(m.changes || {})),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.level, u.matches, u.activeAt)),
+      ]);
+    },
+    async deleteScore(id, nowIso, updates) {
+      await db.batch([
+        db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL').bind(id, nowIso),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.level, u.matches, u.activeAt)),
+      ]);
+    },
+    async setFeedback(matchId, fromId, votes, nowIso, feedbackChanges, updates) {
+      await db.batch([
+        ...votes.map(([about, vote]) => db.prepare('INSERT INTO feedback (match_id, from_id, about_id, vote, created_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(match_id, from_id, about_id) DO UPDATE SET vote = excluded.vote, created_at = excluded.created_at')
+          .bind(matchId, fromId, about, vote, nowIso)),
+        db.prepare('UPDATE matches SET feedback_changes = ?2 WHERE id = ?1').bind(matchId, JSON.stringify(feedbackChanges)),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.level, u.matches, u.activeAt)),
+      ]);
     },
     async listPaidPending(fromDate) {
       const r = await db.prepare(`SELECT ${BOOKED_COLS} FROM booked WHERE slot >= ? AND paid_at IS NOT NULL
@@ -1186,6 +1400,82 @@ export function cleanPaid(body, people) {
 }
 export const isAdmin = (request, env) => keyOk(request.headers.get('X-Admin-Key'), env.ADMIN_KEY);
 
+// ── Scores and levels (Stage 2, 27 Nov 2026) ──
+const levelMap = (rows, today) => new Map(rows.map((l) => [l.id, decayedLevel(l.level, l.level_active_at, today)]));
+// A score: checked, its changes worked out from the four players' levels as they stand (after any
+// 90-day drop, which the score then settles), and saved with those levels in one transaction.
+async function addScore(repo, body, dates, nowIso, admin) {
+  const today = dates[0];
+  const [people, rows] = await Promise.all([repo.listPeople(), repo.listLevels()]);
+  const levels = levelMap(rows, today);
+  const clean = cleanScore(body, people, levels, dates, admin);
+  if (clean.error) return fail(clean.error, clean.status || 400);
+  if (await repo.getMatchByKey(clean.key)) return null;                    // the same form sent twice: already in
+  const recentMatches = await repo.listMatches(addDays(today, -RELIABLE_DAYS));
+  if (recentMatches.some((m) => sameScore(m, clean) && Date.parse(nowIso) - Date.parse(m.enteredAt) < SCORE_SAME_MS)) return fail('That score is already in', 409);
+  const recent = countRecent(recentMatches, addDays(today, -RELIABLE_DAYS));
+  const side = (ids) => ids.map((id) => ({ id, level: levels.get(id), recent: recent.get(id) || 0 }));
+  const result = clean.rated ? levelChanges({ a: side(clean.a), b: side(clean.b), sets: clean.sets }) : { changes: {} };
+  const byId = new Map(rows.map((l) => [l.id, l]));
+  const updates = Object.entries(result.changes).map(([id, d]) => {
+    const n = Number(id);
+    const was = byId.get(n);
+    const activeAt = was.level_active_at && was.level_active_at > clean.playedOn ? was.level_active_at : clean.playedOn;
+    return { id: n, level: r3(clampLevel(levels.get(n) + d)), matches: 1, activeAt };
+  });
+  try {
+    await repo.addScore({ ...clean, changes: result.changes }, updates, nowIso);
+  } catch (e) {
+    if (await repo.getMatchByKey(clean.key)) return null;                  // a double tap that raced: one score
+    throw e;
+  }
+  return null;
+}
+// Kevin's phone: a wrong score comes off, and every change it (and its feedback) made is reversed.
+async function deleteScore(repo, id, nowIso) {
+  const m = id ? await repo.getMatch(id) : null;
+  if (!m || m.deletedAt) return fail('No such score', 404);
+  const rows = new Map((await repo.listLevels()).map((l) => [l.id, l]));
+  const ids = new Set([...Object.keys(m.changes), ...Object.keys(m.feedback)].map(Number));
+  const updates = [...ids].filter((pid) => rows.has(pid) && rows.get(pid).level != null).map((pid) => ({
+    id: pid, level: r3(clampLevel(rows.get(pid).level - (m.changes[pid] || 0) - (m.feedback[pid] || 0))), matches: m.changes[pid] != null ? -1 : 0, activeAt: null,
+  }));
+  await repo.deleteScore(m.id, nowIso, updates);
+  return null;
+}
+// Peer feedback: one of the four marks the others within 24 hours of a rated score. A player with 2
+// matching votes (higher, or lower) moves 0.05 once for that score; a vote changed later moves it back.
+async function addFeedback(repo, body, nowMs, nowIso) {
+  const m = intId(body.match_id) ? await repo.getMatch(intId(body.match_id)) : null;
+  if (!m || m.deletedAt) return fail('No such score', 404);
+  if (!m.rated) return fail('A friendly score has no feedback', 400);
+  if (nowMs >= Date.parse(m.enteredAt) + FEEDBACK_MS) return fail('Feedback closes 24 hours after the score goes in', 409);
+  const four = [...m.a, ...m.b];
+  const from = intId(body.from_id);
+  if (!from || !four.includes(from)) return fail('Only someone who played can give feedback', 400);
+  const raw = body.votes && typeof body.votes === 'object' && !Array.isArray(body.votes) ? Object.entries(body.votes) : [];
+  const votes = raw.map(([k, v]) => [intId(k), v]);
+  if (!votes.length || votes.some(([about, v]) => !about || about === from || !four.includes(about) || !VOTES.includes(v))) return fail('Mark the other three players: higher, expected or lower', 400);
+  const all = (await repo.listFeedback([m.id])).filter((v) => !(v.from_id === from && votes.some(([about]) => about === v.about_id)));
+  for (const [about, vote] of votes) all.push({ about_id: about, from_id: from, vote });
+  const rows = new Map((await repo.listLevels()).map((l) => [l.id, l]));
+  const fb = { ...m.feedback };
+  const updates = [];
+  for (const pid of four) {
+    const about = all.filter((v) => v.about_id === pid);
+    const want = about.filter((v) => v.vote === 'higher').length >= 2 ? FEEDBACK_STEP : about.filter((v) => v.vote === 'lower').length >= 2 ? -FEEDBACK_STEP : 0;
+    const had = fb[pid] || 0;
+    const row = rows.get(pid);
+    if (want === had || !row || row.level == null) continue;
+    const level = r3(clampLevel(row.level + want - had));
+    fb[pid] = r3(had + level - row.level);
+    if (!fb[pid]) delete fb[pid];
+    updates.push({ id: pid, level, matches: 0, activeAt: null });
+  }
+  await repo.setFeedback(m.id, from, votes, nowIso, fb, updates);
+  return null;
+}
+
 async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
   if (body.action === 'name') {
     const id = intId(body.id);
@@ -1200,6 +1490,15 @@ async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
       if ((await repo.listPeople()).some((p) => p.id !== id && (foldName(p.name) === f || (p.realName && foldName(p.realName) === f)))) return fail('Someone else already has that name', 409);
     }
     await repo.setRealName(id, realName);
+  } else if (body.action === 'level') {
+    const id = intId(body.id);
+    if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
+    const level = cleanLevel(body.level);
+    if (level == null) return fail('A level is a number from 0 to 7', 400);
+    await repo.setLevel(id, level, dates[0]);
+  } else if (body.action === 'score-delete') {
+    const r = await deleteScore(repo, intId(body.id), nowIso);
+    if (r) return r;
   } else if (body.action === 'retry') {
     // A retry may be for a booking from the last week (paid late, the robot ran after midnight).
     const m = SLOT_RE.exec(String(body.slot || ''));
@@ -1354,8 +1653,15 @@ async function loadState(env, repo, nowMs, admin = false) {
   const state = computeState({ people, votes, booked, availability, dates, nowMs, cfg: venueConfig(env) });
   state.availability.stale = pulseDue(pulse, nowMs);
   state.earlier = await earlierPaid(env, repo, dates[0]);
+  state.levels = await loadLevels(repo, dates[0], nowMs);
   if (admin) state.setup = await loadSetup(repo);
   return state;
+}
+// Everyone's page: the league table and the last month's scores.
+async function loadLevels(repo, today, nowMs) {
+  const [levels, matches] = await Promise.all([repo.listLevels(), repo.listMatches(addDays(today, -RELIABLE_DAYS))]);
+  const voters = await repo.listFeedback(matches.filter((m) => m.playedOn >= addDays(today, -30)).map((m) => m.id));
+  return computeLevels({ levels, matches, voters: voters.map((v) => ({ match_id: v.match_id, from_id: v.from_id })), today, nowMs });
 }
 
 // Read Pulse (when due), then run the alert check on the fresh state. Never throws: it runs inside
@@ -1512,6 +1818,25 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       const person = await repo.addPerson(clean.name, nowIso);
       if (!person) return fail('Could not save that name. Try again.', 500);
       return json(person);
+    }
+
+    if (path === '/api/level') {
+      const id = intId(body.person_id);
+      const level = cleanLevel(body.level);
+      if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
+      if (level == null) return fail('A level is a number from 0 to 7', 400);
+      if (!(await repo.setLevel(id, level, dates[0], true))) return fail('Your level has moved with your scores now: only Kevin can change it', 409);
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+    if (path === '/api/score') {
+      const r = await addScore(repo, body, dates, nowIso, admin);
+      if (r) return r;
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+    if (path === '/api/feedback') {
+      const r = await addFeedback(repo, body, nowMs, nowIso);
+      if (r) return r;
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
     }
 
     if (path === '/api/vote') {
