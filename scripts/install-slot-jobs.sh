@@ -130,6 +130,11 @@ JOBS=(
   # open, raises ONE review task for Customer Service through create-agent-task.py. Daily,
   # because there is no day-of-month here and a daily check heals after a sleeping Mac.
   "preferred-list|6:20|/usr/bin/python3 $REPO/scripts/preferred-list.py due --apply"
+  # Kevin's weekly FPL Draft swap card (Kevin, 20 Nov 2026; approved build recQZZjNELK1x3cAc).
+  # Rules only, no model. HOURLY at quarter past, because the deadlines fall on different days
+  # and GW14's waivers process 16.5 hours before its deadline, so a daily run would miss it.
+  # Quiet on every hour but the one that owes a card. It recommends only: no swap is ever made.
+  "fpl-draft-swaps|*:15|/usr/bin/python3 $REPO/scripts/fpl-draft-swaps.py card"
 )
 
 # launchd's own numbering: Sunday = 0. Mapped here once so no caller ever writes

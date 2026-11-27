@@ -1,0 +1,118 @@
+{
+ "element_status": [
+  {
+   "element": 1,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 2,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 3,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 4,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 5,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 6,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 7,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 8,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 9,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 10,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 11,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 12,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 13,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 14,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 15,
+   "in_accepted_trade": false,
+   "owner": 96186,
+   "status": "a"
+  },
+  {
+   "element": 20,
+   "in_accepted_trade": false,
+   "owner": null,
+   "status": "a"
+  },
+  {
+   "element": 21,
+   "in_accepted_trade": false,
+   "owner": null,
+   "status": "a"
+  },
+  {
+   "element": 22,
+   "in_accepted_trade": false,
+   "owner": null,
+   "status": "a"
+  },
+  {
+   "element": 23,
+   "in_accepted_trade": false,
+   "owner": null,
+   "status": "a"
+  }
+ ]
+}

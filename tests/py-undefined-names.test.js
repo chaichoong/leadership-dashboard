@@ -40,6 +40,8 @@ const ESTATE_SCRIPTS = [
   'scripts/ebay-search.py',
   // 22 Nov 2026: Freeform boards into the brain inbox, third half of the nightly apple-notes-bridge job
   'scripts/freeform-bridge.py',
+  // 27 Nov 2026: Kevin's weekly FPL Draft swap card, hourly (approved build recQZZjNELK1x3cAc)
+  'scripts/fpl-draft-swaps.py',
   'scripts/approval_evidence.py',
   'scripts/adobe_sign_link.py',
   'scripts/calendar-write.py',

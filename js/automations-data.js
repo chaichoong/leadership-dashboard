@@ -128,6 +128,8 @@ var AUTOMATIONS = {
           what: 'Keeps the Payment Run list true between Fridays. It puts the payment cards you approved on the list on the Friday before they are due, marks a bill Paid once the bank shows a payment that names the payee, and lists any money that left the business account without ever being on the list. No AI, so it costs nothing to run.' },
         { key: 'payment-run', agent: true, name: 'Payment Run', when: 'Fridays 9:00pm', status: 'on',
           what: 'Finds every payment request across Kevin\u2019s two mailboxes, reads the PDF invoices, checks nothing has already been paid, and leaves one list in Accounts > Payment Run. It prepares only \u2014 it never pays, sends or agrees anything.' },
+        { key: 'fpl-draft-swaps', name: 'FPL Draft swaps', when: 'every hour, quarter past', status: 'on',
+          what: 'Checks your fantasy football Draft squad against your five swap rules, once the waivers are processed and the next deadline is inside 36 hours, then puts one card in your queue: which players to swap and who to put in goal, with the numbers behind each line. It recommends only and changes nothing in your team. No AI, so it costs nothing to run. Hourly because the deadlines fall on different days and one gameweek gives only 16 hours between the waivers and the deadline; every other hour it reads and exits.' },
     ],
 
     // Scheduled outside job-schedule.json, so the coverage test does not see it.
