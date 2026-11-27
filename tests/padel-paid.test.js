@@ -946,14 +946,14 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     await h.run();
     expect(h.w.posts[0].people[2]).toEqual({ state: 'unchecked', notes: ['Splitwise not checked: the robot is signed out of Splitwise'] });
     expect(groupReads()).toBe(1);
-    h.state.now = NOON + SETUP_RETRY_MS - 60000;
+    h.state.now = NOON + SETUP_RETRY_MS - 10 * 60000;
     await h.run();
     expect(groupReads()).toBe(1);                                          // not yet an hour
     h.state.now = NOON + SETUP_RETRY_MS;
     h.state.signedOut = false;
     await h.run();
     expect(groupReads()).toBe(2);                                          // an hour on: tried again, and signed in now
-    h.state.now += SETUP_EVERY_MS - 60000;
+    h.state.now += SETUP_EVERY_MS - 10 * 60000;
     await h.run();
     expect(groupReads()).toBe(2);                                          // all checked: left for a day
     await h.run([PEOPLE[0], PEOPLE[1], { id: 3, name: 'Ada Lund-Hart' }]);
@@ -967,7 +967,7 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     const h = setupHarness();                                              // Nia is not in Splitwise
     await h.run();
     expect(h.w.posts[0].people[7].state).toBe('missing');
-    h.state.now = NOON + SETUP_RETRY_MS - 60000;
+    h.state.now = NOON + SETUP_RETRY_MS - 10 * 60000;
     await h.run();
     expect(h.g.calls.length).toBe(1);
     h.state.now = NOON + SETUP_RETRY_MS;
@@ -1010,7 +1010,7 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     const run = () => setupRun({ fetchImpl: h.w.fetchImpl, headers: {}, ab: slow, players: h.players, whatsapp: () => WA2, now: () => h.state.now, log: () => {}, file: h.file, save: (id, add) => add });
     await run();
     expect(JSON.parse(readFileSync(h.file, 'utf8')).at).toBe(NOON);
-    h.state.now = NOON + SETUP_RETRY_MS;
+    h.state.now = NOON + SETUP_RETRY_MS - 2 * 60000;                       // this run started a little early: still the hourly one
     await run();
     expect(h.g.calls.length).toBe(2);
   });
@@ -1020,7 +1020,7 @@ describe('the setup check, and a Splitwise id that changes when an invite is acc
     h.state.members = [...MEM, { id: 62, first_name: 'Nia', last_name: 'Cole' }];
     await h.run();
     expect(h.w.posts[0].people[8].state).toBe('ready');
-    expect(h.w.posts[0].people[9]).toEqual({ state: 'missing', notes: ['not in the Padel WhatsApp group under that name', 'not in the Splitwise group under that name'] });
+    expect(h.w.posts[0].people[9]).toEqual({ state: 'missing', notes: ['not in the Padel WhatsApp group under that name', 'another new name on the list fits the same Splitwise member: check both names'] });
   });
 
   it('a group read that does not include Kevin is not trusted: nothing is re-linked and Splitwise reads as not checked', async () => {

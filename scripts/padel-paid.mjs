@@ -87,6 +87,7 @@ export const SETUP_FILE = join(LOG_DIR, 'setup.json');              // when the 
 export const SETUP_EVERY_MS = 20 * 3600 * 1000;     // the setup check runs once a day...
 export const SETUP_RETRY_MS = 60 * 60 * 1000;       // ...hourly while a list could not be read or a save failed, and at once when the list changes
 export const SETUP_FRESH_MS = 48 * 3600 * 1000;     // ...and hourly while anyone is missing something, for 48 hours after the list changed
+export const SETUP_SLACK_MS = 5 * 60 * 1000;        // a run starts tens of seconds later or earlier each time: "hourly" allows for it
 
 // ── Pure parts ──
 export const money = (pence) => (pence / 100).toFixed(2);
@@ -349,7 +350,7 @@ export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save
   let last = {};
   try { last = JSON.parse(readFileSync(file, 'utf8')) || {}; } catch (e) { if (e.code !== 'ENOENT') log(`padel-paid: setup check: ${file} unreadable (${e.code || e.name}), checking again`); }
   const started = now();                                            // the run's time is when it started, so "hourly" is hourly
-  if (sig === last.sig && started - (Number(last.at) || 0) < (last.retry ? SETUP_RETRY_MS : SETUP_EVERY_MS)) return [];
+  if (sig === last.sig && started - (Number(last.at) || 0) < (last.retry ? SETUP_RETRY_MS : SETUP_EVERY_MS) - SETUP_SLACK_MS) return [];
   const changedAt = sig === last.sig && Number(last.changedAt) ? Number(last.changedAt) : started;
   const reply = await swJson(`${SW}/api/v3.0/get_group/${players.splitwise_group.id}`, ab);
   let members = Array.isArray(reply?.group?.members) ? reply.group.members : null;
@@ -382,6 +383,12 @@ export async function setupRun({ fetchImpl, headers, ab, players, whatsapp, save
     if (unsaved.has(p.id)) out[p.id] = { state: 'missing', notes: ['found, but the entry could not be saved'] };
     else {
       out[p.id] = setupStatus(p, view, { members, whatsapp: wa, membersWhy });
+      // Not found only because a new name earlier on the list fits the same member: say that, not
+      // "not in the group", which would be wrong advice ("Rich Jones" before "Richard Jones").
+      const notIn = out[p.id].notes.indexOf('not in the Splitwise group under that name');
+      if (notIn >= 0 && !players.players[String(p.id)] && linkPlayer(p, players, { members, whatsapp: wa }).add.splitwise_id) {
+        out[p.id].notes[notIn] = 'another new name on the list fits the same Splitwise member: check both names';
+      }
       if (!view.players[String(p.id)]) {
         const { add } = linkPlayer(p, view, { members, whatsapp: wa, today });
         if (Object.keys(add).length) view.players[String(p.id)] = { ...add };
