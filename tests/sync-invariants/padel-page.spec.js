@@ -964,6 +964,16 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       expect(store.levelBodies[1]).toEqual({ person_id: 1, level: '2.37' });
     });
 
+    // Review of PR #1023: with an exact level showing, a step picked from the list was ignored.
+    test('with an exact level showing, a step picked from the list is the one sent', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, levels: { players: [{ id: 1, level: 2.37, matches: 0, reliability: 0, last: null }], scores: [] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#level-exact')).toHaveValue('2.37');
+      await page.locator('#level-step').selectOption('3');
+      await page.locator('#level-form button[type="submit"]').click();
+      await expect.poll(() => store.levelBodies).toEqual([{ person_id: 1, level: '3' }]);
+    });
+
     test('once scores have moved a level, the card says so and has no picker', async ({ page }) => {
       await mockPadel(page, { siClosedFrom: 7, levels: { players: [{ id: 1, level: 3.18, matches: 2, reliability: 10, last: 0.18 }], scores: [] } });
       await openAsTestAnn(page);
@@ -1009,6 +1019,22 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await page.locator('#score-form button[type="submit"]').click();
       await expect(page.locator('#toast')).toContainText('four different players');
       expect(store.scoreBodies).toHaveLength(1);
+    });
+
+    test('a set with one pair\'s games left blank is refused before anything is sent, and the form is gone for the next person on the phone', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await openAsTestAnn(page);
+      await page.locator('[data-score-open]').click();
+      await page.locator('[data-sf="a1"]').selectOption('2');
+      await page.locator('[data-sf="b0"]').selectOption('3');
+      await page.locator('[data-sf="b1"]').selectOption('4');
+      await page.locator('[data-sf="s0a"]').fill('6');
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#toast')).toContainText("Put in both pairs' games for set 1");
+      expect(store.scoreBodies).toEqual([]);
+      await page.locator('#switch').click();
+      await page.locator('[data-person="2"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(0);
     });
 
     test('a player in a fresh rated score sees the changes, marks the other three and sends feedback once', async ({ page }) => {

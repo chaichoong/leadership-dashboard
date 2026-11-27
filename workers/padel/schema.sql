@@ -101,9 +101,13 @@ CREATE TABLE IF NOT EXISTS matches (
   entered_at TEXT NOT NULL,
   changes TEXT NOT NULL DEFAULT '{}',
   feedback_changes TEXT NOT NULL DEFAULT '{}',
-  deleted_at TEXT
+  deleted_at TEXT,
+  fingerprint TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS matches_played_on ON matches (played_on);
+-- One score per match a day: the same pairs and games (either way round) cannot go in twice, even sent
+-- by both pairs at the same moment. A deleted score frees its place.
+CREATE UNIQUE INDEX IF NOT EXISTS matches_one_a_day ON matches (played_on, fingerprint) WHERE deleted_at IS NULL;
 CREATE TABLE IF NOT EXISTS feedback (
   match_id INTEGER NOT NULL,
   from_id INTEGER NOT NULL,

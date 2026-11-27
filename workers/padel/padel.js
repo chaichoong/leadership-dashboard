@@ -732,7 +732,6 @@ export const DECAY_STEP = 0.1;
 export const FEEDBACK_STEP = 0.05;
 export const FEEDBACK_MS = 24 * 3600 * 1000;
 export const SCORE_DAYS = 7;           // a score can go in for today and the 6 days before
-export const SCORE_SAME_MS = 10 * 60 * 1000;   // the same score again within this is a double entry
 export const KC_WEIGHT = 0.25;         // Stage 3: a first-to-3 Kings and challengers game counts a quarter
 export const VOTES = ['higher', 'expected', 'lower'];
 const r3 = (x) => Math.round(x * 1000) / 1000;
@@ -794,7 +793,8 @@ export function cleanScore(body, people, levels, dates, admin = false) {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(key)) return { error: 'The score has no id: reload the page and try again' };
   const today = dates[0];
   const playedOn = String(body.played_on || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(playedOn) || playedOn > today || playedOn < addDays(today, -(SCORE_DAYS - 1))) return { error: `A score is for today or the ${SCORE_DAYS - 1} days before` };
+  const realDay = /^\d{4}-\d{2}-\d{2}$/.test(playedOn) && !Number.isNaN(Date.parse(`${playedOn}T12:00:00Z`)) && new Date(`${playedOn}T12:00:00Z`).toISOString().slice(0, 10) === playedOn;
+  if (!realDay || playedOn > today || playedOn < addDays(today, -(SCORE_DAYS - 1))) return { error: `A score is for today or the ${SCORE_DAYS - 1} days before` };
   const team = (t) => (Array.isArray(t) && t.length === 2 ? t.map(intId) : null);
   const a = team(body.team_a), b = team(body.team_b);
   if (!a || !b || [...a, ...b].some((x) => !x) || new Set([...a, ...b]).size !== 4) return { error: 'Pick two pairs: four different players' };
@@ -824,13 +824,16 @@ export function cleanScore(body, people, levels, dates, admin = false) {
   }
   return { key, playedOn, a, b, sets, rated, enteredBy };
 }
-// The same two pairs and games, either way round.
-const sameScore = (m, c) => {
-  const pair = (t) => [...t].sort((x, y) => x - y).join(',');
-  const one = (x, y) => pair(x.a) === pair(y.a) && pair(x.b) === pair(y.b) && JSON.stringify(x.sets) === JSON.stringify(y.sets);
-  const flip = (x) => ({ a: x.b, b: x.a, sets: x.sets.map(([p, q]) => [q, p]) });
-  return m.playedOn === c.playedOn && (one(m, c) || one(m, flip(c)));
-};
+// One score per match a day (review of PR #1023): the two pairs and the games, the same whichever pair
+// entered it. A unique index on (played_on, fingerprint) refuses a second one even when two players send
+// it at the same moment.
+export function scoreFingerprint(a, b, sets) {
+  const pa = [...a].sort((x, y) => x - y), pb = [...b].sort((x, y) => x - y);
+  const flip = pb[0] < pa[0];
+  const [p1, p2] = flip ? [pb, pa] : [pa, pb];
+  const games = (flip ? sets.map(([x, y]) => [y, x]) : sets).map(([x, y]) => `${x}-${y}`).join(' ');
+  return `${p1.join(',')}|${p2.join(',')}|${games}`;
+}
 const countRecent = (matches, from) => {
   const n = new Map();
   for (const m of matches) if (m.rated && m.playedOn >= from) for (const id of [...m.a, ...m.b]) n.set(id, (n.get(id) || 0) + 1);
@@ -854,7 +857,7 @@ export function computeLevels({ levels, matches, voters = [], today, nowMs }) {
     const until = Date.parse(m.enteredAt) + FEEDBACK_MS;
     return {
       id: m.id, on: m.playedOn, a: m.a, b: m.b, sets: m.sets, rated: m.rated, kind: m.kind, winner: r.winner, finished: r.finished,
-      changes: m.changes, feedback: m.feedback, enteredBy: m.enteredBy, feedbackOpen: m.rated && nowMs < until, voted: [...(votedBy.get(m.id) || [])],
+      changes: m.changes, feedback: m.feedback, enteredBy: m.enteredBy, feedbackOpen: m.rated && !!r.winner && nowMs < until, voted: [...(votedBy.get(m.id) || [])],
     };
   });
   return { players, scores };
@@ -867,14 +870,20 @@ const toPerson = (r) => {
   return p;
 };
 const PEOPLE_COLS = 'id, name, venues, votes_at, real_name';
-const MATCH_COLS = 'id, key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, feedback_changes, deleted_at';
-// A level written whole (worked out in the Worker), the rated-score count moved, the active date kept unless given.
-const PEOPLE_LEVEL_SQL = 'UPDATE people SET level = ?2, level_matches = MAX(0, level_matches + ?3), level_active_at = COALESCE(?4, level_active_at) WHERE id = ?1';
+const MATCH_COLS = 'id, key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, feedback_changes, deleted_at, fingerprint';
+// A level moved BY an amount, in the database (review of PR #1023: two saves at once must both count,
+// never the second overwriting the first), kept within 0 to 7; the rated-score count moved; the active
+// date only ever moved later. ?5 and ?6, when given, make it conditional on this request's own write to
+// the matches row (a delete, a feedback version), so a request that lost a race moves no level.
+const PEOPLE_LEVEL_SQL = `UPDATE people SET level = MIN(${LEVEL_MAX}, MAX(${LEVEL_MIN}, ROUND(COALESCE(level, 0) + ?2, 3))), level_matches = MAX(0, level_matches + ?3),
+  level_active_at = CASE WHEN ?4 IS NULL THEN level_active_at WHEN level_active_at IS NULL OR level_active_at < ?4 THEN ?4 ELSE level_active_at END WHERE id = ?1`;
+const PEOPLE_LEVEL_IF_SQL = (col) => `${PEOPLE_LEVEL_SQL} AND (SELECT ${col} FROM matches WHERE id = ?5) = ?6`;
 const parseChanges = (raw) => { try { const o = JSON.parse(raw || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v === 'number')) : {}; } catch { return {}; } };
 const parseSets = (raw) => { try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 const toMatch = (r) => ({
   id: r.id, key: r.key, playedOn: r.played_on, a: parseIds(r.team_a), b: parseIds(r.team_b), sets: parseSets(r.sets), rated: !!r.rated, kind: r.kind,
-  enteredBy: r.entered_by, enteredAt: r.entered_at, changes: parseChanges(r.changes), feedback: parseChanges(r.feedback_changes), deletedAt: r.deleted_at || null,
+  enteredBy: r.entered_by, enteredAt: r.entered_at, changes: parseChanges(r.changes), feedback: parseChanges(r.feedback_changes), feedbackRaw: r.feedback_changes || '{}',
+  deletedAt: r.deleted_at || null, fingerprint: r.fingerprint || null,
 });
 // Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it failed).
 const SET_PAID_SQL = `UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
@@ -986,31 +995,43 @@ export function makeRepo(db) {
       const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE key = ?`).bind(key).first();
       return r ? toMatch(r) : null;
     },
+    async getLiveMatchByFingerprint(playedOn, fingerprint) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE played_on = ?1 AND fingerprint = ?2 AND deleted_at IS NULL`).bind(playedOn, fingerprint).first();
+      return r ? toMatch(r) : null;
+    },
     async listFeedback(matchIds) {
       if (!matchIds.length) return [];
       const r = await db.prepare('SELECT match_id, from_id, about_id, vote FROM feedback WHERE match_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(matchIds)).all();
       return r.results || [];
     },
     // One score and the levels it moves, in one transaction: a double tap (the same key) fails whole.
+    // A score and the levels it moves, in one transaction: the same key, or the same match on the same
+    // day, fails the whole batch (UNIQUE), so nothing moves twice.
     async addScore(m, updates, nowIso) {
       await db.batch([
-        db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)')
-          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), JSON.stringify(m.sets), m.rated ? 1 : 0, m.kind || 'match', m.enteredBy, nowIso, JSON.stringify(m.changes || {})),
-        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.level, u.matches, u.activeAt)),
+        db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, fingerprint) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)')
+          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), JSON.stringify(m.sets), m.rated ? 1 : 0, m.kind || 'match', m.enteredBy, nowIso, JSON.stringify(m.changes || {}), m.fingerprint),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.delta, u.matches, u.activeAt)),
       ]);
     },
-    async deleteScore(id, nowIso, updates) {
+    // The levels move back only if THIS request marked the score deleted (token): a second delete at the
+    // same moment changes nothing.
+    async deleteScore(id, token, updates) {
       await db.batch([
-        db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL').bind(id, nowIso),
-        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.level, u.matches, u.activeAt)),
+        db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL').bind(id, token),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('deleted_at')).bind(u.id, u.delta, u.matches, null, id, token)),
       ]);
     },
-    async setFeedback(matchId, fromId, votes, nowIso, feedbackChanges, updates) {
+    async putVotes(matchId, fromId, votes, nowIso) {
+      await db.batch(votes.map(([about, vote]) => db.prepare('INSERT INTO feedback (match_id, from_id, about_id, vote, created_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(match_id, from_id, about_id) DO UPDATE SET vote = excluded.vote, created_at = excluded.created_at')
+        .bind(matchId, fromId, about, vote, nowIso)));
+    },
+    // The feedback's effect, swapped in only from the version this request read (compare and set); the
+    // levels move only if that swap was this request's.
+    async swapFeedback(matchId, fromRaw, toRaw, updates) {
       await db.batch([
-        ...votes.map(([about, vote]) => db.prepare('INSERT INTO feedback (match_id, from_id, about_id, vote, created_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(match_id, from_id, about_id) DO UPDATE SET vote = excluded.vote, created_at = excluded.created_at')
-          .bind(matchId, fromId, about, vote, nowIso)),
-        db.prepare('UPDATE matches SET feedback_changes = ?2 WHERE id = ?1').bind(matchId, JSON.stringify(feedbackChanges)),
-        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.level, u.matches, u.activeAt)),
+        db.prepare('UPDATE matches SET feedback_changes = ?3 WHERE id = ?1 AND feedback_changes = ?2').bind(matchId, fromRaw, toRaw),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('feedback_changes')).bind(u.id, u.delta, 0, null, matchId, toRaw)),
       ]);
     },
     async listPaidPending(fromDate) {
@@ -1411,36 +1432,36 @@ async function addScore(repo, body, dates, nowIso, admin) {
   const clean = cleanScore(body, people, levels, dates, admin);
   if (clean.error) return fail(clean.error, clean.status || 400);
   if (await repo.getMatchByKey(clean.key)) return null;                    // the same form sent twice: already in
+  const fingerprint = scoreFingerprint(clean.a, clean.b, clean.sets);
+  if (await repo.getLiveMatchByFingerprint(clean.playedOn, fingerprint)) return fail('That score is already in', 409);
   const recentMatches = await repo.listMatches(addDays(today, -RELIABLE_DAYS));
-  if (recentMatches.some((m) => sameScore(m, clean) && Date.parse(nowIso) - Date.parse(m.enteredAt) < SCORE_SAME_MS)) return fail('That score is already in', 409);
   const recent = countRecent(recentMatches, addDays(today, -RELIABLE_DAYS));
   const side = (ids) => ids.map((id) => ({ id, level: levels.get(id), recent: recent.get(id) || 0 }));
   const result = clean.rated ? levelChanges({ a: side(clean.a), b: side(clean.b), sets: clean.sets }) : { changes: {} };
   const byId = new Map(rows.map((l) => [l.id, l]));
+  // Each level moves by the score's change plus any 90-day drop the score now settles.
   const updates = Object.entries(result.changes).map(([id, d]) => {
     const n = Number(id);
-    const was = byId.get(n);
-    const activeAt = was.level_active_at && was.level_active_at > clean.playedOn ? was.level_active_at : clean.playedOn;
-    return { id: n, level: r3(clampLevel(levels.get(n) + d)), matches: 1, activeAt };
+    return { id: n, delta: r3(levels.get(n) - byId.get(n).level + d), matches: 1, activeAt: clean.playedOn };
   });
   try {
-    await repo.addScore({ ...clean, changes: result.changes }, updates, nowIso);
+    await repo.addScore({ ...clean, changes: result.changes, fingerprint }, updates, nowIso);
   } catch (e) {
     if (await repo.getMatchByKey(clean.key)) return null;                  // a double tap that raced: one score
+    if (await repo.getLiveMatchByFingerprint(clean.playedOn, fingerprint)) return fail('That score is already in', 409);   // the other pair sent it at the same moment
     throw e;
   }
   return null;
 }
-// Kevin's phone: a wrong score comes off, and every change it (and its feedback) made is reversed.
+// Kevin's phone: a wrong score comes off, and every change it (and its feedback) made is reversed. A
+// 90-day drop the score settled stays settled, and a level Kevin set by hand after the score is moved
+// by the reversal too: delete a wrong score first, then set the level.
 async function deleteScore(repo, id, nowIso) {
   const m = id ? await repo.getMatch(id) : null;
   if (!m || m.deletedAt) return fail('No such score', 404);
-  const rows = new Map((await repo.listLevels()).map((l) => [l.id, l]));
   const ids = new Set([...Object.keys(m.changes), ...Object.keys(m.feedback)].map(Number));
-  const updates = [...ids].filter((pid) => rows.has(pid) && rows.get(pid).level != null).map((pid) => ({
-    id: pid, level: r3(clampLevel(rows.get(pid).level - (m.changes[pid] || 0) - (m.feedback[pid] || 0))), matches: m.changes[pid] != null ? -1 : 0, activeAt: null,
-  }));
-  await repo.deleteScore(m.id, nowIso, updates);
+  const updates = [...ids].map((pid) => ({ id: pid, delta: -r3((m.changes[pid] || 0) + (m.feedback[pid] || 0)), matches: m.changes[pid] != null ? -1 : 0 }));
+  await repo.deleteScore(m.id, `${nowIso}#${Math.random().toString(36).slice(2, 10)}`, updates);
   return null;
 }
 // Peer feedback: one of the four marks the others within 24 hours of a rated score. A player with 2
@@ -1448,31 +1469,34 @@ async function deleteScore(repo, id, nowIso) {
 async function addFeedback(repo, body, nowMs, nowIso) {
   const m = intId(body.match_id) ? await repo.getMatch(intId(body.match_id)) : null;
   if (!m || m.deletedAt) return fail('No such score', 404);
-  if (!m.rated) return fail('A friendly score has no feedback', 400);
+  if (!m.rated || !matchResult(m.sets).winner) return fail('This score changed no level, so it takes no feedback', 400);
   if (nowMs >= Date.parse(m.enteredAt) + FEEDBACK_MS) return fail('Feedback closes 24 hours after the score goes in', 409);
   const four = [...m.a, ...m.b];
   const from = intId(body.from_id);
   if (!from || !four.includes(from)) return fail('Only someone who played can give feedback', 400);
   const raw = body.votes && typeof body.votes === 'object' && !Array.isArray(body.votes) ? Object.entries(body.votes) : [];
   const votes = raw.map(([k, v]) => [intId(k), v]);
-  if (!votes.length || votes.some(([about, v]) => !about || about === from || !four.includes(about) || !VOTES.includes(v))) return fail('Mark the other three players: higher, expected or lower', 400);
-  const all = (await repo.listFeedback([m.id])).filter((v) => !(v.from_id === from && votes.some(([about]) => about === v.about_id)));
-  for (const [about, vote] of votes) all.push({ about_id: about, from_id: from, vote });
-  const rows = new Map((await repo.listLevels()).map((l) => [l.id, l]));
-  const fb = { ...m.feedback };
-  const updates = [];
-  for (const pid of four) {
-    const about = all.filter((v) => v.about_id === pid);
-    const want = about.filter((v) => v.vote === 'higher').length >= 2 ? FEEDBACK_STEP : about.filter((v) => v.vote === 'lower').length >= 2 ? -FEEDBACK_STEP : 0;
-    const had = fb[pid] || 0;
-    const row = rows.get(pid);
-    if (want === had || !row || row.level == null) continue;
-    const level = r3(clampLevel(row.level + want - had));
-    fb[pid] = r3(had + level - row.level);
-    if (!fb[pid]) delete fb[pid];
-    updates.push({ id: pid, level, matches: 0, activeAt: null });
+  if (!votes.length || new Set(votes.map(([about]) => about)).size !== votes.length
+    || votes.some(([about, v]) => !about || about === from || !four.includes(about) || !VOTES.includes(v))) return fail('Mark the other three players: higher, expected or lower', 400);
+  await repo.putVotes(m.id, from, votes, nowIso);
+  // Then the effect of ALL the votes now stored, swapped in from the version read (compare and set). Two
+  // players sending at the same moment: the one whose swap loses reads again and settles it.
+  for (let tries = 0; tries < 4; tries += 1) {
+    const cur = await repo.getMatch(m.id);
+    if (!cur || cur.deletedAt) return null;
+    const all = await repo.listFeedback([m.id]);
+    const want = {};
+    for (const pid of four) {
+      const about = all.filter((v) => v.about_id === pid);
+      const w = about.filter((v) => v.vote === 'higher').length >= 2 ? FEEDBACK_STEP : about.filter((v) => v.vote === 'lower').length >= 2 ? -FEEDBACK_STEP : 0;
+      if (w) want[pid] = w;
+    }
+    const diffs = four.map((pid) => [pid, r3((want[pid] || 0) - (cur.feedback[pid] || 0))]).filter(([, d]) => d);
+    if (!diffs.length) return null;
+    const toRaw = JSON.stringify({ ...want, _v: Math.random().toString(36).slice(2, 10) });
+    await repo.swapFeedback(m.id, cur.feedbackRaw, toRaw, diffs.map(([pid, d]) => ({ id: pid, delta: d })));
+    if ((await repo.getMatch(m.id)).feedbackRaw === toRaw) return null;
   }
-  await repo.setFeedback(m.id, from, votes, nowIso, fb, updates);
   return null;
 }
 

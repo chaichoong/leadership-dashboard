@@ -1787,6 +1787,7 @@ describe('a score as a phone sends it (cleanScore)', () => {
     expect(err({ played_on: '2026-11-20' })).toMatch(/today or the 6 days before/);
     expect(err({ played_on: '2026-11-21' })).toBeUndefined();
     expect(err({ played_on: '2026-11-28' })).toMatch(/today or the 6 days before/);
+    for (const bad of ['2026-11-31', '2026-11-99', '2026-11-00', '2026-13-01']) expect([bad, err({ played_on: bad })]).toEqual([bad, expect.stringMatching(/today or the 6 days before/)]);   // not a real day
     expect(err({ team_b: [3, 1] })).toMatch(/four different players/);
     expect(err({ team_b: [3, 99] })).toMatch(/not on the list/);
     expect(err({ entered_by: 5 })).toMatch(/Only someone who played/);
@@ -1879,6 +1880,7 @@ describe('levels and scores on the live database shape (makeRepo SQL on SQLite)'
     expect((await vote(ids[4], { [ids[0]]: 'higher' })).status).toBe(400);
     expect((await vote(ids[1], { [ids[1]]: 'higher' })).status).toBe(400);   // not about yourself
     expect((await vote(ids[1], { [ids[0]]: 'great' })).status).toBe(400);
+    expect((await vote(ids[1], { [String(ids[0])]: 'higher', ['0' + ids[0]]: 'higher' })).status).toBe(400);   // one player named twice
     t.setNow(Date.parse('2026-11-27T18:00:00Z') + FEEDBACK_MS + 1000);
     expect((await vote(ids[1], { [ids[0]]: 'higher' })).status).toBe(409);
   });
@@ -1907,6 +1909,48 @@ describe('levels and scores on the live database shape (makeRepo SQL on SQLite)'
     expect(lv(s.json, ids[0]).level).toBe(2.9);
     const r = await score();
     expect(lv(r.json, ids[0]).level).toBeCloseTo(2.9 + 0.2, 1);    // settled from 2.9, not 3
+  });
+
+  it('a score that changed no level takes no feedback: friendly, or no winner', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const noWin = (await score({ sets: [[4, 3]] })).json.levels.scores[0];
+    expect(noWin).toMatchObject({ winner: null, feedbackOpen: false, changes: {} });
+    expect((await t.call('/api/feedback', { match_id: noWin.id, from_id: ids[1], votes: { [ids[0]]: 'higher' } })).status).toBe(400);
+  });
+
+  it('votes stored by another request at the same moment are counted: the effect is worked out from every stored vote', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    await t.repo.putVotes(mid, ids[2], [[ids[0], 'higher']], iso(Date.parse('2026-11-27T18:00:00Z')));   // landed, but its own recompute lost
+    const r = await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    expect(lv(r.json, ids[0]).level).toBe(3.23);
+    expect(r.json.levels.scores[0].feedback).toEqual({ [ids[0]]: 0.05 });
+  });
+
+  it('the same match sent by both pairs at the same moment is one score: the database refuses the second', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const real = t.repo.getLiveMatchByFingerprint.bind(t.repo);
+    let skip = 2;                                                      // both requests pass the first look before either has written
+    t.repo.getLiveMatchByFingerprint = async (...a) => (skip-- > 0 ? null : real(...a));
+    expect((await score()).status).toBe(200);
+    const second = await score({ entered_by: ids[2], team_a: [ids[3], ids[2]], team_b: [ids[1], ids[0]], sets: [[4, 6], [3, 6]] });
+    expect(second.status).toBe(409);
+    expect(second.json.error).toBe('That score is already in');
+    const s2 = await t.call('/api/state');
+    expect(s2.json.levels.scores).toHaveLength(1);
+    expect(lv(s2.json, ids[0])).toMatchObject({ level: 3.18, matches: 1 });
+  });
+
+  it('a level moves by the change in the database, so a save that read an older level still counts in full', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    await t.call('/api/admin', { action: 'level', id: ids[0], level: 3 }, { admin: ADMIN });
+    await score();
+    // Kevin's correction lands, then a second score that read the levels before it: both stand.
+    await t.call('/api/admin', { action: 'level', id: ids[4], level: 3 }, { admin: ADMIN });
+    const r = await score({ team_b: [ids[2], ids[4]], sets: [[6, 2], [6, 2]] });
+    expect(r.status).toBe(200);
+    expect(lv(r.json, ids[0]).matches).toBe(2);
+    expect(lv(r.json, ids[0]).level).toBeGreaterThan(3.18);
   });
 });
 
