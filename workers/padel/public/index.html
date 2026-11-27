@@ -158,6 +158,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .people td { padding: var(--space-1) var(--space-1) var(--space-1) 0; vertical-align: middle; }
 .people input, .add-player input { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); width: 100%; }
 .add-player { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+/* The robot's setup check under each person (27 Nov 2026): ready, missing something, or not checked. */
+.people .setup td { padding: 0 0 var(--space-2); font-size: var(--fs-sm); color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+.people .setup .ok { color: var(--success); font-weight: var(--fw-semibold); }
+.people .setup .bad { color: var(--danger); font-weight: var(--fw-semibold); }
+.people .setup .wait { color: var(--text-muted); font-weight: var(--fw-semibold); }
 .day[aria-pressed="true"].has-booked small { color: var(--mine-on); }
 .toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .toggle { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); }
@@ -214,6 +219,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       <section id="people-card" class="card" aria-labelledby="people-h" hidden>
         <h2 id="people-h">People</h2>
         <p class="note">Only your phone can change these. A real name replaces the name someone picked, with its initials, everywhere on the page.</p>
+        <p class="note">To add a player: put them in the Padel WhatsApp group (saved in your contacts under their full name) and the Padel Splitwise group (with their email), then add their full name below. The robot checks everyone once a day and within 15 minutes of a change. <span id="setup-line"></span></p>
         <table class="people"><tbody id="people-rows"></tbody></table>
         <form id="add-player-form" class="add-player"><input id="add-player" autocomplete="off" placeholder="Add a player, full name" aria-label="Add a player, full name"><button type="submit" class="btn small">Add</button></form>
       </section>
@@ -716,12 +722,22 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     card.hidden = !isAdmin();
     $('key-line').hidden = isAdmin();                    // any phone without the key can paste it here
     if (card.hidden) return;
+    const setup = S.setup || null;
+    $('setup-line').textContent = setup && setup.at ? 'Last check: ' + timeLabel(setup.at) + '.' : 'The robot has not checked yet.';
     $('people-rows').innerHTML = S.people.map((p) => `<tr>
         <td>${esc(p.nick || p.name)}</td>
         <td><input value="${esc(peopleDraft.has(p.id) ? peopleDraft.get(p.id) : (p.nick ? p.name : ''))}" placeholder="Real name" aria-label="Real name for ${esc(p.nick || p.name)}" data-real-name="${esc(p.id)}"></td>
         <td aria-hidden="true">${esc(initials(p.name))}</td>
         <td><button type="button" class="btn small" data-rename="${esc(p.id)}"${busy ? ' disabled' : ''}>Save</button></td>
-      </tr>`).join('');
+      </tr><tr class="setup"><td colspan="4">${setupLine(setup && setup.people ? setup.people[p.id] : null)}</td></tr>`).join('');
+  }
+  // One player's line from the robot's setup check: what a booking would still be missing, in its words.
+  function setupLine(s) {
+    const notes = s && Array.isArray(s.notes) ? s.notes.map(esc).join('; ') : '';
+    if (!s) return '<span class="wait">Not checked yet</span>';
+    if (s.state === 'ready') return '<span class="ok">&#10003; Ready for bookings</span>' + (notes ? ' (' + notes + ')' : '');
+    if (s.state === 'missing') return '<span class="bad">Needs:</span> ' + notes;
+    return '<span class="wait">Not fully checked:</span> ' + notes;
   }
 
   // Kevin's phone only: paid bookings from earlier days the robot has not finished, with Retry.
@@ -1091,6 +1107,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const input = $('add-player');
     const name = input.value.trim().replace(/\s+/g, ' ');
     if (name.length < 2) { toast('Type their full name first.'); input.focus(); return; }
+    // Their first name and surname, as in your contacts and Splitwise: the robot finds them by it.
+    if (name.split(' ').length < 2) { toast('Type their first name and surname, as in your contacts.'); input.focus(); return; }
     setBusy(true);
     try {
       const known = new Set(S.people.map((p) => p.id));
