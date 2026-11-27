@@ -1929,10 +1929,10 @@ describe('levels and scores on the live database shape (makeRepo SQL on SQLite)'
 
   it('the same match sent by both pairs at the same moment is one score: the database refuses the second', async () => {
     await setAll([3, 2.5, 3, 3]);
-    const real = t.repo.getLiveMatchByFingerprint.bind(t.repo);
-    let skip = 2;                                                      // both requests pass the first look before either has written
-    t.repo.getLiveMatchByFingerprint = async (...a) => (skip-- > 0 ? null : real(...a));
     expect((await score()).status).toBe(200);
+    const real = t.repo.listMatches.bind(t.repo);
+    let blind = true;                                                  // the second request read the list before the first wrote
+    t.repo.listMatches = async (...a) => { if (blind) { blind = false; return []; } return real(...a); };
     const second = await score({ entered_by: ids[2], team_a: [ids[3], ids[2]], team_b: [ids[1], ids[0]], sets: [[4, 6], [3, 6]] });
     expect(second.status).toBe(409);
     expect(second.json.error).toBe('That score is already in');
@@ -1951,6 +1951,64 @@ describe('levels and scores on the live database shape (makeRepo SQL on SQLite)'
     expect(r.status).toBe(200);
     expect(lv(r.json, ids[0]).matches).toBe(2);
     expect(lv(r.json, ids[0]).level).toBeGreaterThan(3.18);
+  });
+
+  it('the same pairs and games more than half an hour later the same day is a new match; within it, the same one', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    await score({ sets: [[6, 4]] });
+    t.setNow(Date.parse('2026-11-27T18:20:00Z'));
+    expect((await score({ sets: [[6, 4]] })).status).toBe(409);
+    t.setNow(Date.parse('2026-11-27T19:30:00Z'));
+    const r = await score({ sets: [[6, 4]] });
+    expect(r.status).toBe(200);
+    expect(r.json.levels.scores).toHaveLength(2);
+  });
+
+  it('a delete landing in the middle of a feedback save, either way round, leaves the levels exactly as before the score', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    // 1. The feedback request has read the score; the delete lands before its swap.
+    const swap = t.repo.swapFeedback.bind(t.repo);
+    t.repo.swapFeedback = async (...a) => { t.repo.swapFeedback = swap; await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN }); return swap(...a); };
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    const s1 = await t.call('/api/state');
+    expect(lv(s1.json, ids[0])).toMatchObject({ level: 3, matches: 0 });
+    // 2. The delete has read the score; a feedback swap lands before its batch.
+    const mid2 = (await score({ sets: [[6, 1], [6, 1]] })).json.levels.scores[0].id;
+    await t.call('/api/feedback', { match_id: mid2, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    const del = t.repo.deleteScore.bind(t.repo);
+    t.repo.deleteScore = async (...a) => { t.repo.deleteScore = del; await t.call('/api/feedback', { match_id: mid2, from_id: ids[3], votes: { [ids[0]]: 'higher' } }); return del(...a); };
+    expect((await t.call('/api/admin', { action: 'score-delete', id: mid2 }, { admin: ADMIN })).status).toBe(200);
+    const s2 = await t.call('/api/state');
+    expect(lv(s2.json, ids[0])).toMatchObject({ level: 3, matches: 0 });
+    expect(s2.json.levels.scores).toEqual([]);
+  });
+
+  it('feedback at the top of the scale records only what it could move, so a delete takes back no more than was given', async () => {
+    await setAll([7, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    expect(lv((await t.call('/api/state')).json, ids[0]).level).toBe(7);
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    const r = await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    expect(r.json.levels.scores[0].feedback[ids[0]]).toBeUndefined();
+    const d = await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN });
+    expect(lv(d.json, ids[0]).level).toBe(7);
+  });
+
+  it('two scores at the same moment for a player with a 90-day drop due take the drop once', async () => {
+    await setAll([3, 3, 3, 3, 3]);
+    await t.repo.setLevel(ids[0], 3, '2026-08-19');                 // 100 days: shows 2.9
+    const stale = await t.repo.listLevels();
+    const realLevels = t.repo.listLevels.bind(t.repo);
+    const one = await score();
+    const c1 = one.json.levels.scores[0].changes[ids[0]];
+    t.repo.listLevels = async () => { t.repo.listLevels = realLevels; return stale; };   // the second read the levels before the first wrote
+    const two = await score({ team_b: [ids[2], ids[4]], sets: [[6, 2], [6, 2]] });
+    expect(two.status).toBe(200);
+    const c2 = two.json.levels.scores[0].changes[ids[0]];
+    expect(lv(two.json, ids[0]).level).toBeCloseTo(2.9 + c1 + c2, 2);
+    expect(Math.round((2.8 + c1 + c2) * 100) / 100).not.toBe(lv(two.json, ids[0]).level);   // not the drop taken twice
   });
 });
 
