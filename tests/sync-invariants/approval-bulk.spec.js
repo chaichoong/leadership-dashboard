@@ -19,8 +19,11 @@
 //      the one decided (Kevin, 30 Sep 2026). It used to return to the first
 //      card (15 Sep), which threw him back to the top every time he worked
 //      the queue out of order. The decided card's Saved strip sits under the
-//      top bar with the next card below it; after the fold the next card
-//      takes the top. The last card hands on to the one above it.
+//      top bar with the next card below it, and that is the only move: when
+//      the Undo ends NOTHING moves (Kevin, 27 Nov 2026; the fold that lifted
+//      the next card into the strip's place is what jolted him). The strip
+//      stays until it is off the screen. The last card hands on to the one
+//      above it. The rest of that rule: approval-no-jolt.spec.js.
 //
 // Airtable is mocked, so these assert on the PATCHes the page actually sends
 // and on where the page actually puts the cards.
@@ -309,7 +312,7 @@ test.describe('every bulk verdict is N single verdicts', () => {
 });
 
 test.describe('the view moves on to the next card', () => {
-  test('after Approve on a card part way down, its strip sits at the top with the next card below, then the next card takes the top', async ({ page }) => {
+  test('after Approve on a card part way down, its strip sits at the top with the next card below, and nothing moves when the Undo ends', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -321,13 +324,13 @@ test.describe('the view moves on to the next card', () => {
     await page.locator(`[data-apv-card="${decided}"] .apv-actions button`, { hasText: /^Approve$/ }).click();
     await expect.poll(() => patches.length).toBe(1);
     await expect(page.locator(`[data-apv-card="${decided}"] [data-apv-state="saved"]`)).toBeVisible();
-    // Straight away, before the fold: the Undo at the top, the next card under it.
+    // Straight away: the Undo at the top, the next card under it.
     await expectCardAtTop(page, decided);
     await expectCardJustBelow(page, decided, next);
-    // And after the decided card folds away, the next card is at the top,
-    // not the first card.
-    await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
-    await expectCardAtTop(page, next);
+    // The Undo ends and nothing moves: the strip stays, without its Undo, with the next card under it.
+    await expect(page.locator(`[data-apv-card="${decided}"] [data-apv-undo]`)).toHaveCount(0, { timeout: 8000 });
+    await expectCardAtTop(page, decided);
+    await expectCardJustBelow(page, decided, next);
     expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(300);
   });
 
@@ -338,9 +341,10 @@ test.describe('the view moves on to the next card', () => {
     const before = await page.locator('.apv-card').count();
     const above = await idAt(page, before - 2);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const last = await idAt(page, before - 1);
     await page.locator('.apv-card').last().locator('.apv-actions button', { hasText: /^Approve$/ }).click();
     await expect.poll(() => patches.length).toBe(1);
-    await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
+    await expect(page.locator(`[data-apv-card="${last}"] [data-apv-undo]`)).toHaveCount(0, { timeout: 8000 });
     // Nothing below it to put at the top, so the page is as far down as it
     // goes, with the card above in view: never thrown back to the top.
     expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(300);
@@ -366,11 +370,10 @@ test.describe('the view moves on to the next card', () => {
     expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(there - 120);
   });
 
-  test('a one-click Knock back part way down saves in place: the next card takes the top, nothing typed is lost', async ({ page }) => {
+  test('a one-click Knock back part way down saves in place: the next card under its strip, nothing moves, nothing typed is lost', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
-    const before = await page.locator('.apv-card').count();
     // A half-written note on the second card, then knock back a card further down.
     const secondId = await idAt(page, 1);
     await page.locator('#apvNote-' + secondId).fill('Check the dates with Roy first.');
@@ -384,8 +387,9 @@ test.describe('the view moves on to the next card', () => {
     await expect(page.locator('#apvNote-' + secondId)).toHaveValue('Check the dates with Roy first.');
     await expectCardAtTop(page, decided);
     await expectCardJustBelow(page, decided, next);
-    await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
-    await expectCardAtTop(page, next);
+    await expect(page.locator(`[data-apv-card="${decided}"] [data-apv-undo]`)).toHaveCount(0, { timeout: 8000 });
+    await expectCardAtTop(page, decided);
+    await expectCardJustBelow(page, decided, next);
     await expect(page.locator('#apvNote-' + secondId)).toHaveValue('Check the dates with Roy first.');
   });
 
@@ -393,7 +397,6 @@ test.describe('the view moves on to the next card', () => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
-    const before = await page.locator('.apv-card').count();
     const ids = await tick(page, [2, 3]);
     const next = await idAt(page, 4);
     await page.locator('[data-apv-bulk-approve]').click();
@@ -402,8 +405,9 @@ test.describe('the view moves on to the next card', () => {
     await expect(page.locator(`[data-apv-card="${ids[1]}"] [data-apv-state="saved"]`)).toBeVisible();
     await expectCardAtTop(page, ids[1]);
     await expectCardJustBelow(page, ids[1], next);
-    await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 8000 });
-    await expectCardAtTop(page, next);
+    await expect(page.locator('[data-apv-undo]')).toHaveCount(0, { timeout: 8000 });
+    await expectCardAtTop(page, ids[1]);
+    await expectCardJustBelow(page, ids[1], next);
   });
 
   test('after an Undo, a bulk Approve still lands on the lowest ticked card ON SCREEN', async ({ page }) => {
@@ -413,7 +417,6 @@ test.describe('the view moves on to the next card', () => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
-    const before = await page.locator('.apv-card').count();
     const undone = await idAt(page, 4);
     await page.locator(`[data-apv-card="${undone}"]`).scrollIntoViewIfNeeded();
     await page.locator(`[data-apv-card="${undone}"] .apv-actions button`, { hasText: /^Approve$/ }).click();
@@ -431,21 +434,22 @@ test.describe('the view moves on to the next card', () => {
     await expect(page.locator('#toast')).toContainText('Approved all 2');
     await expect(page.locator(`[data-apv-card="${ids[1]}"] [data-apv-state="saved"]`)).toBeVisible();
     await expectCardAtTop(page, ids[1]);
-    await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 8000 });
-    await expectCardAtTop(page, next);
+    await expectCardJustBelow(page, ids[1], next);
+    await expect(page.locator('[data-apv-undo]')).toHaveCount(0, { timeout: 8000 });
+    await expectCardAtTop(page, ids[1]);
   });
 
-  test('a slow bulk run that finishes while the lowest card is folding still lands on the card after it', async ({ page }) => {
-    // After an Undo the lowest card on screen is written FIRST, so it can
-    // start folding before the run ends. Finishing inside that 320ms fold
-    // used to point the view at a card on its way out, and every fold after
-    // fell back to the first card (re-review finding, 30 Sep 2026). Card 4's
-    // save is slowed to land the finish in that window. Outside the window
-    // old and new code agree, so a busy machine cannot make this fail.
+  test('a slow bulk run whose lowest card\'s Undo ends before the run does still lands on that card, the card after it under it', async ({ page }) => {
+    // After an Undo the lowest card on screen is written FIRST, so its Undo
+    // can end before the run does. That used to point the view at a card on
+    // its way out, and every fold after fell back to the first card
+    // (re-review finding, 30 Sep 2026). Since 27 Nov 2026 the strip of the
+    // card in front of him goes to the top as it saves and stays while on
+    // screen, so the run lands on it with the card after it underneath, as
+    // any bulk run does. Card 4's save is slowed to land the finish after that Undo.
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
-    const before = await page.locator('.apv-card').count();
     const undone = await idAt(page, 4);
     const next = await idAt(page, 7);
     await page.locator(`[data-apv-card="${undone}"]`).scrollIntoViewIfNeeded();
@@ -463,12 +467,12 @@ test.describe('the view moves on to the next card', () => {
       }
       return route.fallback();
     });
-    await tick(page, [4, 6]);
+    const ids = await tick(page, [4, 6]);
     await page.locator('[data-apv-bulk-approve]').click();
     await expect(page.locator('#toast')).toContainText('Approved all 2', { timeout: 15000 });
-    await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 12000 });
     await page.waitForTimeout(400);
-    await expectCardAtTop(page, next);
+    await expectCardAtTop(page, ids[1]);
+    await expectCardJustBelow(page, ids[1], next);
   });
 
   test.describe('in London', () => {

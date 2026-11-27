@@ -77,16 +77,41 @@
     // The band of the frame that is on screen, so its dialogs, toasts and Undo bar open where Kevin
     // is looking: inside a frame as tall as its content, "fixed" would mean the frame, not the screen.
     let bandRaf = 0;
-    function postBand() {
-        bandRaf = 0;
+    function bandNow() {
         const f = frame();
-        if (!f || !homeOpen()) return;
+        if (!f) return null;
         const r = f.getBoundingClientRect();
         const top = Math.max(0, pinnedHeight() - r.top);   // below the pinned jump row, so a sticky bar is never under it
         const bottom = Math.min(r.height, window.innerHeight - r.top);
-        tellFrame({ type: 'homeViewport', top: Math.round(top), h: Math.round(Math.max(0, bottom - top)) });
+        return { top: Math.round(top), h: Math.round(Math.max(0, bottom - top)) };
     }
+    function postBand() {
+        bandRaf = 0;
+        if (!frame() || !homeOpen()) return;
+        tellFrame(Object.assign({ type: 'homeViewport' }, bandNow()));
+    }
+    // The band as it is this moment, the row pinned or not, for the copy that has just moved Home itself
+    // (27 Nov 2026): adding up its own moves could not follow the row pinning, so its own move read as
+    // Kevin scrolling and cancelled the next one it owed him.
+    window.homeAgentsBand = () => { syncPin(); return bandNow(); };
     function queueBand() { if (!bandRaf) bandRaf = requestAnimationFrame(postBand); }
+
+    // Home's copy of the queue puts a point y of itself just under the pinned row, at once. The copy
+    // calls this directly (same site) in the moment it draws the change, so no frame shows the page in
+    // between; the instant agentsHomeScrollTo message is its fallback.
+    function homeAgentsScrollTo(y) {
+        const f = frame();
+        if (!f) return false;
+        layoutMovedAt = Date.now();
+        window.scrollTo(0, aimFor(f.getBoundingClientRect().top + window.pageYOffset + Math.max(0, Number(y) || 0)));
+        queueBand();
+        return true;
+    }
+    window.homeAgentsScrollTo = homeAgentsScrollTo;
+    // The section a jump button's glide is under way to, or '': the copy must not scroll Home under it
+    // (an instant scroll stops a smooth one dead). A section of the copy is aimed again by the copy when
+    // it moves; any other is aimed again by Home once the glide stops, as for any page that moved.
+    window.homeAgentsGliding = () => (pendingJump && pendingJump.settled == null ? String(pendingJump.key || '') : '');
 
     // Messages from Home's own copy of the AI Agents page, and from nothing else.
     window.addEventListener('message', (e) => {
@@ -106,7 +131,17 @@
             return;
         }
         if (d.type === 'agentsHomeScrollTo') {
-            scrollToY(f.getBoundingClientRect().top + window.pageYOffset + Math.max(0, Number(d.y) || 0));
+            // The move after a decision is made at once (Kevin, 27 Nov 2026): a click during a glide
+            // lands on whatever card is passing under it. A jump button still glides.
+            if (d.instant) homeAgentsScrollTo(d.y);
+            else scrollToY(f.getBoundingClientRect().top + window.pageYOffset + Math.max(0, Number(d.y) || 0));
+            return;
+        }
+        // The copy holding Kevin's place when something above it changed (it scrolls Home itself when
+        // it can; this is the fallback). At once, and not counted as him moving on.
+        if (d.type === 'agentsHomeScrollBy') {
+            const dy = Number(d.dy) || 0;
+            if (dy) { layoutMovedAt = Date.now(); window.scrollBy(0, dy); queueBand(); }
             return;
         }
         if (d.type === 'agentsHomeReady') {
