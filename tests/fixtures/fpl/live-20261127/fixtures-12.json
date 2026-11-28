@@ -1,0 +1,82 @@
+[
+ {
+  "event": 12,
+  "id": 119,
+  "team_a": 6,
+  "team_a_difficulty": 2,
+  "team_h": 18,
+  "team_h_difficulty": 4
+ },
+ {
+  "event": 12,
+  "id": 117,
+  "team_a": 7,
+  "team_a_difficulty": 3,
+  "team_h": 13,
+  "team_h_difficulty": 2
+ },
+ {
+  "event": 12,
+  "id": 118,
+  "team_a": 4,
+  "team_a_difficulty": 3,
+  "team_h": 16,
+  "team_h_difficulty": 3
+ },
+ {
+  "event": 12,
+  "id": 116,
+  "team_a": 2,
+  "team_a_difficulty": 2,
+  "team_h": 12,
+  "team_h_difficulty": 3
+ },
+ {
+  "event": 12,
+  "id": 114,
+  "team_a": 14,
+  "team_a_difficulty": 3,
+  "team_h": 9,
+  "team_h_difficulty": 4
+ },
+ {
+  "event": 12,
+  "id": 112,
+  "team_a": 17,
+  "team_a_difficulty": 4,
+  "team_h": 5,
+  "team_h_difficulty": 3
+ },
+ {
+  "event": 12,
+  "id": 113,
+  "team_a": 11,
+  "team_a_difficulty": 2,
+  "team_h": 8,
+  "team_h_difficulty": 2
+ },
+ {
+  "event": 12,
+  "id": 115,
+  "team_a": 3,
+  "team_a_difficulty": 3,
+  "team_h": 10,
+  "team_h_difficulty": 3
+ },
+ {
+  "event": 12,
+  "id": 120,
+  "team_a": 19,
+  "team_a_difficulty": 3,
+  "team_h": 20,
+  "team_h_difficulty": 3
+ },
+ {
+  "event": 12,
+  "id": 111,
+  "team_a": 15,
+  "team_a_difficulty": 5,
+  "team_h": 1,
+  "team_h_difficulty": 4
+ }
+]

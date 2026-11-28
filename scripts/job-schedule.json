@@ -783,5 +783,16 @@
   "retryWhenDeferred": false,
   "retryWhenDeferredNote": "Hourly: the next hour's run replaces a deferred one.",
   "note": "Kevin, 3 Nov 2026: scripts/sport-calendar.py reads today's diary (both Google accounts, through the drive-upload worker's read-only POST /calendar/day with the triage key) and writes ONE Estate Status row, key sport-day, with each padel or football session's option and start time, never the event's title. The What to wear card marks that option 'Today 19:30'. Hourly 06:05 to 22:05 so a session booked during the day shows within the hour. Outside the queue: a few seconds of reads and one Airtable write, nothing the other jobs wait on. Exits 1 when no account could be read; the row then says Failed."
+ },
+ "fpl-draft-swaps": {
+  "cron": "15 * * * *",
+  "maxLateMinutes": 180,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "cronNote": "Hourly at quarter past, and no day of the week in it (Cloudflare counts Sunday as 0 and this repo lost every Friday to that once). Hourly because FPL Draft deadlines fall on different days: GW12 Fri 27 Nov 18:30, GW13 Tue 1 Dec 18:30, GW14 Sat 5 Dec 11:00, and GW14's waivers process only 16.5 hours before its deadline, so a daily run would miss it. A quiet hour is three cheap public reads and an exit 0.",
+  "note": "Kevin, 20 Nov 2026, built 27 Nov 2026 (approved build recQZZjNELK1x3cAc): scripts/fpl-draft-swaps.py card. Rules only, no model, no cost. Once waivers are processed and the next gameweek deadline is inside 36 hours, it scores Kevin's FPL Draft squad and the free agents against his five confirmed rules (brain Decisions/2026-11-20 FPL Draft swap rules) and raises ONE approval card: swap X for Y, put Z in goal, with the numbers behind each line. PHASE 1 RECOMMENDS ONLY: it signs nobody, saves no team and touches nothing in his league. A failed read ends the run as NOT CHECKED (exit 2) with no card, because an empty squad would read as 'sell everything'. One card per gameweek, checked by name before writing."
  }
 }

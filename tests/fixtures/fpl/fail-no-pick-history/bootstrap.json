@@ -1,0 +1,358 @@
+{
+ "element_types": [
+  {
+   "element_count": 76,
+   "id": 1,
+   "plural_name": "Goalkeepers",
+   "plural_name_short": "GKP",
+   "singular_name": "Goalkeeper",
+   "singular_name_short": "GKP"
+  },
+  {
+   "element_count": 219,
+   "id": 2,
+   "plural_name": "Defenders",
+   "plural_name_short": "DEF",
+   "singular_name": "Defender",
+   "singular_name_short": "DEF"
+  },
+  {
+   "element_count": 300,
+   "id": 3,
+   "plural_name": "Midfielders",
+   "plural_name_short": "MID",
+   "singular_name": "Midfielder",
+   "singular_name_short": "MID"
+  },
+  {
+   "element_count": 79,
+   "id": 4,
+   "plural_name": "Forwards",
+   "plural_name_short": "FWD",
+   "singular_name": "Forward",
+   "singular_name_short": "FWD"
+  }
+ ],
+ "elements": [
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 1,
+   "form": "5.0",
+   "id": 1,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "5.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Keeper"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 1,
+   "form": "3.0",
+   "id": 2,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "3.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Keeper2"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 2,
+   "form": "4.0",
+   "id": 3,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Back"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 2,
+   "form": "4.0",
+   "id": 4,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Back2"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 2,
+   "form": "4.0",
+   "id": 5,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Back3"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 2,
+   "form": "4.0",
+   "id": 6,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Back4"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 2,
+   "form": "4.0",
+   "id": 7,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Back5"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "0.2",
+   "id": 8,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "5.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Palmer"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "4.0",
+   "id": 9,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Mid2"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "4.0",
+   "id": 10,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Mid3"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "4.0",
+   "id": 11,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Mid4"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "4.0",
+   "id": 12,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Mid5"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 4,
+   "form": "4.0",
+   "id": 13,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Fwd1"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 4,
+   "form": "4.0",
+   "id": 14,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "4.0",
+   "status": "a",
+   "team": 1,
+   "web_name": "Fwd2"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 4,
+   "form": "9.0",
+   "id": 15,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "9.0",
+   "status": "a",
+   "team": 3,
+   "web_name": "Blanker"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "9.0",
+   "id": 20,
+   "minutes": 299,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "9.0",
+   "status": "a",
+   "team": 2,
+   "web_name": "Under300"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "9.0",
+   "id": 21,
+   "minutes": 300,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "9.0",
+   "status": "a",
+   "team": 2,
+   "web_name": "Exactly300"
+  },
+  {
+   "chance_of_playing_next_round": 50,
+   "element_type": 3,
+   "form": "9.0",
+   "id": 22,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "9.0",
+   "status": "d",
+   "team": 2,
+   "web_name": "Doubtful50"
+  },
+  {
+   "chance_of_playing_next_round": null,
+   "element_type": 3,
+   "form": "5.2",
+   "id": 23,
+   "minutes": 900,
+   "news": "",
+   "news_return": null,
+   "points_per_game": "5.2",
+   "status": "a",
+   "team": 2,
+   "web_name": "BetterPalmer"
+  }
+ ],
+ "events": {
+  "data": [
+   {
+    "deadline_time": "2026-11-20T18:30:00Z",
+    "finished": true,
+    "id": 11,
+    "name": "Gameweek 11",
+    "trades_time": "2026-11-19T11:00:00Z",
+    "waivers_time": "2026-11-20T11:00:00Z"
+   },
+   {
+    "deadline_time": "2026-11-27T18:30:00Z",
+    "finished": false,
+    "id": 12,
+    "name": "Gameweek 12",
+    "trades_time": "2026-11-25T18:30:00Z",
+    "waivers_time": "2026-11-26T18:30:00Z"
+   },
+   {
+    "deadline_time": "2026-12-01T18:30:00Z",
+    "finished": false,
+    "id": 13,
+    "name": "Gameweek 13",
+    "trades_time": "2026-11-29T18:30:00Z",
+    "waivers_time": "2026-11-30T18:30:00Z"
+   },
+   {
+    "deadline_time": "2026-12-05T11:00:00Z",
+    "finished": false,
+    "id": 14,
+    "name": "Gameweek 14",
+    "trades_time": "2026-12-03T14:00:00Z",
+    "waivers_time": "2026-12-04T14:00:00Z"
+   },
+   {
+    "deadline_time": "2026-12-12T13:30:00Z",
+    "finished": false,
+    "id": 15,
+    "name": "Gameweek 15",
+    "trades_time": "2026-12-10T13:30:00Z",
+    "waivers_time": "2026-12-11T13:30:00Z"
+   }
+  ]
+ },
+ "fixtures": {
+  "11": [
+   {
+    "event": 11,
+    "id": 1,
+    "team_a": 2,
+    "team_a_difficulty": 3,
+    "team_h": 1,
+    "team_h_difficulty": 3
+   }
+  ]
+ },
+ "teams": [
+  {
+   "id": 1,
+   "name": "AAA",
+   "short_name": "AAA"
+  },
+  {
+   "id": 2,
+   "name": "BBB",
+   "short_name": "BBB"
+  },
+  {
+   "id": 3,
+   "name": "CCC",
+   "short_name": "CCC"
+  }
+ ]
+}
