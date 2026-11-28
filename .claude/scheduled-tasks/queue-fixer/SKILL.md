@@ -205,6 +205,28 @@ raises a MERGE card. It tries to break each fix with three checks: the test fail
 the fix tackles the cause and not the symptom, and the same bug is nowhere else. "Nowhere else"
 means any file, skills and agent instructions included: the same bug is the same bug.
 
+**SWEEP THE SIBLING FILES BEFORE YOUR FIRST MERGE ATTEMPT. This is what actually kills fixer
+PRs, not the tests** (28 Nov 2026, daily-ops phase 4 and phase 6). Four PRs were put through the
+gate that morning: 998, 1005, 1013 and 1015. All four went GREEN on the full gate (1015 on vitest
+8498 and browser 890). All four were then refused by the second reviewer on "the same bug is
+elsewhere", with the cause itself accepted every time. Four for four. Each one burned both rounds,
+every PR was closed, and the work was thrown away: six findings reopened that already had a
+written, passing fix. What the reviewer wanted was always a list of siblings the author could have
+found first, for example the same user-agent fix in `facebook_share.py:183,256`,
+`adobe-assign.js:440`, `adobe-drafts.js:68`, `signature-watch.js:102` and `youtube_ads.js:57`
+(finding 1333), or `reporting.xero.com` added to `BUILTIN_SITES` in `agent-browser.js:361`
+(finding 750). So before the FIRST `fixer-merge.py merge`, grep the whole tree, skills and agent
+instructions included, for the pattern you just fixed, and fix every hit in the same PR. A round
+spent being told where the siblings are is a round you cannot get back, and round 2 is the last.
+
+**Run ONE merge gate at a time on this Mac.** Same morning: three gates were started together and
+two of them went red on `tests/fixer-second-review.test.js` reporting a failed FILE with 0 failed
+tests, which is a timeout, not an assertion. That file takes 369 seconds alone and passes with 71
+tests. The gate that ran last and alone was clean. Three gates at once also cost phase 4 its whole
+08:20 ceiling, so nothing was claimed. This is the capacity rule in CLAUDE.md applied to gates: a
+red that is really contention looks exactly like a red that is really code, and it is the more
+expensive of the two to misread.
+
 Write every fix so it can pass. Each finding needs one of these three, from the PR itself, and
 nothing else passes:
 
