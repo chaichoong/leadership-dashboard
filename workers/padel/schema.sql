@@ -8,7 +8,7 @@
 -- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
 -- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
 -- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql,
--- 0003-booked-details.sql, 0004-people-university.sql, 0005-names-and-paid.sql, 0006-levels.sql.
+-- 0003-booked-details.sql, 0004-people-university.sql, 0005-names-and-paid.sql, 0006-levels.sql, 0007-match-day.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS matches (
   changes TEXT NOT NULL DEFAULT '{}',
   feedback_changes TEXT NOT NULL DEFAULT '{}',
   deleted_at TEXT,
-  fingerprint TEXT NOT NULL
+  fingerprint TEXT NOT NULL,
+  session_id INTEGER                  -- a Kings and challengers game's session (sql-changes/0007)
 );
 CREATE INDEX IF NOT EXISTS matches_played_on ON matches (played_on);
 -- One score per match a day: the same pairs and games (either way round) cannot go in twice, even sent
@@ -115,4 +116,17 @@ CREATE TABLE IF NOT EXISTS feedback (
   vote TEXT NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY (match_id, from_id, about_id)
+);
+
+-- Match day (sql-changes/0007-match-day.sql, 28 Nov 2026): one row per court group on a booked hour.
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY,
+  slot TEXT NOT NULL,
+  group_no INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (slot, group_no)
 );

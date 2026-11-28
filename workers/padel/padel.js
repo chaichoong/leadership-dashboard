@@ -41,6 +41,10 @@
 //        which reverses its changes exactly.
 //   POST /api/feedback { match_id, from_id, votes: { <id>: higher|expected|lower } } -> state   within 24 h
 //        of a rated score, each of the four marks the other three; 2 matching votes move a player 0.05.
+//   POST /api/matchday { slot, person_id, action, ... } -> state   match day on today's booked hour (Stage 3):
+//        start { mode: fair|shuffle } splits the players by Kevin's formats and picks the pairs (again, until
+//        the first Kings and challengers game); swap { a, b }; kc-game { group, version, winner: kings|
+//        challengers, lost_by } runs his rules and moves levels a quarter; kc-undo { group, version }.
 //   GET  /api/robot/setup (X-Robot-Key) -> { ok, people }   who is on the list, for the robot's setup check
 //   POST /api/robot/setup (X-Robot-Key) -> { ok, saved }    { people: { <id>: { state, notes } } } (27 Nov
 //        2026): per player, ready, missing (what a booking would still lack) or unchecked. Kept in the
@@ -83,7 +87,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-11-28.1';
+export const VERSION = '2026-11-28.2';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -763,17 +767,21 @@ export function levelChanges({ a, b, sets, weight = 1 }) {
   if (!res.winner) return { ...res, changes: {} };
   const [win, lose] = res.winner === 'a' ? [a, b] : [b, a];
   const [gw, gl] = res.winner === 'a' ? [res.gamesA, res.gamesB] : [res.gamesB, res.gamesA];
-  const avg = (t) => (t[0].level + t[1].level) / 2;
-  const base = 1 - expectedWin(avg(win), avg(lose));          // the less likely the win, the bigger the change
   const margin = Math.max(0.25, 0.5 + (gw - gl) / (gw + gl));   // a close match counts for less than a clear one
+  return { ...res, changes: pairChanges({ win, lose, margin, half: res.half, weight }) };
+}
+// The change for each player when one pair beat the other: the less likely the win, the bigger it is.
+export function pairChanges({ win, lose, margin = 1, half = 1, weight = 1 }) {
+  const avg = (t) => (t[0].level + t[1].level) / 2;
+  const base = 1 - expectedWin(avg(win), avg(lose));
   const changes = {};
   for (const [team, sign] of [[win, 1], [lose, -1]]) {
     for (const p of team) {
-      const size = Math.min(LEVEL_CAP, kFactor(p.level, reliabilityOf(p.recent)) * base * margin * res.half * weight);
+      const size = Math.min(LEVEL_CAP, kFactor(p.level, reliabilityOf(p.recent)) * base * margin * half * weight);
       changes[p.id] = r3(clampLevel(p.level + sign * size) - p.level);
     }
   }
-  return { ...res, changes };
+  return changes;
 }
 // The level shown: 0.10 off for every 90 days since the last level pick or rated score.
 export function decayedLevel(level, activeAt, today) {
@@ -836,9 +844,10 @@ export function scoreFingerprint(a, b, sets) {
   const games = (flip ? sets.map(([x, y]) => [y, x]) : sets).map(([x, y]) => `${x}-${y}`).join(' ');
   return `${p1.join(',')}|${p2.join(',')}|${games}`;
 }
+// Rated scores in the window, a Kings and challengers game counting a quarter (Kevin, 28 Nov 2026).
 const countRecent = (matches, from) => {
   const n = new Map();
-  for (const m of matches) if (m.rated && m.playedOn >= from) for (const id of [...m.a, ...m.b]) n.set(id, (n.get(id) || 0) + 1);
+  for (const m of matches) if (m.rated && m.playedOn >= from) for (const id of [...m.a, ...m.b]) n.set(id, (n.get(id) || 0) + (m.kind === 'kc' ? KC_WEIGHT : 1));
   return n;
 };
 // The league table and the last month's scores, for everyone's page.
@@ -854,7 +863,7 @@ export function computeLevels({ levels, matches, voters = [], today, nowMs }) {
   }));
   const votedBy = new Map();
   for (const v of voters) { if (!votedBy.has(v.match_id)) votedBy.set(v.match_id, new Set()); votedBy.get(v.match_id).add(v.from_id); }
-  const scores = matches.filter((m) => m.playedOn >= addDays(today, -30)).sort((x, y) => (x.playedOn === y.playedOn ? y.id - x.id : x.playedOn < y.playedOn ? 1 : -1)).map((m) => {
+  const scores = matches.filter((m) => m.kind !== 'kc' && m.playedOn >= addDays(today, -30)).sort((x, y) => (x.playedOn === y.playedOn ? y.id - x.id : x.playedOn < y.playedOn ? 1 : -1)).map((m) => {
     const r = matchResult(m.sets);
     const until = Date.parse(m.enteredAt) + FEEDBACK_MS;
     return {
@@ -865,6 +874,128 @@ export function computeLevels({ levels, matches, voters = [], today, nowMs }) {
   return { players, scores };
 }
 
+// ── Match day (Stage 3, Kevin 28 Nov 2026) ──
+// The format by players and courts (Kevin: up to 12 on 2 courts; 4 a match; 5 or 6 Kings and challengers;
+// 8 two matches; 12 two groups of 6; the rest as he approved: 7 one court of Kings and challengers, 9 a
+// match and 5, 10 two groups of 5, 11 groups of 5 and 6).
+export const MATCH_DAY_MAX = 12;
+export const KC_SESSION_CAP = 0.4;     // one session moves a level no more than one match can
+export const PARTNER_DAYS = 90;        // "played with least": partners in the last 90 days
+export const KC_HISTORY = 40;          // states kept for Undo
+export function formatPlan(n, courts = 1) {
+  if (n < 4) return { groups: [], note: 'Match day needs at least 4 players' };
+  const take = Math.min(n, MATCH_DAY_MAX);
+  const g = (kind, size) => ({ kind, size });
+  const notes = [];
+  if (n > MATCH_DAY_MAX) notes.push(`Only ${MATCH_DAY_MAX} fit: ${n - MATCH_DAY_MAX} sit out`);
+  let groups;
+  if (courts < 2 || take <= 7) {
+    groups = take === 4 ? [g('match', 4)] : [g('kc', take)];
+    if (courts >= 2) notes.push(take === 4 ? 'One court is enough for 4' : 'One court of Kings and challengers');
+    else if (take > 7) notes.push('A long queue on one court: a second court would help');
+  } else if (take === 8) groups = [g('match', 4), g('match', 4)];
+  else if (take === 9) groups = [g('match', 4), g('kc', 5)];
+  else if (take === 10) groups = [g('kc', 5), g('kc', 5)];
+  else if (take === 11) groups = [g('kc', 5), g('kc', 6)];
+  else groups = [g('kc', 6), g('kc', 6)];
+  return { groups, note: notes.join('. ') };
+}
+const pairKey = (x, y) => (x < y ? `${x}-${y}` : `${y}-${x}`);
+// How often each two have been partners (both pairs of every score and game since `from`).
+export function partnerCounts(matches, from) {
+  const n = new Map();
+  for (const m of matches) {
+    if (m.playedOn < from) continue;
+    for (const t of [m.a, m.b]) if (t.length === 2) n.set(pairKey(t[0], t[1]), (n.get(pairKey(t[0], t[1])) || 0) + 1);
+  }
+  return n;
+}
+const shuffled = (ids, rng) => { const a = [...ids]; for (let i = a.length - 1; i > 0; i -= 1) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// Two pairs from four players. fair: the two pairs' levels as close as they can be (when all four have one),
+// then the partners who have played together least; shuffle: any of the three ways, at random.
+export function bestPairs(four, levelOf, partners, mode = 'fair', rng = Math.random) {
+  const [p, q, r, t] = four;
+  const ways = [[[p, q], [r, t]], [[p, r], [q, t]], [[p, t], [q, r]]];
+  if (mode === 'shuffle') { const w = ways[Math.floor(rng() * 3)]; return { a: w[0], b: w[1] }; }
+  const known = four.every((id) => levelOf(id) != null);
+  const cost = ([a, b]) => (known ? Math.abs(levelOf(a[0]) + levelOf(a[1]) - levelOf(b[0]) - levelOf(b[1])) * 10 : 0)
+    + (partners.get(pairKey(a[0], a[1])) || 0) + (partners.get(pairKey(b[0], b[1])) || 0);
+  const best = Math.min(...ways.map(cost));
+  const tied = ways.filter((w) => Math.abs(cost(w) - best) < 1e-9);
+  const w = tied[Math.floor(rng() * tied.length)];
+  return { a: w[0], b: w[1] };
+}
+// Players into groups of the given sizes. fair: a snake draft by level, strongest first (court 1, 2, 2, 1,
+// 1, 2 ...), so both courts end up with close levels; players with no level fill what is left, spread
+// evenly. shuffle: at random.
+export function splitGroups(ids, sizes, levelOf, mode = 'fair', rng = Math.random) {
+  if (sizes.length === 1) return [ids.slice(0, sizes[0])];
+  const out = sizes.map(() => []);
+  if (mode === 'shuffle') { const order = shuffled(ids, rng); let i = 0; for (const [gi, n] of sizes.entries()) { out[gi] = order.slice(i, i + n); i += n; } return out; }
+  const ranked = shuffled(ids.filter((id) => levelOf(id) != null), rng).sort((x, y) => levelOf(y) - levelOf(x));
+  const snake = [];
+  for (let round = 0; snake.length < ranked.length + sizes.length; round += 1) snake.push(...(round % 2 ? [...sizes.keys()].reverse() : [...sizes.keys()]));
+  let k = 0;
+  for (const id of ranked) {
+    while (out[snake[k % snake.length]].length >= sizes[snake[k % snake.length]]) k += 1;
+    out[snake[k % snake.length]].push(id);
+    k += 1;
+  }
+  for (const id of shuffled(ids.filter((x) => levelOf(x) == null), rng)) {
+    const open = [...sizes.keys()].filter((i) => out[i].length < sizes[i]).sort((x, y) => out[x].length / sizes[x] - out[y].length / sizes[y]);
+    out[open[0]].push(id);
+  }
+  return out;
+}
+// The start of a Kings and challengers group: four on court as two pairs (as bestPairs), which pair is
+// king decided at random (on court they play for serve), the rest queuing at random.
+export function kcStart(ids, levelOf, partners, mode = 'fair', rng = Math.random) {
+  const order = shuffled(ids, rng);
+  const { a, b } = bestPairs(order.slice(0, 4), levelOf, partners, mode, rng);
+  const [kings, challengers] = rng() < 0.5 ? [a, b] : [b, a];
+  return { players: [...ids], kings, challengers, queue: order.slice(4), streak: 0, points: Object.fromEntries(ids.map((id) => [id, 0])), games: 0, history: [] };
+}
+// One Kings and challengers game, by Kevin's rules (27 Nov 2026): first to 3 points; the player on the
+// losing side who lost the last point comes off and the next in line comes on beside the other loser as
+// the challengers; when the challengers win they become the kings; every time the kings win, both kings
+// get a point; after 3 points in a row both kings come off, the challengers step up to be the kings and
+// the next two in line come on. Only kings score. Returns the next state and who won and lost.
+export function kcApply(st, winner, lostBy) {
+  if (!['kings', 'challengers'].includes(winner)) return { error: 'Who won: the kings or the challengers?' };
+  const winners = winner === 'kings' ? [...st.kings] : [...st.challengers];
+  const losers = winner === 'kings' ? [...st.challengers] : [...st.kings];
+  if (!losers.includes(lostBy)) return { error: 'Pick the player who lost the last point' };
+  const queue = [...st.queue];
+  const points = { ...st.points };
+  const stay = losers.find((x) => x !== lostBy);
+  queue.push(lostBy);
+  const comer = queue.shift();
+  let kings = winners;
+  let challengers = [stay, comer];
+  let streak = winner === 'kings' ? st.streak + 1 : 0;
+  if (winner === 'kings') for (const k of winners) points[k] = (points[k] || 0) + 1;
+  if (streak >= 3) {
+    queue.push(...winners);
+    kings = challengers;
+    challengers = [queue.shift(), queue.shift()];
+    streak = 0;
+  }
+  const snapshot = { kings: st.kings, challengers: st.challengers, queue: st.queue, streak: st.streak, points: st.points, games: st.games };
+  return {
+    state: { ...st, kings, challengers, queue, streak, points, games: st.games + 1, history: [...(st.history || []), snapshot].slice(-KC_HISTORY) },
+    winners, losers,
+  };
+}
+// A session's cap: a game's change trimmed so that no one's total for the session passes +-KC_SESSION_CAP.
+export function capSession(changes, soFar) {
+  const out = {};
+  for (const [id, d] of Object.entries(changes)) {
+    const had = soFar.get(Number(id)) || 0;
+    out[id] = r3(Math.min(KC_SESSION_CAP, Math.max(-KC_SESSION_CAP, had + d)) - had);
+  }
+  return out;
+}
+
 // ── D1 access, behind one small object so tests can swap in a Map-backed copy ──
 const toPerson = (r) => {
   const p = { id: r.id, name: r.name, venues: splitVenues(r.venues), savedAt: r.votes_at || null };
@@ -872,7 +1003,7 @@ const toPerson = (r) => {
   return p;
 };
 const PEOPLE_COLS = 'id, name, venues, votes_at, real_name';
-const MATCH_COLS = 'id, key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, feedback_changes, deleted_at, fingerprint';
+const MATCH_COLS = 'id, key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, feedback_changes, deleted_at, fingerprint, session_id';
 // A level moved BY an amount, in the database (review of PR #1023: two saves at once must both count,
 // never the second overwriting the first), kept within 0 to 7; the rated-score count moved; the active
 // date only ever moved later. ?5 and ?6, when given, make it conditional on this request's own write to
@@ -888,8 +1019,10 @@ const parseSets = (raw) => { try { const a = JSON.parse(raw || '[]'); return Arr
 const toMatch = (r) => ({
   id: r.id, key: r.key, playedOn: r.played_on, a: parseIds(r.team_a), b: parseIds(r.team_b), sets: parseSets(r.sets), rated: !!r.rated, kind: r.kind,
   enteredBy: r.entered_by, enteredAt: r.entered_at, changes: parseChanges(r.changes), feedback: parseChanges(r.feedback_changes), feedbackRaw: r.feedback_changes || '{}',
-  deletedAt: r.deleted_at || null, fingerprint: r.fingerprint || null,
+  deletedAt: r.deleted_at || null, fingerprint: r.fingerprint || null, sessionId: r.session_id ?? null,
 });
+const parseState = (raw) => { try { const o = JSON.parse(raw || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+const toSession = (r) => ({ id: r.id, slot: r.slot, no: r.group_no, kind: r.kind, state: parseState(r.state), version: r.version });
 // Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it failed).
 const SET_PAID_SQL = `UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
   texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`;
@@ -1028,6 +1161,49 @@ export function makeRepo(db) {
         db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL AND feedback_changes = ?3').bind(id, token, feedbackRaw),
         ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('deleted_at')).bind(u.id, u.delta, u.matches, null, id, token)),
       ]);
+    },
+    // Match day (sql-changes/0007, 28 Nov 2026).
+    async listSessions(slots) {
+      if (!slots.length) return [];
+      const r = await db.prepare('SELECT id, slot, group_no, kind, state, version FROM sessions WHERE slot IN (SELECT value FROM json_each(?)) ORDER BY slot, group_no').bind(JSON.stringify(slots)).all();
+      return (r.results || []).map(toSession);
+    },
+    // A fresh plan for a slot, replacing the old one in the same transaction.
+    async replaceSessions(slot, groups, nowIso) {
+      await db.batch([
+        db.prepare('DELETE FROM sessions WHERE slot = ?').bind(slot),
+        ...groups.map((g) => db.prepare('INSERT INTO sessions (slot, group_no, kind, state, version, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)').bind(slot, g.no, g.kind, JSON.stringify(g.state), nowIso)),
+      ]);
+    },
+    // A session's new state, only from the version read (two phones: one change).
+    async setSession(id, version, state, nowIso) {
+      const r = await db.prepare('UPDATE sessions SET state = ?3, version = version + 1, updated_at = ?4 WHERE id = ?1 AND version = ?2').bind(id, version, JSON.stringify(state), nowIso).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    // A Kings and challengers game: the session's next state (from the version read), the game as a
+    // quarter-weight rated score, and the levels it moves, in one transaction. The game's key is the
+    // session and the version, so the same game tapped twice fails whole.
+    async addKcGame(sessionId, version, state, m, updates, nowIso) {
+      await db.batch([
+        db.prepare('UPDATE sessions SET state = ?3, version = version + 1, updated_at = ?4 WHERE id = ?1 AND version = ?2').bind(sessionId, version, JSON.stringify(state), nowIso),
+        db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, fingerprint, session_id) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11)')
+          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), '[]', 'kc', m.enteredBy, nowIso, JSON.stringify(m.changes), m.key, sessionId),
+        ...updates.filter((u) => u.settle).map((u) => db.prepare(PEOPLE_SETTLE_SQL).bind(u.id, u.settle, u.readActive)),
+        ...updates.map((u) => db.prepare(`${PEOPLE_LEVEL_SQL} AND (SELECT version FROM sessions WHERE id = ?5) = ?6`).bind(u.id, u.delta, u.matches, u.activeAt, sessionId, version + 1)),
+      ]);
+    },
+    // Undo the last game: the session back one state (from the version read), the game deleted and its
+    // levels reversed only if this request did both.
+    async undoKcGame(sessionId, version, state, matchId, token, updates, nowIso) {
+      await db.batch([
+        db.prepare('UPDATE sessions SET state = ?3, version = version + 1, updated_at = ?4 WHERE id = ?1 AND version = ?2').bind(sessionId, version, JSON.stringify(state), nowIso),
+        db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL AND (SELECT version FROM sessions WHERE id = ?3) = ?4').bind(matchId, token, sessionId, version + 1),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('deleted_at')).bind(u.id, u.delta, u.matches, null, matchId, token)),
+      ]);
+    },
+    async listSessionGames(sessionId) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE session_id = ? AND deleted_at IS NULL ORDER BY id`).bind(sessionId).all();
+      return (r.results || []).map(toMatch);
     },
     async putVotes(matchId, fromId, votes, nowIso) {
       await db.batch(votes.map(([about, vote]) => db.prepare('INSERT INTO feedback (match_id, from_id, about_id, vote, created_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(match_id, from_id, about_id) DO UPDATE SET vote = excluded.vote, created_at = excluded.created_at')
@@ -1524,6 +1700,114 @@ async function addFeedback(repo, body, nowMs, nowIso) {
   return null;
 }
 
+// ── Match day (Stage 3, 28 Nov 2026) ──
+// The players on a booked hour: the paid list when the price is in, else the app's own pick for that hour.
+async function bookingPlayers(repo, slot, dates) {
+  const b = await repo.getBooked(slot);
+  if (!b || !b.venue) return null;
+  const paid = paidOf(b).players;
+  if (paid.length) return { players: paid, courts: b.courts || 1 };
+  return { players: playersFor(slot, b.venue, b.person_id, await repo.listVotes(dates[0]), await repo.listPeople()), courts: b.courts || 1 };
+}
+async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.random) {
+  const slot = String(body.slot || '');
+  const m = SLOT_RE.exec(slot);
+  if (!m || m[1] !== dates[0]) return fail('Match day is for a booked hour today', 400);
+  const booking = await bookingPlayers(repo, slot, dates);
+  if (!booking) return fail('That hour is not booked', 404);
+  const who = intId(body.person_id);
+  if (!admin && (!who || !booking.players.includes(who))) return fail('Only someone playing can run match day', 400);
+  const today = dates[0];
+  const [rows, recentMatches, sessions] = await Promise.all([repo.listLevels(), repo.listMatches(addDays(today, -RELIABLE_DAYS)), repo.listSessions([slot])]);
+  const levels = levelMap(rows, today);
+  const levelOf = (id) => levels.get(id) ?? null;
+  const started = sessions.some((x) => x.kind === 'kc' && (x.state.games || 0) > 0);
+  const action = body.action;
+  if (action === 'start') {
+    if (started) return fail('Kings and challengers has started: the teams stay as they are', 409);
+    const mode = body.mode === 'shuffle' ? 'shuffle' : 'fair';
+    const plan = formatPlan(booking.players.length, booking.courts);
+    if (!plan.groups.length) return fail(plan.note, 400);
+    const partners = partnerCounts(recentMatches, addDays(today, -PARTNER_DAYS));
+    const take = booking.players.slice(0, MATCH_DAY_MAX);
+    const split = splitGroups(take, plan.groups.map((g) => g.size), levelOf, mode, rng);
+    const groups = plan.groups.map((g, i) => ({
+      no: i + 1, kind: g.kind,
+      state: g.kind === 'match' ? { players: split[i], ...bestPairs(split[i], levelOf, partners, mode, rng), mode, note: plan.note } : { ...kcStart(split[i], levelOf, partners, mode, rng), mode, note: plan.note },
+    }));
+    await repo.replaceSessions(slot, groups, nowIso);
+    return null;
+  }
+  const session = sessions.find((x) => x.no === intId(body.group));
+  if (action === 'swap') {
+    if (started) return fail('Kings and challengers has started: the teams stay as they are', 409);
+    const a = intId(body.a), b = intId(body.b);
+    const where = (id) => sessions.find((x) => (x.state.players || []).includes(id));
+    const sa = where(a), sb = where(b);
+    if (!a || !b || a === b || !sa || !sb) return fail('Pick two players on match day to swap', 400);
+    const swap = (list) => (list || []).map((id) => (id === a ? b : id === b ? a : id));
+    const next = (x) => ({ ...x.state, players: swap(x.state.players), ...(x.kind === 'match' ? { a: swap(x.state.a), b: swap(x.state.b) } : { kings: swap(x.state.kings), challengers: swap(x.state.challengers), queue: swap(x.state.queue), points: Object.fromEntries(swap(x.state.players).map((id) => [id, 0])) }) });
+    for (const x of sa === sb ? [sa] : [sa, sb]) if (!(await repo.setSession(x.id, x.version, next(x), nowIso))) return fail('Someone else changed match day: here is the latest', 409);
+    return null;
+  }
+  if (!session || session.kind !== 'kc') return fail('Pick a Kings and challengers court', 400);
+  const seen = Number.isInteger(body.version) ? body.version : intId(body.version);
+  if (seen !== session.version) return fail('Someone else just recorded a game: here is the latest', 409);
+  if (action === 'kc-game') {
+    const step = kcApply(session.state, body.winner, intId(body.lost_by));
+    if (step.error) return fail(step.error, 400);
+    const recent = countRecent(recentMatches, addDays(today, -RELIABLE_DAYS));
+    const side = (ids) => ids.map((id) => ({ id, level: levelOf(id), recent: recent.get(id) || 0 }));
+    const rated = [...step.winners, ...step.losers].every((id) => levelOf(id) != null);
+    let changes = {};
+    if (rated) {
+      const soFar = new Map();
+      for (const g of await repo.listSessionGames(session.id)) for (const [id, d] of Object.entries(g.changes)) soFar.set(Number(id), (soFar.get(Number(id)) || 0) + d);
+      changes = capSession(pairChanges({ win: side(step.winners), lose: side(step.losers), margin: 1, weight: KC_WEIGHT }), soFar);
+    }
+    const byId = new Map(rows.map((l) => [l.id, l]));
+    const updates = Object.entries(changes).map(([id, d]) => {
+      const n = Number(id);
+      return { id: n, settle: r3(levels.get(n) - byId.get(n).level), readActive: byId.get(n).level_active_at, delta: d, matches: 1, activeAt: today };
+    });
+    const key = `kc-${session.id}-v${session.version}`;
+    const state = { ...step.state, history: step.state.history.map((h, i) => (i === step.state.history.length - 1 ? { ...h, key } : h)) };
+    try {
+      await repo.addKcGame(session.id, session.version, state, { key, playedOn: today, a: step.winners, b: step.losers, enteredBy: who || 0, changes }, updates, nowIso);
+    } catch (e) {
+      if (await repo.getMatchByKey(key)) return fail('Someone else just recorded that game: here is the latest', 409);
+      throw e;
+    }
+    return null;
+  }
+  if (action === 'kc-undo') {
+    const hist = session.state.history || [];
+    if (!hist.length) return fail('No game to undo', 400);
+    const last = hist[hist.length - 1];
+    const game = last.key ? await repo.getMatchByKey(last.key) : null;
+    const state = { ...session.state, ...last, history: hist.slice(0, -1) };
+    delete state.key;
+    const token = `${nowIso}#${Math.random().toString(36).slice(2, 10)}`;
+    const updates = game && !game.deletedAt ? Object.entries(game.changes).map(([id, d]) => ({ id: Number(id), delta: -d, matches: -1 })) : [];
+    await repo.undoKcGame(session.id, session.version, state, game ? game.id : 0, token, updates, nowIso);
+    return null;
+  }
+  return fail('Unknown match day action', 400);
+}
+// Everyone's page: today's booked hours that have a match day, as the phones show them.
+async function loadMatchDay(repo, bookedSlots) {
+  const sessions = await repo.listSessions(bookedSlots);
+  const out = {};
+  for (const x of sessions) {
+    const st = x.state;
+    const g = x.kind === 'match'
+      ? { no: x.no, kind: 'match', version: x.version, players: st.players || [], a: st.a || [], b: st.b || [], mode: st.mode }
+      : { no: x.no, kind: 'kc', version: x.version, players: st.players || [], kings: st.kings || [], challengers: st.challengers || [], queue: st.queue || [], streak: st.streak || 0, points: st.points || {}, games: st.games || 0, canUndo: (st.history || []).length > 0, mode: st.mode };
+    (out[x.slot] || (out[x.slot] = { note: st.note || '', groups: [] })).groups.push(g);
+  }
+  return out;
+}
+
 async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
   if (body.action === 'name') {
     const id = intId(body.id);
@@ -1702,6 +1986,7 @@ async function loadState(env, repo, nowMs, admin = false) {
   state.availability.stale = pulseDue(pulse, nowMs);
   state.earlier = await earlierPaid(env, repo, dates[0]);
   state.levels = await loadLevels(repo, dates[0], nowMs);
+  state.matchday = await loadMatchDay(repo, Object.keys(state.booked).filter((slot) => slot.startsWith(dates[0] + '|')));
   if (admin) state.setup = await loadSetup(repo);
   return state;
 }
@@ -1878,6 +2163,11 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     }
     if (path === '/api/score') {
       const r = await addScore(repo, body, dates, nowIso, admin);
+      if (r) return r;
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+    if (path === '/api/matchday') {
+      const r = await handleMatchDay(body, repo, dates, nowIso, admin);
       if (r) return r;
       return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
     }

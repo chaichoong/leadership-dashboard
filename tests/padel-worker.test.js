@@ -20,6 +20,7 @@ import {
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
   readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl, SIGNED_OUT_MARK,
   levelChanges, matchResult, decayedLevel, cleanLevel, cleanScore, kFactor, expectedWin, setDone, FEEDBACK_MS,
+  formatPlan, bestPairs, splitGroups, kcStart, kcApply, capSession, pairChanges, partnerCounts, KC_SESSION_CAP,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -381,6 +382,7 @@ function mapRepo() {
       async listLevels() { return [...people.values()].map((p) => ({ id: p.id, level: null, level_matches: 0, level_active_at: null })); },
       async listMatches() { return []; },
       async listFeedback() { return []; },
+      async listSessions() { return []; },
       async getPerson(id) { return people.has(id) ? out(people.get(id)) : null; },
       async countPeople() { return people.size; },
       async addPerson(name, now) {
@@ -2009,6 +2011,178 @@ describe('levels and scores on the live database shape (makeRepo SQL on SQLite)'
     const c2 = two.json.levels.scores[0].changes[ids[0]];
     expect(lv(two.json, ids[0]).level).toBeCloseTo(2.9 + c1 + c2, 2);
     expect(Math.round((2.8 + c1 + c2) * 100) / 100).not.toBe(lv(two.json, ids[0]).level);   // not the drop taken twice
+  });
+});
+
+// ── Stage 3 (Kevin, 28 Nov 2026): match day, fair teams, Kings and challengers ──
+// A seeded random, so "at random" is the same in every run.
+const seeded = (seed = 1) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+describe('match day: formats, fair teams and Kings and challengers (pure)', () => {
+  it('the format for every count from 4 to 12, on one court or two, as Kevin set and approved', () => {
+    const kinds = (n, c) => formatPlan(n, c).groups.map((g) => g.kind + g.size).join('+');
+    expect(formatPlan(3, 1)).toEqual({ groups: [], note: 'Match day needs at least 4 players' });
+    expect([4, 5, 6, 7].map((n) => kinds(n, 1))).toEqual(['match4', 'kc5', 'kc6', 'kc7']);
+    expect([4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => kinds(n, 2))).toEqual(['match4', 'kc5', 'kc6', 'kc7', 'match4+match4', 'match4+kc5', 'kc5+kc5', 'kc5+kc6', 'kc6+kc6']);
+    expect(formatPlan(13, 2)).toEqual({ groups: [{ kind: 'kc', size: 6 }, { kind: 'kc', size: 6 }], note: 'Only 12 fit: 1 sit out' });
+    expect(formatPlan(8, 1).note).toBe('A long queue on one court: a second court would help');
+    expect(formatPlan(4, 2).note).toBe('One court is enough for 4');
+  });
+  it('fair pairs: the strongest with the weakest when everyone has a level; otherwise the partners who have played together least', () => {
+    const lv = new Map([[1, 5], [2, 4], [3, 3], [4, 2]]);
+    expect(bestPairs([1, 2, 3, 4], (id) => lv.get(id), new Map(), 'fair', seeded(3))).toEqual({ a: [1, 4], b: [2, 3] });
+    const partners = new Map([['1-2', 3], ['3-4', 3], ['1-3', 2], ['2-4', 2]]);
+    expect(bestPairs([1, 2, 3, 4], () => null, partners, 'fair', seeded(3))).toEqual({ a: [1, 4], b: [2, 3] });   // 1-4 and 2-3 have never partnered
+    const seen = new Set();
+    for (let s = 0; s < 60; s += 1) { const r = bestPairs([1, 2, 3, 4], (id) => lv.get(id), new Map(), 'shuffle'); seen.add(r.a.join(',')); }
+    expect(seen.size).toBe(3);                                                // Shuffle: any of the three ways
+  });
+  it('fair groups: two courts end up with close average levels; players with no level are spread', () => {
+    const lv = new Map([[1, 6], [2, 5.5], [3, 5], [4, 4], [5, 3.5], [6, 3], [7, 2.5], [8, 2], [9, null], [10, null]]);
+    const [g1, g2] = splitGroups([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [5, 5], (id) => lv.get(id) ?? null, 'fair', seeded(5));
+    const avg = (g) => { const k = g.filter((id) => lv.get(id) != null); return k.reduce((x, id) => x + lv.get(id), 0) / k.length; };
+    expect(g1.length + g2.length).toBe(10);
+    expect(Math.abs(avg(g1) - avg(g2))).toBeLessThan(0.3);                    // snake draft: 3.875 v 4.0
+    expect([g1.includes(9) || g1.includes(10), g2.includes(9) || g2.includes(10)]).toEqual([true, true]);
+  });
+  // Kevin's rules, game by game, with five players: A B kings, C D challengers, E waiting.
+  it('Kings and challengers, Kevin\'s rules game by game: points to kings only, the loser of the last point off, challengers step up, 3 in a row and off', () => {
+    const [A, B, C, D, E] = [1, 2, 3, 4, 5];
+    let st = { players: [A, B, C, D, E], kings: [A, B], challengers: [C, D], queue: [E], streak: 0, points: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, games: 0, history: [] };
+    // 1. Kings win; C lost the last point: C off, E on with D. A and B get a point.
+    let r = kcApply(st, 'kings', C);
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak, r.state.points]).toEqual([[A, B], [D, E], [C], 1, { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 }]);
+    expect([r.winners, r.losers]).toEqual([[A, B], [D, E].map(() => null).length ? [C, D] : []]);
+    // 2. Challengers win; king A lost the last point: A off, B goes over with the new challenger C, D and E are kings. No points.
+    r = kcApply(r.state, 'challengers', A);
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak, r.state.points]).toEqual([[D, E], [B, C], [A], 0, { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 }]);
+    // 3, 4, 5. D and E win three in a row: a point each time, then both come off, the challengers step up, the next two come on.
+    r = kcApply(r.state, 'kings', B);                                         // B off, A on with C
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[D, E], [C, A], [B], 1]);
+    r = kcApply(r.state, 'kings', C);                                         // C off, B on with A
+    expect([r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C], 2]);
+    r = kcApply(r.state, 'kings', A);                                         // third in a row
+    expect(r.state.points).toEqual({ 1: 1, 2: 1, 3: 0, 4: 3, 5: 3 });
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[B, C], [A, D], [E], 0]);
+    expect(r.state.games).toBe(5);
+    expect(r.state.history).toHaveLength(5);
+    // Everyone is somewhere, once.
+    expect([...r.state.kings, ...r.state.challengers, ...r.state.queue].sort()).toEqual([A, B, C, D, E]);
+    expect(kcApply(r.state, 'kings', B).error).toBe('Pick the player who lost the last point');   // B is a king, not a loser
+    expect(kcApply(r.state, 'draw', A).error).toBe('Who won: the kings or the challengers?');
+  });
+  it('six players: three in a row brings two new players on as challengers', () => {
+    let st = { players: [1, 2, 3, 4, 5, 6], kings: [1, 2], challengers: [3, 4], queue: [5, 6], streak: 2, points: {}, games: 0, history: [] };
+    const r = kcApply(st, 'kings', 3);                                       // 3 off, 5 on with 4; then 1 and 2 off: 4 5 kings, 6 3 on
+    expect([r.state.kings, r.state.challengers, r.state.queue]).toEqual([[4, 5], [6, 3], [1, 2]]);
+  });
+  it('a game counts a quarter of a match on who won, and one session moves a level no more than 0.4', () => {
+    const p = (id, level) => ({ id, level, recent: 20 });
+    const full = pairChanges({ win: [p(1, 3), p(2, 3)], lose: [p(3, 3), p(4, 3)], margin: 1 });
+    const kc = pairChanges({ win: [p(1, 3), p(2, 3)], lose: [p(3, 3), p(4, 3)], margin: 1, weight: 0.25 });
+    expect(kc[1]).toBeCloseTo(full[1] / 4, 2);
+    expect(kc[3]).toBeLessThan(0);
+    expect(capSession({ 1: 0.05, 2: -0.05 }, new Map([[1, 0.38], [2, -0.39]]))).toEqual({ 1: 0.02, 2: -0.01 });
+    expect(capSession({ 1: -0.05 }, new Map([[1, 0.4]]))).toEqual({ 1: -0.05 });   // back down is always allowed
+    expect(KC_SESSION_CAP).toBe(0.4);
+  });
+  it('partners are counted from both pairs of every score and game in the window', () => {
+    const n = partnerCounts([{ playedOn: '2026-11-20', a: [1, 2], b: [3, 4] }, { playedOn: '2026-11-21', a: [2, 1], b: [4, 5] }, { playedOn: '2026-01-01', a: [1, 2], b: [3, 4] }], '2026-09-01');
+    expect([n.get('1-2'), n.get('3-4'), n.get('4-5')]).toEqual([2, 1, 1]);
+  });
+});
+
+describe('match day on the live database shape (makeRepo SQL on SQLite)', () => {
+  let t;
+  let ids;
+  const TODAY_SLOT = '2026-11-27|19';
+  beforeEach(async () => {
+    t = harness(sqlRepo);
+    t.setNow(Date.parse('2026-11-27T17:00:00Z'));
+    ids = await t.addPeople(['Ann One', 'Bo Two', 'Cy Three', 'Di Four', 'Ed Five', 'Fi Six']);
+  });
+  const book = async (players, courts = 1) => {
+    expect((await t.call('/api/booked', { slot: TODAY_SLOT, person_id: players[0], venue: 'pdl', booked: true, start: '19:00', minutes: 90, courts })).status).toBe(200);
+    expect((await t.call('/api/admin', { action: 'paid', slot: TODAY_SLOT, price: 30, players }, { admin: ADMIN })).status).toBe(200);
+  };
+  const md = (body, opts) => t.call('/api/matchday', { slot: TODAY_SLOT, person_id: ids[0], ...body }, opts);
+  const levelsAll = async (vals) => { for (const [i, v] of vals.entries()) await t.call('/api/admin', { action: 'level', id: ids[i], level: v }, { admin: ADMIN }); };
+  const lvl = (state, id) => state.levels.players.find((x) => x.id === id).level;
+
+  it('4 players: one match with fair pairs; Shuffle and swap re-pick; someone not playing cannot run it', async () => {
+    await levelsAll([5, 4, 3, 2]);
+    await book(ids.slice(0, 4));
+    const r = await md({ action: 'start' });
+    expect(r.status).toBe(200);
+    const g = r.json.matchday[TODAY_SLOT].groups;
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ no: 1, kind: 'match' });
+    expect([g[0].a, g[0].b].map((x) => [...x].sort()).sort()).toEqual([[ids[0], ids[3]], [ids[1], ids[2]]].map((x) => [...x].sort()).sort());   // 5+2 v 4+3
+    expect((await md({ action: 'start', person_id: ids[4] })).status).toBe(400);
+    const sw = await md({ action: 'swap', a: ids[0], b: ids[1] });
+    const g2 = sw.json.matchday[TODAY_SLOT].groups[0];
+    expect([...g2.a, ...g2.b].sort()).toEqual(ids.slice(0, 4).sort());
+    expect(g2.a.includes(ids[1]) ? g2.a : g2.b).toContain(ids[3]);          // Bo took Ann's place beside Di
+    expect((await md({ action: 'start', mode: 'shuffle' })).status).toBe(200);
+  });
+
+  it('5 players: Kings and challengers runs Kevin\'s rules, keeps the points tally, and each game moves levels a quarter', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let r = await md({ action: 'start' });
+    let g = r.json.matchday[TODAY_SLOT].groups[0];
+    expect(g).toMatchObject({ kind: 'kc', streak: 0, games: 0, canUndo: false });
+    expect(g.queue).toHaveLength(1);
+    const kings = g.kings;
+    const loser = g.challengers[0];
+    r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: loser });
+    expect(r.status).toBe(200);
+    g = r.json.matchday[TODAY_SLOT].groups[0];
+    expect(g).toMatchObject({ games: 1, streak: 1, canUndo: true, kings });
+    expect(g.points[kings[0]]).toBe(1);
+    expect(g.queue).toEqual([loser]);
+    expect(lvl(r.json, kings[0])).toBeGreaterThan(3);
+    expect(lvl(r.json, loser)).toBeLessThan(3);
+    expect(r.json.levels.scores).toEqual([]);                                // games live on the match day card, not the scores list
+    // The same game tapped on a second phone (the old version): refused, recorded once.
+    expect((await md({ action: 'kc-game', group: 1, version: g.version - 1, winner: 'kings', lost_by: g.challengers[0] })).status).toBe(409);
+    // Undo puts the court and the levels back exactly.
+    r = await md({ action: 'kc-undo', group: 1, version: g.version });
+    g = r.json.matchday[TODAY_SLOT].groups[0];
+    expect(g).toMatchObject({ games: 0, streak: 0, canUndo: false, kings });
+    expect(g.points[kings[0]]).toBe(0);
+    for (const id of ids.slice(0, 5)) expect(lvl(r.json, id)).toBe(3);
+    // Once a game is in, the teams stay as they are.
+    r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'challengers', lost_by: g.kings[0] });
+    expect((await md({ action: 'start', mode: 'shuffle' })).status).toBe(409);
+    expect((await md({ action: 'kc-game', group: 1, version: r.json.matchday[TODAY_SLOT].groups[0].version, winner: 'kings', lost_by: r.json.matchday[TODAY_SLOT].groups[0].kings[0] })).status).toBe(400);   // a king did not lose
+  });
+
+  it('a long session moves no one more than 0.4, however many games they win', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    const star = g.kings[0];
+    let r;
+    for (let i = 0; i < 40; i += 1) {
+      // Whichever side the star is on wins; the other side's first player lost the last point.
+      const starKing = g.kings.includes(star);
+      const starChallenger = g.challengers.includes(star);
+      const winner = starKing ? 'kings' : starChallenger ? 'challengers' : 'kings';
+      const losers = winner === 'kings' ? g.challengers : g.kings;
+      r = await md({ action: 'kc-game', group: 1, version: g.version, winner, lost_by: losers[0] });
+      expect(r.status).toBe(200);
+      g = r.json.matchday[TODAY_SLOT].groups[0];
+    }
+    expect(lvl(r.json, star)).toBeLessThanOrEqual(3.4);
+    expect(lvl(r.json, star)).toBeGreaterThan(3.3);
+  });
+
+  it('two courts, 10 players: two Kings and challengers groups of 5; not today is refused', async () => {
+    const more = await t.addPeople(['Gu Seven', 'Hy Eight', 'Io Nine', 'Jo Ten']);
+    await book([...ids, ...more], 2);
+    const r = await md({ action: 'start' });
+    expect(r.json.matchday[TODAY_SLOT].groups.map((g) => g.kind + g.players.length)).toEqual(['kc5', 'kc5']);
+    expect((await t.call('/api/matchday', { slot: '2026-11-28|19', person_id: ids[0], action: 'start' })).status).toBe(400);
   });
 });
 
