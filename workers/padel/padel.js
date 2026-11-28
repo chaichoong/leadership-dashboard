@@ -44,7 +44,8 @@
 //   POST /api/matchday { slot, person_id, action, ... } -> state   match day on today's booked hour (Stage 3):
 //        start { mode: fair|shuffle } splits the players by Kevin's formats and picks the pairs (again, until
 //        the first Kings and challengers game); swap { a, b }; kc-game { group, version, winner: kings|
-//        challengers, lost_by } runs his rules and moves levels a quarter; kc-undo { group, version }.
+//        challengers, lost_by, stay_king?, cross? } runs his rules and moves levels a quarter (stay_king and
+//        cross only on a third kings' win in a row with five players); kc-undo { group, version }.
 //   GET  /api/robot/setup (X-Robot-Key) -> { ok, people }   who is on the list, for the robot's setup check
 //   POST /api/robot/setup (X-Robot-Key) -> { ok, saved }    { people: { <id>: { state, notes } } } (27 Nov
 //        2026): per player, ready, missing (what a booking would still lack) or unchecked. Kept in the
@@ -87,7 +88,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-11-28.2';
+export const VERSION = '2026-11-28.3';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -966,23 +967,34 @@ export function kcStart(ids, levelOf, partners, mode = 'fair', rng = Math.random
 // One Kings and challengers game, by Kevin's rules (27 Nov 2026): first to 3 points; the player on the
 // losing side who lost the last point comes off and the next in line comes on beside the other loser as
 // the challengers; when the challengers win they become the kings; every time the kings win, both kings
-// get a point; after 3 points in a row both kings come off, the challengers (the pair who just lost)
-// step up to be the kings and the next two in line come on (the reading used since review of PR #1025,
-// so nobody is crowned straight off the queue). Only kings score. Returns the next state and who won
-// and lost.
-export function kcApply(st, winner, lostBy) {
+// get a point; after 3 points in a row both kings come off and the next two in line come on as the
+// kings, the pair who lost staying on as the challengers (Kevin, 28 Nov 2026). With five players only
+// one is in line: the king who played better (fewer mistakes) stays on and switches to the challenger
+// side, and the challenger who played better moves across to be king beside the one coming on
+// (stayKing and cross say who). Only kings score. Returns the next state and who won and lost.
+export const kcThirdWin = (st, winner) => winner === 'kings' && st.streak + 1 >= 3;
+export function kcApply(st, winner, lostBy, { stayKing = null, cross = null } = {}) {
   if (!['kings', 'challengers'].includes(winner)) return { error: 'Who won: the kings or the challengers?' };
   const winners = winner === 'kings' ? [...st.kings] : [...st.challengers];
   const losers = winner === 'kings' ? [...st.challengers] : [...st.kings];
-  if (!losers.includes(lostBy)) return { error: 'Pick the player who lost the last point' };
+  const third = kcThirdWin(st, winner);
+  if (!third && !losers.includes(lostBy)) return { error: 'Pick the player who lost the last point' };
+  if (third && st.queue.length === 1 && (!winners.includes(stayKing) || !losers.includes(cross))) return { error: 'Which king played better, and which challenger played better?' };
+  if (third && !st.queue.length) return { error: 'Kings and challengers needs someone waiting' };
   const queue = [...st.queue];
   const points = { ...st.points };
   if (winner === 'kings') for (const k of winners) points[k] = (points[k] || 0) + 1;
   let kings, challengers, streak;
-  if (winner === 'kings' && st.streak + 1 >= 3) {
-    queue.push(...winners);                                          // three in a row: both kings off
-    kings = losers;
-    challengers = [queue.shift(), queue.shift()];
+  if (third && queue.length >= 2) {
+    kings = [queue.shift(), queue.shift()];                          // three in a row: both kings off, the next two in line are kings
+    challengers = losers;
+    queue.push(...winners);
+    streak = 0;
+  } else if (third) {
+    const comer = queue.shift();                                     // five players: one in line
+    kings = [comer, cross];
+    challengers = [losers.find((x) => x !== cross), stayKing];
+    queue.push(winners.find((x) => x !== stayKing));
     streak = 0;
   } else {
     queue.push(lostBy);                                              // the loser of the last point off
@@ -1781,7 +1793,7 @@ async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.rando
   if (seen == null) return fail('Which game? Reload the page and try again', 400);
   if (seen !== session.version) return fail('Someone else just recorded a game: here is the latest', 409);
   if (action === 'kc-game') {
-    const step = kcApply(session.state, body.winner, intId(body.lost_by));
+    const step = kcApply(session.state, body.winner, intId(body.lost_by), { stayKing: intId(body.stay_king), cross: intId(body.cross) });
     if (step.error) return fail(step.error, 400);
     const recent = countRecent(recentMatches, addDays(today, -RELIABLE_DAYS));
     const side = (ids) => ids.map((id) => ({ id, level: levelOf(id), recent: recent.get(id) || 0 }));

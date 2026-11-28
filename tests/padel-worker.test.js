@@ -2060,9 +2060,13 @@ describe('match day: formats, fair teams and Kings and challengers (pure)', () =
     expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[D, E], [C, A], [B], 1]);
     r = kcApply(r.state, 'kings', C);                                         // C off, B on with A
     expect([r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C], 2]);
-    r = kcApply(r.state, 'kings', A);                                         // third in a row: D and E off, A and B (who just lost) step up, C and D come on
+    // Third in a row with five players (Kevin, 28 Nov): D and E come off, but only C is in line. The king who
+    // played better (D) stays on and goes over to the challengers; the challenger who played better (B) moves
+    // across to be king beside C, who comes on. E waits.
+    expect(kcApply(r.state, 'kings', A).error).toBe('Which king played better, and which challenger played better?');
+    r = kcApply(r.state, 'kings', null, { stayKing: D, cross: B });
     expect(r.state.points).toEqual({ 1: 1, 2: 1, 3: 0, 4: 3, 5: 3 });
-    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C, D], [E], 0]);
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[C, B], [A, D], [E], 0]);
     expect(r.state.games).toBe(5);
     expect(r.state.history).toHaveLength(5);
     // Everyone is somewhere, once.
@@ -2070,10 +2074,10 @@ describe('match day: formats, fair teams and Kings and challengers (pure)', () =
     expect(kcApply(r.state, 'kings', B).error).toBe('Pick the player who lost the last point');   // B is a king, not a loser
     expect(kcApply(r.state, 'draw', A).error).toBe('Who won: the kings or the challengers?');
   });
-  it('six players: three in a row takes both kings off, the challengers step up and the two waiting come on', () => {
+  it('six players: three in a row takes both kings off and the two waiting come on as the kings; the losers stay challengers', () => {
     let st = { players: [1, 2, 3, 4, 5, 6], kings: [1, 2], challengers: [3, 4], queue: [5, 6], streak: 2, points: {}, games: 0, history: [] };
-    const r = kcApply(st, 'kings', 3);
-    expect([r.state.kings, r.state.challengers, r.state.queue]).toEqual([[3, 4], [5, 6], [1, 2]]);
+    const r = kcApply(st, 'kings');                                          // nobody comes off for the last point: the kings all go
+    expect([r.state.kings, r.state.challengers, r.state.queue]).toEqual([[5, 6], [3, 4], [1, 2]]);
     expect([r.state.points[1], r.state.points[2]]).toEqual([1, 1]);
   });
   it('a game counts a quarter of a match on who won, and one session moves a level no more than 0.4', () => {
@@ -2108,6 +2112,9 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
   const md = (body, opts) => t.call('/api/matchday', { slot: TODAY_SLOT, person_id: ids[0], ...body }, opts);
   const levelsAll = async (vals) => { for (const [i, v] of vals.entries()) await t.call('/api/admin', { action: 'level', id: ids[i], level: v }, { admin: ADMIN }); };
   const lvl = (state, id) => state.levels.players.find((x) => x.id === id).level;
+  // A kings' win as the phone sends it: on a third in a row with five players, who played better too.
+  const kingsWin = (g, prefer) => (g.streak === 2 && g.queue.length === 1 ? { winner: 'kings', stay_king: g.kings.includes(prefer) ? prefer : g.kings[0], cross: g.challengers[0] }
+    : g.streak === 2 ? { winner: 'kings' } : { winner: 'kings', lost_by: g.challengers[0] });
 
   it('4 players: one match with fair pairs; Shuffle and swap re-pick; someone not playing cannot run it', async () => {
     await levelsAll([5, 4, 3, 2]);
@@ -2166,11 +2173,8 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
     let r;
     for (let i = 0; i < 40; i += 1) {
       // Whichever side the star is on wins; the other side's first player lost the last point.
-      const starKing = g.kings.includes(star);
       const starChallenger = g.challengers.includes(star);
-      const winner = starKing ? 'kings' : starChallenger ? 'challengers' : 'kings';
-      const losers = winner === 'kings' ? g.challengers : g.kings;
-      r = await md({ action: 'kc-game', group: 1, version: g.version, winner, lost_by: losers[0] });
+      r = await md({ action: 'kc-game', group: 1, version: g.version, ...(starChallenger ? { winner: 'challengers', lost_by: g.kings[0] } : kingsWin(g, star)) });
       expect(r.status).toBe(200);
       g = r.json.matchday[TODAY_SLOT].groups[0];
     }
@@ -2232,7 +2236,7 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
     let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
     // Play until Ed is on court and a game finishes with him in it.
     for (let i = 0; i < 6; i += 1) {
-      const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+      const r = await md({ action: 'kc-game', group: 1, version: g.version, ...kingsWin(g) });
       g = r.json.matchday[TODAY_SLOT].groups[0];
     }
     const s1 = await t.call('/api/state');
@@ -2267,7 +2271,7 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
     let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
     let r;
     for (let i = 0; i < 12; i += 1) {
-      r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+      r = await md({ action: 'kc-game', group: 1, version: g.version, ...kingsWin(g) });
       g = r.json.matchday[TODAY_SLOT].groups[0];
     }
     const s1 = r.json.levels.players;

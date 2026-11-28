@@ -1167,6 +1167,35 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'kc-undo', group: 1, version: 5 });
     });
 
+    // Kevin, 28 Nov 2026: after the kings' third win in a row the next two in line are kings; with five players
+    // the better king stays on as a challenger and the better challenger moves across.
+    test('a third kings\' win with five players asks who played better, king then challenger, and sends both', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: '', groups: [kc({ version: 8, streak: 2, games: 2, canUndo: true })] } };
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc({ version: 9, kings: [5, 4], challengers: [3, 1], queue: [2], games: 3, canUndo: true })] } });
+      await openToday(page);
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await expect(page.locator('.md-court')).toContainText('which king played better?');
+      await expect(page.locator('[data-md-stay]')).toHaveText(['Test Ann', 'Test Bob']);
+      await page.locator(`[data-md-stay="${SLOT()}|1|1"]`).click();
+      await expect(page.locator('[data-md-cross]')).toHaveText(['Test Cat', 'Test Dan']);
+      await page.locator(`[data-md-cross="${SLOT()}|1|4"]`).click();
+      await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'kc-game', group: 1, version: 8, winner: 'kings', stay_king: 1, cross: 4 });
+      await expect(page.locator('.md-court')).toContainText('Kings: Test Eve + Test Dan');
+    });
+
+    test('a third kings\' win with six players goes straight in: the two waiting become kings', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5, 6]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null }, { id: 6, name: 'Test Fay', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: '', groups: [kc({ version: 3, players: [1, 2, 3, 4, 5, 6], queue: [5, 6], streak: 2, games: 2, canUndo: true, points: { 1: 2, 2: 2, 3: 0, 4: 0, 5: 0, 6: 0 } })] } };
+      await openToday(page);
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'kc-game', group: 1, version: 3, winner: 'kings' });
+    });
+
     test('a match court opens Add a score with its pairs filled in; Swap sends the two players', async ({ page }) => {
       const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
       store.booked.push(booking([1, 2, 3, 4]));
