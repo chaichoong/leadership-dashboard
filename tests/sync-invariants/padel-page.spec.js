@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
 // The phone key the mock Worker accepts (Kevin's phone, 30 Oct 2026): a request carrying it gets admin: true.
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [], setup = null, levels = { players: [], scores: [] } } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [], setup = null, levels = { players: [], scores: [] }, matchdaySeq = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
@@ -60,7 +60,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
   // crowdAt 'HH': six more people, and all eight (Ann too) on tomorrow at that hour: a second court's crowd.
   const PEOPLE = ['Test Cat', 'Test Dan', 'Test Eve', 'Test Fay', 'Test Gus', 'Test Hal'].map((name, i) => ({ id: i + 3, name, venues: ['si', 'pdl', 'pp'], savedAt: null }));
   const extras = crowdAt ? PEOPLE : readyAt ? PEOPLE.slice(0, 2) : [];
-  const store = { levels: structuredClone(levels), levelBodies: [], scoreBodies: [], feedbackBodies: [], votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  const store = { matchday: {}, matchdaySeq: structuredClone(matchdaySeq), matchdayBodies: [], levels: structuredClone(levels), levelBodies: [], scoreBodies: [], feedbackBodies: [], votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   if (readyAt) {
     const slot = `${londonDates(Date.now())[1]}|${readyAt}`;
     for (const pid of [2, 3, 4]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
@@ -85,7 +85,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     );
     const named = (p) => (store.realNames.has(p.id) ? { ...p, realName: store.realNames.get(p.id) } : p);
     const everyone = (store.gone ? [other, ...extras] : [person, other, ...extras]).concat(store.added);
-    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier, levels: store.levels };
+    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier, levels: store.levels, matchday: store.matchday };
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -118,6 +118,11 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       const body = req.postDataJSON();
       store.scoreBodies.push(body);
       store.levels.scores.unshift({ id: 900 + store.scoreBodies.length, on: body.played_on, a: body.team_a, b: body.team_b, sets: body.sets, rated: body.rated, kind: 'match', winner: 'a', finished: true, changes: {}, feedback: {}, enteredBy: body.entered_by, feedbackOpen: body.rated, voted: [] });
+      return reply(route, 200, { ...state(), admin });
+    }
+    if (path === '/api/matchday') {                                      // Stage 3: each POST shows the next state the test lined up
+      store.matchdayBodies.push(req.postDataJSON());
+      if (store.matchdaySeq.length) store.matchday = store.matchdaySeq.shift();
       return reply(route, 200, { ...state(), admin });
     }
     if (path === '/api/feedback') {
@@ -1111,4 +1116,104 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect.poll(() => store.adminBodies.at(-1)).toEqual({ action: 'level', id: 2, level: '2.5' });
     });
   });
+
+  // Stage 3 (Kevin, 28 Nov 2026): match day on today's booked hour.
+  test.describe('match day (28 Nov 2026)', () => {
+    const today = () => londonDates(Date.now())[0];
+    const SLOT = () => `${today()}|19`;
+    // The page's clock at 10:00 today, so today's 19:00 booking shows whatever time the suite runs.
+    const at10 = async (page) => { await page.clock.setFixedTime(new Date(`${today()}T10:00:00Z`)); };
+    const booking = (players) => ({ slot: SLOT(), person_id: 1, venue: 'pdl', start: '19:00', minutes: 90, courts: 1, price_pence: 3000, players: JSON.stringify(players), paid_at: new Date().toISOString() });
+    const kc = (extra = {}) => ({ no: 1, kind: 'kc', version: 0, players: [1, 2, 3, 4, 5], kings: [1, 2], challengers: [3, 4], queue: [5], streak: 0, points: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, games: 0, canUndo: false, mode: 'fair', ...extra });
+    const openToday = async (page) => {
+      await at10(page);
+      await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${today()}"]`).click();
+    };
+
+    test('a player starts match day; five players get Kings and challengers with the kings, challengers, queue and points shown', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', booked: [], matchdaySeq: [] });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc()] } });
+      await openToday(page);
+      await page.locator(`[data-md-start="${SLOT()}"]`).first().click();
+      await expect(page.locator('.md-court h4')).toHaveText('Court 1: Kings and challengers');
+      expect(store.matchdayBodies).toEqual([{ person_id: 1, slot: SLOT(), action: 'start', mode: 'fair' }]);
+      const court = page.locator('.md-court');
+      await expect(court).toContainText('Kings: Test Ann + Test Bob');
+      await expect(court).toContainText('Challengers: Test Cat + Test Dan');
+      await expect(court).toContainText('Next: Test Eve');
+      await expect(court).toContainText('none yet. 0 games played.');
+    });
+
+    test('Kings won, then who lost the last point: one game sent with the version seen; the tally and Undo follow', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: '', groups: [kc({ version: 4 })] } };
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc({ version: 5, challengers: [4, 5], queue: [3], streak: 1, points: { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 }, games: 1, canUndo: true })] } });
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc({ version: 6 })] } });
+      await openToday(page);
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await expect(page.locator('.md-court')).toContainText('Who lost the last point?');
+      await expect(page.locator('[data-md-lost]')).toHaveText(['Test Cat', 'Test Dan']);   // the challengers lost
+      await page.locator(`[data-md-lost="${SLOT()}|1|3"]`).click();
+      await expect(page.locator('.md-court')).toContainText('Kings: Test Ann + Test Bob (1 in a row)');
+      await expect(page.locator('.md-tally')).toContainText('Test Ann 1, Test Bob 1, Test Cat 0');
+      expect(store.matchdayBodies).toEqual([{ person_id: 1, slot: SLOT(), action: 'kc-game', group: 1, version: 4, winner: 'kings', lost_by: 3 }]);
+      await page.locator(`[data-md-undo="${SLOT()}|1"]`).click();
+      await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'kc-undo', group: 1, version: 5 });
+    });
+
+    test('a match court opens Add a score with its pairs filled in; Swap sends the two players', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4]));
+      store.matchday = { [SLOT()]: { note: '', groups: [{ no: 1, kind: 'match', version: 0, players: [1, 2, 3, 4], a: [1, 4], b: [2, 3], mode: 'fair' }] } };
+      await openToday(page);
+      await expect(page.locator('.md-court')).toContainText('Test Ann + Test Dan v Test Bob + Test Cat');
+      await page.locator(`[data-md-score="${SLOT()}|1"]`).click();
+      await expect(page.locator('[data-sf="a0"]')).toHaveValue('1');
+      await expect(page.locator('[data-sf="a1"]')).toHaveValue('4');
+      await expect(page.locator('[data-sf="b0"]')).toHaveValue('2');
+      await expect(page.locator('[data-sf="b1"]')).toHaveValue('3');
+      await page.locator(`[data-md-swap-a="${SLOT()}"]`).selectOption('1');
+      await page.locator(`[data-md-swap-b="${SLOT()}"]`).selectOption('2');
+      await page.locator(`[data-md-swap="${SLOT()}"]`).click();
+      await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'swap', a: 1, b: 2 });
+    });
+
+    test('a booked hour stays on today\'s list after it has started, so match day is there all game', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4]));
+      await page.clock.setFixedTime(new Date(`${today()}T20:40:00Z`));
+      await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${today()}"]`).click();
+      await expect(page.locator('#row-19')).toBeVisible();
+      await expect(page.locator('#row-18')).toHaveCount(0);
+      await expect(page.locator(`[data-md-start="${SLOT()}"]`)).toBeVisible();
+      await expect(page.locator(`[data-unbook="${SLOT()}"]`)).toHaveCount(0);   // started: no Undo of the booking
+      await page.locator(`[data-slot="${SLOT()}"]`).click();
+      await expect(page.locator('#toast')).toContainText('That hour has started.');
+    });
+
+    test('a clash with another phone shows the latest court instead of sticking; who sits out is named', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: 'Only 12 fit: 1 sit out', sitOut: [5], groups: [kc({ version: 4 })] } };
+      await page.route('**/api/matchday', (route) => { store.matchday = { [SLOT()]: { note: '', sitOut: [], groups: [kc({ version: 9, games: 5, streak: 2 })] } }; return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Someone else just recorded a game: here is the latest' }) }); });
+      await openToday(page);
+      await expect(page.locator('.md')).toContainText('Sitting out: Test Eve');
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await page.locator(`[data-md-lost="${SLOT()}|1|3"]`).click();
+      await expect(page.locator('#toast')).toContainText('Someone else just recorded a game');
+      await expect(page.locator('.md-court')).toContainText('(2 in a row)');                   // the latest, read again
+      await expect(page.locator('.md-tally')).toContainText('5 games played.');
+      await expect(page.locator('[data-md-lost]')).toHaveCount(0);
+    });
+  });
 });
+
