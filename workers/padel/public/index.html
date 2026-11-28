@@ -454,7 +454,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
     for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'bookPlayer', 'bookPrice', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName',
       'sf', 'fb', 'levelId', 'levelField', 'scoreOpen', 'scoreCancel', 'fbSend', 'scoreDelete', 'setLevel',
-      'mdStart', 'mdWin', 'mdLost', 'mdUndo', 'mdSwap', 'mdScore', 'mdCancel', 'mdSwapA', 'mdSwapB']) {
+      'mdStart', 'mdWin', 'mdLost', 'mdStay', 'mdCross', 'mdUndo', 'mdSwap', 'mdScore', 'mdCancel', 'mdSwapA', 'mdSwapB']) {
       if (el.dataset[k]) return '[data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()) + '="' + CSS.escape(el.dataset[k]) + '"]';
     }
     return el.id ? '#' + CSS.escape(el.id) : null;
@@ -734,11 +734,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     // (this phone's game went in, or another phone's), it is gone.
     const pick = mdPick && mdPick.slot === slot && mdPick.group === g.no && mdPick.version === g.version ? mdPick : null;
     let btns = '';
-    if (canRun && pick) {
-      const losers = pick.winner === 'kings' ? g.challengers : g.kings;
-      btns = `<p>Who lost the last point?</p><div class="md-btns">${losers.map((id) => `<button type="button" class="btn small primary" data-md-lost="${esc(slot + '|' + g.no + '|' + id)}"${busy ? ' disabled' : ''}>${esc(fullName(id))}</button>`).join('')}
+    const choose = (q, list, attr) => `<p>${q}</p><div class="md-btns">${list.map((id) => `<button type="button" class="btn small primary" data-${attr}="${esc(slot + '|' + g.no + '|' + id)}"${busy ? ' disabled' : ''}>${esc(fullName(id))}</button>`).join('')}
         <button type="button" class="btn small" data-md-cancel="1">Cancel</button></div>`;
-    } else if (canRun) {
+    if (canRun && pick && pick.stage === 'stay') btns = choose('Three in a row: which king played better? They stay on as a challenger.', g.kings, 'md-stay');
+    else if (canRun && pick && pick.stage === 'cross') btns = choose('Which challenger played better? They move across to be king.', g.challengers, 'md-cross');
+    else if (canRun && pick) btns = choose('Who lost the last point?', pick.winner === 'kings' ? g.challengers : g.kings, 'md-lost');
+    else if (canRun) {
       btns = `<div class="md-btns"><button type="button" class="btn small primary" data-md-win="${esc(slot + '|' + g.no + '|kings')}"${busy ? ' disabled' : ''}>Kings won</button>
         <button type="button" class="btn small primary" data-md-win="${esc(slot + '|' + g.no + '|challengers')}"${busy ? ' disabled' : ''}>Challengers won</button>
         ${g.canUndo ? `<button type="button" class="btn small" data-md-undo="${esc(slot + '|' + g.no)}"${busy ? ' disabled' : ''}>Undo last game</button>` : ''}</div>`;
@@ -1126,7 +1127,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function setBusy(on) {
     busy = on;
-    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn,[data-score-open],#score-form button,#level-form button,[data-fb-send],[data-score-delete],[data-set-level],[data-md-start],[data-md-win],[data-md-lost],[data-md-undo],[data-md-swap],[data-md-score]')) b.disabled = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn,[data-score-open],#score-form button,#level-form button,[data-fb-send],[data-score-delete],[data-set-level],[data-md-start],[data-md-win],[data-md-lost],[data-md-stay],[data-md-cross],[data-md-undo],[data-md-swap],[data-md-score]')) b.disabled = on;
   }
 
   // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is
@@ -1334,7 +1335,21 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       keepFocus(renderGrid);
     }
     else if (t.dataset.mdStart) mdSend({ slot: t.dataset.mdStart, action: 'start', mode: t.dataset.mdMode }, t.dataset.mdMode === 'shuffle' ? 'Teams shuffled.' : 'Match day is ready.');
-    else if (t.dataset.mdWin) { const [d, hh, no, winner] = t.dataset.mdWin.split('|'); const g = mdGroup(d + '|' + hh, Number(no)); mdPick = { slot: d + '|' + hh, group: Number(no), winner, version: g ? g.version : -1 }; keepFocus(renderGrid); }
+    else if (t.dataset.mdWin) {
+      const [d, hh, no, winner] = t.dataset.mdWin.split('|');
+      const slot = d + '|' + hh;
+      const g = mdGroup(slot, Number(no));
+      // The kings' third win in a row (Kevin, 28 Nov 2026): both come off and the next two are kings, so
+      // nobody is asked who lost the point; with only one waiting, who played better decides who stays.
+      if (g && winner === 'kings' && g.streak === 2 && g.queue.length >= 2) mdSend({ slot, action: 'kc-game', group: g.no, version: g.version, winner: 'kings' }, 'Three in a row: new kings.');
+      else { mdPick = { slot, group: Number(no), winner, version: g ? g.version : -1, stage: g && winner === 'kings' && g.streak === 2 ? 'stay' : 'lost' }; keepFocus(renderGrid); }
+    }
+    else if (t.dataset.mdStay) { const id = Number(t.dataset.mdStay.split('|')[3]); if (mdPick) { mdPick = { ...mdPick, stayKing: id, stage: 'cross' }; keepFocus(renderGrid); } }
+    else if (t.dataset.mdCross) {
+      const [d, hh, no, id] = t.dataset.mdCross.split('|');
+      const g = mdGroup(d + '|' + hh, Number(no));
+      if (g && mdPick) mdSend({ slot: d + '|' + hh, action: 'kc-game', group: g.no, version: g.version, winner: 'kings', stay_king: mdPick.stayKing, cross: Number(id) }, 'Three in a row: new kings.');
+    }
     else if (t.dataset.mdCancel) { mdPick = null; keepFocus(renderGrid); }
     else if (t.dataset.mdLost) {
       const [d, hh, no, id] = t.dataset.mdLost.split('|');
