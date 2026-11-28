@@ -908,7 +908,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const when = [b.start, b.minutes ? b.minutes + ' min' : ''].filter(Boolean).join(', ');
     const courts = b.courts > 1 ? ', ' + b.courts + ' courts' : '';
     const started = b.paid && b.paid.splitwise.state && b.paid.splitwise.state !== 'failed';
-    const undo = (b.paid && (!isAdmin() || started)) || startedToday(slot) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
+    const undo = (b.paid && (!isAdmin() || started)) || hourOver(slot) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
     let html = `<p class="booked-line"><span>&#10003; Booked by ${esc(who)}: ${esc(where)}${when ? ' ' + esc(when) : ''}${esc(courts)}</span>
         ${undo}</p>`;
     if (b.paid) html += paidLine(slot, b);
@@ -1133,11 +1133,13 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   // only pending, otherwise send a remove. Tick a shown blank: cancel its pending remove if the
   // server has the hour, otherwise send an add. An hour carried by a request on its way is never
   // cancelled: the tap becomes the explicit opposite change.
-  // An hour today that has started stays on the list only for its booking's match day: ticks no longer change.
-  const startedToday = (slot) => slot.startsWith(S.today + '|') && Number(slot.slice(-2)) <= londonHour();
+  // A booked hour today keeps its row for match day: from its start its ticks no longer change, and once the
+  // hour is over its booking's Undo goes. An unbooked hour works as before until it is over.
+  const hourOver = (slot) => slot.startsWith(S.today + '|') && Number(slot.slice(-2)) < londonHour();
+  const bookedStarted = (slot) => !!S.booked[slot] && slot.startsWith(S.today + '|') && Number(slot.slice(-2)) <= londonHour();
   function toggle(slot) {
     if (!me) return;
-    if (startedToday(slot)) { toast('That hour has started.'); return; }
+    if (hourOver(slot) || bookedStarted(slot)) { toast('That hour has started.'); return; }
     const way = onTheWay(slot);
     if (mine.has(slot)) {
       if (pendingAdd.has(slot) && !way && !serverHas(slot)) pendingAdd.delete(slot);

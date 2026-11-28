@@ -2250,14 +2250,12 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
     await book(ids.slice(0, 5));
     const g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
     // Both phones read version 0; the second one's read is served stale so it reaches the database.
-    const listS = t.repo.listSessions.bind(t.repo);
     const add = t.repo.addKcGame.bind(t.repo);
     t.repo.addKcGame = async (...a) => {
       t.repo.addKcGame = add;
       await add(a[0], a[1], 'otherphone1', { ...a[3] }, { ...a[4], a: a[4].b, b: a[4].a }, [], a[6]);   // the other phone's game lands first, under the same key
       return add(...a);
     };
-    void listS;
     const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
     expect(r.status).toBe(409);
     expect(r.json.error).toBe('Someone else just recorded that game: here is the latest');
