@@ -162,6 +162,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .sub { font-size: var(--fs-md); margin: var(--space-4) 0 var(--space-2); }
 .league { margin: 0 0 var(--space-2); padding-left: var(--space-6); }
 .league li { padding: var(--space-1) 0; border-bottom: 1px solid var(--border-subtle); }
+.league li.empty { list-style: none; margin-left: calc(-1 * var(--space-6)); border-bottom: 0; }
 .league .lvl { font-weight: var(--fw-semibold); }
 .league small, .scores small { color: var(--text-secondary); font-size: var(--fs-sm); }
 .up { color: var(--success); }
@@ -169,13 +170,15 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .scores { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
 .scores > li { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
 .scores .won { font-weight: var(--fw-semibold); }
-.score-form, .level-form { display: grid; gap: var(--space-2); }
+.score-form, .level-form { display: grid; gap: var(--space-2); grid-template-columns: minmax(0, 1fr); }
+.level-form select, .level-form input { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.level-step-text { font-size: var(--fs-sm); color: var(--text-secondary); margin: 0; }
 .score-form select, .level-form select, .level-form input, .score-form .sets input, .fb select, .people .lvl-in { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); }
 .score-form .pair { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .score-form .pair select { flex: 1 1 40%; min-width: 0; }
 .score-form .sets { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .score-form .sets input { width: 3.2em; text-align: center; }
-.score-form .row, .fb .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.sf-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .fb { margin-top: var(--space-2); display: grid; gap: var(--space-2); }
 .people .lvl-in { width: 4.5em; }
 /* The robot's setup check under each person (27 Nov 2026): ready, missing something, or not checked. */
@@ -574,6 +577,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       <form class="level-form" id="level-form">
         <label for="level-step">Playtomic level (<a href="${PLAYTOMIC_CHART}" target="_blank" rel="noopener">Playtomic's own chart</a>)</label>
         <select id="level-step" data-level-field="step"><option value="">Choose a level</option>${opts}</select>
+        <p class="level-step-text" id="level-step-text">${esc((LEVEL_STEPS.find(([v]) => String(v) === d.step) || [null, '', ''])[2])}</p>
         <label for="level-exact">or your exact Playtomic level, if you have one</label>
         <input id="level-exact" data-level-field="exact" inputmode="decimal" placeholder="for example 2.37" value="${esc(d.exact)}">
         <button type="submit" class="btn primary"${busy ? ' disabled' : ''}>Save my level</button>
@@ -584,7 +588,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   function renderLeague() {
     const rows = ((S.levels && S.levels.players) || []).filter((x) => x.level != null && person(x.id)).sort((x, y) => y.level - x.level || fullName(x.id).localeCompare(fullName(y.id)));
     $('league').innerHTML = rows.length ? rows.map((x) => `<li><span class="lvl">${esc(lvlText(x.level))}</span> ${esc(fullName(x.id))} ${x.last != null ? changeSpan(x.last) : ''}
-      <small>${esc(x.matches)} score${x.matches === 1 ? '' : 's'}, reliability ${esc(x.reliability)}%</small></li>`).join('') : '<li class="note">Nobody has picked a level yet.</li>';
+      <small>${esc(x.matches)} score${x.matches === 1 ? '' : 's'}, reliability ${esc(x.reliability)}%</small></li>`).join('') : '<li class="note empty">Nobody has picked a level yet.</li>';
     const none = S.people.filter((p) => { const l = levelOf(p.id); return !l || l.level == null; }).map((p) => p.name);
     $('no-level').hidden = !none.length;
     $('no-level').textContent = none.length ? 'No level yet: ' + none.join(', ') + '.' : '';
@@ -598,13 +602,13 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const pick = (field, val) => `<select data-sf="${field}" aria-label="${field.startsWith('a') ? 'Pair 1' : 'Pair 2'} player"><option value="">Who?</option>${S.people.map((p) => `<option value="${p.id}"${p.id === val ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
     const sets = [0, 1, 2].map((i) => `<label>Set ${i + 1} <input data-sf="s${i}a" inputmode="numeric" maxlength="1" value="${esc(f.sets[i][0])}" aria-label="Set ${i + 1}, pair 1 games">–<input data-sf="s${i}b" inputmode="numeric" maxlength="1" value="${esc(f.sets[i][1])}" aria-label="Set ${i + 1}, pair 2 games"></label>`).join('');
     return `<form class="score-form" id="score-form">
-      <div class="row"><label for="score-day">Played</label><select id="score-day" data-sf="on">${dayOpts}</select></div>
+      <div class="sf-row"><label for="score-day">Played</label><select id="score-day" data-sf="on">${dayOpts}</select></div>
       <div class="pair"><strong>Pair 1</strong> ${pick('a0', f.a[0])} ${pick('a1', f.a[1])}</div>
       <div class="pair"><strong>Pair 2</strong> ${pick('b0', f.b[0])} ${pick('b1', f.b[1])}</div>
       <div class="sets">${sets}</div>
       <p class="note">Games for pair 1, then pair 2. Leave a set empty if you did not play it. Stopped mid-set? Put the games as they stood: levels move half as far.</p>
-      <label class="row"><input type="checkbox" data-sf="friendly"${f.friendly ? ' checked' : ''}> Friendly (no level change)</label>
-      <div class="row"><button type="submit" class="btn primary"${busy ? ' disabled' : ''}>Save score</button><button type="button" class="btn" data-score-cancel="1">Cancel</button></div>
+      <label class="sf-row"><input type="checkbox" data-sf="friendly"${f.friendly ? ' checked' : ''}> Friendly (no level change)</label>
+      <div class="sf-row"><button type="submit" class="btn primary"${busy ? ' disabled' : ''}>Save score</button><button type="button" class="btn" data-score-cancel="1">Cancel</button></div>
     </form>`;
   }
   function scoreLine(sc) {
@@ -623,8 +627,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         fb = `<div class="fb"><small>How did the others play against their level? Your answer is private, and it counts only when two players agree.</small>${others.map((id) => {
           const k = sc.id + '|' + id;
           const v = fbDraft.get(k) || 'expected';
-          return `<label class="row">${esc(fullName(id))} <select data-fb="${esc(k)}">${[['higher', 'Higher'], ['expected', 'As expected'], ['lower', 'Lower']].map(([val, label]) => `<option value="${val}"${val === v ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
-        }).join('')}<div class="row"><button type="button" class="btn small" data-fb-send="${esc(sc.id)}"${busy ? ' disabled' : ''}>Send feedback</button></div></div>`;
+          return `<label class="sf-row">${esc(fullName(id))} <select data-fb="${esc(k)}">${[['higher', 'Higher'], ['expected', 'As expected'], ['lower', 'Lower']].map(([val, label]) => `<option value="${val}"${val === v ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
+        }).join('')}<div class="sf-row"><button type="button" class="btn small" data-fb-send="${esc(sc.id)}"${busy ? ' disabled' : ''}>Send feedback</button></div></div>`;
       }
     }
     const del = isAdmin() ? ` <button type="button" class="btn small" data-score-delete="${esc(sc.id)}"${busy ? ' disabled' : ''}>Delete</button>` : '';
@@ -1305,6 +1309,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const ds = el.dataset || {};
     if (ds.levelId) levelDrafts.set(Number(ds.levelId), el.value);
     if (ds.levelField) { levelDraft = levelDraft || { step: $('level-step').value, exact: $('level-exact').value }; levelDraft[ds.levelField] = el.value; levelDraft.last = ds.levelField; }
+    if (ds.levelField === 'step' && $('level-step-text')) $('level-step-text').textContent = (LEVEL_STEPS.find(([v]) => String(v) === el.value) || [null, '', ''])[2];
     if (ds.fb) fbDraft.set(ds.fb, el.value);
     if (ds.sf && scoreForm) {
       const k = ds.sf;
