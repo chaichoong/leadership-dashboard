@@ -1134,7 +1134,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   // server has the hour, otherwise send an add. An hour carried by a request on its way is never
   // cancelled: the tap becomes the explicit opposite change.
   // An hour today that has started stays on the list only for its booking's match day: ticks no longer change.
-  const startedToday = (slot) => slot.startsWith(S.today + '|') && Number(slot.slice(-2)) < londonHour();
+  const startedToday = (slot) => slot.startsWith(S.today + '|') && Number(slot.slice(-2)) <= londonHour();
   function toggle(slot) {
     if (!me) return;
     if (startedToday(slot)) { toast('That hour has started.'); return; }

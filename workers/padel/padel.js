@@ -1205,7 +1205,7 @@ export function makeRepo(db) {
       await db.batch([
         db.prepare('UPDATE sessions SET state = ?3, version = version + 1, updated_at = ?4, token = ?5 WHERE id = ?1 AND version = ?2').bind(sessionId, version, JSON.stringify(state), nowIso, token),
         db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, fingerprint, session_id) SELECT ?1, ?2, ?3, ?4, ?5, ?12, ?6, ?7, ?8, ?9, ?10, ?11 WHERE (SELECT token FROM sessions WHERE id = ?11) = ?13')
-          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), '[]', 'kc', m.enteredBy, nowIso, JSON.stringify(m.changes), m.key, sessionId, m.rated ? 1 : 0, token),
+          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), '[]', 'kc', m.enteredBy, nowIso, JSON.stringify(m.changes), `${m.key}#${token}`, sessionId, m.rated ? 1 : 0, token),
         ...updates.filter((u) => u.settle).map((u) => db.prepare(`${PEOPLE_SETTLE_SQL} AND (SELECT token FROM sessions WHERE id = ?4) = ?5`).bind(u.id, u.settle, u.readActive, sessionId, token)),
         ...updates.map((u) => db.prepare(`${PEOPLE_LEVEL_SQL} AND (SELECT token FROM sessions WHERE id = ?5) = ?6`).bind(u.id, u.delta, u.matches, u.activeAt, sessionId, token)),
       ]);
@@ -1663,6 +1663,7 @@ async function deleteScore(repo, id, nowIso) {
   for (let tries = 0; tries < 4; tries += 1) {
     const m = id ? await repo.getMatch(id) : null;
     if (!m || m.deletedAt) return tries ? null : fail('No such score', 404);
+    if (m.kind === 'kc') return fail('A Kings and challengers game comes off with Undo on its match day', 400);
     const ids = new Set([...Object.keys(m.changes), ...Object.keys(m.feedback)].map(Number));
     const updates = [...ids].map((pid) => ({ id: pid, delta: -r3((m.changes[pid] || 0) + (m.feedback[pid] || 0)), matches: m.changes[pid] != null ? -1 : 0 }));
     const token = `${nowIso}#${Math.random().toString(36).slice(2, 10)}`;
@@ -1755,8 +1756,11 @@ async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.rando
       state: { ...(g.kind === 'match' ? { players: split[i], ...bestPairs(split[i], levelOf, partners, mode, rng) } : kcStart(split[i], levelOf, partners, mode, rng)), mode, note: plan.note, sitOut: i === 0 ? sitOut : [] },
     }));
     // Replaced only while no Kings and challengers game is in, checked inside the same transaction.
-    try { await repo.replaceSessions(slot, groups, nowIso); } catch (e) { return fail('Kings and challengers has started: the teams stay as they are', 409); }
-    if (!(await repo.listSessions([slot])).every((x) => groups.some((g) => g.no === x.no && g.kind === x.kind && JSON.stringify(g.state.players) === JSON.stringify(x.state.players)))) return fail('Kings and challengers has started: the teams stay as they are', 409);
+    try { await repo.replaceSessions(slot, groups, nowIso); } catch (e) {
+      if (/UNIQUE/i.test(String(e && e.message))) return fail('Kings and challengers has started: the teams stay as they are', 409);
+      throw e;
+    }
+    if (!(await repo.listSessions([slot])).every((x) => groups.some((g) => g.no === x.no && g.kind === x.kind && JSON.stringify(g.state.players) === JSON.stringify(x.state.players)))) return fail('Someone else just changed match day: here is the latest', 409);
     return null;
   }
   const session = sessions.find((x) => x.no === intId(body.group));
@@ -1788,7 +1792,7 @@ async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.rando
     if (rated) {
       const soFar = new Map();
       for (const g of await repo.listSessionGames(session.id)) {
-        for (const id of [...g.a, ...g.b]) played.add(id);
+        for (const id of Object.keys(g.changes)) played.add(Number(id));
         for (const [id, d] of Object.entries(g.changes)) soFar.set(Number(id), (soFar.get(Number(id)) || 0) + d);
       }
       changes = capSession(pairChanges({ win: side(step.winners), lose: side(step.losers), margin: 1, weight: KC_WEIGHT }), soFar);
@@ -1808,7 +1812,9 @@ async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.rando
       if (await repo.getMatchByKey(key)) return fail('Someone else just recorded that game: here is the latest', 409);
       throw e;
     }
-    if (!(await repo.getMatchByKey(key))) return fail('Someone else just changed this court: here is the latest', 409);
+    // Ours only if the game under this key carries this request's token: a second phone that sent a
+    // different result for the same game is told so, never "Game in".
+    if ((await repo.getMatchByKey(key))?.fingerprint !== `${key}#${token}`) return fail('Someone else just recorded that game: here is the latest', 409);
     return null;
   }
   if (action === 'kc-undo') {
@@ -1820,10 +1826,12 @@ async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.rando
     delete state.key;
     const token = `${nowIso}#${Math.random().toString(36).slice(2, 10)}`;
     // The tally of scores comes back down only for a player whose only game in the session this was.
-    const others = new Set((await repo.listSessionGames(session.id)).filter((g) => !game || g.id !== game.id).flatMap((g) => [...g.a, ...g.b]));
+    const others = new Set((await repo.listSessionGames(session.id)).filter((g) => !game || g.id !== game.id).flatMap((g) => Object.keys(g.changes).map(Number)));
     const updates = game && !game.deletedAt ? Object.entries(game.changes).map(([id, d]) => ({ id: Number(id), delta: -d, matches: others.has(Number(id)) ? 0 : -1 })) : [];
     await repo.undoKcGame(session.id, session.version, token, state, game ? game.id : 0, updates, nowIso);
-    if ((await repo.listSessions([slot])).find((x) => x.id === session.id)?.state?.games !== state.games) return fail('Someone else just changed this court: here is the latest', 409);
+    const took = game && !game.deletedAt ? (await repo.getMatch(game.id))?.deletedAt === token
+      : (await repo.listSessions([slot])).find((x) => x.id === session.id)?.version === session.version + 1;
+    if (!took) return fail('Someone else just changed this court: here is the latest', 409);
     return null;
   }
   return fail('Unknown match day action', 400);

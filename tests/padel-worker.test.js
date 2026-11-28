@@ -2244,5 +2244,43 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
     const r13 = await t.call('/api/matchday', { slot: '2026-11-27|20', person_id: ids[0], action: 'start' });
     expect(r13.json.matchday['2026-11-27|20']).toMatchObject({ note: 'Only 12 fit: 1 sit out', sitOut: [more[6]] });
   });
+
+  it('two phones send different results for the same game: the second is told, never "Game in"', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    const g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    // Both phones read version 0; the second one's read is served stale so it reaches the database.
+    const listS = t.repo.listSessions.bind(t.repo);
+    const add = t.repo.addKcGame.bind(t.repo);
+    t.repo.addKcGame = async (...a) => {
+      t.repo.addKcGame = add;
+      await add(a[0], a[1], 'otherphone1', { ...a[3] }, { ...a[4], a: a[4].b, b: a[4].a }, [], a[6]);   // the other phone's game lands first, under the same key
+      return add(...a);
+    };
+    void listS;
+    const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe('Someone else just recorded that game: here is the latest');
+  });
+
+  it('a first game with an unlevelled player does not stop the session counting once for the others, and Kevin cannot delete a game outside Undo', async () => {
+    await levelsAll([3, 3, 3, 3]);                                            // Ed has no level
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    let r;
+    for (let i = 0; i < 12; i += 1) {
+      r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+      g = r.json.matchday[TODAY_SLOT].groups[0];
+    }
+    const s1 = r.json.levels.players;
+    for (const id of ids.slice(0, 4)) {
+      const p = s1.find((x) => x.id === id);
+      if (p.last != null) expect(p.matches).toBe(1);                         // played a rated game: the session counts once
+    }
+    expect(s1.find((x) => x.id === ids[4]).matches).toBe(0);
+    expect(s1.filter((x) => x.last != null).length).toBeGreaterThan(0);
+    const anyGame = (await t.repo.listMatches('2026-11-01')).find((m) => m.kind === 'kc' && Object.keys(m.changes).length);
+    expect((await t.call('/api/admin', { action: 'score-delete', id: anyGame.id }, { admin: ADMIN })).status).toBe(400);
+  });
 });
 
