@@ -697,8 +697,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   const pairText = (ids) => ids.map(fullName).map(esc).join(' + ');
   function matchDayHtml(slot, b) {
     const md = (S.matchday || {})[slot];
-    const players = b.paid && b.paid.players.length ? b.paid.players : (S.votes[slot] || []);
-    const canRun = isAdmin() || players.includes(me) || b.person_id === me;
+    // Who may run it, as the Worker decides: the paid list, else the hour's ticks who can get there, and the booker.
+    const players = b.paid && b.paid.players.length ? b.paid.players
+      : [...(S.votes[slot] || []).filter((id) => (person(id) || { venues: [] }).venues.includes(b.venue)), ...(b.person_id ? [b.person_id] : [])];
+    const canRun = isAdmin() || players.includes(me);
     if (!md) {
       if (!canRun) return '';
       return `<div class="md"><p><strong>Match day</strong>: split the players into courts and fair teams.</p>
@@ -717,7 +719,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
           <label>with <select data-md-swap-b="${esc(slot)}" aria-label="with this player">${opts(d.b)}</select></label>
           <button type="button" class="btn small" data-md-swap="${esc(slot)}"${busy ? ' disabled' : ''}>Swap</button></div>`;
     }
-    return `<div class="md"><p><strong>Match day</strong>${md.note ? ': ' + esc(md.note) : ''}</p>${courts}${tools}</div>`;
+    const out = (md.sitOut || []).length ? `<p>Sitting out: ${md.sitOut.map(fullName).map(esc).join(', ')}</p>` : '';
+    return `<div class="md"><p><strong>Match day</strong>${md.note ? ': ' + esc(md.note) : ''}</p>${out}${courts}${tools}</div>`;
   }
   function matchCourt(slot, g, canRun) {
     return `<div class="md-court"><h4>Court ${esc(g.no)}: a match</h4><p>${pairText(g.a)} <strong>v</strong> ${pairText(g.b)}</p>
@@ -749,7 +752,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   }
   const mdGroup = (slot, no) => (((S.matchday || {})[slot] || {}).groups || []).find((g) => g.no === no);
   function mdSend(body, done) {
-    return postAndApply('/api/matchday', { person_id: me, ...body }, done).then((ok) => { if (ok && mdPick) { mdPick = null; keepFocus(renderGrid); } return ok; });
+    return postAndApply('/api/matchday', { person_id: me, ...body }, done).then((ok) => {
+      if (ok && mdPick) { mdPick = null; keepFocus(renderGrid); }
+      if (!ok) { mdPick = null; load(); }                       // another phone moved the court on: show the latest
+      return ok;
+    });
   }
 
   function renderBoard() {
@@ -901,7 +908,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const when = [b.start, b.minutes ? b.minutes + ' min' : ''].filter(Boolean).join(', ');
     const courts = b.courts > 1 ? ', ' + b.courts + ' courts' : '';
     const started = b.paid && b.paid.splitwise.state && b.paid.splitwise.state !== 'failed';
-    const undo = b.paid && (!isAdmin() || started) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
+    const undo = (b.paid && (!isAdmin() || started)) || startedToday(slot) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
     let html = `<p class="booked-line"><span>&#10003; Booked by ${esc(who)}: ${esc(where)}${when ? ' ' + esc(when) : ''}${esc(courts)}</span>
         ${undo}</p>`;
     if (b.paid) html += paidLine(slot, b);
@@ -971,7 +978,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     // A box left open, untouched, on another day gives way to this day's.
     if (paidForm && day && !paidForm.slot.startsWith(day + '|') && !paidForm.price) paidForm = null;
     if (!isAdmin() || paidForm || !day) return;
-    const nowH = day === S.today ? londonHour() : -1;            // only an hour the grid still shows
+    const nowH = day === S.today ? londonHour() : -1;            // only an hour still to come (a started booked hour stays on the grid for match day)
     const slot = Object.keys(S.booked).sort().find((s) => s.startsWith(day + '|') && Number(s.slice(-2)) >= nowH && !S.booked[s].paid && !paidDismissed.has(s));
     if (slot) paidForm = paidDraft(slot);
   }
@@ -1126,8 +1133,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   // only pending, otherwise send a remove. Tick a shown blank: cancel its pending remove if the
   // server has the hour, otherwise send an add. An hour carried by a request on its way is never
   // cancelled: the tap becomes the explicit opposite change.
+  // An hour today that has started stays on the list only for its booking's match day: ticks no longer change.
+  const startedToday = (slot) => slot.startsWith(S.today + '|') && Number(slot.slice(-2)) < londonHour();
   function toggle(slot) {
     if (!me) return;
+    if (startedToday(slot)) { toast('That hour has started.'); return; }
     const way = onTheWay(slot);
     if (mine.has(slot)) {
       if (pendingAdd.has(slot) && !way && !serverHas(slot)) pendingAdd.delete(slot);
@@ -1339,7 +1349,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       const slot = t.dataset.mdSwap;
       const d = mdSwap.get(slot) || {};
       if (!d.a || !d.b || d.a === d.b) toast('Pick two different players to swap.');
-      else mdSend({ slot, action: 'swap', a: d.a, b: d.b }, 'Swapped.').then((ok) => { if (ok) mdSwap.delete(slot); });
+      else mdSend({ slot, action: 'swap', a: d.a, b: d.b }, 'Swapped.').then((ok) => { if (ok) { mdSwap.delete(slot); keepFocus(renderGrid); } });
     }
     else if (t.dataset.mdScore) {
       const [d, hh, no] = t.dataset.mdScore.split('|');

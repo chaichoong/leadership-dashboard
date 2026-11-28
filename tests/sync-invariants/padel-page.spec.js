@@ -1194,6 +1194,25 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(page.locator('#row-19')).toBeVisible();
       await expect(page.locator('#row-18')).toHaveCount(0);
       await expect(page.locator(`[data-md-start="${SLOT()}"]`)).toBeVisible();
+      await expect(page.locator(`[data-unbook="${SLOT()}"]`)).toHaveCount(0);   // started: no Undo of the booking
+      await page.locator(`[data-slot="${SLOT()}"]`).click();
+      await expect(page.locator('#toast')).toContainText('That hour has started.');
+    });
+
+    test('a clash with another phone shows the latest court instead of sticking; who sits out is named', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: 'Only 12 fit: 1 sit out', sitOut: [5], groups: [kc({ version: 4 })] } };
+      await page.route('**/api/matchday', (route) => { store.matchday = { [SLOT()]: { note: '', sitOut: [], groups: [kc({ version: 9, games: 5, streak: 2 })] } }; return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Someone else just recorded a game: here is the latest' }) }); });
+      await openToday(page);
+      await expect(page.locator('.md')).toContainText('Sitting out: Test Eve');
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await page.locator(`[data-md-lost="${SLOT()}|1|3"]`).click();
+      await expect(page.locator('#toast')).toContainText('Someone else just recorded a game');
+      await expect(page.locator('.md-court')).toContainText('(2 in a row)');                   // the latest, read again
+      await expect(page.locator('.md-tally')).toContainText('5 games played.');
+      await expect(page.locator('[data-md-lost]')).toHaveCount(0);
     });
   });
 });

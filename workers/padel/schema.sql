@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 -- Match day (sql-changes/0007-match-day.sql, 28 Nov 2026): one row per court group on a booked hour.
 CREATE TABLE IF NOT EXISTS sessions (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   slot TEXT NOT NULL,
   group_no INTEGER NOT NULL,
   kind TEXT NOT NULL,
@@ -128,5 +128,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  token TEXT,
   UNIQUE (slot, group_no)
 );

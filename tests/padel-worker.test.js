@@ -2045,7 +2045,7 @@ describe('match day: formats, fair teams and Kings and challengers (pure)', () =
     expect([g1.includes(9) || g1.includes(10), g2.includes(9) || g2.includes(10)]).toEqual([true, true]);
   });
   // Kevin's rules, game by game, with five players: A B kings, C D challengers, E waiting.
-  it('Kings and challengers, Kevin\'s rules game by game: points to kings only, the loser of the last point off, challengers step up, 3 in a row and off', () => {
+  it('Kings and challengers, Kevin\'s rules game by game: points to kings only, the loser of the last point off, challengers step up, 3 in a row and both kings off', () => {
     const [A, B, C, D, E] = [1, 2, 3, 4, 5];
     let st = { players: [A, B, C, D, E], kings: [A, B], challengers: [C, D], queue: [E], streak: 0, points: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, games: 0, history: [] };
     // 1. Kings win; C lost the last point: C off, E on with D. A and B get a point.
@@ -2060,9 +2060,9 @@ describe('match day: formats, fair teams and Kings and challengers (pure)', () =
     expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[D, E], [C, A], [B], 1]);
     r = kcApply(r.state, 'kings', C);                                         // C off, B on with A
     expect([r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C], 2]);
-    r = kcApply(r.state, 'kings', A);                                         // third in a row
+    r = kcApply(r.state, 'kings', A);                                         // third in a row: D and E off, A and B (who just lost) step up, C and D come on
     expect(r.state.points).toEqual({ 1: 1, 2: 1, 3: 0, 4: 3, 5: 3 });
-    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[B, C], [A, D], [E], 0]);
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C, D], [E], 0]);
     expect(r.state.games).toBe(5);
     expect(r.state.history).toHaveLength(5);
     // Everyone is somewhere, once.
@@ -2070,10 +2070,11 @@ describe('match day: formats, fair teams and Kings and challengers (pure)', () =
     expect(kcApply(r.state, 'kings', B).error).toBe('Pick the player who lost the last point');   // B is a king, not a loser
     expect(kcApply(r.state, 'draw', A).error).toBe('Who won: the kings or the challengers?');
   });
-  it('six players: three in a row brings two new players on as challengers', () => {
+  it('six players: three in a row takes both kings off, the challengers step up and the two waiting come on', () => {
     let st = { players: [1, 2, 3, 4, 5, 6], kings: [1, 2], challengers: [3, 4], queue: [5, 6], streak: 2, points: {}, games: 0, history: [] };
-    const r = kcApply(st, 'kings', 3);                                       // 3 off, 5 on with 4; then 1 and 2 off: 4 5 kings, 6 3 on
-    expect([r.state.kings, r.state.challengers, r.state.queue]).toEqual([[4, 5], [6, 3], [1, 2]]);
+    const r = kcApply(st, 'kings', 3);
+    expect([r.state.kings, r.state.challengers, r.state.queue]).toEqual([[3, 4], [5, 6], [1, 2]]);
+    expect([r.state.points[1], r.state.points[2]]).toEqual([1, 1]);
   });
   it('a game counts a quarter of a match on who won, and one session moves a level no more than 0.4', () => {
     const p = (id, level) => ({ id, level, recent: 20 });
@@ -2183,6 +2184,65 @@ describe('match day on the live database shape (makeRepo SQL on SQLite)', () => 
     const r = await md({ action: 'start' });
     expect(r.json.matchday[TODAY_SLOT].groups.map((g) => g.kind + g.players.length)).toEqual(['kc5', 'kc5']);
     expect((await t.call('/api/matchday', { slot: '2026-11-28|19', person_id: ids[0], action: 'start' })).status).toBe(400);
+  });
+
+  it('a re-planned court after Undo and Shuffle takes games again (session ids are never reused)', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'kc-undo', group: 1, version: g.version })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'start', mode: 'shuffle' })).json.matchday[TODAY_SLOT].groups[0];
+    const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+    expect(r.status).toBe(200);
+    expect(r.json.matchday[TODAY_SLOT].groups[0].games).toBe(1);
+  });
+
+  it('an Undo landing while a game is being saved: the game is refused and leaves nothing behind', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] })).json.matchday[TODAY_SLOT].groups[0];
+    const add = t.repo.addKcGame.bind(t.repo);
+    t.repo.addKcGame = async (...a) => { t.repo.addKcGame = add; await md({ action: 'kc-undo', group: 1, version: g.version }); return add(...a); };
+    const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+    expect(r.status).toBe(409);
+    const s1 = await t.call('/api/state');
+    expect(s1.json.matchday[TODAY_SLOT].groups[0].games).toBe(0);
+    for (const id of ids.slice(0, 5)) expect(lvl(s1.json, id)).toBe(3);
+  });
+
+  it('a swap across two courts changes both or neither', async () => {
+    const more = await t.addPeople(['Gu Seven', 'Hy Eight', 'Io Nine', 'Jo Ten']);
+    await book([...ids, ...more], 2);
+    const gs = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups;
+    const [x, y] = [gs[0].players[0], gs[1].players[0]];
+    const set = t.repo.setSessions.bind(t.repo);
+    t.repo.setSessions = async (list, now) => { t.repo.setSessions = set; await md({ action: 'swap', a: gs[1].players[1], b: gs[1].players[2] }); return set(list, now); };
+    expect((await md({ action: 'swap', a: x, b: y })).status).toBe(409);
+    const after = (await t.call('/api/state')).json.matchday[TODAY_SLOT].groups;
+    const all = after.flatMap((g) => g.players);
+    expect(all.length).toBe(new Set(all).size);                               // nobody on both courts
+    expect(after[0].players).toContain(x);
+  });
+
+  it('a game with a player who has no level moves nothing and counts nothing; who sits out over 12 is named', async () => {
+    await levelsAll([3, 3, 3, 3]);                                            // Ed has no level
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    // Play until Ed is on court and a game finishes with him in it.
+    for (let i = 0; i < 6; i += 1) {
+      const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+      g = r.json.matchday[TODAY_SLOT].groups[0];
+    }
+    const s1 = await t.call('/api/state');
+    expect(lvl(s1.json, ids[4])).toBe(null);
+    expect(s1.json.levels.players.find((x) => x.id === ids[4]).reliability).toBe(0);
+    const more = await t.addPeople(['Gu Seven', 'Hy Eight', 'Io Nine', 'Jo Ten', 'Ka Eleven', 'Lu Twelve', 'Mo Thirteen']);
+    await t.call('/api/booked', { slot: '2026-11-27|20', person_id: ids[0], venue: 'pdl', booked: true, start: '20:00', minutes: 90, courts: 2 });
+    await t.call('/api/admin', { action: 'paid', slot: '2026-11-27|20', price: 60, players: [...ids, ...more] }, { admin: ADMIN });
+    const r13 = await t.call('/api/matchday', { slot: '2026-11-27|20', person_id: ids[0], action: 'start' });
+    expect(r13.json.matchday['2026-11-27|20']).toMatchObject({ note: 'Only 12 fit: 1 sit out', sitOut: [more[6]] });
   });
 });
 
