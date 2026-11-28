@@ -974,6 +974,24 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect.poll(() => store.levelBodies).toEqual([{ person_id: 1, level: '3' }]);
     });
 
+    // 28 Nov 2026, seen on the live page: a long step description made the list wider than the phone and
+    // pushed the Save button's words out of sight; the empty league read "1."; form rows took the hour cards' border.
+    test('on a phone the level and score forms fit the screen, the Save button reads, and the chosen step is written out in full', async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await openAsTestAnn(page);
+      await page.locator('#level-step').selectOption('6');
+      await expect(page.locator('#level-step-text')).toHaveText(/^Hits hard with control and depth/);
+      await page.locator('[data-score-open]').click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      const save = page.locator('#level-form button[type="submit"]');
+      await expect(save).toHaveText('Save my level');
+      const box = await save.boundingBox();
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+      await expect(page.locator('#league li.empty')).toHaveText('Nobody has picked a level yet.');
+      expect(await page.locator('#score-form .sf-row').first().evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('0px');
+    });
+
     test('once scores have moved a level, the card says so and has no picker', async ({ page }) => {
       await mockPadel(page, { siClosedFrom: 7, levels: { players: [{ id: 1, level: 3.18, matches: 2, reliability: 10, last: 0.18 }], scores: [] } });
       await openAsTestAnn(page);
