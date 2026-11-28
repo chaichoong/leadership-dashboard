@@ -105,7 +105,9 @@ end sh
 -- read the answer exactly as before. doing "" shows no progress window (the sign-in window step,
 -- where the Chrome window is what Kevin needs to see).
 on shWait(cmd, doing)
-	set tmp to do shell script "mktemp -d /tmp/robot-signin.XXXXXX"
+	-- $TMPDIR, never the shared temp directory (finding 20260828-agent-slot-run-391): out and err
+	-- here hold whatever a sign-in step prints, and /tmp is world-listable on this Mac.
+	set tmp to do shell script "mktemp -d \"${TMPDIR:-$HOME/Library/Caches}/robot-signin.XXXXXX\""
 	set rcFile to tmp & "/rc"
 	-- A subshell, so an `exit` in the step ends the step and never the wrapper. The exit code lands
 	-- last, by rename, so a present rc file means stdout and stderr are complete.
