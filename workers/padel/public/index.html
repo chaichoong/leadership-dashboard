@@ -181,6 +181,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .sf-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .fb { margin-top: var(--space-2); display: grid; gap: var(--space-2); }
 .people .lvl-in { width: 4.5em; }
+/* Match day (Stage 3, 28 Nov 2026). */
+.md { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); display: grid; gap: var(--space-2); }
+.md-court { background: var(--bg-surface-2); border-radius: var(--radius-lg); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-2); }
+.md-court h4 { margin: 0; font-size: var(--fs-md); }
+.md-court p { margin: 0; }
+.md-btns { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.md-tally { font-size: var(--fs-sm); color: var(--text-secondary); }
+.md select { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); max-width: 100%; min-width: 0; }
 /* The robot's setup check under each person (27 Nov 2026): ready, missing something, or not checked. */
 .people .setup td { padding: 0 0 var(--space-2); font-size: var(--fs-sm); color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
 .people .setup .ok { color: var(--success); font-weight: var(--fw-semibold); }
@@ -343,6 +351,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let levelDraft = null;                      // { step, exact } as picked in Your level and not saved yet
   const fbDraft = new Map();                  // feedback picked and not sent yet: "scoreId|aboutId" -> higher | expected | lower
   const levelDrafts = new Map();              // levels typed on the People screen and not saved yet, by person id
+  let mdPick = null;                          // { slot, group, winner } after "Kings won" / "Challengers won", until who lost the last point is tapped
+  const mdSwap = new Map();                   // slot -> { a, b } picked in a match day's Swap and not sent yet
   // Kevin's phone key (30 Oct 2026): set once from a #admin= link, kept on this phone only, sent as a
   // header. The Worker decides; the page only hides what this phone may not do.
   // A Home Screen icon opens as its own app with its own storage, which a link opened in Safari never
@@ -443,7 +453,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!el || el === document.body || !el.dataset) return null;
     if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
     for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'bookPlayer', 'bookPrice', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName',
-      'sf', 'fb', 'levelId', 'levelField', 'scoreOpen', 'scoreCancel', 'fbSend', 'scoreDelete', 'setLevel']) {
+      'sf', 'fb', 'levelId', 'levelField', 'scoreOpen', 'scoreCancel', 'fbSend', 'scoreDelete', 'setLevel',
+      'mdStart', 'mdWin', 'mdLost', 'mdUndo', 'mdSwap', 'mdScore', 'mdCancel', 'mdSwapA', 'mdSwapB']) {
       if (el.dataset[k]) return '[data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()) + '="' + CSS.escape(el.dataset[k]) + '"]';
     }
     return el.id ? '#' + CSS.escape(el.id) : null;
@@ -680,6 +691,67 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     postAndApply('/api/feedback', { match_id: sc.id, from_id: me, votes }, 'Feedback sent.');
   }
 
+  // ── Match day (Stage 3, Kevin 28 Nov 2026): on today's booked hour, the players split by his formats,
+  // fair teams, and Kings and challengers run by his rules with a points tally. The Worker decides; the
+  // page shows it and sends taps.
+  const pairText = (ids) => ids.map(fullName).map(esc).join(' + ');
+  function matchDayHtml(slot, b) {
+    const md = (S.matchday || {})[slot];
+    const players = b.paid && b.paid.players.length ? b.paid.players : (S.votes[slot] || []);
+    const canRun = isAdmin() || players.includes(me) || b.person_id === me;
+    if (!md) {
+      if (!canRun) return '';
+      return `<div class="md"><p><strong>Match day</strong>: split the players into courts and fair teams.</p>
+        <div class="md-btns"><button type="button" class="btn small primary" data-md-start="${esc(slot)}" data-md-mode="fair"${busy ? ' disabled' : ''}>Start match day</button></div></div>`;
+    }
+    const started = md.groups.some((g) => g.kind === 'kc' && g.games > 0);
+    const courts = md.groups.map((g) => (g.kind === 'match' ? matchCourt(slot, g, canRun) : kcCourt(slot, g, canRun))).join('');
+    let tools = '';
+    if (canRun && !started) {
+      const all = md.groups.flatMap((g) => g.players);
+      const d = mdSwap.get(slot) || {};
+      const opts = (sel) => `<option value="">Who?</option>${all.map((id) => `<option value="${id}"${id === sel ? ' selected' : ''}>${esc(fullName(id))}</option>`).join('')}`;
+      tools = `<div class="md-btns"><button type="button" class="btn small" data-md-start="${esc(slot)}" data-md-mode="fair"${busy ? ' disabled' : ''}>Fair teams</button>
+          <button type="button" class="btn small" data-md-start="${esc(slot)}" data-md-mode="shuffle"${busy ? ' disabled' : ''}>Shuffle</button></div>
+        <div class="md-btns"><label>Swap <select data-md-swap-a="${esc(slot)}" aria-label="Swap this player">${opts(d.a)}</select></label>
+          <label>with <select data-md-swap-b="${esc(slot)}" aria-label="with this player">${opts(d.b)}</select></label>
+          <button type="button" class="btn small" data-md-swap="${esc(slot)}"${busy ? ' disabled' : ''}>Swap</button></div>`;
+    }
+    return `<div class="md"><p><strong>Match day</strong>${md.note ? ': ' + esc(md.note) : ''}</p>${courts}${tools}</div>`;
+  }
+  function matchCourt(slot, g, canRun) {
+    return `<div class="md-court"><h4>Court ${esc(g.no)}: a match</h4><p>${pairText(g.a)} <strong>v</strong> ${pairText(g.b)}</p>
+      ${canRun ? `<div class="md-btns"><button type="button" class="btn small" data-md-score="${esc(slot + '|' + g.no)}"${busy ? ' disabled' : ''}>Add the score</button></div>` : ''}</div>`;
+  }
+  function kcCourt(slot, g, canRun) {
+    const scored = Object.values(g.points).some((n) => n > 0);
+    const tally = !scored ? '' : Object.entries(g.points).map(([id, n]) => [Number(id), n]).sort((x, y) => y[1] - x[1] || fullName(x[0]).localeCompare(fullName(y[0])))
+      .map(([id, n]) => esc(fullName(id)) + ' ' + esc(n)).join(', ');
+    // The "who lost the last point" step belongs to the game it was opened on: once the court moves on
+    // (this phone's game went in, or another phone's), it is gone.
+    const pick = mdPick && mdPick.slot === slot && mdPick.group === g.no && mdPick.version === g.version ? mdPick : null;
+    let btns = '';
+    if (canRun && pick) {
+      const losers = pick.winner === 'kings' ? g.challengers : g.kings;
+      btns = `<p>Who lost the last point?</p><div class="md-btns">${losers.map((id) => `<button type="button" class="btn small primary" data-md-lost="${esc(slot + '|' + g.no + '|' + id)}"${busy ? ' disabled' : ''}>${esc(fullName(id))}</button>`).join('')}
+        <button type="button" class="btn small" data-md-cancel="1">Cancel</button></div>`;
+    } else if (canRun) {
+      btns = `<div class="md-btns"><button type="button" class="btn small primary" data-md-win="${esc(slot + '|' + g.no + '|kings')}"${busy ? ' disabled' : ''}>Kings won</button>
+        <button type="button" class="btn small primary" data-md-win="${esc(slot + '|' + g.no + '|challengers')}"${busy ? ' disabled' : ''}>Challengers won</button>
+        ${g.canUndo ? `<button type="button" class="btn small" data-md-undo="${esc(slot + '|' + g.no)}"${busy ? ' disabled' : ''}>Undo last game</button>` : ''}</div>`;
+    }
+    return `<div class="md-court"><h4>Court ${esc(g.no)}: Kings and challengers</h4>
+      <p><strong>Kings:</strong> ${pairText(g.kings)}${g.streak ? ` <small>(${esc(g.streak)} in a row)</small>` : ''}</p>
+      <p><strong>Challengers:</strong> ${pairText(g.challengers)}</p>
+      ${g.queue.length ? `<p><strong>Next:</strong> ${g.queue.map(fullName).map(esc).join(', ')}</p>` : ''}
+      ${btns}
+      <p class="md-tally">Points (a point for every win as king): ${tally || 'none yet'}. ${esc(g.games)} game${g.games === 1 ? '' : 's'} played.</p></div>`;
+  }
+  const mdGroup = (slot, no) => (((S.matchday || {})[slot] || {}).groups || []).find((g) => g.no === no);
+  function mdSend(body, done) {
+    return postAndApply('/api/matchday', { person_id: me, ...body }, done).then((ok) => { if (ok && mdPick) { mdPick = null; keepFocus(renderGrid); } return ok; });
+  }
+
   function renderBoard() {
     renderReady();
     renderNearly();
@@ -790,9 +862,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     $('day-note').hidden = !note.length;
     $('day-note').innerHTML = note.join('<br>');
     const readySlots = new Set(S.ready.map((r) => r.slot));
-    // Today shows only the hours still to come; after 21:00 it says so instead of an empty list.
+    // Today shows only the hours still to come; after 21:00 it says so instead of an empty list. A booked
+    // hour stays all day (28 Nov 2026): its match day runs while it is being played, and the score goes in after.
     const nowH = day === S.today ? londonHour() : -1;
-    const hours = S.hours.filter((h) => h >= nowH);
+    const hours = S.hours.filter((h) => h >= nowH || S.booked[day + '|' + pad(h)]);
     if (!hours.length) {
       $('grid').innerHTML = '<li class="row"><p class="note">No more hours today. Pick another day above.</p></li>';
       return;
@@ -835,6 +908,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (isAdmin() && !(paidForm && paidForm.slot === slot)) html += `<p class="paid-line"><span>Splitwise and the texts wait for the price.</span> <button type="button" class="btn small primary" data-paid-open="${esc(slot)}"${busy ? ' disabled' : ''}>Add the price</button></p>`;
     else if (!isAdmin() && me && me === b.person_id) html += `<p class="paid-line"><span>The price and players go in on Kevin's phone. Is this it?</span> <button type="button" class="btn small" data-paste-key${busy ? ' disabled' : ''}>Paste key</button></p>`;
     if (paidForm && paidForm.slot === slot) html += paidFormHtml(slot, b);
+    if (slot.startsWith(S.today + '|')) html += matchDayHtml(slot, b);
     if (b.second) {
       html += `<p class="second"><span><strong>Second court?</strong> ${esc(b.second.count)} can play, and another court is free at ${esc(where)} ${esc(b.second.start)}${b.minutes ? ' for ' + esc(b.minutes) + ' min' : ''}.</span>
         <a class="btn small primary" href="${esc(b.second.book)}" target="_blank" rel="noopener noreferrer">Book</a>
@@ -1045,7 +1119,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function setBusy(on) {
     busy = on;
-    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn,[data-score-open],#score-form button,#level-form button,[data-fb-send],[data-score-delete],[data-set-level]')) b.disabled = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn,[data-score-open],#score-form button,#level-form button,[data-fb-send],[data-score-delete],[data-set-level],[data-md-start],[data-md-win],[data-md-lost],[data-md-undo],[data-md-swap],[data-md-score]')) b.disabled = on;
   }
 
   // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is
@@ -1247,6 +1321,36 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       if (f === bookForm) f.picked = true;
       keepFocus(renderGrid);
     }
+    else if (t.dataset.mdStart) mdSend({ slot: t.dataset.mdStart, action: 'start', mode: t.dataset.mdMode }, t.dataset.mdMode === 'shuffle' ? 'Teams shuffled.' : 'Match day is ready.');
+    else if (t.dataset.mdWin) { const [d, hh, no, winner] = t.dataset.mdWin.split('|'); const g = mdGroup(d + '|' + hh, Number(no)); mdPick = { slot: d + '|' + hh, group: Number(no), winner, version: g ? g.version : -1 }; keepFocus(renderGrid); }
+    else if (t.dataset.mdCancel) { mdPick = null; keepFocus(renderGrid); }
+    else if (t.dataset.mdLost) {
+      const [d, hh, no, id] = t.dataset.mdLost.split('|');
+      const slot = d + '|' + hh;
+      const g = mdGroup(slot, Number(no));
+      if (g && mdPick) mdSend({ slot, action: 'kc-game', group: g.no, version: g.version, winner: mdPick.winner, lost_by: Number(id) }, 'Game in.');
+    }
+    else if (t.dataset.mdUndo) {
+      const [d, hh, no] = t.dataset.mdUndo.split('|');
+      const g = mdGroup(d + '|' + hh, Number(no));
+      if (g) mdSend({ slot: d + '|' + hh, action: 'kc-undo', group: g.no, version: g.version }, 'Last game undone.');
+    }
+    else if (t.dataset.mdSwap) {
+      const slot = t.dataset.mdSwap;
+      const d = mdSwap.get(slot) || {};
+      if (!d.a || !d.b || d.a === d.b) toast('Pick two different players to swap.');
+      else mdSend({ slot, action: 'swap', a: d.a, b: d.b }, 'Swapped.').then((ok) => { if (ok) mdSwap.delete(slot); });
+    }
+    else if (t.dataset.mdScore) {
+      const [d, hh, no] = t.dataset.mdScore.split('|');
+      const g = mdGroup(d + '|' + hh, Number(no));
+      if (g) {
+        scoreForm = { key: newKey(), on: S.today, a: [...g.a], b: [...g.b], sets: [['', ''], ['', ''], ['', '']], friendly: false };
+        keepFocus(renderScores);
+        const box = $('score-box');
+        if (box) box.scrollIntoView({ block: 'center' });
+      }
+    }
     else if (t.dataset.scoreOpen) openScoreForm();
     else if (t.dataset.scoreCancel) { scoreForm = null; keepFocus(renderScores); }
     else if (t.dataset.fbSend) sendFeedback(Number(t.dataset.fbSend));
@@ -1311,6 +1415,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (ds.levelField) { levelDraft = levelDraft || { step: $('level-step').value, exact: $('level-exact').value }; levelDraft[ds.levelField] = el.value; levelDraft.last = ds.levelField; }
     if (ds.levelField === 'step' && $('level-step-text')) $('level-step-text').textContent = (LEVEL_STEPS.find(([v]) => String(v) === el.value) || [null, '', ''])[2];
     if (ds.fb) fbDraft.set(ds.fb, el.value);
+    if (ds.mdSwapA || ds.mdSwapB) { const slot = ds.mdSwapA || ds.mdSwapB; const d = mdSwap.get(slot) || {}; d[ds.mdSwapA ? 'a' : 'b'] = el.value ? Number(el.value) : null; mdSwap.set(slot, d); }
     if (ds.sf && scoreForm) {
       const k = ds.sf;
       if (scoreForm.sent) { scoreForm.key = newKey(); scoreForm.sent = false; }
