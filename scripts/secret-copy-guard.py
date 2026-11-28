@@ -205,6 +205,40 @@ def is_bare_copy(path, value):
     return lines == [value]
 
 
+def repo_roots(repo):
+    """The repo to search for readers, with .claude/worktrees left out of the WALK.
+
+    27 Nov 2026: 36 stale worktrees (2.2 GB) sat under .claude/worktrees. readers_of already
+    throws away every hit in there, but grep still read all of it first: 11 s per search
+    against 0.5 s without them. Four --delete-unread tests then crossed vitest's 30 s limit
+    whenever the full suite ran on a busy Mac, and the pre-push gate refused three pushes in
+    a row. So the walk skips that ONE path. Not --exclude-dir=worktrees: that matches the
+    name anywhere and would also hide a real "worktrees" folder of durable code.
+
+    If the top level cannot be listed, the whole repo is walked as before: slow, never blind.
+    """
+    try:
+        top = sorted(os.listdir(repo))
+        dot_claude = os.path.join(repo, ".claude")
+        inner = sorted(os.listdir(dot_claude)) if os.path.isdir(dot_claude) else []
+    except OSError:
+        return [repo]
+    # A symlink is left out, as the recursive walk of the whole repo never followed one either;
+    # named on the command line, a broken one would turn every search into "could not search".
+    roots = []
+    for name in top:
+        p = os.path.join(repo, name)
+        if name in SKIP_DIRS or os.path.islink(p):
+            continue
+        if name == ".claude" and os.path.isdir(dot_claude):
+            roots += [q for q in (os.path.join(dot_claude, n) for n in inner
+                                  if n != "worktrees" and n not in SKIP_DIRS)
+                      if not os.path.islink(q)]
+        else:
+            roots.append(p)
+    return roots
+
+
 def readers_of(path, reader_roots=READER_ROOTS, repo=None):
     """Files in durable code that mention this path. Empty means nothing reads it.
 
@@ -223,8 +257,8 @@ def readers_of(path, reader_roots=READER_ROOTS, repo=None):
 
     if repo is None:
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    roots = [repo] + [os.path.expanduser(r) for r in reader_roots]
-    roots = [r for r in roots if os.path.isdir(r)]
+    roots = repo_roots(repo) if os.path.isdir(repo) else []
+    roots += [r for r in (os.path.expanduser(r) for r in reader_roots) if os.path.isdir(r)]
     if not roots:
         return []
 
@@ -421,6 +455,19 @@ def selftest():
                 os.path.basename(leak))))
         assert readers_of(leak, reader_roots=[], repo=code) == [], \
             readers_of(leak, reader_roots=[], repo=code)
+
+        # The WALK skips .claude/worktrees too, not only the hits (27 Nov 2026: 36 stale
+        # checkouts, 2.2 GB, made every search 11 s and timed the tests out). Proof it is never
+        # opened: a folder in there that cannot be read would make grep fail, and the answer
+        # would be "could not search". Back-test: walk [repo] whole in readers_of and this fails.
+        locked = os.path.join(code, ".claude", "worktrees", "locked")
+        os.makedirs(locked)
+        os.chmod(locked, 0)
+        try:
+            assert readers_of(leak, reader_roots=[], repo=code) == [], \
+                readers_of(leak, reader_roots=[], repo=code)
+        finally:
+            os.chmod(locked, 0o700)
 
         open(os.path.join(code, "reader.py"), "w").write(
             "PAT = open(%r).read()\n" % leak)

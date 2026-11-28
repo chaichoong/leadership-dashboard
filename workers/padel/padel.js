@@ -28,10 +28,27 @@
 //        { action: 'retry', slot, step }              let the robot try a failed Splitwise entry or texts again
 //   GET  /api/robot/paid  (X-Robot-Key)     -> { ok, bookings }   paid bookings with a step still to do
 //   POST /api/robot/paid  (X-Robot-Key)     -> { ok, changed }    { slot, step, state, note, paidAt }: claimed,
-//        then done or failed; a step is claimed once and never again unless Kevin taps Retry.
+//        then done or failed; a step is claimed once and never again unless Kevin taps Retry, or the
+//        robot resumes one that failed only because it was signed out of Splitwise (SIGNED_OUT_MARK).
 //   POST /api/robot/booking (X-Robot-Key) -> { ok, booked, paid, venue, alreadyPaid }   { slot, venue, start,
 //        minutes, person_id, price_pence? }: a venue's booking email (8 Nov 2026). Marks an unmarked hour
 //        booked; with a price and no price yet, pays it, players from the votes at that moment.
+//   POST /api/level  { person_id, level }   -> state   a player's own starting level (Playtomic's 0 to 7),
+//        only until a rated score has moved it; Kevin's phone sets anyone's ({ action: 'level' }).
+//   POST /api/score  { key, entered_by, played_on, team_a, team_b, sets, rated } -> state   a 2-v-2 score
+//        from one of the four (or Kevin's phone), in the last 7 days; a rated one moves all four levels
+//        by Nettla's published rules (levelChanges). Kevin's phone deletes one ({ action: 'score-delete' }),
+//        which reverses its changes exactly.
+//   POST /api/feedback { match_id, from_id, votes: { <id>: higher|expected|lower } } -> state   within 24 h
+//        of a rated score, each of the four marks the other three; 2 matching votes move a player 0.05.
+//   POST /api/matchday { slot, person_id, action, ... } -> state   match day on today's booked hour (Stage 3):
+//        start { mode: fair|shuffle } splits the players by Kevin's formats and picks the pairs (again, until
+//        the first Kings and challengers game); swap { a, b }; kc-game { group, version, winner: kings|
+//        challengers, lost_by } runs his rules and moves levels a quarter; kc-undo { group, version }.
+//   GET  /api/robot/setup (X-Robot-Key) -> { ok, people }   who is on the list, for the robot's setup check
+//   POST /api/robot/setup (X-Robot-Key) -> { ok, saved }    { people: { <id>: { state, notes } } } (27 Nov
+//        2026): per player, ready, missing (what a booking would still lack) or unchecked. Kept in the
+//        cache table and sent only to Kevin's phone (state.setup), for his People screen.
 //   TWO RULES, IN THE DATABASE (review of PR #858): (1) once the robot has claimed the Splitwise step,
 //   nothing changes or removes that booking, Kevin's phone included, until that step has failed; (2) the
 //   texts can be claimed only after the Splitwise entry is done, and a claim names the paid_at it read, so
@@ -70,7 +87,7 @@
 // count is the one that holds. A D1 failure there lets the request through (fail open): a broken
 // counter must not take the page down.
 
-export const VERSION = '2026-10-30.1';
+export const VERSION = '2026-11-28.2';
 export const TZ = 'Europe/London';
 export const VENUES = ['si', 'pdl', 'pp', 'cu'];
 const MATCHI_VENUES = ['si', 'pdl'];                 // a Mac post must carry both, every time
@@ -101,6 +118,9 @@ const MAX_BODY = 16 * 1024;
 const MAX_COURTS_BODY = 64 * 1024;
 export const MAX_PRICE_POUNDS = 1000;              // a court booking above this is a typo
 export const PAID_STEPS = ['splitwise', 'texts'];  // what the Mac robot does for a paid booking, in this order
+// The words the robot's note carries when a step failed only because it was signed out of Splitwise
+// (scripts/padel-paid.mjs SIGNED_OUT_NOTE, 27 Nov 2026). Only such a step may the robot take up again itself.
+export const SIGNED_OUT_MARK = 'signed out of Splitwise';
 export const PAID_KEEP_DAYS = 7;                   // a paid booking the robot has not finished is kept this long
 // Latin letters only (A-Z, a-z and the Latin-1 letters), spaces, hyphens and straight apostrophes.
 const NAME_RE = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/;
@@ -695,6 +715,298 @@ export function alertText(r, cfg, pageUrl, nowMs) {
 // find the same person.
 export const foldName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
+// ── Levels (Stage 2, Kevin 27 Nov 2026) ──
+// The scale is Playtomic's, 0 to 7 (the starting levels on the page are Playtomic's chart steps). How a
+// score moves a level follows Nettla's published rules (player-help.nettla.co, "How do Nettla padel
+// levels work?", read 27 Nov 2026): a win always goes up and a loss down; beating stronger opponents
+// counts for more; a close match counts for less than a clear win; your partner's level matters; lower
+// levels and players with fewer matches move faster; an unfinished match with a completed set moves
+// half as far, and one with no completed set (or level) not at all; peer feedback has a small extra
+// effect from 2 matching votes; 90 days without a match drops a level 0.10. Nettla does not publish its
+// numbers, so the sizes below are ours: a new player moves about 0.2 a match, a settled one about 0.05.
+export const LEVEL_MIN = 0;
+export const LEVEL_MAX = 7;
+export const LEVEL_SCALE = 2;          // a 1.0 gap between the pairs: the stronger pair expected to win 76%
+export const LEVEL_K = 0.15;           // the size of a change for a settled player at level 2
+export const LEVEL_CAP = 0.4;          // no one moves more than this in one score
+export const RELIABLE_AT = 20;         // rated scores in the last RELIABLE_DAYS for 100% reliability
+export const RELIABLE_DAYS = 180;
+export const DECAY_DAYS = 90;          // Nettla: 90 days without a match, the level drops 0.10, and again
+export const DECAY_STEP = 0.1;
+export const FEEDBACK_STEP = 0.05;
+export const FEEDBACK_MS = 24 * 3600 * 1000;
+export const SCORE_DAYS = 7;           // a score can go in for today and the 6 days before
+export const SCORE_REPEAT_MS = 30 * 60 * 1000;   // the same pairs and games again within this is the same match entered twice
+export const KC_WEIGHT = 0.25;         // Stage 3: a first-to-3 Kings and challengers game counts a quarter
+export const VOTES = ['higher', 'expected', 'lower'];
+const r3 = (x) => Math.round(x * 1000) / 1000;
+export const clampLevel = (x) => Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, x));
+// A finished set: 6 games with a 2-game lead, or 7-5, or 7-6.
+export const setDone = (a, b) => { const hi = Math.max(a, b), lo = Math.min(a, b); return (hi === 6 && hi - lo >= 2) || (hi === 7 && (lo === 5 || lo === 6)); };
+// The result of a score: first to 2 sets is finished; otherwise the team with more finished sets (or, if
+// equal, more games) wins, at half the change (Nettla's unfinished match); no finished set, no winner.
+export function matchResult(sets) {
+  let setsA = 0, setsB = 0, gamesA = 0, gamesB = 0, completed = 0;
+  for (const [x, y] of sets) {
+    gamesA += x; gamesB += y;
+    if (setDone(x, y)) { completed += 1; if (x > y) setsA += 1; else setsB += 1; }
+  }
+  const finished = setsA === 2 || setsB === 2;
+  let winner = null;
+  if (completed) winner = setsA > setsB ? 'a' : setsB > setsA ? 'b' : gamesA > gamesB ? 'a' : gamesB > gamesA ? 'b' : null;
+  return { setsA, setsB, gamesA, gamesB, completed, finished, winner, half: finished ? 1 : 0.5 };
+}
+export const expectedWin = (win, lose) => 1 / (1 + 10 ** ((lose - win) / LEVEL_SCALE));
+export const reliabilityOf = (recent) => Math.min(1, recent / RELIABLE_AT);
+// Lower levels and fewer matches move faster: up to three times for a new player.
+export const kFactor = (level, reliability) => LEVEL_K * (1.2 - level / 10) * (1 + 2 * (1 - reliability));
+// The change to each level for a score. a and b: [{ id, level, recent }] (recent = rated scores in the last
+// RELIABLE_DAYS). weight is 1 for a match (KC_WEIGHT for a Kings and challengers game in Stage 3).
+export function levelChanges({ a, b, sets, weight = 1 }) {
+  const res = matchResult(sets);
+  if (!res.winner) return { ...res, changes: {} };
+  const [win, lose] = res.winner === 'a' ? [a, b] : [b, a];
+  const [gw, gl] = res.winner === 'a' ? [res.gamesA, res.gamesB] : [res.gamesB, res.gamesA];
+  const margin = Math.max(0.25, 0.5 + (gw - gl) / (gw + gl));   // a close match counts for less than a clear one
+  return { ...res, changes: pairChanges({ win, lose, margin, half: res.half, weight }) };
+}
+// The change for each player when one pair beat the other: the less likely the win, the bigger it is.
+export function pairChanges({ win, lose, margin = 1, half = 1, weight = 1 }) {
+  const avg = (t) => (t[0].level + t[1].level) / 2;
+  const base = 1 - expectedWin(avg(win), avg(lose));
+  const changes = {};
+  for (const [team, sign] of [[win, 1], [lose, -1]]) {
+    for (const p of team) {
+      const size = Math.min(LEVEL_CAP, kFactor(p.level, reliabilityOf(p.recent)) * base * margin * half * weight);
+      changes[p.id] = r3(clampLevel(p.level + sign * size) - p.level);
+    }
+  }
+  return changes;
+}
+// The level shown: 0.10 off for every 90 days since the last level pick or rated score.
+export function decayedLevel(level, activeAt, today) {
+  if (level == null) return null;
+  if (!activeAt) return level;
+  const days = Math.floor((Date.parse(today) - Date.parse(activeAt)) / 86400000);
+  return days >= DECAY_DAYS ? r3(Math.max(LEVEL_MIN, level - DECAY_STEP * Math.floor(days / DECAY_DAYS))) : level;
+}
+// A level typed on a phone: a number from 0 to 7, kept to 2 decimals.
+export function cleanLevel(raw) {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d(\.\d{1,2})?$/.test(raw.trim()) ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= LEVEL_MIN && n <= LEVEL_MAX ? Math.round(n * 100) / 100 : null;
+}
+// A score as a phone sends it, checked. people: the list; levels: id -> level; dates: the page's days
+// (today first); admin: Kevin's phone, which may enter a score it did not play in.
+export function cleanScore(body, people, levels, dates, admin = false) {
+  const key = String(body.key || '');
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(key)) return { error: 'The score has no id: reload the page and try again' };
+  const today = dates[0];
+  const playedOn = String(body.played_on || '');
+  const realDay = /^\d{4}-\d{2}-\d{2}$/.test(playedOn) && !Number.isNaN(Date.parse(`${playedOn}T12:00:00Z`)) && new Date(`${playedOn}T12:00:00Z`).toISOString().slice(0, 10) === playedOn;
+  if (!realDay || playedOn > today || playedOn < addDays(today, -(SCORE_DAYS - 1))) return { error: `A score is for today or the ${SCORE_DAYS - 1} days before` };
+  const team = (t) => (Array.isArray(t) && t.length === 2 ? t.map(intId) : null);
+  const a = team(body.team_a), b = team(body.team_b);
+  if (!a || !b || [...a, ...b].some((x) => !x) || new Set([...a, ...b]).size !== 4) return { error: 'Pick two pairs: four different players' };
+  const known = new Map(people.map((p) => [p.id, p]));
+  if ([...a, ...b].some((x) => !known.has(x))) return { error: 'One of those players is not on the list' };
+  const enteredBy = admin ? (intId(body.entered_by) || 0) : intId(body.entered_by);
+  if (!admin && (!enteredBy || ![...a, ...b].includes(enteredBy))) return { error: 'Only someone who played can put the score in' };
+  if (!Array.isArray(body.sets) || !body.sets.length || body.sets.length > 3) return { error: 'Put in 1 to 3 sets' };
+  const sets = [];
+  let wonA = 0, wonB = 0;
+  for (const [i, raw] of body.sets.entries()) {
+    const g = Array.isArray(raw) && raw.length === 2 ? raw.map((x) => (Number.isInteger(x) && x >= 0 && x <= 7 ? x : null)) : null;
+    if (!g || g.includes(null)) return { error: 'Games in a set are 0 to 7' };
+    const [x, y] = g;
+    if (wonA === 2 || wonB === 2) return { error: 'The match was over after two sets: leave the third set empty' };
+    const last = i === body.sets.length - 1;
+    if (!setDone(x, y) && (!last || Math.max(x, y) === 7 || (Math.max(x, y) === 6 && Math.min(x, y) <= 4) || x + y === 0)) {
+      return { error: last ? `Set ${i + 1} is not a set score (6-4, 7-5, 7-6, or the games when you stopped)` : `Set ${i + 1} is not finished: only the last set can be` };
+    }
+    if (setDone(x, y)) { if (x > y) wonA += 1; else wonB += 1; }
+    sets.push([x, y]);
+  }
+  const rated = body.rated !== false;
+  if (rated) {
+    const none = [...a, ...b].filter((x) => levels.get(x) == null).map((x) => known.get(x).realName || known.get(x).name);
+    if (none.length) return { error: `${none.join(', ')} ${none.length === 1 ? 'has' : 'have'} no level yet: pick one first, or tick Friendly`, status: 409 };
+  }
+  return { key, playedOn, a, b, sets, rated, enteredBy };
+}
+// The same match entered twice (review of PR #1023): the two pairs and the games, the same whichever pair
+// entered it. Within SCORE_REPEAT_MS it is refused; a unique index on (played_on, fingerprint), where the
+// fingerprint ends in the half hour it went in, refuses a second one even when both pairs send it at the
+// same moment. The same pairs and games later the same day is a new match.
+export function scoreFingerprint(a, b, sets) {
+  const pa = [...a].sort((x, y) => x - y), pb = [...b].sort((x, y) => x - y);
+  const flip = pb[0] < pa[0];
+  const [p1, p2] = flip ? [pb, pa] : [pa, pb];
+  const games = (flip ? sets.map(([x, y]) => [y, x]) : sets).map(([x, y]) => `${x}-${y}`).join(' ');
+  return `${p1.join(',')}|${p2.join(',')}|${games}`;
+}
+// Rated scores in the window, a Kings and challengers game counting a quarter (Kevin, 28 Nov 2026).
+const countRecent = (matches, from) => {
+  const n = new Map();
+  for (const m of matches) if (m.rated && m.playedOn >= from) for (const id of [...m.a, ...m.b]) n.set(id, (n.get(id) || 0) + (m.kind === 'kc' ? KC_WEIGHT : 1));
+  return n;
+};
+// The league table and the last month's scores, for everyone's page.
+export function computeLevels({ levels, matches, voters = [], today, nowMs }) {
+  const recent = countRecent(matches, addDays(today, -RELIABLE_DAYS));
+  // Each player's last change: a score's, or a whole Kings and challengers session's net.
+  const last = new Map();
+  const lastSession = new Map();
+  for (const m of [...matches].sort((x, y) => (x.playedOn === y.playedOn ? x.id - y.id : x.playedOn < y.playedOn ? -1 : 1))) {
+    for (const id of [...m.a, ...m.b]) {
+      if (!m.rated || (m.changes[id] == null && m.feedback[id] == null)) continue;
+      const d = r3((m.changes[id] || 0) + (m.feedback[id] || 0));
+      if (m.kind === 'kc' && m.sessionId != null && lastSession.get(id) === m.sessionId) last.set(id, r3(last.get(id) + d));
+      else last.set(id, d);
+      lastSession.set(id, m.kind === 'kc' ? m.sessionId : null);
+    }
+  }
+  const players = levels.map((l) => ({
+    id: l.id, level: l.level == null ? null : Math.round(decayedLevel(l.level, l.level_active_at, today) * 100) / 100,
+    matches: l.level_matches || 0, reliability: Math.round(reliabilityOf(recent.get(l.id) || 0) * 100), last: last.has(l.id) ? last.get(l.id) : null,
+  }));
+  const votedBy = new Map();
+  for (const v of voters) { if (!votedBy.has(v.match_id)) votedBy.set(v.match_id, new Set()); votedBy.get(v.match_id).add(v.from_id); }
+  const scores = matches.filter((m) => m.kind !== 'kc' && m.playedOn >= addDays(today, -30)).sort((x, y) => (x.playedOn === y.playedOn ? y.id - x.id : x.playedOn < y.playedOn ? 1 : -1)).map((m) => {
+    const r = matchResult(m.sets);
+    const until = Date.parse(m.enteredAt) + FEEDBACK_MS;
+    return {
+      id: m.id, on: m.playedOn, a: m.a, b: m.b, sets: m.sets, rated: m.rated, kind: m.kind, winner: r.winner, finished: r.finished,
+      changes: m.changes, feedback: m.feedback, enteredBy: m.enteredBy, feedbackOpen: m.rated && !!r.winner && nowMs < until, voted: [...(votedBy.get(m.id) || [])],
+    };
+  });
+  return { players, scores };
+}
+
+// ── Match day (Stage 3, Kevin 28 Nov 2026) ──
+// The format by players and courts (Kevin: up to 12 on 2 courts; 4 a match; 5 or 6 Kings and challengers;
+// 8 two matches; 12 two groups of 6; the rest as he approved: 7 one court of Kings and challengers, 9 a
+// match and 5, 10 two groups of 5, 11 groups of 5 and 6).
+export const MATCH_DAY_MAX = 12;
+export const KC_SESSION_CAP = 0.4;     // one session moves a level no more than one match can
+export const PARTNER_DAYS = 90;        // "played with least": partners in the last 90 days
+export const KC_HISTORY = 40;          // states kept for Undo
+export function formatPlan(n, courts = 1) {
+  if (n < 4) return { groups: [], note: 'Match day needs at least 4 players' };
+  const take = Math.min(n, MATCH_DAY_MAX);
+  const g = (kind, size) => ({ kind, size });
+  const notes = [];
+  if (n > MATCH_DAY_MAX) notes.push(`Only ${MATCH_DAY_MAX} fit: ${n - MATCH_DAY_MAX} sit out`);
+  let groups;
+  if (courts < 2 || take <= 7) {
+    groups = take === 4 ? [g('match', 4)] : [g('kc', take)];
+    if (courts >= 2) notes.push(take === 4 ? 'One court is enough for 4' : 'One court of Kings and challengers');
+    else if (take > 7) notes.push('A long queue on one court: a second court would help');
+  } else if (take === 8) groups = [g('match', 4), g('match', 4)];
+  else if (take === 9) groups = [g('match', 4), g('kc', 5)];
+  else if (take === 10) groups = [g('kc', 5), g('kc', 5)];
+  else if (take === 11) groups = [g('kc', 5), g('kc', 6)];
+  else groups = [g('kc', 6), g('kc', 6)];
+  return { groups, note: notes.join('. ') };
+}
+const pairKey = (x, y) => (x < y ? `${x}-${y}` : `${y}-${x}`);
+// How often each two have been partners (both pairs of every score and game since `from`).
+export function partnerCounts(matches, from) {
+  const n = new Map();
+  for (const m of matches) {
+    if (m.playedOn < from) continue;
+    for (const t of [m.a, m.b]) if (t.length === 2) n.set(pairKey(t[0], t[1]), (n.get(pairKey(t[0], t[1])) || 0) + 1);
+  }
+  return n;
+}
+const shuffled = (ids, rng) => { const a = [...ids]; for (let i = a.length - 1; i > 0; i -= 1) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// Two pairs from four players. fair: the two pairs' levels as close as they can be (when all four have one),
+// then the partners who have played together least; shuffle: any of the three ways, at random.
+export function bestPairs(four, levelOf, partners, mode = 'fair', rng = Math.random) {
+  const [p, q, r, t] = four;
+  const ways = [[[p, q], [r, t]], [[p, r], [q, t]], [[p, t], [q, r]]];
+  if (mode === 'shuffle') { const w = ways[Math.floor(rng() * 3)]; return { a: w[0], b: w[1] }; }
+  const known = four.every((id) => levelOf(id) != null);
+  const cost = ([a, b]) => (known ? Math.abs(levelOf(a[0]) + levelOf(a[1]) - levelOf(b[0]) - levelOf(b[1])) * 10 : 0)
+    + (partners.get(pairKey(a[0], a[1])) || 0) + (partners.get(pairKey(b[0], b[1])) || 0);
+  const best = Math.min(...ways.map(cost));
+  const tied = ways.filter((w) => Math.abs(cost(w) - best) < 1e-9);
+  const w = tied[Math.floor(rng() * tied.length)];
+  return { a: w[0], b: w[1] };
+}
+// Players into groups of the given sizes. fair: a snake draft by level, strongest first (court 1, 2, 2, 1,
+// 1, 2 ...), so both courts end up with close levels; players with no level fill what is left, spread
+// evenly. shuffle: at random.
+export function splitGroups(ids, sizes, levelOf, mode = 'fair', rng = Math.random) {
+  if (sizes.length === 1) return [ids.slice(0, sizes[0])];
+  const out = sizes.map(() => []);
+  if (mode === 'shuffle') { const order = shuffled(ids, rng); let i = 0; for (const [gi, n] of sizes.entries()) { out[gi] = order.slice(i, i + n); i += n; } return out; }
+  const ranked = shuffled(ids.filter((id) => levelOf(id) != null), rng).sort((x, y) => levelOf(y) - levelOf(x));
+  const snake = [];
+  for (let round = 0; snake.length < ranked.length + sizes.length; round += 1) snake.push(...(round % 2 ? [...sizes.keys()].reverse() : [...sizes.keys()]));
+  let k = 0;
+  for (const id of ranked) {
+    while (out[snake[k % snake.length]].length >= sizes[snake[k % snake.length]]) k += 1;
+    out[snake[k % snake.length]].push(id);
+    k += 1;
+  }
+  for (const id of shuffled(ids.filter((x) => levelOf(x) == null), rng)) {
+    const open = [...sizes.keys()].filter((i) => out[i].length < sizes[i]).sort((x, y) => out[x].length / sizes[x] - out[y].length / sizes[y]);
+    out[open[0]].push(id);
+  }
+  return out;
+}
+// The start of a Kings and challengers group: four on court as two pairs (as bestPairs), which pair is
+// king decided at random (on court they play for serve), the rest queuing at random.
+export function kcStart(ids, levelOf, partners, mode = 'fair', rng = Math.random) {
+  const order = shuffled(ids, rng);
+  const { a, b } = bestPairs(order.slice(0, 4), levelOf, partners, mode, rng);
+  const [kings, challengers] = rng() < 0.5 ? [a, b] : [b, a];
+  return { players: [...ids], kings, challengers, queue: order.slice(4), streak: 0, points: Object.fromEntries(ids.map((id) => [id, 0])), games: 0, history: [] };
+}
+// One Kings and challengers game, by Kevin's rules (27 Nov 2026): first to 3 points; the player on the
+// losing side who lost the last point comes off and the next in line comes on beside the other loser as
+// the challengers; when the challengers win they become the kings; every time the kings win, both kings
+// get a point; after 3 points in a row both kings come off, the challengers (the pair who just lost)
+// step up to be the kings and the next two in line come on (the reading used since review of PR #1025,
+// so nobody is crowned straight off the queue). Only kings score. Returns the next state and who won
+// and lost.
+export function kcApply(st, winner, lostBy) {
+  if (!['kings', 'challengers'].includes(winner)) return { error: 'Who won: the kings or the challengers?' };
+  const winners = winner === 'kings' ? [...st.kings] : [...st.challengers];
+  const losers = winner === 'kings' ? [...st.challengers] : [...st.kings];
+  if (!losers.includes(lostBy)) return { error: 'Pick the player who lost the last point' };
+  const queue = [...st.queue];
+  const points = { ...st.points };
+  if (winner === 'kings') for (const k of winners) points[k] = (points[k] || 0) + 1;
+  let kings, challengers, streak;
+  if (winner === 'kings' && st.streak + 1 >= 3) {
+    queue.push(...winners);                                          // three in a row: both kings off
+    kings = losers;
+    challengers = [queue.shift(), queue.shift()];
+    streak = 0;
+  } else {
+    queue.push(lostBy);                                              // the loser of the last point off
+    const comer = queue.shift();
+    kings = winners;
+    challengers = [losers.find((x) => x !== lostBy), comer];
+    streak = winner === 'kings' ? st.streak + 1 : 0;
+  }
+  const snapshot = { kings: st.kings, challengers: st.challengers, queue: st.queue, streak: st.streak, points: st.points, games: st.games };
+  return {
+    state: { ...st, kings, challengers, queue, streak, points, games: st.games + 1, history: [...(st.history || []), snapshot].slice(-KC_HISTORY) },
+    winners, losers,
+  };
+}
+// A session's cap: a game's change trimmed so that no one's total for the session passes +-KC_SESSION_CAP.
+export function capSession(changes, soFar) {
+  const out = {};
+  for (const [id, d] of Object.entries(changes)) {
+    const had = soFar.get(Number(id)) || 0;
+    out[id] = r3(Math.min(KC_SESSION_CAP, Math.max(-KC_SESSION_CAP, had + d)) - had);
+  }
+  return out;
+}
+
 // ── D1 access, behind one small object so tests can swap in a Map-backed copy ──
 const toPerson = (r) => {
   const p = { id: r.id, name: r.name, venues: splitVenues(r.venues), savedAt: r.votes_at || null };
@@ -702,6 +1014,26 @@ const toPerson = (r) => {
   return p;
 };
 const PEOPLE_COLS = 'id, name, venues, votes_at, real_name';
+const MATCH_COLS = 'id, key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, feedback_changes, deleted_at, fingerprint, session_id';
+// A level moved BY an amount, in the database (review of PR #1023: two saves at once must both count,
+// never the second overwriting the first), kept within 0 to 7; the rated-score count moved; the active
+// date only ever moved later. ?5 and ?6, when given, make it conditional on this request's own write to
+// the matches row (a delete, a feedback version), so a request that lost a race moves no level.
+const PEOPLE_LEVEL_SQL = `UPDATE people SET level = MIN(${LEVEL_MAX}, MAX(${LEVEL_MIN}, ROUND(COALESCE(level, 0) + ?2, 3))), level_matches = MAX(0, level_matches + ?3),
+  level_active_at = CASE WHEN ?4 IS NULL THEN level_active_at WHEN level_active_at IS NULL OR level_active_at < ?4 THEN ?4 ELSE level_active_at END WHERE id = ?1`;
+const PEOPLE_LEVEL_IF_SQL = (col) => `${PEOPLE_LEVEL_SQL} AND (SELECT ${col} FROM matches WHERE id = ?5) = ?6`;
+// A 90-day drop a score settles, taken only while the active date is still the one read: two scores at
+// the same moment, or a level Kevin set meanwhile, never take it twice.
+const PEOPLE_SETTLE_SQL = `UPDATE people SET level = MIN(${LEVEL_MAX}, MAX(${LEVEL_MIN}, ROUND(COALESCE(level, 0) + ?2, 3))) WHERE id = ?1 AND level_active_at IS ?3`;
+const parseChanges = (raw) => { try { const o = JSON.parse(raw || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v === 'number')) : {}; } catch { return {}; } };
+const parseSets = (raw) => { try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+const toMatch = (r) => ({
+  id: r.id, key: r.key, playedOn: r.played_on, a: parseIds(r.team_a), b: parseIds(r.team_b), sets: parseSets(r.sets), rated: !!r.rated, kind: r.kind,
+  enteredBy: r.entered_by, enteredAt: r.entered_at, changes: parseChanges(r.changes), feedback: parseChanges(r.feedback_changes), feedbackRaw: r.feedback_changes || '{}',
+  deletedAt: r.deleted_at || null, fingerprint: r.fingerprint || null, sessionId: r.session_id ?? null,
+});
+const parseState = (raw) => { try { const o = JSON.parse(raw || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+const toSession = (r) => ({ id: r.id, slot: r.slot, no: r.group_no, kind: r.kind, state: parseState(r.state), version: r.version });
 // Booked and paid, or a change to it: only while the robot has not started on Splitwise (or it failed).
 const SET_PAID_SQL = `UPDATE booked SET price_pence = ?2, players = ?3, paid_at = ?4, splitwise_state = NULL, splitwise_at = NULL, splitwise_note = NULL,
   texts_state = NULL, texts_at = NULL, texts_note = NULL WHERE slot = ?1 AND COALESCE(splitwise_state, '') IN ('', 'failed') AND texts_state IS NULL`;
@@ -775,17 +1107,133 @@ export function makeRepo(db) {
       return (r.meta?.changes || 0) === 1;
     },
     // The robot's steps: claimed from nothing, then done or failed from claimed; Retry clears a failed one.
+    // Resume is the robot's own Retry, and only of a step that failed because it was signed out of
+    // Splitwise (its own note says so): nothing was tried, and Kevin's sign-in is all it waited on.
     async markStep(slot, step, state, note, nowIso, paidAt = null) {
-      if (!PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
-      let from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
+      if (!PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'retry', 'resume'].includes(state)) return false;
+      let from = state === 'claimed' ? `${step}_state IS NULL` : state === 'retry' || state === 'resume' ? `${step}_state = 'failed'` : `${step}_state = 'claimed'`;
       if (state === 'claimed' && step === 'texts') from += " AND splitwise_state = 'done'";
       if (state === 'claimed') from += ' AND paid_at = ?5';
-      const to = state === 'retry' ? null : state;
+      if (state === 'resume') from += ` AND ${step}_note LIKE ?5`;
+      const to = state === 'retry' || state === 'resume' ? null : state;
       const args = [slot, to, to ? nowIso : null, to ? note : null];
-      if (state === 'claimed') args.push(paidAt);            // ?5 exists only in a claim
+      if (state === 'claimed') args.push(paidAt);            // ?5 is the version read in a claim,
+      if (state === 'resume') args.push(`%${SIGNED_OUT_MARK}%`);   // and the robot's own sign-out note in a resume
       const r = await db.prepare(`UPDATE booked SET ${step}_state = ?2, ${step}_at = ?3, ${step}_note = ?4 WHERE slot = ?1 AND paid_at IS NOT NULL AND ${from}`)
         .bind(...args).run();
       return (r.meta?.changes || 0) === 1;
+    },
+    // Levels and scores (sql-changes/0006, 27 Nov 2026).
+    async listLevels() {
+      const r = await db.prepare('SELECT id, level, level_matches, level_active_at FROM people').all();
+      return r.results || [];
+    },
+    async setLevel(id, level, activeAt, onlyUnplayed = false) {
+      const r = await db.prepare(`UPDATE people SET level = ?2, level_active_at = ?3 WHERE id = ?1${onlyUnplayed ? ' AND level_matches = 0' : ''}`).bind(id, level, activeAt).run();
+      return (r.meta?.changes || 0) === 1;
+    },
+    async listMatches(fromDate) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE played_on >= ? AND deleted_at IS NULL ORDER BY played_on, id`).bind(fromDate).all();
+      return (r.results || []).map(toMatch);
+    },
+    async getMatch(id) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE id = ?`).bind(id).first();
+      return r ? toMatch(r) : null;
+    },
+    async getMatchByKey(key) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE key = ?`).bind(key).first();
+      return r ? toMatch(r) : null;
+    },
+    async getLiveMatchByFingerprint(playedOn, fingerprint) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE played_on = ?1 AND fingerprint = ?2 AND deleted_at IS NULL`).bind(playedOn, fingerprint).first();
+      return r ? toMatch(r) : null;
+    },
+    async listFeedback(matchIds) {
+      if (!matchIds.length) return [];
+      const r = await db.prepare('SELECT match_id, from_id, about_id, vote FROM feedback WHERE match_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(matchIds)).all();
+      return r.results || [];
+    },
+    // One score and the levels it moves, in one transaction: a double tap (the same key) fails whole.
+    // A score and the levels it moves, in one transaction: the same key, or the same match on the same
+    // day, fails the whole batch (UNIQUE), so nothing moves twice.
+    async addScore(m, updates, nowIso) {
+      await db.batch([
+        db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, fingerprint) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)')
+          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), JSON.stringify(m.sets), m.rated ? 1 : 0, m.kind || 'match', m.enteredBy, nowIso, JSON.stringify(m.changes || {}), m.fingerprint),
+        ...updates.filter((u) => u.settle).map((u) => db.prepare(PEOPLE_SETTLE_SQL).bind(u.id, u.settle, u.readActive)),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_SQL).bind(u.id, u.delta, u.matches, u.activeAt)),
+      ]);
+    },
+    // The levels move back only if THIS request marked the score deleted (token), and only from the
+    // feedback version it read: a second delete, or a feedback swap landing meanwhile, changes nothing here
+    // (the caller reads again and retries).
+    async deleteScore(id, token, feedbackRaw, updates) {
+      await db.batch([
+        db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL AND feedback_changes = ?3').bind(id, token, feedbackRaw),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('deleted_at')).bind(u.id, u.delta, u.matches, null, id, token)),
+      ]);
+    },
+    // Match day (sql-changes/0007, 28 Nov 2026).
+    async listSessions(slots) {
+      if (!slots.length) return [];
+      const r = await db.prepare('SELECT id, slot, group_no, kind, state, version FROM sessions WHERE slot IN (SELECT value FROM json_each(?)) ORDER BY slot, group_no').bind(JSON.stringify(slots)).all();
+      return (r.results || []).map(toSession);
+    },
+    // A fresh plan for a slot, replacing the old one in the same transaction, and only while no Kings and
+    // challengers game is in (otherwise the delete does nothing and the inserts fail on UNIQUE: nothing changes).
+    async replaceSessions(slot, groups, nowIso) {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE slot = ?1 AND NOT EXISTS (SELECT 1 FROM sessions WHERE slot = ?1 AND kind = 'kc' AND COALESCE(json_extract(state, '$.games'), 0) > 0)").bind(slot),
+        ...groups.map((g) => db.prepare('INSERT INTO sessions (slot, group_no, kind, state, version, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)').bind(slot, g.no, g.kind, JSON.stringify(g.state), nowIso)),
+      ]);
+    },
+    // One or two sessions' new states, all from the versions read or none (a swap across two courts).
+    async setSessions(list, nowIso) {
+      const cond = list.map((_, i) => `(id = ?${3 + i * 3} AND version = ?${4 + i * 3})`).join(' OR ');
+      const cases = list.map((_, i) => `WHEN ?${3 + i * 3} THEN ?${5 + i * 3}`).join(' ');
+      const ids = list.map((_, i) => `?${3 + i * 3}`).join(', ');
+      const args = [list.length, nowIso, ...list.flatMap((x) => [x.id, x.version, JSON.stringify(x.state)])];
+      const r = await db.prepare(`UPDATE sessions SET state = CASE id ${cases} END, version = version + 1, updated_at = ?2 WHERE id IN (${ids}) AND (SELECT COUNT(*) FROM sessions WHERE ${cond}) = ?1`).bind(...args).run();
+      return (r.meta?.changes || 0) === list.length;
+    },
+    // A Kings and challengers game: the session's next state (from the version read), the game as a
+    // quarter-weight rated score, and the levels it moves, in one transaction. The game's key is the
+    // session and the version, so the same game tapped twice fails whole.
+    // Every other statement runs only if THIS request's session write took (its token is in place): a
+    // game, an Undo, a swap or a new plan landing in between leaves no game and moves no level.
+    async addKcGame(sessionId, version, token, state, m, updates, nowIso) {
+      await db.batch([
+        db.prepare('UPDATE sessions SET state = ?3, version = version + 1, updated_at = ?4, token = ?5 WHERE id = ?1 AND version = ?2').bind(sessionId, version, JSON.stringify(state), nowIso, token),
+        db.prepare('INSERT INTO matches (key, played_on, team_a, team_b, sets, rated, kind, entered_by, entered_at, changes, fingerprint, session_id) SELECT ?1, ?2, ?3, ?4, ?5, ?12, ?6, ?7, ?8, ?9, ?10, ?11 WHERE (SELECT token FROM sessions WHERE id = ?11) = ?13')
+          .bind(m.key, m.playedOn, JSON.stringify(m.a), JSON.stringify(m.b), '[]', 'kc', m.enteredBy, nowIso, JSON.stringify(m.changes), `${m.key}#${token}`, sessionId, m.rated ? 1 : 0, token),
+        ...updates.filter((u) => u.settle).map((u) => db.prepare(`${PEOPLE_SETTLE_SQL} AND (SELECT token FROM sessions WHERE id = ?4) = ?5`).bind(u.id, u.settle, u.readActive, sessionId, token)),
+        ...updates.map((u) => db.prepare(`${PEOPLE_LEVEL_SQL} AND (SELECT token FROM sessions WHERE id = ?5) = ?6`).bind(u.id, u.delta, u.matches, u.activeAt, sessionId, token)),
+      ]);
+    },
+    // Undo the last game: the session back one state (from the version read), the game deleted and its
+    // levels reversed only if this request's session write took.
+    async undoKcGame(sessionId, version, token, state, matchId, updates, nowIso) {
+      await db.batch([
+        db.prepare('UPDATE sessions SET state = ?3, version = version + 1, updated_at = ?4, token = ?5 WHERE id = ?1 AND version = ?2').bind(sessionId, version, JSON.stringify(state), nowIso, token),
+        db.prepare('UPDATE matches SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL AND (SELECT token FROM sessions WHERE id = ?3) = ?2').bind(matchId, token, sessionId),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('deleted_at')).bind(u.id, u.delta, u.matches, null, matchId, token)),
+      ]);
+    },
+    async listSessionGames(sessionId) {
+      const r = await db.prepare(`SELECT ${MATCH_COLS} FROM matches WHERE session_id = ? AND deleted_at IS NULL ORDER BY id`).bind(sessionId).all();
+      return (r.results || []).map(toMatch);
+    },
+    async putVotes(matchId, fromId, votes, nowIso) {
+      await db.batch(votes.map(([about, vote]) => db.prepare('INSERT INTO feedback (match_id, from_id, about_id, vote, created_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(match_id, from_id, about_id) DO UPDATE SET vote = excluded.vote, created_at = excluded.created_at')
+        .bind(matchId, fromId, about, vote, nowIso)));
+    },
+    // The feedback's effect, swapped in only from the version this request read (compare and set); the
+    // levels move only if that swap was this request's.
+    async swapFeedback(matchId, fromRaw, toRaw, updates) {
+      await db.batch([
+        db.prepare('UPDATE matches SET feedback_changes = ?3 WHERE id = ?1 AND feedback_changes = ?2 AND deleted_at IS NULL').bind(matchId, fromRaw, toRaw),
+        ...updates.map((u) => db.prepare(PEOPLE_LEVEL_IF_SQL('feedback_changes')).bind(u.id, u.delta, 0, null, matchId, toRaw)),
+      ]);
     },
     async listPaidPending(fromDate) {
       const r = await db.prepare(`SELECT ${BOOKED_COLS} FROM booked WHERE slot >= ? AND paid_at IS NOT NULL
@@ -1174,6 +1622,236 @@ export function cleanPaid(body, people) {
 }
 export const isAdmin = (request, env) => keyOk(request.headers.get('X-Admin-Key'), env.ADMIN_KEY);
 
+// ── Scores and levels (Stage 2, 27 Nov 2026) ──
+const levelMap = (rows, today) => new Map(rows.map((l) => [l.id, decayedLevel(l.level, l.level_active_at, today)]));
+// A score: checked, its changes worked out from the four players' levels as they stand (after any
+// 90-day drop, which the score then settles), and saved with those levels in one transaction.
+async function addScore(repo, body, dates, nowIso, admin) {
+  const today = dates[0];
+  const [people, rows] = await Promise.all([repo.listPeople(), repo.listLevels()]);
+  const levels = levelMap(rows, today);
+  const clean = cleanScore(body, people, levels, dates, admin);
+  if (clean.error) return fail(clean.error, clean.status || 400);
+  if (await repo.getMatchByKey(clean.key)) return null;                    // the same form sent twice: already in
+  const base = scoreFingerprint(clean.a, clean.b, clean.sets);
+  const nowMs = Date.parse(nowIso);
+  const fingerprint = `${base}#${Math.floor(nowMs / SCORE_REPEAT_MS)}`;
+  const recentMatches = await repo.listMatches(addDays(today, -RELIABLE_DAYS));
+  if (recentMatches.some((m) => m.playedOn === clean.playedOn && String(m.fingerprint || '').split('#')[0] === base && Math.abs(nowMs - Date.parse(m.enteredAt)) < SCORE_REPEAT_MS)) return fail('That score is already in', 409);
+  const recent = countRecent(recentMatches, addDays(today, -RELIABLE_DAYS));
+  const side = (ids) => ids.map((id) => ({ id, level: levels.get(id), recent: recent.get(id) || 0 }));
+  const result = clean.rated ? levelChanges({ a: side(clean.a), b: side(clean.b), sets: clean.sets }) : { changes: {} };
+  const byId = new Map(rows.map((l) => [l.id, l]));
+  // Each level moves by the score's change, after any 90-day drop the score now settles (taken once).
+  const updates = Object.entries(result.changes).map(([id, d]) => {
+    const n = Number(id);
+    return { id: n, settle: r3(levels.get(n) - byId.get(n).level), readActive: byId.get(n).level_active_at, delta: d, matches: 1, activeAt: clean.playedOn };
+  });
+  try {
+    await repo.addScore({ ...clean, changes: result.changes, fingerprint }, updates, nowIso);
+  } catch (e) {
+    if (await repo.getMatchByKey(clean.key)) return null;                  // a double tap that raced: one score
+    if (await repo.getLiveMatchByFingerprint(clean.playedOn, fingerprint)) return fail('That score is already in', 409);   // the other pair sent it at the same moment
+    throw e;
+  }
+  return null;
+}
+// Kevin's phone: a wrong score comes off, and every change it (and its feedback) made is reversed. A
+// 90-day drop the score settled stays settled, and a level Kevin set by hand after the score is moved
+// by the reversal too: delete a wrong score first, then set the level.
+async function deleteScore(repo, id, nowIso) {
+  for (let tries = 0; tries < 4; tries += 1) {
+    const m = id ? await repo.getMatch(id) : null;
+    if (!m || m.deletedAt) return tries ? null : fail('No such score', 404);
+    if (m.kind === 'kc') return fail('A Kings and challengers game comes off with Undo on its match day', 400);
+    const ids = new Set([...Object.keys(m.changes), ...Object.keys(m.feedback)].map(Number));
+    const updates = [...ids].map((pid) => ({ id: pid, delta: -r3((m.changes[pid] || 0) + (m.feedback[pid] || 0)), matches: m.changes[pid] != null ? -1 : 0 }));
+    const token = `${nowIso}#${Math.random().toString(36).slice(2, 10)}`;
+    await repo.deleteScore(m.id, token, m.feedbackRaw, updates);
+    const after = await repo.getMatch(m.id);
+    if (after && after.deletedAt) return null;        // ours, or another delete's: either way reversed once
+  }
+  return fail('The score kept changing: try again', 409);
+}
+// Peer feedback: one of the four marks the others within 24 hours of a rated score. A player with 2
+// matching votes (higher, or lower) moves 0.05 once for that score; a vote changed later moves it back.
+async function addFeedback(repo, body, nowMs, nowIso) {
+  const m = intId(body.match_id) ? await repo.getMatch(intId(body.match_id)) : null;
+  if (!m || m.deletedAt) return fail('No such score', 404);
+  if (!m.rated || !matchResult(m.sets).winner) return fail('This score changed no level, so it takes no feedback', 400);
+  if (nowMs >= Date.parse(m.enteredAt) + FEEDBACK_MS) return fail('Feedback closes 24 hours after the score goes in', 409);
+  const four = [...m.a, ...m.b];
+  const from = intId(body.from_id);
+  if (!from || !four.includes(from)) return fail('Only someone who played can give feedback', 400);
+  const raw = body.votes && typeof body.votes === 'object' && !Array.isArray(body.votes) ? Object.entries(body.votes) : [];
+  const votes = raw.map(([k, v]) => [intId(k), v]);
+  if (!votes.length || new Set(votes.map(([about]) => about)).size !== votes.length
+    || votes.some(([about, v]) => !about || about === from || !four.includes(about) || !VOTES.includes(v))) return fail('Mark the other three players: higher, expected or lower', 400);
+  await repo.putVotes(m.id, from, votes, nowIso);
+  // Then the effect of ALL the votes now stored, swapped in from the version read (compare and set). Two
+  // players sending at the same moment: the one whose swap loses reads again and settles it.
+  for (let tries = 0; tries < 4; tries += 1) {
+    const cur = await repo.getMatch(m.id);
+    if (!cur || cur.deletedAt) return null;
+    const all = await repo.listFeedback([m.id]);
+    const want = {};
+    for (const pid of four) {
+      const about = all.filter((v) => v.about_id === pid);
+      const w = about.filter((v) => v.vote === 'higher').length >= 2 ? FEEDBACK_STEP : about.filter((v) => v.vote === 'lower').length >= 2 ? -FEEDBACK_STEP : 0;
+      if (w) want[pid] = w;
+    }
+    // What the level can really move (0 to 7), so the amount recorded is the amount a delete takes back.
+    const levelNow = new Map((await repo.listLevels()).map((l) => [l.id, l.level]));
+    const next = {};
+    const diffs = [];
+    for (const pid of four) {
+      const had = cur.feedback[pid] || 0;
+      const lvl = levelNow.get(pid);
+      const d = lvl == null ? 0 : r3(clampLevel(lvl + (want[pid] || 0) - had) - lvl);
+      if (r3(had + d)) next[pid] = r3(had + d);
+      if (d) diffs.push([pid, d]);
+    }
+    if (!diffs.length) return null;
+    const toRaw = JSON.stringify({ ...next, _v: Math.random().toString(36).slice(2, 10) });
+    await repo.swapFeedback(m.id, cur.feedbackRaw, toRaw, diffs.map(([pid, d]) => ({ id: pid, delta: d })));
+    if ((await repo.getMatch(m.id)).feedbackRaw === toRaw) return null;
+  }
+  return null;
+}
+
+// ── Match day (Stage 3, 28 Nov 2026) ──
+// The players on a booked hour: the paid list when the price is in, else the app's own pick for that hour.
+async function bookingPlayers(repo, slot, dates) {
+  const b = await repo.getBooked(slot);
+  if (!b || !b.venue) return null;
+  const paid = paidOf(b).players;
+  if (paid.length) return { players: paid, courts: b.courts || 1 };
+  return { players: playersFor(slot, b.venue, b.person_id, await repo.listVotes(dates[0]), await repo.listPeople()), courts: b.courts || 1 };
+}
+async function handleMatchDay(body, repo, dates, nowIso, admin, rng = Math.random) {
+  const slot = String(body.slot || '');
+  const m = SLOT_RE.exec(slot);
+  if (!m || m[1] !== dates[0]) return fail('Match day is for a booked hour today', 400);
+  const booking = await bookingPlayers(repo, slot, dates);
+  if (!booking) return fail('That hour is not booked', 404);
+  const who = intId(body.person_id);
+  if (!admin && (!who || !booking.players.includes(who))) return fail('Only someone playing can run match day', 400);
+  const today = dates[0];
+  const [rows, recentMatches, sessions] = await Promise.all([repo.listLevels(), repo.listMatches(addDays(today, -RELIABLE_DAYS)), repo.listSessions([slot])]);
+  const levels = levelMap(rows, today);
+  const levelOf = (id) => levels.get(id) ?? null;
+  const started = sessions.some((x) => x.kind === 'kc' && (x.state.games || 0) > 0);
+  const action = body.action;
+  if (action === 'start') {
+    if (started) return fail('Kings and challengers has started: the teams stay as they are', 409);
+    const mode = body.mode === 'shuffle' ? 'shuffle' : 'fair';
+    const plan = formatPlan(booking.players.length, booking.courts);
+    if (!plan.groups.length) return fail(plan.note, 400);
+    const partners = partnerCounts(recentMatches, addDays(today, -PARTNER_DAYS));
+    const take = booking.players.slice(0, MATCH_DAY_MAX);
+    const sitOut = booking.players.slice(MATCH_DAY_MAX);
+    const split = splitGroups(take, plan.groups.map((g) => g.size), levelOf, mode, rng);
+    const groups = plan.groups.map((g, i) => ({
+      no: i + 1, kind: g.kind,
+      state: { ...(g.kind === 'match' ? { players: split[i], ...bestPairs(split[i], levelOf, partners, mode, rng) } : kcStart(split[i], levelOf, partners, mode, rng)), mode, note: plan.note, sitOut: i === 0 ? sitOut : [] },
+    }));
+    // Replaced only while no Kings and challengers game is in, checked inside the same transaction.
+    try { await repo.replaceSessions(slot, groups, nowIso); } catch (e) {
+      if (/UNIQUE/i.test(String(e && e.message))) return fail('Kings and challengers has started: the teams stay as they are', 409);
+      throw e;
+    }
+    if (!(await repo.listSessions([slot])).every((x) => groups.some((g) => g.no === x.no && g.kind === x.kind && JSON.stringify(g.state.players) === JSON.stringify(x.state.players)))) return fail('Someone else just changed match day: here is the latest', 409);
+    return null;
+  }
+  const session = sessions.find((x) => x.no === intId(body.group));
+  if (action === 'swap') {
+    if (started) return fail('Kings and challengers has started: the teams stay as they are', 409);
+    const a = intId(body.a), b = intId(body.b);
+    const where = (id) => sessions.find((x) => (x.state.players || []).includes(id));
+    const sa = where(a), sb = where(b);
+    if (!a || !b || a === b || !sa || !sb) return fail('Pick two players on match day to swap', 400);
+    const swap = (list) => (list || []).map((id) => (id === a ? b : id === b ? a : id));
+    const next = (x) => ({ ...x.state, players: swap(x.state.players), ...(x.kind === 'match' ? { a: swap(x.state.a), b: swap(x.state.b) } : { kings: swap(x.state.kings), challengers: swap(x.state.challengers), queue: swap(x.state.queue), points: Object.fromEntries(swap(x.state.players).map((id) => [id, 0])) }) });
+    const both = sa === sb ? [sa] : [sa, sb];
+    if (!(await repo.setSessions(both.map((x) => ({ id: x.id, version: x.version, state: next(x) })), nowIso))) return fail('Someone else changed match day: here is the latest', 409);
+    return null;
+  }
+  if (!session || session.kind !== 'kc') return fail('Pick a Kings and challengers court', 400);
+  const seen = Number.isInteger(body.version) ? body.version : intId(body.version);
+  if (seen == null) return fail('Which game? Reload the page and try again', 400);
+  if (seen !== session.version) return fail('Someone else just recorded a game: here is the latest', 409);
+  if (action === 'kc-game') {
+    const step = kcApply(session.state, body.winner, intId(body.lost_by));
+    if (step.error) return fail(step.error, 400);
+    const recent = countRecent(recentMatches, addDays(today, -RELIABLE_DAYS));
+    const side = (ids) => ids.map((id) => ({ id, level: levelOf(id), recent: recent.get(id) || 0 }));
+    // Rated only when all four have a level: a game with someone unlevelled moves nothing and counts nothing.
+    const rated = [...step.winners, ...step.losers].every((id) => levelOf(id) != null);
+    let changes = {};
+    const played = new Set();
+    if (rated) {
+      const soFar = new Map();
+      for (const g of await repo.listSessionGames(session.id)) {
+        for (const id of Object.keys(g.changes)) played.add(Number(id));
+        for (const [id, d] of Object.entries(g.changes)) soFar.set(Number(id), (soFar.get(Number(id)) || 0) + d);
+      }
+      changes = capSession(pairChanges({ win: side(step.winners), lose: side(step.losers), margin: 1, weight: KC_WEIGHT }), soFar);
+    }
+    const byId = new Map(rows.map((l) => [l.id, l]));
+    // A session counts once in a player's tally of scores (and locks their own level pick), at their first game in it.
+    const updates = Object.entries(changes).map(([id, d]) => {
+      const n = Number(id);
+      return { id: n, settle: r3(levels.get(n) - byId.get(n).level), readActive: byId.get(n).level_active_at, delta: d, matches: played.has(n) ? 0 : 1, activeAt: today };
+    });
+    const key = `kc-${session.id}-v${session.version}`;
+    const token = Math.random().toString(36).slice(2, 12);
+    const state = { ...step.state, history: step.state.history.map((h, i) => (i === step.state.history.length - 1 ? { ...h, key } : h)) };
+    try {
+      await repo.addKcGame(session.id, session.version, token, state, { key, playedOn: today, a: step.winners, b: step.losers, enteredBy: who || 0, changes, rated }, updates, nowIso);
+    } catch (e) {
+      if (await repo.getMatchByKey(key)) return fail('Someone else just recorded that game: here is the latest', 409);
+      throw e;
+    }
+    // Ours only if the game under this key carries this request's token: a second phone that sent a
+    // different result for the same game is told so, never "Game in".
+    if ((await repo.getMatchByKey(key))?.fingerprint !== `${key}#${token}`) return fail('Someone else just recorded that game: here is the latest', 409);
+    return null;
+  }
+  if (action === 'kc-undo') {
+    const hist = session.state.history || [];
+    if (!hist.length) return fail('No game to undo', 400);
+    const last = hist[hist.length - 1];
+    const game = last.key ? await repo.getMatchByKey(last.key) : null;
+    const state = { ...session.state, ...last, history: hist.slice(0, -1) };
+    delete state.key;
+    const token = `${nowIso}#${Math.random().toString(36).slice(2, 10)}`;
+    // The tally of scores comes back down only for a player whose only game in the session this was.
+    const others = new Set((await repo.listSessionGames(session.id)).filter((g) => !game || g.id !== game.id).flatMap((g) => Object.keys(g.changes).map(Number)));
+    const updates = game && !game.deletedAt ? Object.entries(game.changes).map(([id, d]) => ({ id: Number(id), delta: -d, matches: others.has(Number(id)) ? 0 : -1 })) : [];
+    await repo.undoKcGame(session.id, session.version, token, state, game ? game.id : 0, updates, nowIso);
+    const took = game && !game.deletedAt ? (await repo.getMatch(game.id))?.deletedAt === token
+      : (await repo.listSessions([slot])).find((x) => x.id === session.id)?.version === session.version + 1;
+    if (!took) return fail('Someone else just changed this court: here is the latest', 409);
+    return null;
+  }
+  return fail('Unknown match day action', 400);
+}
+// Everyone's page: today's booked hours that have a match day, as the phones show them.
+async function loadMatchDay(repo, bookedSlots) {
+  const sessions = await repo.listSessions(bookedSlots);
+  const out = {};
+  for (const x of sessions) {
+    const st = x.state;
+    const g = x.kind === 'match'
+      ? { no: x.no, kind: 'match', version: x.version, players: st.players || [], a: st.a || [], b: st.b || [], mode: st.mode }
+      : { no: x.no, kind: 'kc', version: x.version, players: st.players || [], kings: st.kings || [], challengers: st.challengers || [], queue: st.queue || [], streak: st.streak || 0, points: st.points || {}, games: st.games || 0, canUndo: (st.history || []).length > 0, mode: st.mode };
+    const day = out[x.slot] || (out[x.slot] = { note: st.note || '', sitOut: [], groups: [] });
+    if (Array.isArray(st.sitOut) && st.sitOut.length) day.sitOut = st.sitOut;
+    day.groups.push(g);
+  }
+  return out;
+}
+
 async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
   if (body.action === 'name') {
     const id = intId(body.id);
@@ -1188,6 +1866,15 @@ async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
       if ((await repo.listPeople()).some((p) => p.id !== id && (foldName(p.name) === f || (p.realName && foldName(p.realName) === f)))) return fail('Someone else already has that name', 409);
     }
     await repo.setRealName(id, realName);
+  } else if (body.action === 'level') {
+    const id = intId(body.id);
+    if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
+    const level = cleanLevel(body.level);
+    if (level == null) return fail('A level is a number from 0 to 7', 400);
+    await repo.setLevel(id, level, dates[0]);
+  } else if (body.action === 'score-delete') {
+    const r = await deleteScore(repo, intId(body.id), nowIso);
+    if (r) return r;
   } else if (body.action === 'retry') {
     // A retry may be for a booking from the last week (paid late, the robot ran after midnight).
     const m = SLOT_RE.exec(String(body.slot || ''));
@@ -1209,7 +1896,46 @@ async function handleAdmin(body, env, repo, nowMs, dates, nowIso) {
   } else {
     return fail('Unknown action', 400);
   }
-  return json({ ...(await loadState(env, repo, nowMs)), admin: true });
+  return json({ ...(await loadState(env, repo, nowMs, true)), admin: true });
+}
+
+// The robot's setup check (Kevin, 27 Nov 2026: adding a player must not "cock up every time"): per
+// player on the list, ready, missing (with what to fix) or unchecked. Players removed since the robot
+// read the list are dropped; anything else malformed refuses the whole post.
+export const SETUP_STATES = ['ready', 'missing', 'unchecked'];
+export function cleanSetup(body, people) {
+  const raw = body && body.people;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'people is needed' };
+  const known = new Set(people.map((p) => p.id));
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const id = intId(k);
+    if (!id) return { error: 'Each player is named by id' };
+    if (!v || !SETUP_STATES.includes(v.state)) return { error: 'Each player needs a state: ready, missing or unchecked' };
+    if (!known.has(id)) continue;
+    const notes = Array.isArray(v.notes) ? v.notes.filter((n) => typeof n === 'string' && n.trim()).slice(0, 4).map((n) => n.trim().slice(0, 120)) : [];
+    out[id] = { state: v.state, notes };
+  }
+  return { people: out };
+}
+async function handleRobotSetup(request, env, repo, nowMs) {
+  if (!keyOk(request.headers.get('X-Robot-Key'), env.ROBOT_KEY)) return fail('Robot key needed', 401);
+  const people = await repo.listPeople();
+  if (request.method === 'GET') return json({ ok: true, people: people.map((p) => ({ id: p.id, name: p.realName || p.name, nick: p.name })) });
+  if (request.method !== 'POST') return fail('Not found', 404);
+  const parsed = await readBody(request, MAX_COURTS_BODY);
+  if (parsed.error) return fail(parsed.error, parsed.status);
+  const clean = cleanSetup(parsed.body, people);
+  if (clean.error) return fail(clean.error, 400);
+  const nowIso = new Date(nowMs).toISOString();
+  await repo.setCache('setup', JSON.stringify({ at: nowIso, people: clean.people }), nowIso);
+  return json({ ok: true, saved: Object.keys(clean.people).length });
+}
+// Kevin's phone only: the robot's last setup check, or null before the first one.
+async function loadSetup(repo) {
+  const raw = await repo.getCache('setup');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { console.error('padel: setup cache unreadable', String(e)); return null; }
 }
 
 // The Mac robot's view of a paid booking: everything it needs for the Splitwise entry and the texts.
@@ -1235,7 +1961,7 @@ async function handleRobotPaid(request, env, repo, nowMs) {
   const parsed = await readBody(request);
   if (parsed.error) return fail(parsed.error, parsed.status);
   const { slot, step, state } = parsed.body;
-  if (typeof slot !== 'string' || !SLOT_RE.test(slot) || !PAID_STEPS.includes(step) || !['claimed', 'done', 'failed'].includes(state)) return fail('slot, step and state are needed', 400);
+  if (typeof slot !== 'string' || !SLOT_RE.test(slot) || !PAID_STEPS.includes(step) || !['claimed', 'done', 'failed', 'resume'].includes(state)) return fail('slot, step and state are needed', 400);
   const note = typeof parsed.body.note === 'string' ? parsed.body.note.slice(0, 200) : null;
   const paidAt = typeof parsed.body.paidAt === 'string' ? parsed.body.paidAt : null;
   if (state === 'claimed' && !paidAt) return fail('A claim names the paidAt it read', 400);
@@ -1295,7 +2021,7 @@ async function earlierPaid(env, repo, today) {
   });
 }
 
-async function loadState(env, repo, nowMs) {
+async function loadState(env, repo, nowMs, admin = false) {
   const dates = londonDates(nowMs);
   const [{ pulse, availability }, people, votes, booked] = await Promise.all([
     loadAvailability(repo), repo.listPeople(), repo.listVotes(dates[0]), repo.listBooked(dates[0]),
@@ -1303,7 +2029,16 @@ async function loadState(env, repo, nowMs) {
   const state = computeState({ people, votes, booked, availability, dates, nowMs, cfg: venueConfig(env) });
   state.availability.stale = pulseDue(pulse, nowMs);
   state.earlier = await earlierPaid(env, repo, dates[0]);
+  state.levels = await loadLevels(repo, dates[0], nowMs);
+  state.matchday = await loadMatchDay(repo, Object.keys(state.booked).filter((slot) => slot.startsWith(dates[0] + '|')));
+  if (admin) state.setup = await loadSetup(repo);
   return state;
+}
+// Everyone's page: the league table and the last month's scores.
+async function loadLevels(repo, today, nowMs) {
+  const [levels, matches] = await Promise.all([repo.listLevels(), repo.listMatches(addDays(today, -RELIABLE_DAYS))]);
+  const voters = await repo.listFeedback(matches.filter((m) => m.playedOn >= addDays(today, -30)).map((m) => m.id));
+  return computeLevels({ levels, matches, voters: voters.map((v) => ({ match_id: v.match_id, from_id: v.from_id })), today, nowMs });
 }
 
 // Read Pulse (when due), then run the alert check on the fresh state. Never throws: it runs inside
@@ -1405,10 +2140,11 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
     if (path === '/api/courts') return await handleCourts(request, env, ctx, repo, nowMs, fetchImpl, clock, sleep);
     if (path === '/api/robot/paid') return await handleRobotPaid(request, env, repo, nowMs);
     if (path === '/api/robot/booking') return await handleRobotBooking(request, env, repo, nowMs);
+    if (path === '/api/robot/setup') return await handleRobotSetup(request, env, repo, nowMs);
     const admin = isAdmin(request, env);
 
     if (path === '/api/state' && request.method === 'GET') {
-      const state = await loadState(env, repo, nowMs);
+      const state = await loadState(env, repo, nowMs, admin);
       if (state.availability.stale && await repo.claimRefresh(nowMs, REFRESH_GUARD_MS)) {
         ctx.waitUntil(refreshAndAlert(env, repo, nowMs, fetchImpl, clock, sleep));
       }
@@ -1424,7 +2160,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
         try { refreshed = await refreshPulse(env, repo, nowMs, fetchImpl); } catch (e) { console.error('padel: Pulse read failed', String(e && e.stack || e)); }
       }
       const now = clock();
-      const state = await loadState(env, repo, now);
+      const state = await loadState(env, repo, now, admin);
       // The alert check runs in waitUntil: a caller going away cannot stop it between claim and reply.
       ctx.waitUntil(alertSafely(state, env, repo, now, sleep));
       return json({ ...state, refreshed, admin });
@@ -1461,6 +2197,30 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       return json(person);
     }
 
+    if (path === '/api/level') {
+      const id = intId(body.person_id);
+      const level = cleanLevel(body.level);
+      if (!id || !(await repo.getPerson(id))) return fail('No such person', 404);
+      if (level == null) return fail('A level is a number from 0 to 7', 400);
+      if (!(await repo.setLevel(id, level, dates[0], true))) return fail('Your level has moved with your scores now: only Kevin can change it', 409);
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+    if (path === '/api/score') {
+      const r = await addScore(repo, body, dates, nowIso, admin);
+      if (r) return r;
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+    if (path === '/api/matchday') {
+      const r = await handleMatchDay(body, repo, dates, nowIso, admin);
+      if (r) return r;
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+    if (path === '/api/feedback') {
+      const r = await addFeedback(repo, body, nowMs, nowIso);
+      if (r) return r;
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
+    }
+
     if (path === '/api/vote') {
       const id = intId(body.person_id);
       if (!id) return fail('person_id is needed', 400);
@@ -1473,7 +2233,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       if (both.length) return fail(`An hour cannot be added and removed at once: ${both[0]}`, 400);
       if (!(await repo.getPerson(id))) return fail('No such person', 404);
       await repo.applyVotes(id, add.slots, remove.slots, nowIso);
-      const state = await loadState(env, repo, nowMs);
+      const state = await loadState(env, repo, nowMs, admin);
       // The save answers at once; the DM (up to 20 s on the relay) goes in the background.
       ctx.waitUntil(alertSafely(state, env, repo, nowMs, sleep));
       return json({ ...state, admin });
@@ -1510,7 +2270,7 @@ export async function handleRequest(request, env, ctx, repo, deps = {}) {
       } else {
         return fail('booked must be true or false', 400);
       }
-      return json({ ...(await loadState(env, repo, nowMs)), admin });
+      return json({ ...(await loadState(env, repo, nowMs, admin)), admin });
     }
     return fail('Not found', 404);
   } catch (e) {

@@ -18,7 +18,9 @@ import worker from '../workers/padel/worker.js';
 import {
   parseMatchi, parsePulse, hoursFromStarts, londonParts, londonDates, londonMidnightMs, computeState,
   decideAlerts, handleRequest, makeRepo, cleanName, cleanSlots, alertText, venueConfig, callerKey,
-  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl,
+  readPulse, checkAlerts, assembleAvailability, VERSION, RELAY_PENDING, matchiFresh, parseGladstone, bookUrl, SIGNED_OUT_MARK,
+  levelChanges, matchResult, decayedLevel, cleanLevel, cleanScore, kFactor, expectedWin, setDone, FEEDBACK_MS,
+  formatPlan, bestPairs, splitGroups, kcStart, kcApply, capSession, pairChanges, partnerCounts, KC_SESSION_CAP,
 } from '../workers/padel/padel.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -376,6 +378,11 @@ function mapRepo() {
     putAlert: (row) => alerts.set(row.slot, { names: '', venues: '', relay_reply: null, ...row }),
     repo: {
       async listPeople() { return [...people.values()].sort((a, b) => a.name.localeCompare(b.name)).map(out); },
+      // Levels and scores are tested on the real SQL (makeRepo over SQLite) below; this copy only answers the reads.
+      async listLevels() { return [...people.values()].map((p) => ({ id: p.id, level: null, level_matches: 0, level_active_at: null })); },
+      async listMatches() { return []; },
+      async listFeedback() { return []; },
+      async listSessions() { return []; },
       async getPerson(id) { return people.has(id) ? out(people.get(id)) : null; },
       async countPeople() { return people.size; },
       async addPerson(name, now) {
@@ -408,12 +415,13 @@ function mapRepo() {
       },
       async markStep(slot, step, state, note, now, paidAt = null) {
         const b = booked.get(slot);
-        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step) || !['claimed', 'done', 'failed', 'retry'].includes(state)) return false;
+        if (!b || !b.paid_at || !['splitwise', 'texts'].includes(step) || !['claimed', 'done', 'failed', 'retry', 'resume'].includes(state)) return false;
         const cur = b[`${step}_state`] ?? null;
         const ok = state === 'claimed' ? cur === null && b.paid_at === paidAt && (step === 'splitwise' || b.splitwise_state === 'done')
-          : state === 'retry' ? cur === 'failed' : cur === 'claimed';
+          : state === 'retry' ? cur === 'failed'
+          : state === 'resume' ? cur === 'failed' && String(b[`${step}_note`] || '').toLowerCase().includes('signed out of splitwise') : cur === 'claimed';
         if (!ok) return false;
-        const to = state === 'retry' ? null : state;
+        const to = state === 'retry' || state === 'resume' ? null : state;
         Object.assign(b, { [`${step}_state`]: to, [`${step}_at`]: to ? now : null, [`${step}_note`]: to ? note : null });
         return true;
       },
@@ -1367,6 +1375,50 @@ describe.each([['Map repo', mapRepo], ['makeRepo SQL on SQLite', sqlRepo]])('ale
       expect((await t.call('/api/robot/paid', undefined, { robot: ROBOT })).json.bookings).toEqual([]);
       expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'nope', state: 'done' }, { robot: ROBOT })).status).toBe(400);
     });
+    // 27 Nov 2026: the robot's Splitwise sign-in lapsed. Kevin's sign-in is all such a step waits on.
+    it('the robot resumes only a step that failed because it was signed out of Splitwise', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await book(a);
+      await t.call('/api/admin', { action: 'paid', slot: SLOT, price: 36, players: [a, b] }, { admin: ADMIN });
+      const step = (step, state, note) => t.call('/api/robot/paid', { slot: SLOT, step, state, note, paidAt: iso(NOW) }, { robot: ROBOT });
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // nothing to resume
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // claimed is not failed
+      expect((await step('splitwise', 'failed', 'Test Bob: not in the Splitwise group. Fix it, then Retry')).json.changed).toBe(true);
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // any other failure is Kevin's Retry
+      expect((await t.call('/api/admin', { action: 'retry', slot: SLOT, step: 'splitwise' }, { admin: ADMIN })).status).toBe(200);
+      expect((await step('splitwise', 'claimed')).json.changed).toBe(true);
+      expect((await step('splitwise', 'failed', `The robot is ${SIGNED_OUT_MARK}. Sign it in on the Mac and it carries on by itself`)).json.changed).toBe(true);
+      expect((await step('splitwise', 'resume')).json.changed).toBe(true);
+      expect((await t.call('/api/state')).json.booked[SLOT].paid.splitwise).toMatchObject({ state: null, note: null });
+      expect((await step('splitwise', 'resume')).json.changed).toBe(false);             // once
+      expect((await t.call('/api/robot/paid', { slot: SLOT, step: 'splitwise', state: 'retry' }, { robot: ROBOT })).status).toBe(400);   // Retry stays Kevin's
+    });
+    // 27 Nov 2026: the robot's setup check, shown only on Kevin's phone (the People screen).
+    it('the robot reads the list and posts each player\'s setup; only Kevin\'s phone gets it back', async () => {
+      const [a, b] = await t.addPeople(['Test Ann', 'Test Bob']);
+      await t.call('/api/admin', { action: 'name', id: b, real_name: 'Test Robert' }, { admin: ADMIN });
+      expect((await t.call('/api/robot/setup')).status).toBe(401);
+      expect((await t.call('/api/robot/setup', undefined, { robot: ROBOT })).json.people)
+        .toEqual([{ id: a, name: 'Test Ann', nick: 'Test Ann' }, { id: b, name: 'Test Robert', nick: 'Test Bob' }]);
+      expect((await t.call('/api/state', undefined, { admin: ADMIN })).json.setup).toBe(null);   // before the first check
+      const post = (people) => t.call('/api/robot/setup', { people }, { robot: ROBOT });
+      const long = 'x'.repeat(200);
+      const r = await post({ [a]: { state: 'ready', notes: [] }, [b]: { state: 'missing', notes: ['not in the Padel WhatsApp group under that name', long, 'c', 'd', 'e', 7] }, 999: { state: 'ready', notes: [] } });
+      expect(r.json).toEqual({ ok: true, saved: 2 });                                     // a person no longer on the list is dropped
+      const setup = (await t.call('/api/state', undefined, { admin: ADMIN })).json.setup;
+      expect(setup.at).toBe(iso(NOW));
+      expect(setup.people[a]).toEqual({ state: 'ready', notes: [] });
+      expect(setup.people[b].notes).toEqual(['not in the Padel WhatsApp group under that name', 'x'.repeat(120), 'c', 'd']);
+      const pub = (await t.call('/api/state')).json;
+      expect(pub).not.toHaveProperty('setup');                                            // never on anyone else's page
+      expect(pub.admin).toBe(false);
+      expect((await t.call('/api/admin', { action: 'name', id: a, real_name: 'Test Anna' }, { admin: ADMIN })).json.setup.people[a]).toEqual({ state: 'ready', notes: [] });
+      expect((await post({ [a]: { state: 'fine' } })).status).toBe(400);
+      expect((await post({ x: { state: 'ready' } })).status).toBe(400);
+      expect((await post([])).status).toBe(400);
+      expect((await t.call('/api/robot/setup', { people: {} }, { robot: 'wrong' })).status).toBe(401);
+    });
     it('a paid booking the robot has not finished survives midnight; a finished or unpaid one is cleared as before', async () => {
       const [a] = await t.addPeople(['Test Ann']);
       await book(a);
@@ -1675,3 +1727,558 @@ describe('Worker entry point', () => {
     expect(Object.keys(worker)).toEqual(['fetch']);
   });
 });
+
+// ── Stage 2 (Kevin, 27 Nov 2026): levels on Playtomic's 0 to 7 scale, moved by Nettla's published rules ──
+// Every name here is invented. The routes run on the real SQL (makeRepo over SQLite); the maths is pure.
+describe('levels: the maths (Nettla\'s rules, our numbers)', () => {
+  const p = (id, level, recent) => ({ id, level, recent });
+  it('the worked example Kevin approved: +0.19 new, +0.06 settled, -0.18 new on the losing side', () => {
+    const r = levelChanges({ a: [p(1, 3.0, 20), p(2, 2.5, 0)], b: [p(3, 3.0, 0), p(4, 3.0, 20)], sets: [[6, 4], [6, 3]] });
+    expect(r.winner).toBe('a');
+    expect(r.finished).toBe(true);
+    expect(r.changes).toEqual({ 1: 0.059, 2: 0.186, 3: -0.177, 4: -0.059 });
+    expect(expectedWin(2.75, 3.0)).toBeCloseTo(0.4285, 4);
+  });
+  it('stopped at 6-4 3-2: the team ahead wins at half the change; no finished set, or level, changes nothing', () => {
+    expect(levelChanges({ a: [p(1, 3.0, 20), p(2, 2.5, 0)], b: [p(3, 3.0, 0), p(4, 3.0, 20)], sets: [[6, 4], [3, 2]] }).changes[2]).toBe(0.086);
+    expect(levelChanges({ a: [p(1, 3, 0), p(2, 3, 0)], b: [p(3, 3, 0), p(4, 3, 0)], sets: [[4, 3]] }).changes).toEqual({});
+    expect(levelChanges({ a: [p(1, 3, 0), p(2, 3, 0)], b: [p(3, 3, 0), p(4, 3, 0)], sets: [[6, 4], [4, 6]] }).changes).toEqual({});   // 1-1, 10-10
+    expect(matchResult([[6, 4], [4, 6], [3, 1]])).toMatchObject({ winner: 'a', finished: false, half: 0.5 });   // sets level, more games
+  });
+  it('a win always goes up and a loss down, even when the favourites only just win; an upset counts for more', () => {
+    const fav = levelChanges({ a: [p(1, 5, 20), p(2, 5, 20)], b: [p(3, 2, 20), p(4, 2, 20)], sets: [[7, 6], [7, 6]] }).changes;
+    expect(fav[1]).toBeGreaterThan(0);
+    expect(fav[3]).toBeLessThan(0);
+    const upset = levelChanges({ a: [p(1, 2, 20), p(2, 2, 20)], b: [p(3, 5, 20), p(4, 5, 20)], sets: [[7, 6], [7, 6]] }).changes;
+    expect(upset[1]).toBeGreaterThan(fav[1] * 5);
+  });
+  it('a clear win counts for more than a close one; lower levels and newer players move faster; no one moves more than 0.4', () => {
+    const at = (sets) => levelChanges({ a: [p(1, 3, 20), p(2, 3, 20)], b: [p(3, 3, 20), p(4, 3, 20)], sets }).changes[1];
+    expect(at([[6, 0], [6, 0]])).toBeGreaterThan(at([[7, 6], [7, 6]]));
+    expect(kFactor(1.5, 1)).toBeGreaterThan(kFactor(5, 1));
+    expect(kFactor(3, 0)).toBeCloseTo(kFactor(3, 1) * 3, 10);
+    const huge = levelChanges({ a: [p(1, 1, 0), p(2, 1, 0)], b: [p(3, 6, 0), p(4, 6, 0)], sets: [[6, 0], [6, 0]] }).changes;
+    expect(huge[1]).toBe(0.4);
+    const top = levelChanges({ a: [p(1, 6.9, 0), p(2, 2, 0)], b: [p(3, 6, 0), p(4, 6, 0)], sets: [[6, 0], [6, 0]] }).changes;
+    expect(top[1]).toBe(0.1);                                       // never past 7
+  });
+  it('90 days without a rated score drops a level 0.10, and again every 90 days, never below 0', () => {
+    expect(decayedLevel(3, '2026-09-01', '2026-11-27')).toBe(3);    // 87 days
+    expect(decayedLevel(3, '2026-08-01', '2026-11-27')).toBe(2.9);  // 118 days
+    expect(decayedLevel(3, '2026-03-01', '2026-11-27')).toBe(2.7);  // 271 days
+    expect(decayedLevel(0.1, '2025-01-01', '2026-11-27')).toBe(0);
+    expect(decayedLevel(null, '2025-01-01', '2026-11-27')).toBe(null);
+  });
+  it('a level is 0 to 7 with at most 2 decimals; a set is 6 with a 2-game lead, 7-5 or 7-6', () => {
+    expect([cleanLevel('3.25'), cleanLevel(4), cleanLevel(0), cleanLevel(7), cleanLevel('7.5'), cleanLevel('3.333'), cleanLevel(-1), cleanLevel('x')]).toEqual([3.25, 4, 0, 7, null, null, null, null]);
+    expect([setDone(6, 4), setDone(6, 5), setDone(7, 5), setDone(7, 6), setDone(7, 4), setDone(4, 6)]).toEqual([true, false, true, true, false, true]);
+  });
+});
+
+describe('a score as a phone sends it (cleanScore)', () => {
+  const people = [{ id: 1, name: 'Ann One' }, { id: 2, name: 'Bo Two' }, { id: 3, name: 'Cy Three' }, { id: 4, name: 'Di Four' }, { id: 5, name: 'Ed Five' }];
+  const levels = new Map([[1, 3], [2, 2.5], [3, 3], [4, 3], [5, null]]);
+  const dates = ['2026-11-27', '2026-11-28'];
+  const ok = { key: 'k-0000000001', entered_by: 1, played_on: '2026-11-27', team_a: [1, 2], team_b: [3, 4], sets: [[6, 4], [6, 3]] };
+  const err = (extra, admin = false) => cleanScore({ ...ok, ...extra }, people, levels, dates, admin).error;
+  it('a good score comes back clean', () => {
+    expect(cleanScore(ok, people, levels, dates)).toEqual({ key: 'k-0000000001', playedOn: '2026-11-27', a: [1, 2], b: [3, 4], sets: [[6, 4], [6, 3]], rated: true, enteredBy: 1 });
+  });
+  it('refused: no id, outside the 7 days, not four different players, someone not on the list or not playing', () => {
+    expect(err({ key: 'x' })).toMatch(/no id/);
+    expect(err({ played_on: '2026-11-20' })).toMatch(/today or the 6 days before/);
+    expect(err({ played_on: '2026-11-21' })).toBeUndefined();
+    expect(err({ played_on: '2026-11-28' })).toMatch(/today or the 6 days before/);
+    for (const bad of ['2026-11-31', '2026-11-99', '2026-11-00', '2026-13-01']) expect([bad, err({ played_on: bad })]).toEqual([bad, expect.stringMatching(/today or the 6 days before/)]);   // not a real day
+    expect(err({ team_b: [3, 1] })).toMatch(/four different players/);
+    expect(err({ team_b: [3, 99] })).toMatch(/not on the list/);
+    expect(err({ entered_by: 5 })).toMatch(/Only someone who played/);
+    expect(err({ entered_by: 5 }, true)).toBeUndefined();          // Kevin's phone
+  });
+  it('refused: a set that is not a set, an unfinished set before the last, a third set after 2-0', () => {
+    expect(err({ sets: [[7, 3]] })).toMatch(/not a set score/);
+    expect(err({ sets: [[6, 2], [6, 1]] })).toBeUndefined();
+    expect(err({ sets: [[4, 3], [6, 1]] })).toMatch(/Set 1 is not finished/);
+    expect(err({ sets: [[6, 2], [6, 1], [3, 0]] })).toMatch(/leave the third set empty/);
+    expect(err({ sets: [[6, 2], [3, 6], [5, 4]] })).toBeUndefined(); // stopped in the third
+    expect(err({ sets: [[0, 0]] })).toMatch(/not a set score/);
+    expect(err({ sets: [[8, 6]] })).toMatch(/0 to 7/);
+    expect(err({ sets: [] })).toMatch(/1 to 3 sets/);
+  });
+  it('a rated score needs four levels and names who has none; a friendly one does not', () => {
+    const r = cleanScore({ ...ok, team_b: [3, 5] }, people, levels, dates);
+    expect(r).toEqual({ error: 'Ed Five has no level yet: pick one first, or tick Friendly', status: 409 });
+    expect(cleanScore({ ...ok, team_b: [3, 5], rated: false }, people, levels, dates).rated).toBe(false);
+  });
+});
+
+describe('levels and scores on the live database shape (makeRepo SQL on SQLite)', () => {
+  let t;
+  let ids;
+  beforeEach(async () => {
+    t = harness(sqlRepo);
+    t.setNow(Date.parse('2026-11-27T18:00:00Z'));
+    ids = await t.addPeople(['Ann One', 'Bo Two', 'Cy Three', 'Di Four', 'Ed Five']);
+  });
+  const lv = (state, id) => state.levels.players.find((x) => x.id === id);
+  const setAll = async (levels) => { for (const [i, l] of levels.entries()) expect((await t.call('/api/level', { person_id: ids[i], level: l })).status).toBe(200); };
+  let n = 0;
+  const score = (extra = {}, opts = {}) => t.call('/api/score', { key: `key-test-${++n}-0000`, entered_by: ids[0], played_on: '2026-11-27', team_a: [ids[0], ids[1]], team_b: [ids[2], ids[3]], sets: [[6, 4], [6, 3]], ...extra }, opts);
+
+  it('a player picks a starting level; everyone sees it in the league table; Kevin\'s phone can set anyone\'s', async () => {
+    const r = await t.call('/api/level', { person_id: ids[0], level: '3.5' });
+    expect(lv(r.json, ids[0])).toEqual({ id: ids[0], level: 3.5, matches: 0, reliability: 0, last: null });
+    expect(lv(r.json, ids[1]).level).toBe(null);
+    expect((await t.call('/api/level', { person_id: ids[0], level: 9 })).status).toBe(400);
+    expect((await t.call('/api/admin', { action: 'level', id: ids[1], level: 2 }, { admin: ADMIN })).json.levels.players.find((x) => x.id === ids[1]).level).toBe(2);
+    expect((await t.call('/api/admin', { action: 'level', id: ids[1], level: 2 })).status).toBe(401);
+  });
+
+  it('a rated score moves all four levels once, and a second tap of the same form is the same score', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const r = await score();
+    expect(r.status).toBe(200);
+    expect([ids[0], ids[1], ids[2], ids[3]].map((id) => lv(r.json, id).level)).toEqual([3.18, 2.69, 2.82, 2.82]);   // all four new: +0.177 for a 3.0, +0.186 for the 2.5
+    expect(lv(r.json, ids[0])).toMatchObject({ matches: 1, reliability: 5, last: 0.177 });
+    expect(r.json.levels.scores).toHaveLength(1);
+    expect(r.json.levels.scores[0]).toMatchObject({ on: '2026-11-27', a: [ids[0], ids[1]], b: [ids[2], ids[3]], sets: [[6, 4], [6, 3]], rated: true, winner: 'a', finished: true, enteredBy: ids[0], feedbackOpen: true, voted: [] });
+    const again = await t.call('/api/score', { key: `key-test-${n}-0000`, entered_by: ids[0], played_on: '2026-11-27', team_a: [ids[0], ids[1]], team_b: [ids[2], ids[3]], sets: [[6, 4], [6, 3]] });
+    expect(again.status).toBe(200);
+    expect(again.json.levels.scores).toHaveLength(1);
+    expect(lv(again.json, ids[0]).level).toBe(3.18);
+    // The same score with a new form id, from the other team, minutes later: already in.
+    expect((await score({ entered_by: ids[2], team_a: [ids[2], ids[3]], team_b: [ids[0], ids[1]], sets: [[4, 6], [3, 6]] })).status).toBe(409);
+    // Once a score has moved your level, only Kevin's phone changes it.
+    expect((await t.call('/api/level', { person_id: ids[0], level: 5 })).status).toBe(409);
+  });
+
+  it('refused: a player with no level (named), someone who did not play; a friendly score changes no level', async () => {
+    await setAll([3, 2.5, 3]);
+    const r = await score();
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe('Di Four has no level yet: pick one first, or tick Friendly');
+    expect((await score({ entered_by: ids[4] })).status).toBe(400);
+    const f = await score({ rated: false });
+    expect(f.status).toBe(200);
+    expect(f.json.levels.scores[0]).toMatchObject({ rated: false, changes: {}, feedbackOpen: false });
+    expect(lv(f.json, ids[0])).toMatchObject({ level: 3, matches: 0 });
+  });
+
+  it('peer feedback: 2 matching votes move a player 0.05 once; a changed vote moves it back; only the four, only for 24 hours', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    const vote = (from, votes) => t.call('/api/feedback', { match_id: mid, from_id: from, votes });
+    let r = await vote(ids[2], { [ids[0]]: 'higher', [ids[1]]: 'expected', [ids[3]]: 'expected' });
+    expect(lv(r.json, ids[0]).level).toBe(3.18);                    // one vote: nothing yet
+    expect(r.json.levels.scores[0].voted).toEqual([ids[2]]);
+    r = await vote(ids[3], { [ids[0]]: 'higher' });
+    expect(lv(r.json, ids[0]).level).toBe(3.23);                    // two: +0.05
+    expect(r.json.levels.scores[0].feedback).toEqual({ [ids[0]]: 0.05 });
+    r = await vote(ids[1], { [ids[0]]: 'higher' });
+    expect(lv(r.json, ids[0]).level).toBe(3.23);                    // three: still once
+    r = await vote(ids[3], { [ids[0]]: 'expected' });
+    r = await vote(ids[1], { [ids[0]]: 'expected' });
+    expect(lv(r.json, ids[0]).level).toBe(3.18);                    // back to one higher: the 0.05 comes off
+    expect((await vote(ids[4], { [ids[0]]: 'higher' })).status).toBe(400);
+    expect((await vote(ids[1], { [ids[1]]: 'higher' })).status).toBe(400);   // not about yourself
+    expect((await vote(ids[1], { [ids[0]]: 'great' })).status).toBe(400);
+    expect((await vote(ids[1], { [String(ids[0])]: 'higher', ['0' + ids[0]]: 'higher' })).status).toBe(400);   // one player named twice
+    t.setNow(Date.parse('2026-11-27T18:00:00Z') + FEEDBACK_MS + 1000);
+    expect((await vote(ids[1], { [ids[0]]: 'higher' })).status).toBe(409);
+  });
+
+  it('Kevin\'s phone deletes a wrong score and every change it made comes off exactly, feedback included', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    expect((await t.call('/api/admin', { action: 'score-delete', id: mid })).status).toBe(401);
+    const r = await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN });
+    expect(r.status).toBe(200);
+    expect([ids[0], ids[1], ids[2], ids[3]].map((id) => lv(r.json, id))).toEqual([
+      { id: ids[0], level: 3, matches: 0, reliability: 0, last: null }, { id: ids[1], level: 2.5, matches: 0, reliability: 0, last: null },
+      { id: ids[2], level: 3, matches: 0, reliability: 0, last: null }, { id: ids[3], level: 3, matches: 0, reliability: 0, last: null },
+    ]);
+    expect(r.json.levels.scores).toEqual([]);
+    expect((await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN })).status).toBe(404);
+    expect((await t.call('/api/level', { person_id: ids[0], level: 3.5 })).status).toBe(200);   // no score now: their own pick again
+  });
+
+  it('a level 100 days without a score shows 0.10 lower, and the next score starts from that', async () => {
+    await setAll([3, 3, 3, 3]);
+    await t.repo.setLevel(ids[0], 3, '2026-08-19');               // 100 days before 27 Nov
+    const s = await t.call('/api/state');
+    expect(lv(s.json, ids[0]).level).toBe(2.9);
+    const r = await score();
+    expect(lv(r.json, ids[0]).level).toBeCloseTo(2.9 + 0.2, 1);    // settled from 2.9, not 3
+  });
+
+  it('a score that changed no level takes no feedback: friendly, or no winner', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const noWin = (await score({ sets: [[4, 3]] })).json.levels.scores[0];
+    expect(noWin).toMatchObject({ winner: null, feedbackOpen: false, changes: {} });
+    expect((await t.call('/api/feedback', { match_id: noWin.id, from_id: ids[1], votes: { [ids[0]]: 'higher' } })).status).toBe(400);
+  });
+
+  it('votes stored by another request at the same moment are counted: the effect is worked out from every stored vote', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    await t.repo.putVotes(mid, ids[2], [[ids[0], 'higher']], iso(Date.parse('2026-11-27T18:00:00Z')));   // landed, but its own recompute lost
+    const r = await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    expect(lv(r.json, ids[0]).level).toBe(3.23);
+    expect(r.json.levels.scores[0].feedback).toEqual({ [ids[0]]: 0.05 });
+  });
+
+  it('the same match sent by both pairs at the same moment is one score: the database refuses the second', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    expect((await score()).status).toBe(200);
+    const real = t.repo.listMatches.bind(t.repo);
+    let blind = true;                                                  // the second request read the list before the first wrote
+    t.repo.listMatches = async (...a) => { if (blind) { blind = false; return []; } return real(...a); };
+    const second = await score({ entered_by: ids[2], team_a: [ids[3], ids[2]], team_b: [ids[1], ids[0]], sets: [[4, 6], [3, 6]] });
+    expect(second.status).toBe(409);
+    expect(second.json.error).toBe('That score is already in');
+    const s2 = await t.call('/api/state');
+    expect(s2.json.levels.scores).toHaveLength(1);
+    expect(lv(s2.json, ids[0])).toMatchObject({ level: 3.18, matches: 1 });
+  });
+
+  it('a level moves by the change in the database, so a save that read an older level still counts in full', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    await t.call('/api/admin', { action: 'level', id: ids[0], level: 3 }, { admin: ADMIN });
+    await score();
+    // Kevin's correction lands, then a second score that read the levels before it: both stand.
+    await t.call('/api/admin', { action: 'level', id: ids[4], level: 3 }, { admin: ADMIN });
+    const r = await score({ team_b: [ids[2], ids[4]], sets: [[6, 2], [6, 2]] });
+    expect(r.status).toBe(200);
+    expect(lv(r.json, ids[0]).matches).toBe(2);
+    expect(lv(r.json, ids[0]).level).toBeGreaterThan(3.18);
+  });
+
+  it('the same pairs and games more than half an hour later the same day is a new match; within it, the same one', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    await score({ sets: [[6, 4]] });
+    t.setNow(Date.parse('2026-11-27T18:20:00Z'));
+    expect((await score({ sets: [[6, 4]] })).status).toBe(409);
+    t.setNow(Date.parse('2026-11-27T19:30:00Z'));
+    const r = await score({ sets: [[6, 4]] });
+    expect(r.status).toBe(200);
+    expect(r.json.levels.scores).toHaveLength(2);
+  });
+
+  it('a delete landing in the middle of a feedback save, either way round, leaves the levels exactly as before the score', async () => {
+    await setAll([3, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    // 1. The feedback request has read the score; the delete lands before its swap.
+    const swap = t.repo.swapFeedback.bind(t.repo);
+    t.repo.swapFeedback = async (...a) => { t.repo.swapFeedback = swap; await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN }); return swap(...a); };
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    const s1 = await t.call('/api/state');
+    expect(lv(s1.json, ids[0])).toMatchObject({ level: 3, matches: 0 });
+    // 2. The delete has read the score; a feedback swap lands before its batch.
+    const mid2 = (await score({ sets: [[6, 1], [6, 1]] })).json.levels.scores[0].id;
+    await t.call('/api/feedback', { match_id: mid2, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    const del = t.repo.deleteScore.bind(t.repo);
+    t.repo.deleteScore = async (...a) => { t.repo.deleteScore = del; await t.call('/api/feedback', { match_id: mid2, from_id: ids[3], votes: { [ids[0]]: 'higher' } }); return del(...a); };
+    expect((await t.call('/api/admin', { action: 'score-delete', id: mid2 }, { admin: ADMIN })).status).toBe(200);
+    const s2 = await t.call('/api/state');
+    expect(lv(s2.json, ids[0])).toMatchObject({ level: 3, matches: 0 });
+    expect(s2.json.levels.scores).toEqual([]);
+  });
+
+  it('feedback at the top of the scale records only what it could move, so a delete takes back no more than was given', async () => {
+    await setAll([7, 2.5, 3, 3]);
+    const mid = (await score()).json.levels.scores[0].id;
+    expect(lv((await t.call('/api/state')).json, ids[0]).level).toBe(7);
+    await t.call('/api/feedback', { match_id: mid, from_id: ids[2], votes: { [ids[0]]: 'higher' } });
+    const r = await t.call('/api/feedback', { match_id: mid, from_id: ids[3], votes: { [ids[0]]: 'higher' } });
+    expect(r.json.levels.scores[0].feedback[ids[0]]).toBeUndefined();
+    const d = await t.call('/api/admin', { action: 'score-delete', id: mid }, { admin: ADMIN });
+    expect(lv(d.json, ids[0]).level).toBe(7);
+  });
+
+  it('two scores at the same moment for a player with a 90-day drop due take the drop once', async () => {
+    await setAll([3, 3, 3, 3, 3]);
+    await t.repo.setLevel(ids[0], 3, '2026-08-19');                 // 100 days: shows 2.9
+    const stale = await t.repo.listLevels();
+    const realLevels = t.repo.listLevels.bind(t.repo);
+    const one = await score();
+    const c1 = one.json.levels.scores[0].changes[ids[0]];
+    t.repo.listLevels = async () => { t.repo.listLevels = realLevels; return stale; };   // the second read the levels before the first wrote
+    const two = await score({ team_b: [ids[2], ids[4]], sets: [[6, 2], [6, 2]] });
+    expect(two.status).toBe(200);
+    const c2 = two.json.levels.scores[0].changes[ids[0]];
+    expect(lv(two.json, ids[0]).level).toBeCloseTo(2.9 + c1 + c2, 2);
+    expect(Math.round((2.8 + c1 + c2) * 100) / 100).not.toBe(lv(two.json, ids[0]).level);   // not the drop taken twice
+  });
+});
+
+// ── Stage 3 (Kevin, 28 Nov 2026): match day, fair teams, Kings and challengers ──
+// A seeded random, so "at random" is the same in every run.
+const seeded = (seed = 1) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+describe('match day: formats, fair teams and Kings and challengers (pure)', () => {
+  it('the format for every count from 4 to 12, on one court or two, as Kevin set and approved', () => {
+    const kinds = (n, c) => formatPlan(n, c).groups.map((g) => g.kind + g.size).join('+');
+    expect(formatPlan(3, 1)).toEqual({ groups: [], note: 'Match day needs at least 4 players' });
+    expect([4, 5, 6, 7].map((n) => kinds(n, 1))).toEqual(['match4', 'kc5', 'kc6', 'kc7']);
+    expect([4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => kinds(n, 2))).toEqual(['match4', 'kc5', 'kc6', 'kc7', 'match4+match4', 'match4+kc5', 'kc5+kc5', 'kc5+kc6', 'kc6+kc6']);
+    expect(formatPlan(13, 2)).toEqual({ groups: [{ kind: 'kc', size: 6 }, { kind: 'kc', size: 6 }], note: 'Only 12 fit: 1 sit out' });
+    expect(formatPlan(8, 1).note).toBe('A long queue on one court: a second court would help');
+    expect(formatPlan(4, 2).note).toBe('One court is enough for 4');
+  });
+  it('fair pairs: the strongest with the weakest when everyone has a level; otherwise the partners who have played together least', () => {
+    const lv = new Map([[1, 5], [2, 4], [3, 3], [4, 2]]);
+    expect(bestPairs([1, 2, 3, 4], (id) => lv.get(id), new Map(), 'fair', seeded(3))).toEqual({ a: [1, 4], b: [2, 3] });
+    const partners = new Map([['1-2', 3], ['3-4', 3], ['1-3', 2], ['2-4', 2]]);
+    expect(bestPairs([1, 2, 3, 4], () => null, partners, 'fair', seeded(3))).toEqual({ a: [1, 4], b: [2, 3] });   // 1-4 and 2-3 have never partnered
+    const seen = new Set();
+    for (let s = 0; s < 60; s += 1) { const r = bestPairs([1, 2, 3, 4], (id) => lv.get(id), new Map(), 'shuffle'); seen.add(r.a.join(',')); }
+    expect(seen.size).toBe(3);                                                // Shuffle: any of the three ways
+  });
+  it('fair groups: two courts end up with close average levels; players with no level are spread', () => {
+    const lv = new Map([[1, 6], [2, 5.5], [3, 5], [4, 4], [5, 3.5], [6, 3], [7, 2.5], [8, 2], [9, null], [10, null]]);
+    const [g1, g2] = splitGroups([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [5, 5], (id) => lv.get(id) ?? null, 'fair', seeded(5));
+    const avg = (g) => { const k = g.filter((id) => lv.get(id) != null); return k.reduce((x, id) => x + lv.get(id), 0) / k.length; };
+    expect(g1.length + g2.length).toBe(10);
+    expect(Math.abs(avg(g1) - avg(g2))).toBeLessThan(0.3);                    // snake draft: 3.875 v 4.0
+    expect([g1.includes(9) || g1.includes(10), g2.includes(9) || g2.includes(10)]).toEqual([true, true]);
+  });
+  // Kevin's rules, game by game, with five players: A B kings, C D challengers, E waiting.
+  it('Kings and challengers, Kevin\'s rules game by game: points to kings only, the loser of the last point off, challengers step up, 3 in a row and both kings off', () => {
+    const [A, B, C, D, E] = [1, 2, 3, 4, 5];
+    let st = { players: [A, B, C, D, E], kings: [A, B], challengers: [C, D], queue: [E], streak: 0, points: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, games: 0, history: [] };
+    // 1. Kings win; C lost the last point: C off, E on with D. A and B get a point.
+    let r = kcApply(st, 'kings', C);
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak, r.state.points]).toEqual([[A, B], [D, E], [C], 1, { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 }]);
+    expect([r.winners, r.losers]).toEqual([[A, B], [D, E].map(() => null).length ? [C, D] : []]);
+    // 2. Challengers win; king A lost the last point: A off, B goes over with the new challenger C, D and E are kings. No points.
+    r = kcApply(r.state, 'challengers', A);
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak, r.state.points]).toEqual([[D, E], [B, C], [A], 0, { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 }]);
+    // 3, 4, 5. D and E win three in a row: a point each time, then both come off, the challengers step up, the next two come on.
+    r = kcApply(r.state, 'kings', B);                                         // B off, A on with C
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[D, E], [C, A], [B], 1]);
+    r = kcApply(r.state, 'kings', C);                                         // C off, B on with A
+    expect([r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C], 2]);
+    r = kcApply(r.state, 'kings', A);                                         // third in a row: D and E off, A and B (who just lost) step up, C and D come on
+    expect(r.state.points).toEqual({ 1: 1, 2: 1, 3: 0, 4: 3, 5: 3 });
+    expect([r.state.kings, r.state.challengers, r.state.queue, r.state.streak]).toEqual([[A, B], [C, D], [E], 0]);
+    expect(r.state.games).toBe(5);
+    expect(r.state.history).toHaveLength(5);
+    // Everyone is somewhere, once.
+    expect([...r.state.kings, ...r.state.challengers, ...r.state.queue].sort()).toEqual([A, B, C, D, E]);
+    expect(kcApply(r.state, 'kings', B).error).toBe('Pick the player who lost the last point');   // B is a king, not a loser
+    expect(kcApply(r.state, 'draw', A).error).toBe('Who won: the kings or the challengers?');
+  });
+  it('six players: three in a row takes both kings off, the challengers step up and the two waiting come on', () => {
+    let st = { players: [1, 2, 3, 4, 5, 6], kings: [1, 2], challengers: [3, 4], queue: [5, 6], streak: 2, points: {}, games: 0, history: [] };
+    const r = kcApply(st, 'kings', 3);
+    expect([r.state.kings, r.state.challengers, r.state.queue]).toEqual([[3, 4], [5, 6], [1, 2]]);
+    expect([r.state.points[1], r.state.points[2]]).toEqual([1, 1]);
+  });
+  it('a game counts a quarter of a match on who won, and one session moves a level no more than 0.4', () => {
+    const p = (id, level) => ({ id, level, recent: 20 });
+    const full = pairChanges({ win: [p(1, 3), p(2, 3)], lose: [p(3, 3), p(4, 3)], margin: 1 });
+    const kc = pairChanges({ win: [p(1, 3), p(2, 3)], lose: [p(3, 3), p(4, 3)], margin: 1, weight: 0.25 });
+    expect(kc[1]).toBeCloseTo(full[1] / 4, 2);
+    expect(kc[3]).toBeLessThan(0);
+    expect(capSession({ 1: 0.05, 2: -0.05 }, new Map([[1, 0.38], [2, -0.39]]))).toEqual({ 1: 0.02, 2: -0.01 });
+    expect(capSession({ 1: -0.05 }, new Map([[1, 0.4]]))).toEqual({ 1: -0.05 });   // back down is always allowed
+    expect(KC_SESSION_CAP).toBe(0.4);
+  });
+  it('partners are counted from both pairs of every score and game in the window', () => {
+    const n = partnerCounts([{ playedOn: '2026-11-20', a: [1, 2], b: [3, 4] }, { playedOn: '2026-11-21', a: [2, 1], b: [4, 5] }, { playedOn: '2026-01-01', a: [1, 2], b: [3, 4] }], '2026-09-01');
+    expect([n.get('1-2'), n.get('3-4'), n.get('4-5')]).toEqual([2, 1, 1]);
+  });
+});
+
+describe('match day on the live database shape (makeRepo SQL on SQLite)', () => {
+  let t;
+  let ids;
+  const TODAY_SLOT = '2026-11-27|19';
+  beforeEach(async () => {
+    t = harness(sqlRepo);
+    t.setNow(Date.parse('2026-11-27T17:00:00Z'));
+    ids = await t.addPeople(['Ann One', 'Bo Two', 'Cy Three', 'Di Four', 'Ed Five', 'Fi Six']);
+  });
+  const book = async (players, courts = 1) => {
+    expect((await t.call('/api/booked', { slot: TODAY_SLOT, person_id: players[0], venue: 'pdl', booked: true, start: '19:00', minutes: 90, courts })).status).toBe(200);
+    expect((await t.call('/api/admin', { action: 'paid', slot: TODAY_SLOT, price: 30, players }, { admin: ADMIN })).status).toBe(200);
+  };
+  const md = (body, opts) => t.call('/api/matchday', { slot: TODAY_SLOT, person_id: ids[0], ...body }, opts);
+  const levelsAll = async (vals) => { for (const [i, v] of vals.entries()) await t.call('/api/admin', { action: 'level', id: ids[i], level: v }, { admin: ADMIN }); };
+  const lvl = (state, id) => state.levels.players.find((x) => x.id === id).level;
+
+  it('4 players: one match with fair pairs; Shuffle and swap re-pick; someone not playing cannot run it', async () => {
+    await levelsAll([5, 4, 3, 2]);
+    await book(ids.slice(0, 4));
+    const r = await md({ action: 'start' });
+    expect(r.status).toBe(200);
+    const g = r.json.matchday[TODAY_SLOT].groups;
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ no: 1, kind: 'match' });
+    expect([g[0].a, g[0].b].map((x) => [...x].sort()).sort()).toEqual([[ids[0], ids[3]], [ids[1], ids[2]]].map((x) => [...x].sort()).sort());   // 5+2 v 4+3
+    expect((await md({ action: 'start', person_id: ids[4] })).status).toBe(400);
+    const sw = await md({ action: 'swap', a: ids[0], b: ids[1] });
+    const g2 = sw.json.matchday[TODAY_SLOT].groups[0];
+    expect([...g2.a, ...g2.b].sort()).toEqual(ids.slice(0, 4).sort());
+    expect(g2.a.includes(ids[1]) ? g2.a : g2.b).toContain(ids[3]);          // Bo took Ann's place beside Di
+    expect((await md({ action: 'start', mode: 'shuffle' })).status).toBe(200);
+  });
+
+  it('5 players: Kings and challengers runs Kevin\'s rules, keeps the points tally, and each game moves levels a quarter', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let r = await md({ action: 'start' });
+    let g = r.json.matchday[TODAY_SLOT].groups[0];
+    expect(g).toMatchObject({ kind: 'kc', streak: 0, games: 0, canUndo: false });
+    expect(g.queue).toHaveLength(1);
+    const kings = g.kings;
+    const loser = g.challengers[0];
+    r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: loser });
+    expect(r.status).toBe(200);
+    g = r.json.matchday[TODAY_SLOT].groups[0];
+    expect(g).toMatchObject({ games: 1, streak: 1, canUndo: true, kings });
+    expect(g.points[kings[0]]).toBe(1);
+    expect(g.queue).toEqual([loser]);
+    expect(lvl(r.json, kings[0])).toBeGreaterThan(3);
+    expect(lvl(r.json, loser)).toBeLessThan(3);
+    expect(r.json.levels.scores).toEqual([]);                                // games live on the match day card, not the scores list
+    // The same game tapped on a second phone (the old version): refused, recorded once.
+    expect((await md({ action: 'kc-game', group: 1, version: g.version - 1, winner: 'kings', lost_by: g.challengers[0] })).status).toBe(409);
+    // Undo puts the court and the levels back exactly.
+    r = await md({ action: 'kc-undo', group: 1, version: g.version });
+    g = r.json.matchday[TODAY_SLOT].groups[0];
+    expect(g).toMatchObject({ games: 0, streak: 0, canUndo: false, kings });
+    expect(g.points[kings[0]]).toBe(0);
+    for (const id of ids.slice(0, 5)) expect(lvl(r.json, id)).toBe(3);
+    // Once a game is in, the teams stay as they are.
+    r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'challengers', lost_by: g.kings[0] });
+    expect((await md({ action: 'start', mode: 'shuffle' })).status).toBe(409);
+    expect((await md({ action: 'kc-game', group: 1, version: r.json.matchday[TODAY_SLOT].groups[0].version, winner: 'kings', lost_by: r.json.matchday[TODAY_SLOT].groups[0].kings[0] })).status).toBe(400);   // a king did not lose
+  });
+
+  it('a long session moves no one more than 0.4, however many games they win', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    const star = g.kings[0];
+    let r;
+    for (let i = 0; i < 40; i += 1) {
+      // Whichever side the star is on wins; the other side's first player lost the last point.
+      const starKing = g.kings.includes(star);
+      const starChallenger = g.challengers.includes(star);
+      const winner = starKing ? 'kings' : starChallenger ? 'challengers' : 'kings';
+      const losers = winner === 'kings' ? g.challengers : g.kings;
+      r = await md({ action: 'kc-game', group: 1, version: g.version, winner, lost_by: losers[0] });
+      expect(r.status).toBe(200);
+      g = r.json.matchday[TODAY_SLOT].groups[0];
+    }
+    expect(lvl(r.json, star)).toBeLessThanOrEqual(3.4);
+    expect(lvl(r.json, star)).toBeGreaterThan(3.3);
+  });
+
+  it('two courts, 10 players: two Kings and challengers groups of 5; not today is refused', async () => {
+    const more = await t.addPeople(['Gu Seven', 'Hy Eight', 'Io Nine', 'Jo Ten']);
+    await book([...ids, ...more], 2);
+    const r = await md({ action: 'start' });
+    expect(r.json.matchday[TODAY_SLOT].groups.map((g) => g.kind + g.players.length)).toEqual(['kc5', 'kc5']);
+    expect((await t.call('/api/matchday', { slot: '2026-11-28|19', person_id: ids[0], action: 'start' })).status).toBe(400);
+  });
+
+  it('a re-planned court after Undo and Shuffle takes games again (session ids are never reused)', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'kc-undo', group: 1, version: g.version })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'start', mode: 'shuffle' })).json.matchday[TODAY_SLOT].groups[0];
+    const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+    expect(r.status).toBe(200);
+    expect(r.json.matchday[TODAY_SLOT].groups[0].games).toBe(1);
+  });
+
+  it('an Undo landing while a game is being saved: the game is refused and leaves nothing behind', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    g = (await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] })).json.matchday[TODAY_SLOT].groups[0];
+    const add = t.repo.addKcGame.bind(t.repo);
+    t.repo.addKcGame = async (...a) => { t.repo.addKcGame = add; await md({ action: 'kc-undo', group: 1, version: g.version }); return add(...a); };
+    const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+    expect(r.status).toBe(409);
+    const s1 = await t.call('/api/state');
+    expect(s1.json.matchday[TODAY_SLOT].groups[0].games).toBe(0);
+    for (const id of ids.slice(0, 5)) expect(lvl(s1.json, id)).toBe(3);
+  });
+
+  it('a swap across two courts changes both or neither', async () => {
+    const more = await t.addPeople(['Gu Seven', 'Hy Eight', 'Io Nine', 'Jo Ten']);
+    await book([...ids, ...more], 2);
+    const gs = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups;
+    const [x, y] = [gs[0].players[0], gs[1].players[0]];
+    const set = t.repo.setSessions.bind(t.repo);
+    t.repo.setSessions = async (list, now) => { t.repo.setSessions = set; await md({ action: 'swap', a: gs[1].players[1], b: gs[1].players[2] }); return set(list, now); };
+    expect((await md({ action: 'swap', a: x, b: y })).status).toBe(409);
+    const after = (await t.call('/api/state')).json.matchday[TODAY_SLOT].groups;
+    const all = after.flatMap((g) => g.players);
+    expect(all.length).toBe(new Set(all).size);                               // nobody on both courts
+    expect(after[0].players).toContain(x);
+  });
+
+  it('a game with a player who has no level moves nothing and counts nothing; who sits out over 12 is named', async () => {
+    await levelsAll([3, 3, 3, 3]);                                            // Ed has no level
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    // Play until Ed is on court and a game finishes with him in it.
+    for (let i = 0; i < 6; i += 1) {
+      const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+      g = r.json.matchday[TODAY_SLOT].groups[0];
+    }
+    const s1 = await t.call('/api/state');
+    expect(lvl(s1.json, ids[4])).toBe(null);
+    expect(s1.json.levels.players.find((x) => x.id === ids[4]).reliability).toBe(0);
+    const more = await t.addPeople(['Gu Seven', 'Hy Eight', 'Io Nine', 'Jo Ten', 'Ka Eleven', 'Lu Twelve', 'Mo Thirteen']);
+    await t.call('/api/booked', { slot: '2026-11-27|20', person_id: ids[0], venue: 'pdl', booked: true, start: '20:00', minutes: 90, courts: 2 });
+    await t.call('/api/admin', { action: 'paid', slot: '2026-11-27|20', price: 60, players: [...ids, ...more] }, { admin: ADMIN });
+    const r13 = await t.call('/api/matchday', { slot: '2026-11-27|20', person_id: ids[0], action: 'start' });
+    expect(r13.json.matchday['2026-11-27|20']).toMatchObject({ note: 'Only 12 fit: 1 sit out', sitOut: [more[6]] });
+  });
+
+  it('two phones send different results for the same game: the second is told, never "Game in"', async () => {
+    await levelsAll([3, 3, 3, 3, 3]);
+    await book(ids.slice(0, 5));
+    const g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    // Both phones read version 0; the second one's read is served stale so it reaches the database.
+    const add = t.repo.addKcGame.bind(t.repo);
+    t.repo.addKcGame = async (...a) => {
+      t.repo.addKcGame = add;
+      await add(a[0], a[1], 'otherphone1', { ...a[3] }, { ...a[4], a: a[4].b, b: a[4].a }, [], a[6]);   // the other phone's game lands first, under the same key
+      return add(...a);
+    };
+    const r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe('Someone else just recorded that game: here is the latest');
+  });
+
+  it('a first game with an unlevelled player does not stop the session counting once for the others, and Kevin cannot delete a game outside Undo', async () => {
+    await levelsAll([3, 3, 3, 3]);                                            // Ed has no level
+    await book(ids.slice(0, 5));
+    let g = (await md({ action: 'start' })).json.matchday[TODAY_SLOT].groups[0];
+    let r;
+    for (let i = 0; i < 12; i += 1) {
+      r = await md({ action: 'kc-game', group: 1, version: g.version, winner: 'kings', lost_by: g.challengers[0] });
+      g = r.json.matchday[TODAY_SLOT].groups[0];
+    }
+    const s1 = r.json.levels.players;
+    for (const id of ids.slice(0, 4)) {
+      const p = s1.find((x) => x.id === id);
+      if (p.last != null) expect(p.matches).toBe(1);                         // played a rated game: the session counts once
+    }
+    expect(s1.find((x) => x.id === ids[4]).matches).toBe(0);
+    expect(s1.filter((x) => x.last != null).length).toBeGreaterThan(0);
+    const anyGame = (await t.repo.listMatches('2026-11-01')).find((m) => m.kind === 'kc' && Object.keys(m.changes).length);
+    expect((await t.call('/api/admin', { action: 'score-delete', id: anyGame.id }, { admin: ADMIN })).status).toBe(400);
+  });
+});
+

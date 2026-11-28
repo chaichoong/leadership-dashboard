@@ -42,6 +42,8 @@ const ESTATE_SCRIPTS = [
   'scripts/freeform-bridge.py',
   // 27 Nov 2026: Kevin's weekly FPL Draft swap card, hourly (approved build recQZZjNELK1x3cAc)
   'scripts/fpl-draft-swaps.py',
+  // 27 Nov 2026: a pen-drawn square on a Freeform board becomes a task (approved build)
+  'scripts/freeform_actions.py',
   'scripts/approval_evidence.py',
   'scripts/adobe_sign_link.py',
   'scripts/calendar-write.py',

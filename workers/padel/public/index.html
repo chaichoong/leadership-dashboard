@@ -158,6 +158,42 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 .people td { padding: var(--space-1) var(--space-1) var(--space-1) 0; vertical-align: middle; }
 .people input, .add-player input { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); width: 100%; }
 .add-player { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+/* Levels and scores (Stage 2, 27 Nov 2026). */
+.sub { font-size: var(--fs-md); margin: var(--space-4) 0 var(--space-2); }
+.league { margin: 0 0 var(--space-2); padding-left: var(--space-6); }
+.league li { padding: var(--space-1) 0; border-bottom: 1px solid var(--border-subtle); }
+.league li.empty { list-style: none; margin-left: calc(-1 * var(--space-6)); border-bottom: 0; }
+.league .lvl { font-weight: var(--fw-semibold); }
+.league small, .scores small { color: var(--text-secondary); font-size: var(--fs-sm); }
+.up { color: var(--success); }
+.down { color: var(--danger); }
+.scores { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.scores > li { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+.scores .won { font-weight: var(--fw-semibold); }
+.score-form, .level-form { display: grid; gap: var(--space-2); grid-template-columns: minmax(0, 1fr); }
+.level-form select, .level-form input { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.level-step-text { font-size: var(--fs-sm); color: var(--text-secondary); margin: 0; }
+.score-form select, .level-form select, .level-form input, .score-form .sets input, .fb select, .people .lvl-in { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); }
+.score-form .pair { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.score-form .pair select { flex: 1 1 40%; min-width: 0; }
+.score-form .sets { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.score-form .sets input { width: 3.2em; text-align: center; }
+.sf-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.fb { margin-top: var(--space-2); display: grid; gap: var(--space-2); }
+.people .lvl-in { width: 4.5em; }
+/* Match day (Stage 3, 28 Nov 2026). */
+.md { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); display: grid; gap: var(--space-2); }
+.md-court { background: var(--bg-surface-2); border-radius: var(--radius-lg); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-2); }
+.md-court h4 { margin: 0; font-size: var(--fs-md); }
+.md-court p { margin: 0; }
+.md-btns { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.md-tally { font-size: var(--fs-sm); color: var(--text-secondary); }
+.md select { min-height: var(--tap); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-surface); font-size: var(--fs-md); max-width: 100%; min-width: 0; }
+/* The robot's setup check under each person (27 Nov 2026): ready, missing something, or not checked. */
+.people .setup td { padding: 0 0 var(--space-2); font-size: var(--fs-sm); color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+.people .setup .ok { color: var(--success); font-weight: var(--fw-semibold); }
+.people .setup .bad { color: var(--danger); font-weight: var(--fw-semibold); }
+.people .setup .wait { color: var(--text-muted); font-weight: var(--fw-semibold); }
 .day[aria-pressed="true"].has-booked small { color: var(--mine-on); }
 .toggles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .toggle { min-height: var(--tap); padding: 0 var(--space-4); border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: var(--bg-surface); font-weight: var(--fw-semibold); }
@@ -211,9 +247,23 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
         <p class="note">Tap a venue you can't get to. You won't count towards a court there.</p>
         <div id="venue-toggles" class="toggles"></div>
       </section>
+      <section id="level-card" class="card" aria-labelledby="level-h">
+        <h2 id="level-h">Your level</h2>
+        <div id="level-body"></div>
+      </section>
+      <section id="levels-card" class="card" aria-labelledby="levels-h">
+        <h2 id="levels-h">Levels</h2>
+        <p class="note">Playtomic's 0 to 7 scale. A score moves levels the way Nettla does: a win goes up and a loss down, beating a stronger pair or winning clearly counts for more, and new players move faster.</p>
+        <ol id="league" class="league"></ol>
+        <p id="no-level" class="note" hidden></p>
+        <h3 class="sub">Scores</h3>
+        <div id="score-box"></div>
+        <ul id="scores" class="scores"></ul>
+      </section>
       <section id="people-card" class="card" aria-labelledby="people-h" hidden>
         <h2 id="people-h">People</h2>
         <p class="note">Only your phone can change these. A real name replaces the name someone picked, with its initials, everywhere on the page.</p>
+        <p class="note">To add a player: put them in the Padel WhatsApp group (saved in your contacts under their full name) and the Padel Splitwise group (with their email), then add their full name below. The robot checks everyone once a day and within 15 minutes of a change. <span id="setup-line"></span></p>
         <table class="people"><tbody id="people-rows"></tbody></table>
         <form id="add-player-form" class="add-player"><input id="add-player" autocomplete="off" placeholder="Add a player, full name" aria-label="Add a player, full name"><button type="submit" class="btn small">Add</button></form>
       </section>
@@ -297,6 +347,12 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
   let paidForm = null;                        // { slot, price, players: Set } while the price box is open
   const paidDismissed = new Set();            // booked hours whose price box Kevin closed on this visit, so it does not open itself again
   const peopleDraft = new Map();              // real names typed on the People screen and not saved yet, by person id
+  let scoreForm = null;                       // { key, on, a: [id, id], b: [id, id], sets: [[a, b] x3 as typed], friendly } while Add a score is open
+  let levelDraft = null;                      // { step, exact } as picked in Your level and not saved yet
+  const fbDraft = new Map();                  // feedback picked and not sent yet: "scoreId|aboutId" -> higher | expected | lower
+  const levelDrafts = new Map();              // levels typed on the People screen and not saved yet, by person id
+  let mdPick = null;                          // { slot, group, winner } after "Kings won" / "Challengers won", until who lost the last point is tapped
+  const mdSwap = new Map();                   // slot -> { a, b } picked in a match day's Swap and not sent yet
   // Kevin's phone key (30 Oct 2026): set once from a #admin= link, kept on this phone only, sent as a
   // header. The Worker decides; the page only hides what this phone may not do.
   // A Home Screen icon opens as its own app with its own storage, which a link opened in Safari never
@@ -396,7 +452,9 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const el = document.activeElement;
     if (!el || el === document.body || !el.dataset) return null;
     if (el.dataset.bookSlot) return '[data-book-slot="' + CSS.escape(el.dataset.bookSlot) + '"][data-book-venue="' + CSS.escape(el.dataset.bookVenue || '') + '"]';
-    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'bookPlayer', 'bookPrice', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName']) {
+    for (const k of ['slot', 'day', 'venue', 'person', 'goto', 'unbook', 'mark', 'bookSecond', 'bookCancel', 'bookField', 'bookPlayer', 'bookPrice', 'paidOpen', 'paidPlayer', 'paidPrice', 'retry', 'rename', 'realName',
+      'sf', 'fb', 'levelId', 'levelField', 'scoreOpen', 'scoreCancel', 'fbSend', 'scoreDelete', 'setLevel',
+      'mdStart', 'mdWin', 'mdLost', 'mdUndo', 'mdSwap', 'mdScore', 'mdCancel', 'mdSwapA', 'mdSwapB']) {
       if (el.dataset[k]) return '[data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()) + '="' + CSS.escape(el.dataset[k]) + '"]';
     }
     return el.id ? '#' + CSS.escape(el.id) : null;
@@ -484,12 +542,232 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     $('names-empty').hidden = S.people.length > 0;
   }
 
+  // Playtomic's level chart steps (Kevin, 27 Nov 2026: "use the Playtomic descriptions"). Playtomic's own
+  // words are theirs, so each step says the same thing in ours; the chart itself is one tap away.
+  const PLAYTOMIC_CHART = 'https://playerhelp.playtomic.com/hc/article_attachments/19831794916753';
+  const LEVEL_STEPS = [
+    [0, 'Initiation', 'New to racket sports altogether'],
+    [0.5, 'Initiation', 'Under six months of padel and no lessons yet; no real technique or tactics'],
+    [1, 'Initiation', 'Under a year of padel with few or no lessons; technique and tactics still to come'],
+    [1.5, 'Initiation to intermediate', 'A handful of lessons, playing about twice a month; can keep a slow rally going'],
+    [2, 'Initiation to intermediate', 'A year or more of padel and a handful of lessons, about twice a month; slow rallies and returns'],
+    [2.5, 'Intermediate', 'Most shots nearly there; can aim the ball at a normal pace'],
+    [3, 'Intermediate', 'Comfortable with most shots, hits mostly flat and drives the ball; still plenty of unforced errors'],
+    [3.5, 'Intermediate', 'Comfortable with most shots, slice on both sides as well as flat; aims well but still gives away a lot of points'],
+    [4, 'Intermediate high', 'In control of most shots and where they go, slice or flat; few unforced errors'],
+    [4.5, 'Intermediate high', 'Full control of the shot and where it goes, slice or flat by choice; adds pace but finds it hard to finish points'],
+    [5, 'Intermediate advanced', 'Sound technique and a strong tactical head; ready for quick-paced matches'],
+    [5.5, 'Advanced', 'Strong technique and tactics; ready for fast, high-level matches'],
+    [6, 'Advanced', 'Hits hard with control and depth, attacks with purpose, defends well off the walls and reads the opponents; just below elite'],
+    [7, 'Elite', 'Professional: the top of the world tour'],
+  ];
+  const lvlText = (x) => (x == null ? 'no level' : x.toFixed(2));
+  const signed = (d) => (d > 0 ? '+' : d < 0 ? '−' : '±') + Math.abs(d).toFixed(2);
+  const changeSpan = (d) => (d == null ? '' : `<span class="${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${signed(d)}</span>`);
+  const levelOf = (id) => ((S.levels && S.levels.players) || []).find((x) => x.id === id) || null;
+  const initialsOf = (id) => { const p = person(id); return p ? initials(p.name) : '?'; };   // two players can share a first name
+  const fullName = (id) => { const p = person(id); return p ? p.name : 'someone'; };
+  function isoAdd(date, n) {
+    const [y, m, d] = date.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + n, 12)).toISOString().slice(0, 10);
+  }
+  const newKey = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+
+  // Your level: pick a Playtomic step (or your exact Playtomic level) until a score has moved it.
+  function renderLevel() {
+    const mine = levelOf(me) || { level: null, matches: 0, reliability: 0 };
+    const box = $('level-body');
+    if (mine.matches > 0) {
+      box.innerHTML = `<p><strong>${esc(lvlText(mine.level))}</strong> <small>${esc(mine.matches)} rated score${mine.matches === 1 ? '' : 's'}, reliability ${esc(mine.reliability)}%</small></p>
+        <p class="note">Your level moves with your scores now. Kevin can change it if it is wrong.</p>`;
+      return;
+    }
+    const d = levelDraft || { step: mine.level != null && LEVEL_STEPS.some(([v]) => v === mine.level) ? String(mine.level) : '', exact: mine.level != null && !LEVEL_STEPS.some(([v]) => v === mine.level) ? String(mine.level) : '' };
+    const opts = LEVEL_STEPS.map(([v, band, text]) => `<option value="${v}"${String(v) === d.step ? ' selected' : ''}>${esc(v.toFixed(1) + ' ' + band + ': ' + text)}</option>`).join('');
+    box.innerHTML = `${mine.level != null ? `<p>Your level: <strong>${esc(lvlText(mine.level))}</strong>. You can change it until a score moves it.</p>` : '<p class="note">Pick where you start. Your level then moves with your scores.</p>'}
+      <form class="level-form" id="level-form">
+        <label for="level-step">Playtomic level (<a href="${PLAYTOMIC_CHART}" target="_blank" rel="noopener">Playtomic's own chart</a>)</label>
+        <select id="level-step" data-level-field="step"><option value="">Choose a level</option>${opts}</select>
+        <p class="level-step-text" id="level-step-text">${esc((LEVEL_STEPS.find(([v]) => String(v) === d.step) || [null, '', ''])[2])}</p>
+        <label for="level-exact">or your exact Playtomic level, if you have one</label>
+        <input id="level-exact" data-level-field="exact" inputmode="decimal" placeholder="for example 2.37" value="${esc(d.exact)}">
+        <button type="submit" class="btn primary"${busy ? ' disabled' : ''}>Save my level</button>
+      </form>`;
+  }
+
+  // The league table: everyone with a level, highest first; who has none yet, below it.
+  function renderLeague() {
+    const rows = ((S.levels && S.levels.players) || []).filter((x) => x.level != null && person(x.id)).sort((x, y) => y.level - x.level || fullName(x.id).localeCompare(fullName(y.id)));
+    $('league').innerHTML = rows.length ? rows.map((x) => `<li><span class="lvl">${esc(lvlText(x.level))}</span> ${esc(fullName(x.id))} ${x.last != null ? changeSpan(x.last) : ''}
+      <small>${esc(x.matches)} score${x.matches === 1 ? '' : 's'}, reliability ${esc(x.reliability)}%</small></li>`).join('') : '<li class="note empty">Nobody has picked a level yet.</li>';
+    const none = S.people.filter((p) => { const l = levelOf(p.id); return !l || l.level == null; }).map((p) => p.name);
+    $('no-level').hidden = !none.length;
+    $('no-level').textContent = none.length ? 'No level yet: ' + none.join(', ') + '.' : '';
+  }
+
+  // Add a score, and the last month's scores with their changes, feedback and (Kevin's phone) Delete.
+  function scoreFormHtml() {
+    const f = scoreForm;
+    const days = [0, 1, 2, 3, 4, 5, 6].map((n) => isoAdd(S.today, -n));
+    const dayOpts = days.map((d, i) => `<option value="${d}"${d === f.on ? ' selected' : ''}>${i === 0 ? 'Today' : i === 1 ? 'Yesterday' : esc(dayLong(d))}</option>`).join('');
+    const pick = (field, val) => `<select data-sf="${field}" aria-label="${field.startsWith('a') ? 'Pair 1' : 'Pair 2'} player"><option value="">Who?</option>${S.people.map((p) => `<option value="${p.id}"${p.id === val ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
+    const sets = [0, 1, 2].map((i) => `<label>Set ${i + 1} <input data-sf="s${i}a" inputmode="numeric" maxlength="1" value="${esc(f.sets[i][0])}" aria-label="Set ${i + 1}, pair 1 games">–<input data-sf="s${i}b" inputmode="numeric" maxlength="1" value="${esc(f.sets[i][1])}" aria-label="Set ${i + 1}, pair 2 games"></label>`).join('');
+    return `<form class="score-form" id="score-form">
+      <div class="sf-row"><label for="score-day">Played</label><select id="score-day" data-sf="on">${dayOpts}</select></div>
+      <div class="pair"><strong>Pair 1</strong> ${pick('a0', f.a[0])} ${pick('a1', f.a[1])}</div>
+      <div class="pair"><strong>Pair 2</strong> ${pick('b0', f.b[0])} ${pick('b1', f.b[1])}</div>
+      <div class="sets">${sets}</div>
+      <p class="note">Games for pair 1, then pair 2. Leave a set empty if you did not play it. Stopped mid-set? Put the games as they stood: levels move half as far.</p>
+      <label class="sf-row"><input type="checkbox" data-sf="friendly"${f.friendly ? ' checked' : ''}> Friendly (no level change)</label>
+      <div class="sf-row"><button type="submit" class="btn primary"${busy ? ' disabled' : ''}>Save score</button><button type="button" class="btn" data-score-cancel="1">Cancel</button></div>
+    </form>`;
+  }
+  function scoreLine(sc) {
+    const pair = (ids) => ids.map(fullName).map(esc).join(' + ');
+    const games = sc.sets.map(([x, y]) => x + '-' + y).join(' ');
+    const a = `<span class="${sc.winner === 'a' ? 'won' : ''}">${pair(sc.a)}</span>`;
+    const b = `<span class="${sc.winner === 'b' ? 'won' : ''}">${pair(sc.b)}</span>`;
+    const moved = [...sc.a, ...sc.b].filter((id) => sc.changes[id] != null || sc.feedback[id] != null)
+      .map((id) => esc(initialsOf(id)) + ' ' + changeSpan(Math.round(((sc.changes[id] || 0) + (sc.feedback[id] || 0)) * 1000) / 1000)).join(', ');
+    const how = !sc.rated ? 'Friendly: no level change.' : !sc.winner ? 'No winner: no level change.' : !sc.finished ? 'Unfinished: half the usual change.' : '';
+    let fb = '';
+    if (sc.feedbackOpen && [...sc.a, ...sc.b].includes(me)) {
+      if (sc.voted.includes(me)) fb = '<p class="note">Thanks: your feedback is in.</p>';
+      else {
+        const others = [...sc.a, ...sc.b].filter((id) => id !== me);
+        fb = `<div class="fb"><small>How did the others play against their level? Your answer is private, and it counts only when two players agree.</small>${others.map((id) => {
+          const k = sc.id + '|' + id;
+          const v = fbDraft.get(k) || 'expected';
+          return `<label class="sf-row">${esc(fullName(id))} <select data-fb="${esc(k)}">${[['higher', 'Higher'], ['expected', 'As expected'], ['lower', 'Lower']].map(([val, label]) => `<option value="${val}"${val === v ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
+        }).join('')}<div class="sf-row"><button type="button" class="btn small" data-fb-send="${esc(sc.id)}"${busy ? ' disabled' : ''}>Send feedback</button></div></div>`;
+      }
+    }
+    const del = isAdmin() ? ` <button type="button" class="btn small" data-score-delete="${esc(sc.id)}"${busy ? ' disabled' : ''}>Delete</button>` : '';
+    return `<li><small>${esc(dayLong(sc.on))}</small><br>${a} <strong>${esc(games)}</strong> ${b}${del}
+      ${moved ? `<br><small>${moved}</small>` : ''}${how ? `<br><small>${esc(how)}</small>` : ''}${fb}</li>`;
+  }
+  function renderScores() {
+    $('score-box').innerHTML = scoreForm ? scoreFormHtml() : `<button type="button" class="btn" data-score-open="1"${busy ? ' disabled' : ''}>Add a score</button>`;
+    const list = (S.levels && S.levels.scores) || [];
+    $('scores').innerHTML = list.length ? list.map(scoreLine).join('') : '<li class="note">No scores in the last month.</li>';
+  }
+  function openScoreForm() {
+    scoreForm = { key: newKey(), on: S.today, a: [me, null], b: [null, null], sets: [['', ''], ['', ''], ['', '']], friendly: false };
+    keepFocus(renderScores);
+  }
+  async function saveScore(ev) {
+    ev.preventDefault();
+    const f = scoreForm;
+    const ids = [...f.a, ...f.b];
+    if (ids.some((x) => !x) || new Set(ids).size !== 4) { toast('Pick two pairs: four different players.'); return; }
+    const half = f.sets.findIndex(([x, y]) => (String(x).trim() === '') !== (String(y).trim() === ''));
+    if (half >= 0) { toast('Put in both pairs\' games for set ' + (half + 1) + ' (0 if they won none).'); return; }
+    const sets = f.sets.filter(([x, y]) => String(x).trim() !== '').map(([x, y]) => [Number(x), Number(y)]);
+    if (!sets.length) { toast('Put in the games for at least one set.'); return; }
+    if (sets.some(([x, y]) => !Number.isInteger(x) || !Number.isInteger(y))) { toast('Games are whole numbers, 0 to 7.'); return; }
+    // The other pair may have put this match in already (more than half an hour ago, so the Worker would
+    // take it as a new match): ask before a second score for the same four on the same day.
+    const four = [...ids].sort((x, y) => x - y).join(',');
+    const twin = ((S.levels && S.levels.scores) || []).some((sc) => sc.on === f.on && [...sc.a, ...sc.b].sort((x, y) => x - y).join(',') === four);
+    if (twin && !window.confirm('A score for these four players on this day is already in. Is this a different match?')) return;
+    f.sent = true;                                    // an edit after this gets a new id, so a changed score is never taken as this one
+    const ok = await postAndApply('/api/score', { key: f.key, entered_by: me, played_on: f.on, team_a: f.a, team_b: f.b, sets, rated: !f.friendly }, f.friendly ? 'Score saved.' : 'Score saved: levels updated.');
+    if (ok) { scoreForm = null; keepFocus(renderScores); }
+  }
+  async function saveLevel(ev) {
+    ev.preventDefault();
+    const d = levelDraft || { step: $('level-step').value, exact: $('level-exact').value };
+    // The box changed last wins: picking a step after an exact level was shown sends the step.
+    const order = d.last === 'step' ? [d.step, d.exact] : [d.exact, d.step];
+    const raw = order.map((x) => String(x || '').trim()).find(Boolean) || '';
+    if (!raw) { toast('Choose a level first.'); return; }
+    const ok = await postAndApply('/api/level', { person_id: me, level: raw }, 'Level saved.');
+    if (ok) levelDraft = null;
+  }
+  function sendFeedback(scoreId) {
+    const sc = ((S.levels && S.levels.scores) || []).find((x) => x.id === scoreId);
+    if (!sc) return;
+    const votes = Object.fromEntries([...sc.a, ...sc.b].filter((id) => id !== me).map((id) => [id, fbDraft.get(sc.id + '|' + id) || 'expected']));
+    postAndApply('/api/feedback', { match_id: sc.id, from_id: me, votes }, 'Feedback sent.');
+  }
+
+  // ── Match day (Stage 3, Kevin 28 Nov 2026): on today's booked hour, the players split by his formats,
+  // fair teams, and Kings and challengers run by his rules with a points tally. The Worker decides; the
+  // page shows it and sends taps.
+  const pairText = (ids) => ids.map(fullName).map(esc).join(' + ');
+  function matchDayHtml(slot, b) {
+    const md = (S.matchday || {})[slot];
+    // Who may run it, as the Worker decides: the paid list, else the hour's ticks who can get there, and the booker.
+    const players = b.paid && b.paid.players.length ? b.paid.players
+      : [...(S.votes[slot] || []).filter((id) => (person(id) || { venues: [] }).venues.includes(b.venue)), ...(b.person_id ? [b.person_id] : [])];
+    const canRun = isAdmin() || players.includes(me);
+    if (!md) {
+      if (!canRun) return '';
+      return `<div class="md"><p><strong>Match day</strong>: split the players into courts and fair teams.</p>
+        <div class="md-btns"><button type="button" class="btn small primary" data-md-start="${esc(slot)}" data-md-mode="fair"${busy ? ' disabled' : ''}>Start match day</button></div></div>`;
+    }
+    const started = md.groups.some((g) => g.kind === 'kc' && g.games > 0);
+    const courts = md.groups.map((g) => (g.kind === 'match' ? matchCourt(slot, g, canRun) : kcCourt(slot, g, canRun))).join('');
+    let tools = '';
+    if (canRun && !started) {
+      const all = md.groups.flatMap((g) => g.players);
+      const d = mdSwap.get(slot) || {};
+      const opts = (sel) => `<option value="">Who?</option>${all.map((id) => `<option value="${id}"${id === sel ? ' selected' : ''}>${esc(fullName(id))}</option>`).join('')}`;
+      tools = `<div class="md-btns"><button type="button" class="btn small" data-md-start="${esc(slot)}" data-md-mode="fair"${busy ? ' disabled' : ''}>Fair teams</button>
+          <button type="button" class="btn small" data-md-start="${esc(slot)}" data-md-mode="shuffle"${busy ? ' disabled' : ''}>Shuffle</button></div>
+        <div class="md-btns"><label>Swap <select data-md-swap-a="${esc(slot)}" aria-label="Swap this player">${opts(d.a)}</select></label>
+          <label>with <select data-md-swap-b="${esc(slot)}" aria-label="with this player">${opts(d.b)}</select></label>
+          <button type="button" class="btn small" data-md-swap="${esc(slot)}"${busy ? ' disabled' : ''}>Swap</button></div>`;
+    }
+    const out = (md.sitOut || []).length ? `<p>Sitting out: ${md.sitOut.map(fullName).map(esc).join(', ')}</p>` : '';
+    return `<div class="md"><p><strong>Match day</strong>${md.note ? ': ' + esc(md.note) : ''}</p>${out}${courts}${tools}</div>`;
+  }
+  function matchCourt(slot, g, canRun) {
+    return `<div class="md-court"><h4>Court ${esc(g.no)}: a match</h4><p>${pairText(g.a)} <strong>v</strong> ${pairText(g.b)}</p>
+      ${canRun ? `<div class="md-btns"><button type="button" class="btn small" data-md-score="${esc(slot + '|' + g.no)}"${busy ? ' disabled' : ''}>Add the score</button></div>` : ''}</div>`;
+  }
+  function kcCourt(slot, g, canRun) {
+    const scored = Object.values(g.points).some((n) => n > 0);
+    const tally = !scored ? '' : Object.entries(g.points).map(([id, n]) => [Number(id), n]).sort((x, y) => y[1] - x[1] || fullName(x[0]).localeCompare(fullName(y[0])))
+      .map(([id, n]) => esc(fullName(id)) + ' ' + esc(n)).join(', ');
+    // The "who lost the last point" step belongs to the game it was opened on: once the court moves on
+    // (this phone's game went in, or another phone's), it is gone.
+    const pick = mdPick && mdPick.slot === slot && mdPick.group === g.no && mdPick.version === g.version ? mdPick : null;
+    let btns = '';
+    if (canRun && pick) {
+      const losers = pick.winner === 'kings' ? g.challengers : g.kings;
+      btns = `<p>Who lost the last point?</p><div class="md-btns">${losers.map((id) => `<button type="button" class="btn small primary" data-md-lost="${esc(slot + '|' + g.no + '|' + id)}"${busy ? ' disabled' : ''}>${esc(fullName(id))}</button>`).join('')}
+        <button type="button" class="btn small" data-md-cancel="1">Cancel</button></div>`;
+    } else if (canRun) {
+      btns = `<div class="md-btns"><button type="button" class="btn small primary" data-md-win="${esc(slot + '|' + g.no + '|kings')}"${busy ? ' disabled' : ''}>Kings won</button>
+        <button type="button" class="btn small primary" data-md-win="${esc(slot + '|' + g.no + '|challengers')}"${busy ? ' disabled' : ''}>Challengers won</button>
+        ${g.canUndo ? `<button type="button" class="btn small" data-md-undo="${esc(slot + '|' + g.no)}"${busy ? ' disabled' : ''}>Undo last game</button>` : ''}</div>`;
+    }
+    return `<div class="md-court"><h4>Court ${esc(g.no)}: Kings and challengers</h4>
+      <p><strong>Kings:</strong> ${pairText(g.kings)}${g.streak ? ` <small>(${esc(g.streak)} in a row)</small>` : ''}</p>
+      <p><strong>Challengers:</strong> ${pairText(g.challengers)}</p>
+      ${g.queue.length ? `<p><strong>Next:</strong> ${g.queue.map(fullName).map(esc).join(', ')}</p>` : ''}
+      ${btns}
+      <p class="md-tally">Points (a point for every win as king): ${tally || 'none yet'}. ${esc(g.games)} game${g.games === 1 ? '' : 's'} played.</p></div>`;
+  }
+  const mdGroup = (slot, no) => (((S.matchday || {})[slot] || {}).groups || []).find((g) => g.no === no);
+  function mdSend(body, done) {
+    return postAndApply('/api/matchday', { person_id: me, ...body }, done).then((ok) => {
+      if (ok && mdPick) { mdPick = null; keepFocus(renderGrid); }
+      if (!ok) { mdPick = null; load(); }                       // another phone moved the court on: show the latest
+      return ok;
+    });
+  }
+
   function renderBoard() {
     renderReady();
     renderNearly();
     renderDays();
     renderGrid();
     renderToggles();
+    renderLevel();
+    renderLeague();
+    renderScores();
     renderPeople();
     renderEarlier();
     renderUnsaved();
@@ -591,9 +869,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     $('day-note').hidden = !note.length;
     $('day-note').innerHTML = note.join('<br>');
     const readySlots = new Set(S.ready.map((r) => r.slot));
-    // Today shows only the hours still to come; after 21:00 it says so instead of an empty list.
+    // Today shows only the hours still to come; after 21:00 it says so instead of an empty list. A booked
+    // hour stays all day (28 Nov 2026): its match day runs while it is being played, and the score goes in after.
     const nowH = day === S.today ? londonHour() : -1;
-    const hours = S.hours.filter((h) => h >= nowH);
+    const hours = S.hours.filter((h) => h >= nowH || S.booked[day + '|' + pad(h)]);
     if (!hours.length) {
       $('grid').innerHTML = '<li class="row"><p class="note">No more hours today. Pick another day above.</p></li>';
       return;
@@ -629,13 +908,14 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const when = [b.start, b.minutes ? b.minutes + ' min' : ''].filter(Boolean).join(', ');
     const courts = b.courts > 1 ? ', ' + b.courts + ' courts' : '';
     const started = b.paid && b.paid.splitwise.state && b.paid.splitwise.state !== 'failed';
-    const undo = b.paid && (!isAdmin() || started) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
+    const undo = (b.paid && (!isAdmin() || started)) || hourOver(slot) ? '' : `<button type="button" class="btn small" data-unbook="${esc(slot)}"${busy ? ' disabled' : ''}>Undo</button>`;
     let html = `<p class="booked-line"><span>&#10003; Booked by ${esc(who)}: ${esc(where)}${when ? ' ' + esc(when) : ''}${esc(courts)}</span>
         ${undo}</p>`;
     if (b.paid) html += paidLine(slot, b);
     else if (isAdmin() && !(paidForm && paidForm.slot === slot)) html += `<p class="paid-line"><span>Splitwise and the texts wait for the price.</span> <button type="button" class="btn small primary" data-paid-open="${esc(slot)}"${busy ? ' disabled' : ''}>Add the price</button></p>`;
     else if (!isAdmin() && me && me === b.person_id) html += `<p class="paid-line"><span>The price and players go in on Kevin's phone. Is this it?</span> <button type="button" class="btn small" data-paste-key${busy ? ' disabled' : ''}>Paste key</button></p>`;
     if (paidForm && paidForm.slot === slot) html += paidFormHtml(slot, b);
+    if (slot.startsWith(S.today + '|')) html += matchDayHtml(slot, b);
     if (b.second) {
       html += `<p class="second"><span><strong>Second court?</strong> ${esc(b.second.count)} can play, and another court is free at ${esc(where)} ${esc(b.second.start)}${b.minutes ? ' for ' + esc(b.minutes) + ' min' : ''}.</span>
         <a class="btn small primary" href="${esc(b.second.book)}" target="_blank" rel="noopener noreferrer">Book</a>
@@ -698,7 +978,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     // A box left open, untouched, on another day gives way to this day's.
     if (paidForm && day && !paidForm.slot.startsWith(day + '|') && !paidForm.price) paidForm = null;
     if (!isAdmin() || paidForm || !day) return;
-    const nowH = day === S.today ? londonHour() : -1;            // only an hour the grid still shows
+    const nowH = day === S.today ? londonHour() : -1;            // only an hour still to come (a started booked hour stays on the grid for match day)
     const slot = Object.keys(S.booked).sort().find((s) => s.startsWith(day + '|') && Number(s.slice(-2)) >= nowH && !S.booked[s].paid && !paidDismissed.has(s));
     if (slot) paidForm = paidDraft(slot);
   }
@@ -716,12 +996,24 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     card.hidden = !isAdmin();
     $('key-line').hidden = isAdmin();                    // any phone without the key can paste it here
     if (card.hidden) return;
+    const setup = S.setup || null;
+    $('setup-line').textContent = setup && setup.at ? 'Last check: ' + timeLabel(setup.at) + '.' : 'The robot has not checked yet.';
     $('people-rows').innerHTML = S.people.map((p) => `<tr>
         <td>${esc(p.nick || p.name)}</td>
         <td><input value="${esc(peopleDraft.has(p.id) ? peopleDraft.get(p.id) : (p.nick ? p.name : ''))}" placeholder="Real name" aria-label="Real name for ${esc(p.nick || p.name)}" data-real-name="${esc(p.id)}"></td>
         <td aria-hidden="true">${esc(initials(p.name))}</td>
         <td><button type="button" class="btn small" data-rename="${esc(p.id)}"${busy ? ' disabled' : ''}>Save</button></td>
-      </tr>`).join('');
+      </tr><tr class="setup"><td colspan="4"><span class="setup-status">${setupLine(setup && setup.people ? setup.people[p.id] : null)}</span>
+        <br><label>Level <input class="lvl-in" inputmode="decimal" data-level-id="${esc(p.id)}" value="${esc(levelDrafts.has(p.id) ? levelDrafts.get(p.id) : (levelOf(p.id) && levelOf(p.id).level != null ? levelOf(p.id).level : ''))}" aria-label="Level for ${esc(p.nick || p.name)}"></label>
+        <button type="button" class="btn small" data-set-level="${esc(p.id)}"${busy ? ' disabled' : ''}>Set</button></td></tr>`).join('');
+  }
+  // One player's line from the robot's setup check: what a booking would still be missing, in its words.
+  function setupLine(s) {
+    const notes = s && Array.isArray(s.notes) ? s.notes.map(esc).join('; ') : '';
+    if (!s) return '<span class="wait">Not checked yet</span>';
+    if (s.state === 'ready') return '<span class="ok">&#10003; Ready for bookings</span>' + (notes ? ' (' + notes + ')' : '');
+    if (s.state === 'missing') return '<span class="bad">Needs:</span> ' + notes;
+    return '<span class="wait">Not fully checked:</span> ' + notes;
   }
 
   // Kevin's phone only: paid bookings from earlier days the robot has not finished, with Retry.
@@ -834,15 +1126,20 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
 
   function setBusy(on) {
     busy = on;
-    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn')) b.disabled = on;
+    for (const b of document.querySelectorAll('[data-book-slot],[data-unbook],[data-mark],[data-book-second],.book-form button,[data-paid-open],[data-paste-key],[data-retry],[data-rename],#add-player-form button,[data-venue],#check-now,#add-btn,[data-score-open],#score-form button,#level-form button,[data-fb-send],[data-score-delete],[data-set-level],[data-md-start],[data-md-win],[data-md-lost],[data-md-undo],[data-md-swap],[data-md-score]')) b.disabled = on;
   }
 
   // A tap decides from what is SHOWN. Untick a shown tick: cancel its pending add if that hour is
   // only pending, otherwise send a remove. Tick a shown blank: cancel its pending remove if the
   // server has the hour, otherwise send an add. An hour carried by a request on its way is never
   // cancelled: the tap becomes the explicit opposite change.
+  // A booked hour today keeps its row for match day: from its start its ticks no longer change, and once the
+  // hour is over its booking's Undo goes. An unbooked hour works as before until it is over.
+  const hourOver = (slot) => slot.startsWith(S.today + '|') && Number(slot.slice(-2)) < londonHour();
+  const bookedStarted = (slot) => !!S.booked[slot] && slot.startsWith(S.today + '|') && Number(slot.slice(-2)) <= londonHour();
   function toggle(slot) {
     if (!me) return;
+    if (hourOver(slot) || bookedStarted(slot)) { toast('That hour has started.'); return; }
     const way = onTheWay(slot);
     if (mine.has(slot)) {
       if (pendingAdd.has(slot) && !way && !serverHas(slot)) pendingAdd.delete(slot);
@@ -925,6 +1222,7 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
     me = id;
     store.set('padel.person', String(id));
+    clearLevelDrafts();
     showTruth();
     render();
     window.scrollTo(0, 0);
@@ -934,8 +1232,11 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     if (!(await saveAndWait())) { toast('Your ticks are not saved yet. Try again when you have signal.'); return; }
     me = null;
     store.del('padel.person');
+    clearLevelDrafts();
     render();
   }
+  // Someone else on this phone never sees, or saves, the last person's score, level or feedback.
+  function clearLevelDrafts() { scoreForm = null; levelDraft = null; fbDraft.clear(); }
 
   async function addName(ev) {
     ev.preventDefault();
@@ -1032,6 +1333,45 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       if (f === bookForm) f.picked = true;
       keepFocus(renderGrid);
     }
+    else if (t.dataset.mdStart) mdSend({ slot: t.dataset.mdStart, action: 'start', mode: t.dataset.mdMode }, t.dataset.mdMode === 'shuffle' ? 'Teams shuffled.' : 'Match day is ready.');
+    else if (t.dataset.mdWin) { const [d, hh, no, winner] = t.dataset.mdWin.split('|'); const g = mdGroup(d + '|' + hh, Number(no)); mdPick = { slot: d + '|' + hh, group: Number(no), winner, version: g ? g.version : -1 }; keepFocus(renderGrid); }
+    else if (t.dataset.mdCancel) { mdPick = null; keepFocus(renderGrid); }
+    else if (t.dataset.mdLost) {
+      const [d, hh, no, id] = t.dataset.mdLost.split('|');
+      const slot = d + '|' + hh;
+      const g = mdGroup(slot, Number(no));
+      if (g && mdPick) mdSend({ slot, action: 'kc-game', group: g.no, version: g.version, winner: mdPick.winner, lost_by: Number(id) }, 'Game in.');
+    }
+    else if (t.dataset.mdUndo) {
+      const [d, hh, no] = t.dataset.mdUndo.split('|');
+      const g = mdGroup(d + '|' + hh, Number(no));
+      if (g) mdSend({ slot: d + '|' + hh, action: 'kc-undo', group: g.no, version: g.version }, 'Last game undone.');
+    }
+    else if (t.dataset.mdSwap) {
+      const slot = t.dataset.mdSwap;
+      const d = mdSwap.get(slot) || {};
+      if (!d.a || !d.b || d.a === d.b) toast('Pick two different players to swap.');
+      else mdSend({ slot, action: 'swap', a: d.a, b: d.b }, 'Swapped.').then((ok) => { if (ok) { mdSwap.delete(slot); keepFocus(renderGrid); } });
+    }
+    else if (t.dataset.mdScore) {
+      const [d, hh, no] = t.dataset.mdScore.split('|');
+      const g = mdGroup(d + '|' + hh, Number(no));
+      if (g) {
+        scoreForm = { key: newKey(), on: S.today, a: [...g.a], b: [...g.b], sets: [['', ''], ['', ''], ['', '']], friendly: false };
+        keepFocus(renderScores);
+        const box = $('score-box');
+        if (box) box.scrollIntoView({ block: 'center' });
+      }
+    }
+    else if (t.dataset.scoreOpen) openScoreForm();
+    else if (t.dataset.scoreCancel) { scoreForm = null; keepFocus(renderScores); }
+    else if (t.dataset.fbSend) sendFeedback(Number(t.dataset.fbSend));
+    else if (t.dataset.scoreDelete) { if (window.confirm('Delete this score? Every level change it made is reversed.')) postAndApply('/api/admin', { action: 'score-delete', id: Number(t.dataset.scoreDelete) }, 'Score deleted: levels put back.'); }
+    else if (t.dataset.setLevel) {
+      const id = Number(t.dataset.setLevel);
+      const input = document.querySelector('[data-level-id="' + CSS.escape(t.dataset.setLevel) + '"]');
+      postAndApply('/api/admin', { action: 'level', id, level: input ? input.value.trim() : '' }, 'Level set.').then((ok) => { if (ok) { levelDrafts.delete(id); renderPeople(); } });
+    }
     else if (t.dataset.retry) { const [d, hh, step] = t.dataset.retry.split('|'); postAndApply('/api/admin', { action: 'retry', slot: d + '|' + hh, step }, 'The robot will try again within 15 minutes.'); }
     else if (t.dataset.rename) {
       const input = document.querySelector('[data-real-name="' + CSS.escape(t.dataset.rename) + '"]');
@@ -1045,6 +1385,10 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     else if (t.id === 'retry') { $('retry').hidden = true; $('loading-text').textContent = 'Loading...'; load(); }
   });
   $('add-form').addEventListener('submit', addName);
+  document.addEventListener('submit', (ev) => {
+    if (ev.target.id === 'score-form') saveScore(ev);
+    else if (ev.target.id === 'level-form') saveLevel(ev);
+  });
   // The Booked picker: Save sends the booking with its details; a change of venue or start redraws the "(free)" hints.
   document.addEventListener('submit', (ev) => {
     const form = ev.target.closest('[data-book-form]');
@@ -1076,7 +1420,26 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
       if (ok && paidForm && paidForm.slot === slot) { paidForm = null; keepFocus(renderGrid); }
     });
   });
+  // Drafts kept as they are typed or picked, so a redraw (a poll, a save elsewhere) never loses them.
+  function keepDraft(el) {
+    const ds = el.dataset || {};
+    if (ds.levelId) levelDrafts.set(Number(ds.levelId), el.value);
+    if (ds.levelField) { levelDraft = levelDraft || { step: $('level-step').value, exact: $('level-exact').value }; levelDraft[ds.levelField] = el.value; levelDraft.last = ds.levelField; }
+    if (ds.levelField === 'step' && $('level-step-text')) $('level-step-text').textContent = (LEVEL_STEPS.find(([v]) => String(v) === el.value) || [null, '', ''])[2];
+    if (ds.fb) fbDraft.set(ds.fb, el.value);
+    if (ds.mdSwapA || ds.mdSwapB) { const slot = ds.mdSwapA || ds.mdSwapB; const d = mdSwap.get(slot) || {}; d[ds.mdSwapA ? 'a' : 'b'] = el.value ? Number(el.value) : null; mdSwap.set(slot, d); }
+    if (ds.sf && scoreForm) {
+      const k = ds.sf;
+      if (scoreForm.sent) { scoreForm.key = newKey(); scoreForm.sent = false; }
+      if (k === 'on') scoreForm.on = el.value;
+      else if (k === 'friendly') scoreForm.friendly = el.checked;
+      else if (/^[ab][01]$/.test(k)) scoreForm[k[0]][Number(k[1])] = el.value ? Number(el.value) : null;
+      else if (/^s[012][ab]$/.test(k)) scoreForm.sets[Number(k[1])][k[2] === 'a' ? 0 : 1] = el.value.replace(/[^0-9]/g, '');
+    }
+  }
+  document.addEventListener('change', (ev) => keepDraft(ev.target));
   document.addEventListener('input', (ev) => {
+    keepDraft(ev.target);
     if (ev.target.dataset && ev.target.dataset.realName) peopleDraft.set(Number(ev.target.dataset.realName), ev.target.value);
     // A price box's draft is kept as it is typed, so a redraw (a poll, a tick) never loses it.
     const draft = ev.target.dataset && ev.target.dataset.paidPrice ? paidForm : ev.target.dataset && ev.target.dataset.bookPrice ? bookForm : null;
@@ -1091,6 +1454,8 @@ h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(-
     const input = $('add-player');
     const name = input.value.trim().replace(/\s+/g, ' ');
     if (name.length < 2) { toast('Type their full name first.'); input.focus(); return; }
+    // Their first name and surname, as in your contacts and Splitwise: the robot finds them by it.
+    if (name.split(' ').length < 2) { toast('Type their first name and surname, as in your contacts.'); input.focus(); return; }
     setBusy(true);
     try {
       const known = new Set(S.people.map((p) => p.id));

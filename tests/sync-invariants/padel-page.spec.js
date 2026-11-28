@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // voteStatuses: one per request in order; 'applied-500' applies the change and then answers 500.
 // The phone key the mock Worker accepts (Kevin's phone, 30 Oct 2026): a request carrying it gets admin: true.
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
-async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [] } = {}) {
+async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFrom = null, siFree = null, readyAt = null, crowdAt = null, booked = [], earlier = [], setup = null, levels = { players: [], scores: [] }, matchdaySeq = [] } = {}) {
   const person = { id: 1, name: 'Test Ann', venues: ['si', 'pdl', 'pp'], savedAt: null };
   const other = { id: 2, name: 'Test Bob', venues: ['si', 'pdl', 'pp'], savedAt: null };
   // readyAt 'HH': two more people, and Bob, Cat and Dan already on tomorrow at that hour, so
@@ -60,7 +60,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
   // crowdAt 'HH': six more people, and all eight (Ann too) on tomorrow at that hour: a second court's crowd.
   const PEOPLE = ['Test Cat', 'Test Dan', 'Test Eve', 'Test Fay', 'Test Gus', 'Test Hal'].map((name, i) => ({ id: i + 3, name, venues: ['si', 'pdl', 'pp'], savedAt: null }));
   const extras = crowdAt ? PEOPLE : readyAt ? PEOPLE.slice(0, 2) : [];
-  const store = { votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
+  const store = { matchday: {}, matchdaySeq: structuredClone(matchdaySeq), matchdayBodies: [], levels: structuredClone(levels), levelBodies: [], scoreBodies: [], feedbackBodies: [], votes: new Map(), booked: booked.map((b) => ({ ...b })), bookedBodies: [], adminBodies: [], realNames: new Map(), added: [], headers: [], bodies: [], times: [], stateTimes: [], replyTimes: [], answered: 0, inflight: 0, maxInflight: 0, inflightBy: {}, maxInflightBy: {} };
   if (readyAt) {
     const slot = `${londonDates(Date.now())[1]}|${readyAt}`;
     for (const pid of [2, 3, 4]) store.votes.set(`${pid}|${slot}`, { person_id: pid, slot });
@@ -85,7 +85,7 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     );
     const named = (p) => (store.realNames.has(p.id) ? { ...p, realName: store.realNames.get(p.id) } : p);
     const everyone = (store.gone ? [other, ...extras] : [person, other, ...extras]).concat(store.added);
-    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier };
+    return { ...computeState({ people: everyone.map(named), votes: [...store.votes.values()], booked: store.booked, availability, dates: londonDates(now), nowMs: now }), earlier, levels: store.levels, matchday: store.matchday };
   };
   const reply = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
@@ -94,7 +94,8 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
     if (store.offline) return route.abort('internetdisconnected');      // no signal at all
     store.headers.push(req.headers());
     const admin = req.headers()['x-admin-key'] === ADMIN_KEY;
-    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, { ...state(), admin }); }
+    // The robot's setup check rides only on Kevin's phone's replies, as the Worker sends it (27 Nov 2026).
+    if (path === '/api/state') { store.stateTimes.push(Date.now()); return reply(route, 200, { ...state(), admin, ...(admin ? { setup } : {}) }); }
     if (path === '/api/refresh') return reply(route, 200, { ...state(), refreshed: false, admin });
     if (path === '/api/admin') {                                         // the Worker's admin route, as far as the page uses it
       if (!admin) return reply(route, 401, { error: "Only Kevin's phone can do that" });
@@ -103,7 +104,33 @@ async function mockPadel(page, { voteDelayMs = 0, voteStatuses = [], siClosedFro
       if (body.action === 'name') { if (body.real_name) store.realNames.set(body.id, body.real_name); else store.realNames.delete(body.id); }
       if (body.action === 'paid') Object.assign(store.booked.find((b) => b.slot === body.slot), { price_pence: Math.round(body.price * 100), players: JSON.stringify(body.players), paid_at: new Date().toISOString() });
       if (body.action === 'retry') { const e = earlier.find((x) => x.slot === body.slot); if (e) e.paid[body.step] = { state: null, at: null, note: null }; }
-      return reply(route, 200, { ...state(), admin: true });
+      return reply(route, 200, { ...state(), admin: true, setup });
+    }
+    // Stage 2 (27 Nov 2026): the level, score and feedback saves, as far as the page uses them.
+    if (path === '/api/level') {
+      const body = req.postDataJSON();
+      store.levelBodies.push(body);
+      const row = store.levels.players.find((x) => x.id === body.person_id);
+      if (row) row.level = Number(body.level); else store.levels.players.push({ id: body.person_id, level: Number(body.level), matches: 0, reliability: 0, last: null });
+      return reply(route, 200, { ...state(), admin });
+    }
+    if (path === '/api/score') {
+      const body = req.postDataJSON();
+      store.scoreBodies.push(body);
+      store.levels.scores.unshift({ id: 900 + store.scoreBodies.length, on: body.played_on, a: body.team_a, b: body.team_b, sets: body.sets, rated: body.rated, kind: 'match', winner: 'a', finished: true, changes: {}, feedback: {}, enteredBy: body.entered_by, feedbackOpen: body.rated, voted: [] });
+      return reply(route, 200, { ...state(), admin });
+    }
+    if (path === '/api/matchday') {                                      // Stage 3: each POST shows the next state the test lined up
+      store.matchdayBodies.push(req.postDataJSON());
+      if (store.matchdaySeq.length) store.matchday = store.matchdaySeq.shift();
+      return reply(route, 200, { ...state(), admin });
+    }
+    if (path === '/api/feedback') {
+      const body = req.postDataJSON();
+      store.feedbackBodies.push(body);
+      const sc = store.levels.scores.find((x) => x.id === body.match_id);
+      if (sc) sc.voted.push(body.from_id);
+      return reply(route, 200, { ...state(), admin });
     }
     if (path === '/api/person') {                                        // adding a player by name
       const body = req.postDataJSON();
@@ -723,6 +750,45 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       await expect(page.locator('#people-rows')).toContainText('Test Carl');
     });
 
+    // 27 Nov 2026 (Kevin: adding players must not "cock up every time"): under each person, the robot's
+    // setup check says ready, what is missing, or not checked; adding a player needs the full name.
+    test('the People screen shows each player ready, missing something, or not checked, and Add needs a full name', async ({ page }) => {
+      const at = new Date(Date.now() - 5 * 60000).toISOString();
+      const setup = { at, people: {
+        1: { state: 'ready', notes: [] },
+        2: { state: 'missing', notes: ['not in the Padel WhatsApp group under that name', '<b>not bold</b>'] },
+      } };
+      const store = await mockPadel(page, { siClosedFrom: 7, setup });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await expect(page.locator('#people-card')).toBeVisible();
+      const when = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+      await expect(page.locator('#setup-line')).toHaveText(`Last check: ${when}.`);
+      const lines = page.locator('#people-rows tr.setup .setup-status');
+      await expect(lines).toHaveCount(2);
+      await expect(lines.nth(0)).toHaveText('✓ Ready for bookings');
+      await expect(lines.nth(1)).toHaveText('Needs: not in the Padel WhatsApp group under that name; <b>not bold</b>');   // shown as text, never as markup
+      await expect(lines.nth(1).locator('b')).toHaveCount(0);
+      // One word is refused before anything is sent; the full name goes through and shows "Not checked yet".
+      await page.locator('#add-player').fill('Carl');
+      await page.locator('#add-player-form button').click();
+      await expect(page.locator('#toast')).toContainText('first name and surname');
+      expect(store.added).toEqual([]);
+      await page.locator('#add-player').fill('Test Carl');
+      await page.locator('#add-player-form button').click();
+      await expect(page.locator('#people-rows')).toContainText('Test Carl');
+      await expect(lines).toHaveCount(3);
+      await expect(lines.nth(2)).toHaveText('Not checked yet');
+    });
+
+    test('before the robot\'s first check the People screen says so', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7 });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      await expect(page.locator('#setup-line')).toHaveText('The robot has not checked yet.');
+      await expect(page.locator('#people-rows tr.setup .setup-status').first()).toHaveText('Not checked yet');
+    });
+
     // 8 Nov 2026: a booking marked at 20:41 sat all night with no price because the price was a second
     // button. On Kevin's phone a booked hour with no price now opens its price box by itself.
     test('a booked hour with no price opens its price box by itself: players ticked, the price splits, and Save sends it', async ({ page }) => {
@@ -879,4 +945,275 @@ test.describe('padel page: shown = server truth + unsent changes', () => {
       expect(await page.evaluate(() => localStorage.getItem('padel.k'))).toBeNull();
     });
   });
+
+  // Stage 2 (Kevin, 27 Nov 2026): levels on Playtomic's 0 to 7 scale, scores, feedback, a league table.
+  test.describe('levels and scores (27 Nov 2026)', () => {
+    const today = () => londonDates(Date.now())[0];
+    const scored = (extra = {}) => ({ id: 7, on: today(), a: [1, 2], b: [3, 4], sets: [[6, 4], [6, 3]], rated: true, kind: 'match', winner: 'a', finished: true,
+      changes: { 1: 0.177, 2: 0.186, 3: -0.177, 4: -0.177 }, feedback: {}, enteredBy: 1, feedbackOpen: true, voted: [], ...extra });
+
+    test('a player picks a starting Playtomic level, or types their exact one, and saves it', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7 });
+      await openAsTestAnn(page);
+      const step = page.locator('#level-step');
+      await expect(step.locator('option')).toHaveCount(15);                     // "Choose a level" and Playtomic's 14 steps
+      await expect(step.locator('option[value="3"]')).toHaveText(/^3\.0 Intermediate: /);
+      await expect(page.locator('#level-card a')).toHaveAttribute('href', 'https://playerhelp.playtomic.com/hc/article_attachments/19831794916753');
+      await step.selectOption('3');
+      await page.locator('#level-form button[type="submit"]').click();
+      await expect(page.locator('#level-body')).toContainText('Your level: 3.00');
+      expect(store.levelBodies).toEqual([{ person_id: 1, level: '3' }]);
+      await page.locator('#level-exact').fill('2.37');
+      await page.locator('#level-form button[type="submit"]').click();
+      await expect(page.locator('#level-body')).toContainText('Your level: 2.37');
+      expect(store.levelBodies[1]).toEqual({ person_id: 1, level: '2.37' });
+    });
+
+    // Review of PR #1023: with an exact level showing, a step picked from the list was ignored.
+    test('with an exact level showing, a step picked from the list is the one sent', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, levels: { players: [{ id: 1, level: 2.37, matches: 0, reliability: 0, last: null }], scores: [] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#level-exact')).toHaveValue('2.37');
+      await page.locator('#level-step').selectOption('3');
+      await page.locator('#level-form button[type="submit"]').click();
+      await expect.poll(() => store.levelBodies).toEqual([{ person_id: 1, level: '3' }]);
+    });
+
+    // 28 Nov 2026, seen on the live page: a long step description made the list wider than the phone and
+    // pushed the Save button's words out of sight; the empty league read "1."; form rows took the hour cards' border.
+    test('on a phone the level and score forms fit the screen, the Save button reads, and the chosen step is written out in full', async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await openAsTestAnn(page);
+      await page.locator('#level-step').selectOption('6');
+      await expect(page.locator('#level-step-text')).toHaveText(/^Hits hard with control and depth/);
+      await page.locator('[data-score-open]').click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      const save = page.locator('#level-form button[type="submit"]');
+      await expect(save).toHaveText('Save my level');
+      const box = await save.boundingBox();
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+      await expect(page.locator('#league li.empty')).toHaveText('Nobody has picked a level yet.');
+      expect(await page.locator('#score-form .sf-row').first().evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('0px');
+    });
+
+    test('once scores have moved a level, the card says so and has no picker', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, levels: { players: [{ id: 1, level: 3.18, matches: 2, reliability: 10, last: 0.18 }], scores: [] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#level-body')).toContainText('3.18');
+      await expect(page.locator('#level-body')).toContainText('2 rated scores, reliability 10%');
+      await expect(page.locator('#level-form')).toHaveCount(0);
+    });
+
+    test('the league table lists levels highest first with the last change, and who has no level yet', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [
+        { id: 2, level: 2.69, matches: 1, reliability: 5, last: 0.186 }, { id: 1, level: 3.18, matches: 1, reliability: 5, last: 0.177 }, { id: 3, level: null, matches: 0, reliability: 0, last: null },
+      ], scores: [] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#league li')).toHaveText([/^3\.18 Test Ann \+0\.18\s+1 score, reliability 5%$/, /^2\.69 Test Bob \+0\.19\s+1 score, reliability 5%$/]);
+      await expect(page.locator('#no-level')).toHaveText('No level yet: Test Cat, Test Dan.');
+    });
+
+    test('Add a score: two pairs and the games go in one body, and what was typed survives a redraw', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await openAsTestAnn(page);
+      await page.locator('[data-score-open]').click();
+      await page.locator('[data-sf="a1"]').selectOption('2');
+      await page.locator('[data-sf="b0"]').selectOption('3');
+      await page.locator('[data-sf="b1"]').selectOption('4');
+      await page.locator('[data-sf="s0a"]').fill('6');
+      await page.locator('[data-sf="s0b"]').fill('4');
+      await Promise.all([                                                         // a redraw from a fresh reply, landed before typing on
+        page.waitForResponse((r) => r.url().includes('/api/refresh')),
+        page.locator('#check-now').click(),
+      ]);
+      await expect(page.locator('#check-now')).toBeEnabled();
+      await expect(page.locator('[data-sf="s0a"]')).toHaveValue('6');
+      await expect(page.locator('[data-sf="b1"]')).toHaveValue('4');
+      await page.locator('[data-sf="s1a"]').fill('6');
+      await page.locator('[data-sf="s1b"]').fill('3');
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(0);
+      expect(store.scoreBodies).toHaveLength(1);
+      expect(store.scoreBodies[0]).toEqual({ key: expect.stringMatching(/^[A-Za-z0-9-]{8,64}$/), entered_by: 1, played_on: today(), team_a: [1, 2], team_b: [3, 4], sets: [[6, 4], [6, 3]], rated: true });
+      await expect(page.locator('#scores li').first()).toContainText('Test Ann + Test Bob 6-4 6-3 Test Cat + Test Dan');
+      // Three players is refused on the page, before anything is sent.
+      await page.locator('[data-score-open]').click();
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#toast')).toContainText('four different players');
+      expect(store.scoreBodies).toHaveLength(1);
+    });
+
+    test('a set with one pair\'s games left blank is refused before anything is sent, and the form is gone for the next person on the phone', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      await openAsTestAnn(page);
+      await page.locator('[data-score-open]').click();
+      await page.locator('[data-sf="a1"]').selectOption('2');
+      await page.locator('[data-sf="b0"]').selectOption('3');
+      await page.locator('[data-sf="b1"]').selectOption('4');
+      await page.locator('[data-sf="s0a"]').fill('6');
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#toast')).toContainText("Put in both pairs' games for set 1");
+      expect(store.scoreBodies).toEqual([]);
+      await page.locator('#switch').click();
+      await page.locator('[data-person="2"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(0);
+    });
+
+    test('a second score for the same four on the same day asks first: No sends nothing, Yes sends it', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored({ feedbackOpen: false })] } });
+      await openAsTestAnn(page);
+      const fill = async () => {
+        await page.locator('[data-score-open]').click();
+        await page.locator('[data-sf="a1"]').selectOption('4');
+        await page.locator('[data-sf="b0"]').selectOption('2');
+        await page.locator('[data-sf="b1"]').selectOption('3');
+        await page.locator('[data-sf="s0a"]').fill('6');
+        await page.locator('[data-sf="s0b"]').fill('2');
+      };
+      await fill();
+      page.once('dialog', (d) => d.dismiss());
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(1);
+      expect(store.scoreBodies).toEqual([]);
+      page.once('dialog', (d) => d.accept());
+      await page.locator('#score-form button[type="submit"]').click();
+      await expect(page.locator('#score-form')).toHaveCount(0);
+      expect(store.scoreBodies).toHaveLength(1);
+    });
+
+    test('a player in a fresh rated score sees the changes, marks the other three and sends feedback once', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored()] } });
+      await openAsTestAnn(page);
+      const li = page.locator('#scores li').first();
+      await expect(li).toContainText('TA +0.18, TB +0.19, TC −0.18, TD −0.18');
+      await expect(li.locator('[data-fb]')).toHaveCount(3);
+      await li.locator('[data-fb="7|3"]').selectOption('higher');
+      await li.locator('[data-fb-send]').click();
+      await expect(page.locator('#scores li').first()).toContainText('your feedback is in');
+      expect(store.feedbackBodies).toEqual([{ match_id: 7, from_id: 1, votes: { 2: 'expected', 3: 'higher', 4: 'expected' } }]);
+    });
+
+    test('a friendly or unfinished score says so; someone who did not play sees no feedback', async ({ page }) => {
+      await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [
+        scored({ id: 8, rated: false, changes: {}, feedbackOpen: false }), scored({ id: 9, a: [2, 3], b: [4, 5], finished: false, sets: [[6, 4], [3, 2]] }),
+      ] } });
+      await openAsTestAnn(page);
+      await expect(page.locator('#scores li').nth(0)).toContainText('Friendly: no level change.');
+      await expect(page.locator('#scores li').nth(1)).toContainText('Unfinished: half the usual change.');
+      await expect(page.locator('#scores [data-fb]')).toHaveCount(0);
+    });
+
+    test('Kevin\'s phone: Delete asks first, and a level can be set for anyone on the People screen', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', levels: { players: [], scores: [scored({ feedbackOpen: false })] } });
+      await page.addInitScript((k) => { localStorage.setItem('padel.person', '1'); localStorage.setItem('padel.admin', k); }, ADMIN_KEY);
+      await page.goto(PAGE);
+      page.once('dialog', (d) => d.accept());
+      await page.locator('[data-score-delete="7"]').click();
+      await expect.poll(() => store.adminBodies).toEqual([{ action: 'score-delete', id: 7 }]);
+      await page.locator('[data-level-id="2"]').fill('2.5');
+      await page.locator('[data-set-level="2"]').click();
+      await expect.poll(() => store.adminBodies.at(-1)).toEqual({ action: 'level', id: 2, level: '2.5' });
+    });
+  });
+
+  // Stage 3 (Kevin, 28 Nov 2026): match day on today's booked hour.
+  test.describe('match day (28 Nov 2026)', () => {
+    const today = () => londonDates(Date.now())[0];
+    const SLOT = () => `${today()}|19`;
+    // The page's clock at 10:00 today, so today's 19:00 booking shows whatever time the suite runs.
+    const at10 = async (page) => { await page.clock.setFixedTime(new Date(`${today()}T10:00:00Z`)); };
+    const booking = (players) => ({ slot: SLOT(), person_id: 1, venue: 'pdl', start: '19:00', minutes: 90, courts: 1, price_pence: 3000, players: JSON.stringify(players), paid_at: new Date().toISOString() });
+    const kc = (extra = {}) => ({ no: 1, kind: 'kc', version: 0, players: [1, 2, 3, 4, 5], kings: [1, 2], challengers: [3, 4], queue: [5], streak: 0, points: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, games: 0, canUndo: false, mode: 'fair', ...extra });
+    const openToday = async (page) => {
+      await at10(page);
+      await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${today()}"]`).click();
+    };
+
+    test('a player starts match day; five players get Kings and challengers with the kings, challengers, queue and points shown', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19', booked: [], matchdaySeq: [] });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc()] } });
+      await openToday(page);
+      await page.locator(`[data-md-start="${SLOT()}"]`).first().click();
+      await expect(page.locator('.md-court h4')).toHaveText('Court 1: Kings and challengers');
+      expect(store.matchdayBodies).toEqual([{ person_id: 1, slot: SLOT(), action: 'start', mode: 'fair' }]);
+      const court = page.locator('.md-court');
+      await expect(court).toContainText('Kings: Test Ann + Test Bob');
+      await expect(court).toContainText('Challengers: Test Cat + Test Dan');
+      await expect(court).toContainText('Next: Test Eve');
+      await expect(court).toContainText('none yet. 0 games played.');
+    });
+
+    test('Kings won, then who lost the last point: one game sent with the version seen; the tally and Undo follow', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: '', groups: [kc({ version: 4 })] } };
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc({ version: 5, challengers: [4, 5], queue: [3], streak: 1, points: { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 }, games: 1, canUndo: true })] } });
+      store.matchdaySeq.push({ [SLOT()]: { note: '', groups: [kc({ version: 6 })] } });
+      await openToday(page);
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await expect(page.locator('.md-court')).toContainText('Who lost the last point?');
+      await expect(page.locator('[data-md-lost]')).toHaveText(['Test Cat', 'Test Dan']);   // the challengers lost
+      await page.locator(`[data-md-lost="${SLOT()}|1|3"]`).click();
+      await expect(page.locator('.md-court')).toContainText('Kings: Test Ann + Test Bob (1 in a row)');
+      await expect(page.locator('.md-tally')).toContainText('Test Ann 1, Test Bob 1, Test Cat 0');
+      expect(store.matchdayBodies).toEqual([{ person_id: 1, slot: SLOT(), action: 'kc-game', group: 1, version: 4, winner: 'kings', lost_by: 3 }]);
+      await page.locator(`[data-md-undo="${SLOT()}|1"]`).click();
+      await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'kc-undo', group: 1, version: 5 });
+    });
+
+    test('a match court opens Add a score with its pairs filled in; Swap sends the two players', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4]));
+      store.matchday = { [SLOT()]: { note: '', groups: [{ no: 1, kind: 'match', version: 0, players: [1, 2, 3, 4], a: [1, 4], b: [2, 3], mode: 'fair' }] } };
+      await openToday(page);
+      await expect(page.locator('.md-court')).toContainText('Test Ann + Test Dan v Test Bob + Test Cat');
+      await page.locator(`[data-md-score="${SLOT()}|1"]`).click();
+      await expect(page.locator('[data-sf="a0"]')).toHaveValue('1');
+      await expect(page.locator('[data-sf="a1"]')).toHaveValue('4');
+      await expect(page.locator('[data-sf="b0"]')).toHaveValue('2');
+      await expect(page.locator('[data-sf="b1"]')).toHaveValue('3');
+      await page.locator(`[data-md-swap-a="${SLOT()}"]`).selectOption('1');
+      await page.locator(`[data-md-swap-b="${SLOT()}"]`).selectOption('2');
+      await page.locator(`[data-md-swap="${SLOT()}"]`).click();
+      await expect.poll(() => store.matchdayBodies.at(-1)).toEqual({ person_id: 1, slot: SLOT(), action: 'swap', a: 1, b: 2 });
+    });
+
+    test('a booked hour stays on today\'s list after it has started, so match day is there all game', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4]));
+      await page.clock.setFixedTime(new Date(`${today()}T20:40:00Z`));
+      await page.addInitScript(() => { localStorage.setItem('padel.person', '1'); });
+      await page.goto(PAGE);
+      await page.locator(`[data-day="${today()}"]`).click();
+      await expect(page.locator('#row-19')).toBeVisible();
+      await expect(page.locator('#row-18')).toHaveCount(0);
+      await expect(page.locator(`[data-md-start="${SLOT()}"]`)).toBeVisible();
+      await expect(page.locator(`[data-unbook="${SLOT()}"]`)).toHaveCount(0);   // started: no Undo of the booking
+      await page.locator(`[data-slot="${SLOT()}"]`).click();
+      await expect(page.locator('#toast')).toContainText('That hour has started.');
+    });
+
+    test('a clash with another phone shows the latest court instead of sticking; who sits out is named', async ({ page }) => {
+      const store = await mockPadel(page, { siClosedFrom: 7, readyAt: '19' });
+      store.booked.push(booking([1, 2, 3, 4, 5]));
+      store.added.push({ id: 5, name: 'Test Eve', venues: ['si', 'pdl', 'pp'], savedAt: null });
+      store.matchday = { [SLOT()]: { note: 'Only 12 fit: 1 sit out', sitOut: [5], groups: [kc({ version: 4 })] } };
+      await page.route('**/api/matchday', (route) => { store.matchday = { [SLOT()]: { note: '', sitOut: [], groups: [kc({ version: 9, games: 5, streak: 2 })] } }; return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Someone else just recorded a game: here is the latest' }) }); });
+      await openToday(page);
+      await expect(page.locator('.md')).toContainText('Sitting out: Test Eve');
+      await page.locator(`[data-md-win="${SLOT()}|1|kings"]`).click();
+      await page.locator(`[data-md-lost="${SLOT()}|1|3"]`).click();
+      await expect(page.locator('#toast')).toContainText('Someone else just recorded a game');
+      await expect(page.locator('.md-court')).toContainText('(2 in a row)');                   // the latest, read again
+      await expect(page.locator('.md-tally')).toContainText('5 games played.');
+      await expect(page.locator('[data-md-lost]')).toHaveCount(0);
+    });
+  });
 });
+

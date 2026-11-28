@@ -45,6 +45,11 @@ fb = importlib.util.module_from_spec(spec); spec.loader.exec_module(fb)
 D = ${JSON.stringify(dir)}
 STATE, INBOX, PREVIEWS = os.path.join(D, "state.json"), os.path.join(D, "inbox"), os.path.join(D, "previews")
 os.makedirs(INBOX); os.makedirs(PREVIEWS)
+# An empty action-box record (scripts/freeform_actions.py), so the bridge never
+# reads the real one; these boards hold no closed pen loops, so it stays empty.
+ACTIONS = os.path.join(D, "actions.json")
+json.dump({"version": 1, "baseline_at": "2026-11-27T00:00:00+00:00", "boxes": {}, "blocked_boards": {}},
+          open(ACTIONS, "w"))
 OCR = os.path.join(D, "ocr")
 def fake_ocr(ok=True):
     with open(OCR, "w") as f:
@@ -56,7 +61,7 @@ def db(specs):
     return fx.build(D, specs)
 def bridge(*extra, database=None):
     argv = ["--db", database or os.path.join(D, "Boards", "boards.db"), "--state", STATE, "--inbox", INBOX,
-            "--previews", PREVIEWS, "--ocr-bin", OCR, "--no-sync"] + list(extra)
+            "--previews", PREVIEWS, "--ocr-bin", OCR, "--no-sync", "--actions-state", ACTIONS] + list(extra)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         code = fb.main(argv)
@@ -654,7 +659,7 @@ drawn = max(os.path.getmtime(os.path.join(PREVIEWS, f)) for f in os.listdir(PREV
 fake = {"waited": 100, "arrivals": {"A" * 32: drawn - 20, "B" * 32: drawn + 30}, "ended": drawn + 80, "opened": True}
 fb.sync = lambda db: fake
 argv = ["--db", os.path.join(D, "Boards", "boards.db"), "--state", STATE, "--inbox", INBOX,
-        "--previews", PREVIEWS, "--ocr-bin", OCR]
+        "--previews", PREVIEWS, "--ocr-bin", OCR, "--actions-state", ACTIONS]
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     code = fb.main(argv)

@@ -8,7 +8,7 @@
 -- numbered file in sql-changes/, applied once by hand with `wrangler d1 execute padel --remote --file`
 -- (not migrations/: that is wrangler's folder for `d1 migrations apply`, which would run them again),
 -- and the same change made here so a fresh build matches. Applied so far: 0001-votes-at.sql, 0002-rate.sql,
--- 0003-booked-details.sql, 0004-people-university.sql, 0005-names-and-paid.sql.
+-- 0003-booked-details.sql, 0004-people-university.sql, 0005-names-and-paid.sql, 0006-levels.sql, 0007-match-day.sql.
 --
 -- A slot is "YYYY-MM-DD|HH": the London date and the two-digit start hour (07 to 21).
 
@@ -20,7 +20,11 @@ CREATE TABLE IF NOT EXISTS people (
   venues TEXT NOT NULL DEFAULT 'si,pdl,pp,cu',
   created_at TEXT NOT NULL,
   votes_at TEXT,
-  real_name TEXT                      -- Kevin's People screen (sql-changes/0005, 30 Oct 2026)
+  real_name TEXT,                     -- Kevin's People screen (sql-changes/0005, 30 Oct 2026)
+  -- Levels (sql-changes/0006, 27 Nov 2026): Playtomic's 0 to 7 scale, moved by scores (Nettla's rules).
+  level REAL,
+  level_matches INTEGER NOT NULL DEFAULT 0,
+  level_active_at TEXT
 );
 
 -- "I can play" ticks. A save adds and removes single hours (POST /api/vote { add, remove }).
@@ -81,4 +85,49 @@ CREATE TABLE IF NOT EXISTS rate (
   key TEXT PRIMARY KEY,
   n INTEGER NOT NULL,
   created_at TEXT NOT NULL
+);
+
+-- Scores and peer feedback (sql-changes/0006-levels.sql, 27 Nov 2026): see that file for each column.
+CREATE TABLE IF NOT EXISTS matches (
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  played_on TEXT NOT NULL,
+  team_a TEXT NOT NULL,
+  team_b TEXT NOT NULL,
+  sets TEXT NOT NULL,
+  rated INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'match',
+  entered_by INTEGER NOT NULL,
+  entered_at TEXT NOT NULL,
+  changes TEXT NOT NULL DEFAULT '{}',
+  feedback_changes TEXT NOT NULL DEFAULT '{}',
+  deleted_at TEXT,
+  fingerprint TEXT NOT NULL,
+  session_id INTEGER                  -- a Kings and challengers game's session (sql-changes/0007)
+);
+CREATE INDEX IF NOT EXISTS matches_played_on ON matches (played_on);
+-- One score per match a day: the same pairs and games (either way round) cannot go in twice, even sent
+-- by both pairs at the same moment. A deleted score frees its place.
+CREATE UNIQUE INDEX IF NOT EXISTS matches_one_a_day ON matches (played_on, fingerprint) WHERE deleted_at IS NULL;
+CREATE TABLE IF NOT EXISTS feedback (
+  match_id INTEGER NOT NULL,
+  from_id INTEGER NOT NULL,
+  about_id INTEGER NOT NULL,
+  vote TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (match_id, from_id, about_id)
+);
+
+-- Match day (sql-changes/0007-match-day.sql, 28 Nov 2026): one row per court group on a booked hour.
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slot TEXT NOT NULL,
+  group_no INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  token TEXT,
+  UNIQUE (slot, group_no)
 );
