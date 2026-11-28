@@ -23,6 +23,7 @@
 #   POST_MAIL_OPEN       command standing in for `open -ga Mail`
 #   POST_MAIL_WAIT_S     seconds between attempts (default 3)
 #   POST_MAIL_BOOT_S     seconds to wait for Mail to come up (default 30)
+#   POST_MAIL_ERR_DIR    private directory for the per-run error file (default $TMPDIR)
 set -u
 
 PDF="${1:-}"
@@ -81,6 +82,23 @@ fi
 
 BODY="$(cat "$BODY_FILE")"
 
+# A PRIVATE place for the error capture (finding 20260828-agent-slot-run-391).
+# This used to be one fixed file in the shared temp directory, which on this Mac
+# is drwxrwxrwt, and the file landed -rw-r--r-- — readable by any process on the
+# machine, while this script carries Kevin's scanned post, creditor and legal
+# letters included. $TMPDIR is the Mac's own per-user directory (mode 0700); a
+# fresh mktemp file inside it is per-run, 0600, and removed on exit.
+ERR_DIR="${POST_MAIL_ERR_DIR:-${TMPDIR:-}}"
+if [ -z "$ERR_DIR" ]; then
+  ERR_DIR="$HOME/knowledge-os/logs/post-mail"
+  mkdir -p "$ERR_DIR" || { echo "POST MAIL REFUSED: no private scratch directory" >&2; exit 1; }
+  chmod 700 "$ERR_DIR" 2>/dev/null || true
+fi
+ERR_FILE="$(mktemp "${ERR_DIR%/}/post-mail-send.XXXXXX")" || {
+  echo "POST MAIL REFUSED: could not make a private error file in $ERR_DIR" >&2; exit 1; }
+chmod 600 "$ERR_FILE" 2>/dev/null || true
+trap 'rm -f "$ERR_FILE"' EXIT
+
 # STEP 2 — send, read the exit code, retry twice.
 attempt=1
 while [ "$attempt" -le "$ATTEMPTS" ]; do
@@ -95,11 +113,11 @@ while [ "$attempt" -le "$ATTEMPTS" ]; do
       -e '    send newMessage' \
       -e '  end tell' \
       -e 'end run' \
-      "$SUBJECT" "$BODY" "$TO" "$PDF" >/dev/null 2>/tmp/post-mail-send.err; then
+      "$SUBJECT" "$BODY" "$TO" "$PDF" >/dev/null 2>"$ERR_FILE"; then
     echo "POST MAIL SENT on attempt ${attempt}/${ATTEMPTS}: $SUBJECT"
     exit 0
   fi
-  echo "POST MAIL ATTEMPT ${attempt}/${ATTEMPTS} FAILED: $(tr '\n' ' ' < /tmp/post-mail-send.err | cut -c1-300)" >&2
+  echo "POST MAIL ATTEMPT ${attempt}/${ATTEMPTS} FAILED: $(tr '\n' ' ' < "$ERR_FILE" | cut -c1-300)" >&2
   attempt=$((attempt + 1))
   [ "$attempt" -le "$ATTEMPTS" ] && sleep "$WAIT_S"
 done

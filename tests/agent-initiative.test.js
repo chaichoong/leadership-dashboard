@@ -117,6 +117,22 @@ describe('robot-only deny list (scripts/agent-settings.json)', () => {
   const SETTINGS = 'scripts/agent-settings.json';
   const RUNNERS_ALL = [...RUNNERS, 'scripts/signin-pickup-run.sh', 'scripts/roy-assistant-run.sh'];
   const deny = () => JSON.parse(read(SETTINGS)).permissions.deny;
+  // The ONE class of deny rule in this file that is not a git/gh write and not
+  // anchored in the repo (finding 20260828-agent-slot-run-391, approved build
+  // rec4XX7XgT3xZIQUk). /tmp on this Mac is drwxrwxrwt, so a working file written
+  // there is readable by anything running on the machine, and agent runs handle
+  // tenant records, creditor letters and Kevin's legal matter. The runner's prompt
+  // asked agents not to; this makes the harness refuse. The list is exact, so the
+  // two guards below stay as strict as they were for everything else.
+  const TEMP_DENIES = [
+    'Write(/tmp/**)', 'Write(/private/tmp/**)', 'Edit(/tmp/**)', 'Edit(/private/tmp/**)',
+    'Bash(*>/tmp/*)', 'Bash(*> /tmp/*)', 'Bash(*>>/tmp/*)', 'Bash(*>> /tmp/*)',
+    'Bash(*>/private/tmp/*)', 'Bash(*> /private/tmp/*)',
+    'Bash(*>>/private/tmp/*)', 'Bash(*>> /private/tmp/*)',
+    'Bash(mktemp */tmp/*)', 'Bash(tee /tmp/*)', 'Bash(tee /private/tmp/*)',
+    'Bash(cp * /tmp/*)', 'Bash(cp * /private/tmp/*)',
+    'Bash(mv * /tmp/*)', 'Bash(mv * /private/tmp/*)',
+  ];
   const editRules = () => deny().filter((r) => r.startsWith('Edit('))
     .map((r) => r.slice(5, -1));
   // The repo every runner cds into before starting claude.
@@ -182,13 +198,15 @@ describe('robot-only deny list (scripts/agent-settings.json)', () => {
     }
     for (const r of deny()) {
       if (!r.startsWith('Bash(')) continue;
-      expect(r, 'Bash denies are git/gh writes only').toMatch(/^Bash\((git |gh )/);
+      if (TEMP_DENIES.includes(r)) continue; // the shared-temp writes, listed above
+      expect(r, 'Bash denies are git/gh writes and the shared-temp writes only').toMatch(/^Bash\((git |gh )/);
     }
   });
 
   it('every Edit rule is one of the three proven shapes, anchored at the repo or ~/.claude', () => {
     for (const r of editRules()) {
       if (r.startsWith('~/.claude/')) continue;
+      if (TEMP_DENIES.includes(`Edit(${r})`)) continue; // the shared-temp writes, listed above
       expect(r.startsWith(`/${REPO}/`), `${r} must be anchored with // at ${REPO}`).toBe(true);
       const rest = r.slice(REPO.length + 2);
       expect(rest, r).toMatch(/^([A-Za-z0-9._-]+\/\*\*|\*\.[a-z]+|[A-Za-z0-9._-]+)$/);

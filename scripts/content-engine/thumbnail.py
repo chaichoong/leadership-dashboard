@@ -14,7 +14,7 @@ Usage:
   thumbnail.py titles TRANSCRIPT.txt              # prints LINE1 / LINE2 from Claude
   thumbnail.py selftest
 """
-import argparse, base64, json, math, os, re, subprocess, sys
+import argparse, base64, json, math, os, re, subprocess, sys, tempfile
 
 import numpy as np
 import cv2
@@ -222,7 +222,9 @@ def text_width(text, fontsize, fontfile=None):
     """Measure rendered text in pixels by drawing it on a black strip and reading the ink extent.
     No PIL on this Mac, and guessing an em-width put a 15-character title at half the size the team's use."""
     fontfile = fontfile or FONT_IMPACT
-    strip = "/tmp/od-thumb-measure-%d.png" % os.getpid()
+    # tempfile.gettempdir(), never a hard-coded shared temp path (finding
+    # 20260828-agent-slot-run-391): $TMPDIR is this user's own 0700 directory.
+    strip = os.path.join(tempfile.gettempdir(), "od-thumb-measure-%d.png" % os.getpid())
     with open(strip + ".txt", "w") as fh: fh.write(text)
     r = subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i", "color=black:s=2400x%d" % (fontsize * 2),
                         "-vf", "drawtext=fontfile='%s':textfile='%s':fontsize=%d:fontcolor=white:x=10:y=%d" % (fontfile, strip + ".txt", fontsize, fontsize // 2),
@@ -367,7 +369,7 @@ def selftest():
     assert text_width("KIDS CAN'T FIND", 100) > text_width("KIDS CAN'T FIND", 60) > text_width("KIDS", 60) > 0
     # a real composition on a synthetic 9:16 photo: title ink where the team's layout puts it, apostrophe intact
     photo = np.full((1920, 1080, 3), (40, 120, 200), np.uint8); cv2.rectangle(photo, (400, 500), (680, 1400), (0, 0, 255), -1)
-    pp = "/tmp/od-thumb-selftest-%d.png" % os.getpid(); cv2.imwrite(pp, photo)
+    pp = os.path.join(tempfile.gettempdir(), "od-thumb-selftest-%d.png" % os.getpid()); cv2.imwrite(pp, photo)
     out = compose(pp, pp.replace(".png", "-out.png"), "KIDS CAN'T FIND", "WORK TRY THIS"); os.remove(pp)
     got = cv2.imread(out); os.remove(out)
     assert got.shape == (TH, TW, 3), got.shape
